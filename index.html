@@ -59,7 +59,7 @@
   .deck-body {
     width: 380px;
     max-width: 100%;
-    height: 280px;
+    height: 320px;
     border-radius: 18px;
     padding: 14px 16px;
     background: linear-gradient(135deg, #38bdf8, #a855f7, #22c55e);
@@ -79,12 +79,12 @@
     box-shadow: inset 0 0 14px rgba(15, 23, 42, 0.9);
     display: grid;
     grid-template-columns: 2.2fr 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto 1fr;
     gap: 10px;
   }
 
   .platter-wrap {
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 2;
     grid-column: 1;
     display: flex;
     align-items: center;
@@ -141,6 +141,23 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .waveform-wrap {
+    grid-row: 3;
+    grid-column: 1;
+    width: 100%;
+    height: 60px;
+    margin-top: 4px;
+    background: rgba(15,23,42,0.9);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: inset 0 0 8px rgba(15,23,42,0.9);
+  }
+
+  .waveform-wrap canvas {
+    width: 100%;
+    height: 100%;
   }
 
   .deck-right {
@@ -417,7 +434,7 @@
 <div class="glow-card">
   <h2>GLCTC1 Hybrid 1200 Decks</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Twin cosmic decks with pitch, metadata, and crossfader for GLCTC1 hybrid performance.
+    Twin cosmic decks with pitch, waveform, metadata, and crossfader for GLCTC1 hybrid performance.
   </p>
 
   <div class="decks-row">
@@ -433,6 +450,10 @@
             <div class="platter-ring"></div>
             <div class="cover-art"><img id="coverImgA" src=""></div>
           </div>
+        </div>
+
+        <div class="waveform-wrap">
+          <canvas id="waveformA"></canvas>
         </div>
 
         <div class="deck-right">
@@ -470,6 +491,10 @@
             <div class="platter-ring"></div>
             <div class="cover-art"><img id="coverImgB" src=""></div>
           </div>
+        </div>
+
+        <div class="waveform-wrap">
+          <canvas id="waveformB"></canvas>
         </div>
 
         <div class="deck-right">
@@ -645,6 +670,70 @@
     audioB.playbackRate = parseFloat(pitchB.value);
   });
 
+  // Waveform setup
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  const sourceA = audioCtx.createMediaElementSource(audioA);
+  const analyserA = audioCtx.createAnalyser();
+  analyserA.fftSize = 2048;
+  sourceA.connect(analyserA);
+  analyserA.connect(audioCtx.destination);
+
+  const sourceB = audioCtx.createMediaElementSource(audioB);
+  const analyserB = audioCtx.createAnalyser();
+  analyserB.fftSize = 2048;
+  sourceB.connect(analyserB);
+  analyserB.connect(audioCtx.destination);
+
+  const canvasA = document.getElementById("waveformA");
+  const canvasB = document.getElementById("waveformB");
+  const ctxA = canvasA.getContext("2d");
+  const ctxB = canvasB.getContext("2d");
+
+  function drawWaveform(analyser, canvas, ctx, color) {
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function draw() {
+      requestAnimationFrame(draw);
+
+      analyser.getByteTimeDomainData(dataArray);
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+
+      const sliceWidth = width * 1.0 / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = v * height / 2;
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+      }
+
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+    }
+
+    draw();
+  }
+
+  drawWaveform(analyserA, canvasA, ctxA, "#38bdf8");
+  drawWaveform(analyserB, canvasB, ctxB, "#a855f7");
+
   const library = [];
   let audioFileData = null;
   let stemsData = [null, null, null, null, null];
@@ -739,8 +828,8 @@
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const audioCtx = new AudioContext();
-      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      const localCtx = new AudioContext();
+      const decoded = await localCtx.decodeAudioData(arrayBuffer);
 
       const duration = decoded.duration;
       const sampleRate = decoded.sampleRate;
@@ -955,7 +1044,10 @@
     }
   }
 
-  document.getElementById("playA").addEventListener("click", () => {
+  document.getElementById("playA").addEventListener("click", async () => {
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
     audioA.play();
     updateVolumes();
   });
@@ -965,7 +1057,10 @@
     audioA.currentTime = 0;
   });
 
-  document.getElementById("playB").addEventListener("click", () => {
+  document.getElementById("playB").addEventListener("click", async () => {
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
     audioB.play();
     updateVolumes();
   });

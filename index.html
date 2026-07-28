@@ -47,7 +47,6 @@
     margin-top: 10px;
   }
 
-  /* DECKS */
   .decks-row {
     display: flex;
     align-items: flex-start;
@@ -486,7 +485,6 @@
     <div class="deck-title-right" id="deckBTitle">No track</div>
   </div>
 
-  <!-- MASTER LIBRARY SLOT UNDER DECKS -->
   <div class="library-slot">
     <h3>GLCTC1 Master Library</h3>
     <div id="libraryList" class="library-list">
@@ -495,11 +493,10 @@
   </div>
 </div>
 
-<!-- OPTIONAL LOGIN -->
 <div class="glow-card">
   <h2>GLCTC1 Login</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    (Optional) Sign in to manage your GLCTC1 Master Library. Hook this into Firebase/Supabase later.
+    You must be logged in to upload tracks. (Hook into Firebase/Supabase later.)
   </p>
   <div class="form-grid">
     <div><label>Email</label><input id="userEmail" type="email" placeholder="you@example.com"></div>
@@ -511,11 +508,10 @@
   </div>
 </div>
 
-<!-- MASTER LIBRARY FORM -->
 <div class="glow-card">
   <h2>Add Track To GLCTC1 Master Library</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Fill in the track details and upload the audio file. Tracks are stored in the GLCTC1 Master Library and can be loaded to Deck A or Deck B.
+    Upload the master audio and let GLCTC1 auto‑fill metadata. Then tweak fields and add stems.
   </p>
 
   <div class="form-grid">
@@ -552,14 +548,20 @@
     <div><label>Planet</label><input id="planet"></div>
 
     <div><label>Spatial</label><input id="spatial"></div>
-    <div><label>Stems (Notes)</label><input id="stems"></div>
+    <div><label>Stems (Notes)</label><input id="stemsNotes"></div>
 
     <div><label>Cover Art URL</label><input id="coverUrl"></div>
 
     <div>
-      <label>Audio File</label>
+      <label>Master Audio</label>
       <input type="file" id="audioFile" accept="audio/*">
     </div>
+
+    <div><label>Stem 1</label><input type="file" id="stem1" accept="audio/*"></div>
+    <div><label>Stem 2</label><input type="file" id="stem2" accept="audio/*"></div>
+    <div><label>Stem 3</label><input type="file" id="stem3" accept="audio/*"></div>
+    <div><label>Stem 4</label><input type="file" id="stem4" accept="audio/*"></div>
+    <div><label>Stem 5</label><input type="file" id="stem5" accept="audio/*"></div>
 
   </div>
 
@@ -598,11 +600,17 @@
 
   const library = [];
   let audioFileData = null;
+  let stemsData = [null, null, null, null, null];
+  let loggedIn = false;
 
-  document.getElementById("audioFile").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    audioFileData = file;
+  document.getElementById("loginBtn").addEventListener("click", () => {
+    loggedIn = true;
+    alert("Logged in (placeholder).");
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+    loggedIn = false;
+    alert("Logged out.");
   });
 
   function getVal(id) {
@@ -622,9 +630,55 @@
     }
   }
 
+  document.getElementById("audioFile").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    audioFileData = file;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new AudioContext();
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+
+      const duration = decoded.duration;
+      const sampleRate = decoded.sampleRate;
+      const channels = decoded.numberOfChannels;
+
+      document.getElementById("frequency").value = sampleRate;
+      document.getElementById("stemsNotes").value =
+        `${channels} channel(s), ${duration.toFixed(2)}s`;
+
+      // Simple auto-fill hints
+      if (!getVal("trackTitle")) {
+        document.getElementById("trackTitle").value = file.name.replace(/\.[^/.]+$/, "");
+      }
+      if (!getVal("genre")) {
+        document.getElementById("genre").value = "Hybrid";
+      }
+      if (!getVal("liveType")) {
+        document.getElementById("liveType").value = "Hybrid";
+      }
+    } catch (err) {
+      console.log("Metadata decode error:", err);
+    }
+  });
+
+  ["stem1","stem2","stem3","stem4","stem5"].forEach((id, index) => {
+    document.getElementById(id).addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      stemsData[index] = file || null;
+    });
+  });
+
   function addTrackToLibrary() {
+    if (!loggedIn) {
+      alert("You must be logged in to upload tracks.");
+      return;
+    }
+
     if (!audioFileData) {
-      alert("Please upload an audio file for this track.");
+      alert("Please upload a master audio file.");
       return;
     }
 
@@ -642,9 +696,10 @@
       chakra: document.getElementById("chakra").value,
       planet: getVal("planet"),
       spatial: getVal("spatial"),
-      stems: getVal("stems"),
+      stemsNotes: getVal("stemsNotes"),
       coverUrl: getVal("coverUrl"),
-      audioFile: audioFileData
+      audioFile: audioFileData,
+      stems: stemsData.slice()
     };
 
     library.push(track);
@@ -656,12 +711,16 @@
     const ids = [
       "idCat","artist","album","albumId","trackTitle","trackNumber",
       "genre","liveType","frequency","keyField","planet","spatial",
-      "stems","coverUrl"
+      "stemsNotes","coverUrl"
     ];
     ids.forEach(id => document.getElementById(id).value = "");
     document.getElementById("chakra").value = "";
     audioFileData = null;
     document.getElementById("audioFile").value = "";
+    ["stem1","stem2","stem3","stem4","stem5"].forEach((id, i) => {
+      document.getElementById(id).value = "";
+      stemsData[i] = null;
+    });
   }
 
   function renderLibrary() {
@@ -682,7 +741,8 @@
       meta.innerHTML = `
         <strong>${track.trackTitle || "Untitled"}</strong> — ${track.artist || "Unknown"}<br>
         <span style="color:#9ca3af;">${track.album || ""}</span><br>
-        ${track.frequency ? track.frequency + " Hz · " : ""}${track.keyField || ""} · ${track.chakra || ""} · ${track.planet || ""}
+        ${track.frequency ? track.frequency + " Hz · " : ""}${track.keyField || ""} · ${track.chakra || ""} · ${track.planet || ""}<br>
+        <span style="color:#9ca3af;">${track.stemsNotes || ""}</span>
       `;
 
       const actions = document.createElement("div");
@@ -765,14 +825,6 @@
 
   document.getElementById("addTrack").addEventListener("click", addTrackToLibrary);
   document.getElementById("clearForm").addEventListener("click", clearForm);
-
-  // Login buttons (visual only for now)
-  document.getElementById("loginBtn").addEventListener("click", () => {
-    alert("Login placeholder — connect to Firebase/Supabase later.");
-  });
-  document.getElementById("logoutBtn").addEventListener("click", () => {
-    alert("Logout placeholder.");
-  });
 
   renderLibrary();
 </script>

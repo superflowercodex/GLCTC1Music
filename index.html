@@ -434,7 +434,7 @@
 <div class="glow-card">
   <h2>GLCTC1 Hybrid 1200 Decks</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Twin cosmic decks with pitch, waveform, metadata, and crossfader for GLCTC1 hybrid performance.
+    Twin cosmic decks with pitch, waveform, chakra, planet, key, spatial and crossfader for GLCTC1 hybrid performance.
   </p>
 
   <div class="decks-row">
@@ -561,7 +561,7 @@
 <div class="glow-card">
   <h2>Add Track To GLCTC1 Master Library</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Upload the master audio and cover art, let GLCTC1 auto‑fill metadata, then tweak and add stems.
+    Upload the master audio and cover art, let GLCTC1 auto‑fill cosmic metadata, then tweak and add stems.
   </p>
 
   <div class="form-grid">
@@ -734,6 +734,71 @@
   drawWaveform(analyserA, canvasA, ctxA, "#38bdf8");
   drawWaveform(analyserB, canvasB, ctxB, "#a855f7");
 
+  // Cosmic mapping
+
+  // Center tones (common ones only)
+  const CENTER_TONES = [
+    { chakra: "Root",        planet: "Mars",            tone: 396, key: "G"  },
+    { chakra: "Sacral",      planet: "Venus",          tone: 417, key: "G#" },
+    { chakra: "Solar Plexus",planet: "Sun",            tone: 528, key: "C"  },
+    { chakra: "Heart",       planet: "Earth",          tone: 639, key: "E"  },
+    { chakra: "Throat",      planet: "Mercury",        tone: 741, key: "F#" },
+    { chakra: "Third Eye",   planet: "Jupiter",        tone: 852, key: "A#" },
+    { chakra: "Crown",       planet: "Saturn / Neptune", tone: 963, key: "B" }
+  ];
+
+  function nearestCenterTone(freq) {
+    freq = Number(freq);
+    if (!freq) return null;
+    let best = null;
+    let bestDiff = Infinity;
+    CENTER_TONES.forEach(ct => {
+      const diff = Math.abs(freq - ct.tone);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = ct;
+      }
+    });
+    return best;
+  }
+
+  function chakraFromFrequency(freq) {
+    const ct = nearestCenterTone(freq);
+    return ct ? ct.chakra : "";
+  }
+
+  function planetFromChakra(chakra) {
+    const ct = CENTER_TONES.find(c => c.chakra === chakra);
+    return ct ? ct.planet : "";
+  }
+
+  function keyFromFrequency(freq) {
+    const ct = nearestCenterTone(freq);
+    return ct ? ct.key : "";
+  }
+
+  function chakraColor(chakra) {
+    switch (chakra) {
+      case "Root": return "rgba(239, 68, 68, 0.7)";
+      case "Sacral": return "rgba(249, 115, 22, 0.7)";
+      case "Solar Plexus": return "rgba(234, 179, 8, 0.7)";
+      case "Heart": return "rgba(34, 197, 94, 0.7)";
+      case "Throat": return "rgba(59, 130, 246, 0.7)";
+      case "Third Eye": return "rgba(129, 140, 248, 0.7)";
+      case "Crown": return "rgba(236, 72, 153, 0.7)";
+      default: return "rgba(56, 189, 248, 0.4)";
+    }
+  }
+
+  function spatialFromChannels(channels) {
+    if (channels <= 1) return "Mono";
+    if (channels === 2) return "Stereo";
+    if (channels === 4) return "Quad";
+    if (channels === 6) return "5.1";
+    if (channels === 8) return "7.1";
+    return channels + "ch";
+  }
+
   const library = [];
   let audioFileData = null;
   let stemsData = [null, null, null, null, null];
@@ -787,31 +852,6 @@
     return document.getElementById(id).value.trim();
   }
 
-  function chakraColor(chakra) {
-    switch (chakra) {
-      case "Root": return "rgba(239, 68, 68, 0.7)";
-      case "Sacral": return "rgba(249, 115, 22, 0.7)";
-      case "Solar Plexus": return "rgba(234, 179, 8, 0.7)";
-      case "Heart": return "rgba(34, 197, 94, 0.7)";
-      case "Throat": return "rgba(59, 130, 246, 0.7)";
-      case "Third Eye": return "rgba(129, 140, 248, 0.7)";
-      case "Crown": return "rgba(236, 72, 153, 0.7)";
-      default: return "rgba(56, 189, 248, 0.4)";
-    }
-  }
-
-  function chakraFromFrequency(freq) {
-    freq = Number(freq);
-    if (!freq) return "";
-    if (freq < 400) return "Root";
-    if (freq < 500) return "Sacral";
-    if (freq < 600) return "Solar Plexus";
-    if (freq < 700) return "Heart";
-    if (freq < 800) return "Throat";
-    if (freq < 900) return "Third Eye";
-    return "Crown";
-  }
-
   document.getElementById("coverArtFile").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -842,6 +882,21 @@
       const chakraAuto = chakraFromFrequency(sampleRate);
       if (!document.getElementById("chakra").value) {
         document.getElementById("chakra").value = chakraAuto;
+      }
+
+      const planetAuto = planetFromChakra(chakraAuto);
+      if (!document.getElementById("planet").value) {
+        document.getElementById("planet").value = planetAuto;
+      }
+
+      const keyAuto = keyFromFrequency(sampleRate);
+      if (!document.getElementById("keyField").value) {
+        document.getElementById("keyField").value = keyAuto;
+      }
+
+      const spatialAuto = spatialFromChannels(channels);
+      if (!document.getElementById("spatial").value) {
+        document.getElementById("spatial").value = spatialAuto;
       }
     } catch (err) {
       console.log("Audio metadata decode error:", err);
@@ -911,6 +966,24 @@
       document.getElementById("chakra").value = chakraVal;
     }
 
+    let planetVal = getVal("planet");
+    if (!planetVal) {
+      planetVal = planetFromChakra(chakraVal);
+      document.getElementById("planet").value = planetVal;
+    }
+
+    let keyVal = getVal("keyField");
+    if (!keyVal) {
+      keyVal = keyFromFrequency(freqVal);
+      document.getElementById("keyField").value = keyVal;
+    }
+
+    let spatialVal = getVal("spatial");
+    if (!spatialVal) {
+      spatialVal = "Stereo";
+      document.getElementById("spatial").value = spatialVal;
+    }
+
     const track = {
       idCat: getVal("idCat"),
       artist: getVal("artist"),
@@ -921,10 +994,10 @@
       genre: getVal("genre"),
       liveType: getVal("liveType"),
       frequency: freqVal,
-      keyField: getVal("keyField"),
+      keyField: keyVal,
       chakra: chakraVal,
-      planet: getVal("planet"),
-      spatial: getVal("spatial"),
+      planet: planetVal,
+      spatial: spatialVal,
       stemsNotes: getVal("stemsNotes"),
       audioFile: audioFileData,
       stems: stemsData.slice(),
@@ -974,6 +1047,7 @@
         <strong>${track.trackTitle || "Untitled"}</strong> — ${track.artist || "Unknown"}<br>
         <span style="color:#9ca3af;">${track.album || ""}</span><br>
         ${track.frequency ? track.frequency + " Hz · " : ""}${track.keyField || ""} · ${track.chakra || ""} · ${track.planet || ""}<br>
+        <span style="color:#9ca3af;">${track.spatial || ""}</span><br>
         <span style="color:#9ca3af;">${track.stemsNotes || ""}</span>
       `;
 

@@ -384,6 +384,21 @@
     padding: 4px 10px;
     font-size: 0.7rem;
   }
+
+  .cover-preview {
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #4b5563;
+    margin-top: 6px;
+  }
+
+  .cover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
 </style>
 </head>
 
@@ -496,7 +511,7 @@
 <div class="glow-card">
   <h2>GLCTC1 Login</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    You must be logged in to upload tracks. (Hook into Firebase/Supabase later.)
+    You must be logged in to upload tracks. (Firebase Auth placeholder.)
   </p>
   <div class="form-grid">
     <div><label>Email</label><input id="userEmail" type="email" placeholder="you@example.com"></div>
@@ -511,7 +526,7 @@
 <div class="glow-card">
   <h2>Add Track To GLCTC1 Master Library</h2>
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Upload the master audio and let GLCTC1 auto‑fill metadata. Then tweak fields and add stems.
+    Upload the master audio and cover art, let GLCTC1 auto‑fill metadata, then tweak and add stems.
   </p>
 
   <div class="form-grid">
@@ -550,7 +565,13 @@
     <div><label>Spatial</label><input id="spatial"></div>
     <div><label>Stems (Notes)</label><input id="stemsNotes"></div>
 
-    <div><label>Cover Art URL</label><input id="coverUrl"></div>
+    <div>
+      <label>Cover Art Upload</label>
+      <input type="file" id="coverArtFile" accept="image/*">
+      <div class="cover-preview">
+        <img id="coverPreviewImg" src="">
+      </div>
+    </div>
 
     <div>
       <label>Master Audio</label>
@@ -571,7 +592,23 @@
   </div>
 </div>
 
+<!-- Firebase + jsmediatags -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
+
 <script>
+  // TODO: Replace with your real Firebase config
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+
   const audioA = new Audio();
   const audioB = new Audio();
 
@@ -601,16 +638,35 @@
   const library = [];
   let audioFileData = null;
   let stemsData = [null, null, null, null, null];
+  let coverArtFileData = null;
   let loggedIn = false;
 
-  document.getElementById("loginBtn").addEventListener("click", () => {
-    loggedIn = true;
-    alert("Logged in (placeholder).");
+  auth.onAuthStateChanged(user => {
+    loggedIn = !!user;
   });
 
-  document.getElementById("logoutBtn").addEventListener("click", () => {
-    loggedIn = false;
-    alert("Logged out.");
+  document.getElementById("loginBtn").addEventListener("click", async () => {
+    const email = document.getElementById("userEmail").value.trim();
+    const password = document.getElementById("userPassword").value.trim();
+    if (!email || !password) {
+      alert("Enter email and password.");
+      return;
+    }
+    try {
+      await auth.signInWithEmailAndPassword(email, password);
+      alert("Logged in.");
+    } catch (err) {
+      alert("Login error: " + err.message);
+    }
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", async () => {
+    try {
+      await auth.signOut();
+      alert("Logged out.");
+    } catch (err) {
+      alert("Logout error: " + err.message);
+    }
   });
 
   function getVal(id) {
@@ -630,12 +686,21 @@
     }
   }
 
+  document.getElementById("coverArtFile").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    coverArtFileData = file;
+    const url = URL.createObjectURL(file);
+    document.getElementById("coverPreviewImg").src = url;
+  });
+
   document.getElementById("audioFile").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     audioFileData = file;
 
+    // Decode audio for basic metadata
     try {
       const arrayBuffer = await file.arrayBuffer();
       const audioCtx = new AudioContext();
@@ -648,19 +713,47 @@
       document.getElementById("frequency").value = sampleRate;
       document.getElementById("stemsNotes").value =
         `${channels} channel(s), ${duration.toFixed(2)}s`;
-
-      // Simple auto-fill hints
-      if (!getVal("trackTitle")) {
-        document.getElementById("trackTitle").value = file.name.replace(/\.[^/.]+$/, "");
-      }
-      if (!getVal("genre")) {
-        document.getElementById("genre").value = "Hybrid";
-      }
-      if (!getVal("liveType")) {
-        document.getElementById("liveType").value = "Hybrid";
-      }
     } catch (err) {
-      console.log("Metadata decode error:", err);
+      console.log("Audio metadata decode error:", err);
+    }
+
+    // ID3 tags via jsmediatags
+    jsmediatags.read(file, {
+      onSuccess: function(tag) {
+        const t = tag.tags;
+        if (t.artist && !getVal("artist")) {
+          document.getElementById("artist").value = t.artist;
+        }
+        if (t.title && !getVal("trackTitle")) {
+          document.getElementById("trackTitle").value = t.title;
+        }
+        if (t.album && !getVal("album")) {
+          document.getElementById("album").value = t.album;
+        }
+        if (t.genre && !getVal("genre")) {
+          document.getElementById("genre").value = t.genre;
+        }
+
+        if (t.picture && !coverArtFileData) {
+          const pic = t.picture;
+          const base64String = btoa(
+            pic.data.reduce((data, byte) => data + String.fromCharCode(byte), "")
+          );
+          const imgUrl = `data:${pic.format};base64,${base64String}`;
+          document.getElementById("coverPreviewImg").src = imgUrl;
+          coverArtFileData = { embedded: true, url: imgUrl };
+        }
+      },
+      onError: function(error) {
+        console.log("ID3 error:", error);
+      }
+    });
+
+    if (!getVal("trackTitle")) {
+      document.getElementById("trackTitle").value = file.name.replace(/\.[^/.]+$/, "");
+    }
+    if (!getVal("liveType")) {
+      document.getElementById("liveType").value = "Hybrid";
     }
   });
 
@@ -697,9 +790,9 @@
       planet: getVal("planet"),
       spatial: getVal("spatial"),
       stemsNotes: getVal("stemsNotes"),
-      coverUrl: getVal("coverUrl"),
       audioFile: audioFileData,
-      stems: stemsData.slice()
+      stems: stemsData.slice(),
+      coverArt: coverArtFileData
     };
 
     library.push(track);
@@ -711,12 +804,15 @@
     const ids = [
       "idCat","artist","album","albumId","trackTitle","trackNumber",
       "genre","liveType","frequency","keyField","planet","spatial",
-      "stemsNotes","coverUrl"
+      "stemsNotes"
     ];
     ids.forEach(id => document.getElementById(id).value = "");
     document.getElementById("chakra").value = "";
     audioFileData = null;
+    coverArtFileData = null;
     document.getElementById("audioFile").value = "";
+    document.getElementById("coverArtFile").value = "";
+    document.getElementById("coverPreviewImg").src = "";
     ["stem1","stem2","stem3","stem4","stem5"].forEach((id, i) => {
       document.getElementById(id).value = "";
       stemsData[i] = null;
@@ -768,6 +864,15 @@
   function loadTrackToDeck(deck, track) {
     const url = URL.createObjectURL(track.audioFile);
 
+    let coverUrl = "";
+    if (track.coverArt) {
+      if (track.coverArt.embedded) {
+        coverUrl = track.coverArt.url;
+      } else {
+        coverUrl = URL.createObjectURL(track.coverArt);
+      }
+    }
+
     if (deck === "A") {
       audioA.src = url;
       document.getElementById("deckATitle").textContent = track.trackTitle || "Untitled";
@@ -783,7 +888,7 @@
       glowA.style.background = chakraColor(track.chakra);
 
       const coverA = document.getElementById("coverImgA");
-      coverA.src = track.coverUrl || "";
+      coverA.src = coverUrl || "";
     } else {
       audioB.src = url;
       document.getElementById("deckBTitle").textContent = track.trackTitle || "Untitled";
@@ -799,7 +904,7 @@
       glowB.style.background = chakraColor(track.chakra);
 
       const coverB = document.getElementById("coverImgB");
-      coverB.src = track.coverUrl || "";
+      coverB.src = coverUrl || "";
     }
   }
 

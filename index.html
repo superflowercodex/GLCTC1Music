@@ -123,32 +123,43 @@ const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
 // ⭐ Unlock nav
 function unlockNav() {
-  document.getElementById("navUpload").classList.add("active");
-  document.getElementById("navDecks").classList.add("active");
+  navUpload.classList.add("active");
+  navDecks.classList.add("active");
 }
 function lockNav() {
-  document.getElementById("navUpload").classList.remove("active");
-  document.getElementById("navDecks").classList.remove("active");
+  navUpload.classList.remove("active");
+  navDecks.classList.remove("active");
 }
 
-// ⭐ SIGN UP → AUTO LOGIN → REDIRECT
-document.getElementById("createAccountBtn").addEventListener("click", async () => {
+// ⭐ SIGN UP → fallback → login → redirect
+createAccountBtn.addEventListener("click", async () => {
   const email = regEmail.value.trim();
   const password = regPassword.value.trim();
 
+  // Try sign-up
   const { error } = await supabaseClient.auth.signUp({
     email,
     password,
-    options: { emailRedirectTo: null } // ⭐ disables email confirmation
+    options: { emailRedirectTo: null }
   });
 
   if (error) {
-    regStatus.textContent = error.message;
+    // If rate limit OR email exists → login instead
+    regStatus.textContent = "Account exists or rate limit hit — logging you in...";
+    const { error: loginError } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+    if (loginError) {
+      regStatus.textContent = loginError.message;
+      return;
+    }
+
+    unlockNav();
+    window.location.href = "upload.html";
     return;
   }
 
+  // Sign-up succeeded → auto login
   regStatus.textContent = "Account created! Logging you in...";
-
   const { error: loginError } = await supabaseClient.auth.signInWithPassword({ email, password });
 
   if (loginError) {
@@ -160,8 +171,8 @@ document.getElementById("createAccountBtn").addEventListener("click", async () =
   window.location.href = "upload.html";
 });
 
-// ⭐ LOGIN → REDIRECT
-document.getElementById("loginBtn").addEventListener("click", async () => {
+// ⭐ LOGIN → redirect
+loginBtn.addEventListener("click", async () => {
   const email = loginEmail.value.trim();
   const password = loginPassword.value.trim();
 
@@ -178,14 +189,14 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 });
 
 // ⭐ LOGOUT
-document.getElementById("logoutBtn").addEventListener("click", async () => {
+logoutBtn.addEventListener("click", async () => {
   await supabaseClient.auth.signOut();
   loginStatus.textContent = "Logged out.";
   lockNav();
 });
 
-// ⭐ ENTER STUDIO BUTTON
-document.getElementById("enterStudioBtn").addEventListener("click", async () => {
+// ⭐ ENTER STUDIO
+enterStudioBtn.addEventListener("click", async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) {
     alert("You must be logged in.");
@@ -194,7 +205,7 @@ document.getElementById("enterStudioBtn").addEventListener("click", async () => 
   window.location.href = "upload.html";
 });
 
-// ⭐ AUTO CHECK LOGIN ON PAGE LOAD
+// ⭐ AUTO CHECK LOGIN
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session) unlockNav();

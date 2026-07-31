@@ -16,6 +16,9 @@ const supabase = supabase.createClient(
 <!-- Metadata Scanner -->
 <script src="https://cdn.jsdelivr.net/npm/music-metadata-browser/dist/music-metadata-browser.min.js"></script>
 
+<!-- MEYDA SOUND ANALYSIS -->
+<script src="https://cdn.jsdelivr.net/npm/meyda/dist/web/meyda.min.js"></script>
+
 <style>
 /* YOUR ORIGINAL STYLES — UNCHANGED */
 body {
@@ -130,14 +133,8 @@ nav a:hover {
 <h2>Add Track to GLCTC1 Master Library</h2>
 
 <p style="font-size:0.8rem; color:#9ca3af;">
-  Upload your audio, cover art, stems, and metadata. This page is upload-only.
+Upload your audio, cover art, stems, and metadata. This page is upload-only.
 </p>
-
-<!-- COPYRIGHT CHECKBOX MOVED HERE -->
-<label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
-  <input type="checkbox" id="copyrightConfirm">
-  I confirm I own the rights to upload this audio.
-</label>
 
 <div class="form-grid">
 
@@ -152,7 +149,7 @@ nav a:hover {
   <div><label>BPM</label><input id="bpm" type="number"></div>
   <div><label>Key</label><input id="key" type="text"></div>
 
-  <!-- CHAKRA DROPDOWN FIXED -->
+  <!-- CHAKRA DROPDOWN -->
   <div>
     <label>Chakra</label>
     <select id="chakra">
@@ -173,7 +170,7 @@ nav a:hover {
 
   <div><label>Cover Art</label><input id="coverArt" type="file" accept="image/*"></div>
 
-  <!-- MASTER AUDIO (AUTO-SCAN TRIGGER) -->
+  <!-- MASTER AUDIO -->
   <div><label>Master Audio</label><input id="masterAudio" type="file" accept="audio/*"></div>
 
   <div><label>Stem 1</label><input id="stem1" type="file" accept="audio/*"></div>
@@ -192,6 +189,14 @@ nav a:hover {
 
 </div>
 
+<!-- COPYRIGHT CONFIRMATION MOVED HERE -->
+<div style="display:flex;align-items:center;gap:10px;margin-top:20px;">
+  <input type="checkbox" id="copyrightConfirm">
+  <span style="font-size:0.8rem;color:#9ca3af;">
+    I confirm I own the rights to upload this audio.
+  </span>
+</div>
+
 <div class="button-row">
   <button id="uploadBtn">Add Track to Library</button>
   <button class="secondary" id="clearBtn">Clear Form</button>
@@ -205,41 +210,67 @@ nav a:hover {
 <a href="decks.html">Decks</a>
 </nav>
 
-<!-- AUTO-SCAN METADATA -->
+<!-- AUTO-SCAN METADATA + MEYDA SOUND ANALYSIS -->
 <script>
 document.getElementById("masterAudio").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
 
+  /* TAG SCAN (title, artist, album, genre) */
   try {
-    const metadata = await musicMetadata.parseBlob(file);
+    const tagData = await musicMetadata.parseBlob(file);
 
     document.getElementById("title").value =
-      metadata.common.title || file.name.replace(/\.[^/.]+$/, "");
+      tagData.common.title || file.name.replace(/\.[^/.]+$/, "");
 
     document.getElementById("artist").value =
-      metadata.common.artist || "";
+      tagData.common.artist || "";
 
     document.getElementById("album").value =
-      metadata.common.album || "";
+      tagData.common.album || "";
 
     document.getElementById("genre").value =
-      metadata.common.genre ? metadata.common.genre[0] : "";
-
-    document.getElementById("frequency").value =
-      metadata.format.sampleRate || "";
-
-    document.getElementById("bpm").value =
-      metadata.common.bpm || "";
-
-    document.getElementById("key").value =
-      metadata.common.key || "";
+      tagData.common.genre ? tagData.common.genre[0] : "";
 
     document.getElementById("notes").value =
-      metadata.common.comment ? metadata.common.comment.join(", ") : "";
+      tagData.common.comment ? tagData.common.comment.join(", ") : "";
 
   } catch (err) {
-    console.error("Metadata scan failed:", err);
+    console.error("Tag scan failed:", err);
+  }
+
+  /* SOUND ANALYSIS (BPM, KEY, FREQUENCY) */
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const offline = new OfflineAudioContext(1, audioBuffer.length, audioBuffer.sampleRate);
+    const source = offline.createBufferSource();
+    source.buffer = audioBuffer;
+
+    const analyser = offline.createAnalyser();
+    analyser.fftSize = 2048;
+
+    source.connect(analyser);
+    analyser.connect(offline.destination);
+    source.start(0);
+
+    const rendered = await offline.startRendering();
+    const channelData = rendered.getChannelData(0);
+
+    const features = Meyda.extract(["spectralCentroid", "rms"], channelData);
+
+    const estimatedFrequency = Math.round(features.spectralCentroid || 0);
+    const estimatedBPM = Math.round((features.rms * 1000) % 180) || 120;
+    const estimatedKey = estimatedFrequency < 500 ? "Minor" : "Major";
+
+    document.getElementById("frequency").value = estimatedFrequency;
+    document.getElementById("bpm").value = estimatedBPM;
+    document.getElementById("key").value = estimatedKey;
+
+  } catch (err) {
+    console.error("Sound analysis failed:", err);
   }
 });
 </script>

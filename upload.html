@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <title>GLCTC1 – Upload Track</title>
 
+<!-- Supabase Client -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 <script>
 const supabase = supabase.createClient(
   "https://zdlaloiruxamxsduxqxw.supabase.co",
-  "YOUR_ANON_KEY_HERE"
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ"
 );
 </script>
 
@@ -37,9 +38,10 @@ h1 {
   background: rgba(15, 23, 42, 0.9);
   border-radius: 14px;
   padding: 20px;
-  box-shadow: 0 0 25px rgba(56,189,248,0.35),
-              0 0 60px rgba(129,140,248,0.35);
-  border: 1px solid rgba(56,189,248,0.5);
+  box-shadow:
+    0 0 25px rgba(56, 189, 248, 0.35),
+    0 0 60px rgba(129, 140, 248, 0.35);
+  border: 1px solid rgba(56, 189, 248, 0.5);
 }
 .form-grid {
   display: grid;
@@ -110,11 +112,13 @@ nav a:hover {
 
 <div class="glow-card">
   <h2>Add Track to GLCTC1 Master Library</h2>
+
   <p style="font-size:0.8rem; color:#9ca3af;">
-    Upload your audio, cover art, stems, and metadata. This page is upload-only.
+    Upload your audio, cover art, stems, and metadata. Manual entry only.
   </p>
 
   <div class="form-grid">
+
     <div><label>ID Cat No</label><input id="catNo" type="text"></div>
     <div><label>Artist</label><input id="artist" type="text"></div>
     <div><label>Album</label><input id="album" type="text"></div>
@@ -125,6 +129,7 @@ nav a:hover {
 
     <div><label>BPM</label><input id="bpm" type="number"></div>
     <div><label>Key</label><input id="key" type="text"></div>
+
     <div>
       <label>Chakra</label>
       <select id="chakra">
@@ -144,7 +149,9 @@ nav a:hover {
     <div><label>Notes</label><textarea id="notes"></textarea></div>
 
     <div><label>Cover Art</label><input id="coverArt" type="file" accept="image/*"></div>
+
     <div><label>Master Audio</label><input id="masterAudio" type="file" accept="audio/*"></div>
+
     <div><label>Stem 1</label><input id="stem1" type="file" accept="audio/*"></div>
     <div><label>Stem 2</label><input id="stem2" type="file" accept="audio/*"></div>
     <div><label>Stem 3</label><input id="stem3" type="file" accept="audio/*"></div>
@@ -158,12 +165,13 @@ nav a:hover {
         <option value="yes">Yes – I have permission</option>
       </select>
     </div>
+
   </div>
 
-  <!-- FIXED COPYRIGHT BOX -->
+  <!-- PERFECTLY ALIGNED CHECKBOX + TEXT -->
   <div style="display:flex;align-items:center;gap:10px;margin-top:20px;">
     <input type="checkbox" id="copyrightConfirm">
-    <span style="font-size:0.8rem;color:#9ca3af;">
+    <span style="font-size:0.8rem;color:#9ca3af;white-space:nowrap;">
       I confirm I own the rights to upload this audio.
     </span>
   </div>
@@ -183,13 +191,14 @@ nav a:hover {
 
 <script>
 document.getElementById('uploadBtn').addEventListener('click', async () => {
-  if (!document.getElementById('copyrightConfirm').checked) {
-    alert("Please confirm you own the rights to upload this audio.");
+
+  if (!copyrightConfirm.checked) {
+    alert("Please confirm copyright ownership.");
     return;
   }
 
-  const file = document.getElementById('masterAudio').files[0];
-  if (!file) {
+  const masterAudio = document.getElementById('masterAudio').files[0];
+  if (!masterAudio) {
     alert("Please select a master audio file.");
     return;
   }
@@ -201,17 +210,71 @@ document.getElementById('uploadBtn').addEventListener('click', async () => {
   }
 
   const user_id = user.id;
-  const { data, error } = await supabase.storage
-    .from("tracks")
-    .upload(`user_${user_id}/master_${Date.now()}_${file.name}`, file, { upsert: true });
 
-  if (error) {
-    alert("Upload failed: " + error.message);
+  // Upload master audio
+  const ext = masterAudio.name.split('.').pop();
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from("tracks")
+    .upload(`user_${user_id}/master_${Date.now()}.${ext}`, masterAudio, { upsert: true });
+
+  if (uploadError) {
+    alert("Upload failed: " + uploadError.message);
     return;
   }
 
+  // Build metadata object
   const metadata = {
     cat_no: catNo.value,
     artist: artist.value,
     album: album.value,
-    title
+    title: title.value,
+    genre: genre.value,
+    frequency: frequency.value,
+    bpm: bpm.value,
+    key: key.value,
+    chakra: chakra.value,
+    planet: planet.value,
+    spatial: spatial.value,
+    notes: notes.value,
+    is_cover: isCover.value,
+    master_audio_path: uploadData.path,
+    user_id: user_id
+  };
+
+  // Insert into database
+  const { error: insertError } = await supabase
+    .from("tracks")
+    .insert(metadata);
+
+  if (insertError) {
+    alert("Database insert error: " + insertError.message);
+    return;
+  }
+
+  // Send to Page 3
+  const trackForDecks = {
+    id: crypto.randomUUID(),
+    title: metadata.title,
+    artist: metadata.artist,
+    bpm: metadata.bpm,
+    key: metadata.key,
+    masterFile: masterAudio
+  };
+
+  sessionStorage.setItem("pendingUpload", JSON.stringify(trackForDecks));
+
+  window.location.href = "decks.html";
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.querySelectorAll('input, textarea').forEach(el => {
+    if (el.type !== 'checkbox' && el.type !== 'file') el.value = '';
+  });
+  chakra.value = '';
+  isCover.value = 'no';
+  copyrightConfirm.checked = false;
+});
+</script>
+
+</body>
+</html>

@@ -107,6 +107,9 @@ h1 {
   transform:translateX(-50%);
   z-index:10;
 }
+
+/* PITCH */
+
 .pitch-wrap {
   display:flex;
   flex-direction:column;
@@ -127,7 +130,7 @@ h1 {
   width:18px;
 }
 
-/* AUDIO OVERLAY UNDER PLATTER */
+/* AUDIO OVERLAY */
 
 .audio-bar {
   margin-top:16px;
@@ -136,7 +139,7 @@ audio {
   width:100%;
 }
 
-/* WAVEFORM + BPM */
+/* WAVEFORM */
 
 .wave-strip {
   height:32px;
@@ -152,6 +155,9 @@ audio {
   height:100%;
   display:block;
 }
+
+/* BPM */
+
 .bpm-meter {
   height:10px;
   margin-top:6px;
@@ -167,7 +173,7 @@ audio {
   100% { transform:scaleX(0.2); opacity:0.6; }
 }
 
-/* TRANSPORT + FX */
+/* TRANSPORT */
 
 .transport-row {
   margin-top:12px;
@@ -194,19 +200,13 @@ button:hover {
   box-shadow:0 0 12px rgba(59,130,246,0.8);
 }
 
-/* GAIN / VOLUME + FX SLIDERS */
+/* GAIN + PAN */
 
 .gain-row {
   margin-top:12px;
   display:grid;
   grid-template-columns:repeat(2,1fr);
   gap:10px;
-}
-.slider-row {
-  margin-top:10px;
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:8px;
 }
 .slider-block {
   text-align:center;
@@ -219,6 +219,15 @@ button:hover {
 }
 .slider-block input[type="range"] {
   width:100%;
+}
+
+/* FX */
+
+.slider-row {
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
 }
 
 /* CROSSFADER */
@@ -291,8 +300,6 @@ button:hover {
   font-size:0.75rem;
 }
 
-/* DETAILS + STEMS ABOVE LIBRARY */
-
 .details-panel {
   margin-top:10px;
   padding:10px;
@@ -305,8 +312,15 @@ button:hover {
   margin-top:6px;
 }
 
-/* MASTER LIBRARY AT BOTTOM, SCROLLING */
+/* MASTER LIBRARY */
 
+.library-wrap {
+  margin-top:10px;
+  max-height:220px;
+  overflow-y:auto;
+  border-radius:10px;
+  border:1px solid rgba(30,64,175,0.4);
+}
 .library-table {
   width:100%;
   border-collapse:collapse;
@@ -327,13 +341,6 @@ button:hover {
 }
 .library-row:hover {
   background:rgba(30,64,175,0.25);
-}
-.library-wrap {
-  margin-top:10px;
-  max-height:220px;
-  overflow-y:auto;
-  border-radius:10px;
-  border:1px solid rgba(30,64,175,0.4);
 }
 
 /* FOOTER */
@@ -394,8 +401,8 @@ button:hover {
           <input type="range" id="gainA" min="0" max="2" step="0.01" value="1">
         </div>
         <div class="slider-block">
-          <div class="slider-label">Volume</div>
-          <input type="range" id="volA" min="0" max="1" step="0.01" value="1">
+          <div class="slider-label">Pan L/R</div>
+          <input type="range" id="panA" min="-1" max="1" step="0.01" value="0">
         </div>
       </div>
 
@@ -457,8 +464,8 @@ button:hover {
           <input type="range" id="gainB" min="0" max="2" step="0.01" value="1">
         </div>
         <div class="slider-block">
-          <div class="slider-label">Volume</div>
-          <input type="range" id="volB" min="0" max="1" step="0.01" value="1">
+          <div class="slider-label">Pan L/R</div>
+          <input type="range" id="panB" min="-1" max="1" step="0.01" value="0">
         </div>
       </div>
 
@@ -568,15 +575,31 @@ button:hover {
 </div>
 
 <script>
-// --- CORE HELPERS ---
+// BASIC HELPERS
 function audio(deck) {
   return document.getElementById(deck === "A" ? "audioA" : "audioB");
 }
 function wheel(deck) {
   return document.getElementById(deck === "A" ? "wheelA" : "wheelB");
 }
+function goPage(file) {
+  window.location.href = file;
+}
 
-// --- TRANSPORT ---
+// AUDIO CONTEXT + PAN
+const ctxA = new (window.AudioContext || window.webkitAudioContext)();
+const ctxB = new (window.AudioContext || window.webkitAudioContext)();
+
+const sourceA = ctxA.createMediaElementSource(audio("A"));
+const sourceB = ctxB.createMediaElementSource(audio("B"));
+
+const panNodeA = ctxA.createStereoPanner();
+const panNodeB = ctxB.createStereoPanner();
+
+sourceA.connect(panNodeA).connect(ctxA.destination);
+sourceB.connect(panNodeB).connect(ctxB.destination);
+
+// TRANSPORT
 function playDeck(deck) {
   const a = audio(deck);
   const w = wheel(deck);
@@ -610,20 +633,21 @@ function syncDeck(from, to) {
   aTo.currentTime = aFrom.currentTime;
 }
 
-// --- GAIN / VOLUME / CROSSFADER ---
+// GAIN / PAN / CROSSFADER
 function setGain(deck, value) {
   const a = audio(deck);
   a.dataset.gain = value;
   applyVolumes();
 }
-function setVolume(deck, value) {
-  const a = audio(deck);
-  a.dataset.vol = value;
-  applyVolumes();
+function setPan(deck, value) {
+  if (deck === "A") {
+    panNodeA.pan.value = value;
+  } else {
+    panNodeB.pan.value = value;
+  }
 }
 function setCrossfader(value) {
-  const cf = document.getElementById("crossfader");
-  cf.value = value;
+  document.getElementById("crossfader").value = value;
   applyVolumes();
 }
 function applyVolumes() {
@@ -631,19 +655,16 @@ function applyVolumes() {
   const aB = audio("B");
   const gainA = parseFloat(aA.dataset.gain || 1);
   const gainB = parseFloat(aB.dataset.gain || 1);
-  const volA = parseFloat(aA.dataset.vol || 1);
-  const volB = parseFloat(aB.dataset.vol || 1);
   const cf = parseFloat(document.getElementById("crossfader").value);
-
-  aA.volume = gainA * volA * (1 - cf);
-  aB.volume = gainB * volB * cf;
+  aA.volume = gainA * (1 - cf);
+  aB.volume = gainB * cf;
 }
 
-// --- FX PLACEHOLDERS ---
+// FX PLACEHOLDERS
 function setFilter(deck, value) {}
 function setDelay(deck, value) {}
 
-// --- WAVEFORM + BPM ---
+// WAVEFORM + BPM (simple visual)
 function drawWaveform(deck) {
   const canvas = document.getElementById(deck === "A" ? "waveA" : "waveB");
   const ctx = canvas.getContext("2d");
@@ -672,16 +693,13 @@ function updateBpmMeter(deck, bpm) {
   bar.style.animationDuration = speed + "s";
 }
 
-// --- MASTER LIBRARY ---
-// This is where your Supabase-backed data plugs in.
-// For now, we keep a simple in-memory structure.
-const masterLibrary = []; // [{id,title,artist,bpm,key,url,stems:[]}, ...]
+// MASTER LIBRARY
+const masterLibrary = []; // {id,title,artist,bpm,key,masterFile,stems:[]}
 
 function renderLibrary() {
   const body = document.getElementById("libraryBody");
   body.innerHTML = "";
 
-  // Render existing tracks
   masterLibrary.forEach((track, index) => {
     const row = document.createElement("tr");
     row.className = "library-row";
@@ -705,7 +723,6 @@ function renderLibrary() {
     body.appendChild(row);
   });
 
-  // Always keep one empty slot ready to grow
   const emptyRow = document.createElement("tr");
   emptyRow.className = "library-row";
   emptyRow.innerHTML = `
@@ -724,19 +741,16 @@ function renderLibrary() {
   `;
   body.appendChild(emptyRow);
 
-  // Wire buttons + bank selects
   body.querySelectorAll(".loadA").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
-      const id = btn.dataset.id;
-      loadToDeck("A", id);
+      loadToDeck("A", btn.dataset.id);
     });
   });
   body.querySelectorAll(".loadB").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
-      const id = btn.dataset.id;
-      loadToDeck("B", id);
+      loadToDeck("B", btn.dataset.id);
     });
   });
   body.querySelectorAll(".bankSelect").forEach(sel => {
@@ -801,7 +815,7 @@ function showDetails(id) {
   }
 }
 
-// --- BANKS ---
+// BANKS
 const banks = {};
 "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => banks[l] = []);
 
@@ -856,29 +870,29 @@ function showBank(letter) {
   });
 }
 
-// --- LOADERS ---
+// LOADERS
 function loadToDeck(deck, id) {
   const track = masterLibrary.find(t => String(t.id) === String(id));
-  if (!track || !track.url) return;
+  if (!track || !track.masterFile) return;
+
   const a = audio(deck);
-  a.src = track.url; // your upload flow should set this to the Supabase-served URL or local URL
+  const file = track.masterFile;
+  const url = URL.createObjectURL(file);
+  a.src = url;
   a.dataset.id = id;
+
   drawWaveform(deck);
   updateBpmMeter(deck, track.bpm || 120);
 }
-function loadStem(url, deck) {
+function loadStem(file, deck) {
   const a = audio(deck);
+  const url = URL.createObjectURL(file);
   a.src = url;
   drawWaveform(deck);
   updateBpmMeter(deck, 120);
 }
 
-// --- NAV ---
-function goPage(file) {
-  window.location.href = file;
-}
-
-// --- SCRATCH ---
+// SCRATCH
 let scratchState = {
   A: { active:false, startX:0, startTime:0 },
   B: { active:false, startX:0, startTime:0 }
@@ -924,8 +938,7 @@ function enableScratch(deck) {
 enableScratch("A");
 enableScratch("B");
 
-// --- MIDI ---
-let midiEnabled = false;
+// MIDI
 function handleMidi(msg) {
   const data = msg.data;
   const control = data[1];
@@ -933,8 +946,8 @@ function handleMidi(msg) {
 
   if (control === 20 && value > 0) playDeck("A");
   if (control === 21 && value > 0) stopDeck("A");
-  if (control === 22) setVolume("A", value / 127);
-  if (control === 23) setPitch("A", 0.5 + (value / 127));
+  if (control === 22) setGain("A", value / 64);
+  if (control === 23) setPan("A", (value - 64) / 64);
   if (control === 24) {
     const a = audio("A");
     a.currentTime += (value - 64) / 512;
@@ -942,8 +955,8 @@ function handleMidi(msg) {
 
   if (control === 30 && value > 0) playDeck("B");
   if (control === 31 && value > 0) stopDeck("B");
-  if (control === 32) setVolume("B", value / 127);
-  if (control === 33) setPitch("B", 0.5 + (value / 127));
+  if (control === 32) setGain("B", value / 64);
+  if (control === 33) setPan("B", (value - 64) / 64);
   if (control === 34) {
     const a = audio("B");
     a.currentTime += (value - 64) / 512;
@@ -953,17 +966,14 @@ function handleMidi(msg) {
 }
 if (navigator.requestMIDIAccess) {
   navigator.requestMIDIAccess().then(access => {
-    midiEnabled = true;
     const inputs = access.inputs.values();
     for (let input of inputs) {
       input.onmidimessage = handleMidi;
     }
-  }).catch(err => {
-    midiEnabled = false;
-  });
+  }).catch(() => {});
 }
 
-// --- UI WIRING ---
+// WIRE UI
 document.getElementById("playA").addEventListener("click", () => playDeck("A"));
 document.getElementById("stopA").addEventListener("click", () => stopDeck("A"));
 document.getElementById("cueA").addEventListener("click", () => setCue("A"));
@@ -982,9 +992,9 @@ document.getElementById("pitchB").addEventListener("input", e => setPitch("B", p
 document.getElementById("crossfader").addEventListener("input", e => setCrossfader(parseFloat(e.target.value)));
 
 document.getElementById("gainA").addEventListener("input", e => setGain("A", parseFloat(e.target.value)));
-document.getElementById("volA").addEventListener("input", e => setVolume("A", parseFloat(e.target.value)));
+document.getElementById("panA").addEventListener("input", e => setPan("A", parseFloat(e.target.value)));
 document.getElementById("gainB").addEventListener("input", e => setGain("B", parseFloat(e.target.value)));
-document.getElementById("volB").addEventListener("input", e => setVolume("B", parseFloat(e.target.value)));
+document.getElementById("panB").addEventListener("input", e => setPan("B", parseFloat(e.target.value)));
 
 document.getElementById("highA").addEventListener("input", e => setFilter("A", parseFloat(e.target.value)));
 document.getElementById("lowA").addEventListener("input", e => setFilter("A", parseFloat(e.target.value)));
@@ -996,12 +1006,47 @@ document.getElementById("lowB").addEventListener("input", e => setFilter("B", pa
 document.getElementById("filterB").addEventListener("input", e => setFilter("B", parseFloat(e.target.value)));
 document.getElementById("delayB").addEventListener("input", e => setDelay("B", parseFloat(e.target.value)));
 
-// --- INIT ---
-renderLibrary();
-renderBanks();
-applyVolumes();
-drawWaveform("A");
-drawWaveform("B");
+// INIT: pull pending upload from Page 2
+(function initFromUpload() {
+  const raw = sessionStorage.getItem("pendingUpload");
+  if (!raw) {
+    renderLibrary();
+    renderBanks();
+    applyVolumes();
+    drawWaveform("A");
+    drawWaveform("B");
+    return;
+  }
+  let track;
+  try {
+    track = JSON.parse(raw);
+  } catch {
+    renderLibrary();
+    renderBanks();
+    applyVolumes();
+    drawWaveform("A");
+    drawWaveform("B");
+    return;
+  }
+
+  masterLibrary.push({
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    bpm: track.bpm,
+    key: track.key,
+    masterFile: track.masterFile ? track.masterFile : null,
+    stems: track.stems || []
+  });
+
+  sessionStorage.removeItem("pendingUpload");
+
+  renderLibrary();
+  renderBanks();
+  applyVolumes();
+  drawWaveform("A");
+  drawWaveform("B");
+})();
 </script>
 
 </body>

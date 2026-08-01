@@ -720,48 +720,17 @@ let selectedLibraryTrack = null;
 
 // --- LOADERS ---
 function loadToDeck(deck, track) {
-if (!track) return;
-
-let src = null;
-
-// If Page 2 stored a File object
-if (track.audioFile) {
-src = URL.createObjectURL(track.audioFile);
-}
-
-// If Page 2 stored a URL string
-else if (track.master_audio) {
-src = track.master_audio;
-}
-
-if (!src) {
-console.warn("No audio source found for track:", track);
-return;
-}
-
+if (!track || !track.master_audio) return;
 const a = audio(deck);
-a.src = src;
+a.src = track.master_audio;
 drawWaveform(deck);
 updateBpmMeter(deck, track.bpm || 120);
 }
 
-function loadStemToDeck(deck, fileOrUrl, bpm) {
-if (!fileOrUrl) return;
-
-let src = null;
-
-// If stem is a File or Blob
-if (fileOrUrl instanceof File || fileOrUrl instanceof Blob) {
-src = URL.createObjectURL(fileOrUrl);
-}
-
-// If stem is a URL string
-else {
-src = fileOrUrl;
-}
-
+function loadStemToDeck(deck, fileUrl, bpm) {
+if (!fileUrl) return;
 const a = audio(deck);
-a.src = src;
+a.src = fileUrl;
 drawWaveform(deck);
 updateBpmMeter(deck, bpm || 120);
 }
@@ -786,25 +755,7 @@ if (row) row.style.backgroundColor = "rgba(56,189,248,0.15)";
 }
 
 function playLibraryTrack(track) {
-if (!track) return;
-
-let src = null;
-
-// If Page 2 stored a File object
-if (track.audioFile) {
-src = URL.createObjectURL(track.audioFile);
-}
-
-// If Page 2 stored a URL string
-else if (track.master_audio) {
-src = track.master_audio;
-}
-
-if (!src) {
-console.warn("No audio source found for preview:", track);
-return;
-}
-
+if (!track || !track.master_audio) return;
 const player = document.getElementById("libraryPlayer");
 const nowPlaying = document.getElementById("libraryNowPlaying");
 
@@ -812,38 +763,8 @@ const labelArtist = track.artist || "Unknown";
 const labelTitle = track.title || "Untitled";
 
 nowPlaying.textContent = ${labelArtist} — ${labelTitle};
-player.src = src;
+player.src = track.master_audio;
 player.play();
-}
-
-// --- MASTER LIBRARY BUILDER ---
-function buildMasterLibrary(data) {
-masterLibrary = data.map(row => ({
-id: row.id,
-artist: row.artist,
-title: row.title,
-genre: row.genre,
-album: row.album,
-bpm: row.bpm,
-key: row.key,
-frequency_hz: row.frequency_hz,
-chakra: row.chakra,
-planet: row.planet,
-spatial: row.spatial,
-notes: row.notes,
-cat_no: row.cat_no,
-
-// MASTER AUDIO
-master_audio: row.master_audio,
-
-// STEMS (grouped correctly)
-stems: [
-row.stem1 || null,
-row.stem2 || null,
-row.stem3 || null,
-row.stem4 || null
- ].filter(Boolean)
-}));
 }
 
 // --- DETAILS + STEMS PANEL ---
@@ -857,61 +778,40 @@ stemList.textContent = "No stems available.";
 return;
 }
 
-// DETAILS PANEL
-panel.innerHTML = &lt;div&gt;&lt;strong&gt;Artist:&lt;/strong&gt; ${track.artist || ""}</div>
+panel.innerHTML =
+<div&gt;&lt;strong&gt;Artist:&lt;/strong&gt; ${track.artist || ""}</div>
 <div><strong>Track Title:</strong> ${track.title || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Genre:&lt;/strong&gt; ${track.genre || ""}</div>
 <div><strong>Album:</strong> ${track.album || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;BPM:&lt;/strong&gt; ${track.bpm || ""}</div>
 <div><strong>Key:</strong> ${track.key || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Frequency (Hz):&lt;/strong&gt; ${track.frequency_hz || ""}</div>
 <div><strong>Chakra:</strong> ${track.chakra || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Planet:&lt;/strong&gt; ${track.planet || ""}</div>
 <div><strong>Spatial:</strong> ${track.spatial || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Notes:&lt;/strong&gt; ${track.notes || ""}</div>
-<div><strong>ID Cat No:</strong> ${track.cat_no || ""}&lt;/div&gt;;
+<div><strong>ID Cat No:</strong> ${track.cat_no || ""}&lt;/div>;
 
-// STEMS PANEL
 stemList.innerHTML = "";
 const stems = [track.stem1, track.stem2, track.stem3, track.stem4].filter(Boolean);
-
 if (!stems.length) {
 stemList.textContent = "No stems available.";
-return;
-}
-
+} else {
 stems.forEach((stemUrl, idx) => {
 const div = document.createElement("div");
 div.className = "bank-track-item";
-
-// FIXED STEM BUTTONS
-div.innerHTML = &lt;span&gt;Stem ${idx + 1}</span>
+div.innerHTML =
+<span&gt;Stem ${idx + 1}</span>
 <span>
-<button data-master="${track.id}" data-stem="${idx}" class="stemA">Deck A</button>
-<button data-master="${track.id}" data-stem="${idx}" class="stemB"&gt;Deck B&lt;/button&gt; &lt;/span&gt;;
-
+<button class="stemA">Deck A</button>
+<button class="stemB">Deck B</button>
+</span>`;
+const btnA = div.querySelector(".stemA");
+const btnB = div.querySelector(".stemB");
+btnA.addEventListener("click", () => {
+loadStemToDeck("A", stemUrl, track.bpm);
+});
+btnB.addEventListener("click", () => {
+loadStemToDeck("B", stemUrl, track.bpm);
+});
 stemList.appendChild(div);
 });
-
-// FIXED STEM CLICK HANDLERS
-stemList.querySelectorAll(".stemA").forEach(btn => {
-btn.addEventListener("click", () => {
-const masterId = btn.dataset.master;
-const stemIndex = parseInt(btn.dataset.stem, 10);
-
-const t = masterLibrary.find(x => String(x.id) === String(masterId));
-if (t && t.stems && t.stems[stemIndex]) {
-loadStemToDeck("A", t.stems[stemIndex], t.bpm);
 }
-});
-});
-
-stemList.querySelectorAll(".stemB").forEach(btn => {
-btn.addEventListener("click", () => {
-const masterId = btn.dataset.master;
-const stemIndex = parseInt(btn.dataset.stem, 10);
-
-const t = masterLibrary.find(x => String(x.id) === String(masterId));
-if (t && t.stems && t.stems[stemIndex]) {
-loadStemToDeck("B", t.stems[stemIndex], t.bpm);
-}
-});
-});
 }
 
 // --- RENDER LIBRARY TABLE ---

@@ -93,8 +93,9 @@ h1 {
   position:absolute;
   inset:0;
   border-radius:50%;
-  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.08)0px,rgba(255,255,255,0.08)6px,transparent6px,transparent12px);
+  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 6px, transparent 6px, transparent 12px);
 }
+
 .deck-wheel-marker {
   position:absolute;
   top:10px;
@@ -122,8 +123,9 @@ h1 {
   color:#94a3b8;
 }
 .pitch-slider {
-  -webkit-appearance:slider-vertical;
-  writing-mode:bt-lr;
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  writing-mode: vertical-lr;
   height:170px;
   width:18px;
 }
@@ -150,6 +152,7 @@ audio {
   width:100%;
   height:100%;
   display:block;
+  background:rgba(2,6,23,0.4);
 }
 
 /* BPM */
@@ -224,6 +227,7 @@ button:hover {
   appearance:none;
 }
 .pan-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;
   width:22px;
   height:22px;
   border-radius:50%;
@@ -262,6 +266,7 @@ button:hover {
   appearance:none;
 }
 .crossfader::-webkit-slider-thumb {
+  -webkit-appearance:none;
   width:22px;
   height:22px;
   border-radius:50%;
@@ -336,6 +341,7 @@ button:hover {
   margin-top:8px;
   font-size:0.75rem;
   min-width:1200px;
+  table-layout:auto;
 }
 .library-table th,
 .library-table td {
@@ -398,7 +404,7 @@ button:hover {
   </div>
 
   <div class="audio-bar">
-    <audio id="audioA" controls></audio>
+    <audio id="audioA" controls preload="metadata"></audio>
   </div>
   <div class="wave-strip">
     <canvas id="waveA" class="wave-canvas"></canvas>
@@ -461,7 +467,7 @@ button:hover {
   </div>
 
   <div class="audio-bar">
-    <audio id="audioB" controls></audio>
+    <audio id="audioB" controls preload="metadata"></audio>
   </div>
   <div class="wave-strip">
     <canvas id="waveB" class="wave-canvas"></canvas>
@@ -659,17 +665,29 @@ function updateBpmMeter(deck, bpm) {
 // --- DECK CONTROL ---
 function playDeck(deck) {
   const a = audio(deck);
-  a.play();
+  if (!a.src) return;
+
+  a.play().catch(err => {
+    console.log("Playback blocked:", err);
+  });
+
   wheel(deck).style.animationPlayState = "running";
 }
 function stopDeck(deck) {
   const a = audio(deck);
+  if (!a) return;
+
   a.pause();
-  wheel(deck).style.animationPlayState = "paused";
+  a.currentTime = 0;
+
+  const w = wheel(deck);
+  if (w) {
+    w.style.animationPlayState = "paused";
+  }
 }
 function setCue(deck) {
   const a = audio(deck);
-  a.dataset.cue = a.currentTime;
+  a.dataset.cue = a.currentTime || 0;
 }
 function toggleLoop(deck) {
   const a = audio(deck);
@@ -678,20 +696,34 @@ function toggleLoop(deck) {
 function syncDeck(source, target) {
   const aSrc = audio(source);
   const aTgt = audio(target);
+
+  if (!aSrc || !aTgt) return;
+
   aTgt.playbackRate = aSrc.playbackRate;
+
+  if (aSrc.currentTime) {
+    aTgt.currentTime = aSrc.currentTime;
+  }
 }
 
 /* PITCH: audio + platter speed */
 function setPitch(deck, value) {
   const a = audio(deck);
-  a.playbackRate = value;
   const w = wheel(deck);
+
+  if (!a || !w) return;
+
+  a.playbackRate = value;
+
   const baseSpeed = 2.5;
   w.style.animationDuration = `${baseSpeed / value}s`;
 }
 
 function setGain(deck, value) {
   const a = audio(deck);
+
+  if (!a) return;
+
   a.volume = Math.max(0, Math.min(1, value));
 }
 function setPan(deck, value) {
@@ -706,8 +738,11 @@ function setDelay(deck, value) {
 function setCrossfader(value) {
   const a = audio("A");
   const b = audio("B");
-  a.volume = 1 - value;
-  b.volume = value;
+
+  if (!a || !b) return;
+
+  a.volume = Math.max(0, Math.min(1, 1 - value));
+  b.volume = Math.max(0, Math.min(1, value));
 }
 
 // --- MASTER LIBRARY / BANKS STATE ---
@@ -721,16 +756,28 @@ let selectedLibraryTrack = null;
 // --- LOADERS ---
 function loadToDeck(deck, track) {
   if (!track || !track.master_audio) return;
+
   const a = audio(deck);
+
+  if (!a) return;
+
   a.src = track.master_audio;
+  a.load();
+
   drawWaveform(deck);
   updateBpmMeter(deck, track.bpm || 120);
 }
 
 function loadStemToDeck(deck, fileUrl, bpm) {
   if (!fileUrl) return;
+
   const a = audio(deck);
+
+  if (!a) return;
+
   a.src = fileUrl;
+  a.load();
+
   drawWaveform(deck);
   updateBpmMeter(deck, bpm || 120);
 }
@@ -756,15 +803,23 @@ function highlightSelectedRow(row) {
 
 function playLibraryTrack(track) {
   if (!track || !track.master_audio) return;
+
   const player = document.getElementById("libraryPlayer");
   const nowPlaying = document.getElementById("libraryNowPlaying");
+
+  if (!player || !nowPlaying) return;
 
   const labelArtist = track.artist || "Unknown";
   const labelTitle = track.title || "Untitled";
 
   nowPlaying.textContent = `${labelArtist} — ${labelTitle}`;
+
   player.src = track.master_audio;
-  player.play();
+  player.load();
+
+  player.play().catch(err => {
+    console.log("Preview playback blocked:", err);
+  });
 }
 
 // --- DETAILS + STEMS PANEL ---
@@ -997,3 +1052,4 @@ document.addEventListener("DOMContentLoaded", () => {
 
 </body>
 </html>
+

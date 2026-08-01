@@ -554,7 +554,608 @@ color:#ec4899;
 <div id="detailsPanel" class="details-panel">No track selected.</div>
 <div id="stemList" class="details-panel">No stems available.</div>
 
-<!-- MASTER LIBRARY SYSTEM  -->
+<!-- MASTER LIBRARY -->
+<div class="section-title">Master Library</div>
+<div class="library-wrap">
+
+<!-- Selected Track Slot -->
+<div id="librarySelected" style="padding:8px; background:rgba(15,23,42,0.8); border-radius:8px; margin-bottom:10px;">
+<strong>Selected:</strong> <span id="librarySelectedText">None</span>
+<div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
+<button id="libLoadA">Load Deck A</button>
+<button id="libLoadB">Load Deck B</button>
+<button id="libBankAdd">Add to Bank</button>
+</div>
+</div>
+
+<!-- Preview Player -->
+<div style="margin-bottom:10px;">
+<div id="libraryNowPlaying" style="font-size:0.9rem; color:#9ca3af;">
+Nothing playing
+</div>
+<audio id="libraryPlayer" controls style="width:100%; margin-top:6px;"></audio>
+<div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
+<button id="libraryPrev">Prev</button>
+<button id="libraryNext">Next</button>
+</div>
+</div>
+
+<!-- Horizontal scroll wrapper -->
+<div class="library-scroll-x">
+<table id="libraryTable" class="library-table">
+<thead>
+<tr>
+<!-- TRACK TITLE FIRST -->
+<th data-key="title">Track Title</th>
+
+<!-- MASTER AUDIO NEXT -->
+<th data-key="master_audio">Master</th>
+
+<!-- STEMS -->
+<th>Stem 1</th>
+<th>Stem 2</th>
+<th>Stem 3</th>
+<th>Stem 4</th>
+
+<!-- DJ FLOW -->
+<th data-key="artist">Artist</th>
+<th data-key="album">Album</th>
+<th data-key="bpm">BPM</th>
+<th data-key="genre">Genre</th>
+
+<!-- COSMIC METADATA -->
+<th data-key="key">Key</th>
+<th data-key="frequency_hz">Frequency (Hz)</th>
+<th data-key="chakra">Chakra</th>
+<th data-key="planet">Planet</th>
+<th data-key="spatial">Spatial</th>
+
+<!-- NOTES + COVER -->
+<th data-key="notes">Notes</th>
+<th data-key="cover_art">Cover Art</th>
+
+<!-- IDS AT THE END -->
+<th data-key="cat_no">Cat No</th>
+<th data-key="id">ID</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+
+</div>
+
+<div class="footer-nav">
+<span><a href="./index.html">Intro</a></span>
+<span><a href="./upload.html">Upload</a></span>
+<span><a href="./decks.html">Decks</a></span>
+</div>
+
+</div>
+
+<script>
+// --- CORE HELPERS ---
+function audio(deck) {
+return document.getElementById(deck === "A" ? "audioA" : "audioB");
+}
+function wheel(deck) {
+return document.getElementById(deck === "A" ? "wheelA" : "wheelB");
+}
+function bpmMeter(deck) {
+return document.getElementById(deck === "A" ? "bpmA" : "bpmB");
+}
+function waveCanvas(deck) {
+return document.getElementById(deck === "A" ? "waveA" : "waveB");
+}
+
+function drawWaveform(deck) {
+const canvas = waveCanvas(deck);
+if (!canvas) return;
+const ctx = canvas.getContext("2d");
+const w = canvas.width = canvas.offsetWidth;
+const h = canvas.height = canvas.offsetHeight;
+ctx.clearRect(0,0,w,h);
+ctx.strokeStyle = "#a78bfa";
+ctx.lineWidth = 2;
+ctx.beginPath();
+for (let x = 0; x < w; x++) {
+const y = h/2 + Math.sin(x/20) * (h/4);
+if (x === 0) ctx.moveTo(x,y);
+else ctx.lineTo(x,y);
+}
+ctx.stroke();
+}
+
+function updateBpmMeter(deck, bpm) {
+const meter = bpmMeter(deck);
+if (!meter) return;
+const scale = Math.min(2, Math.max(0.2, (bpm || 120) / 120));
+meter.style.transform = scaleX(${scale})`;
+}
+
+// --- DECK CONTROL ---
+function playDeck(deck) {
+const a = audio(deck);
+a.play();
+wheel(deck).style.animationPlayState = "running";
+}
+function stopDeck(deck) {
+const a = audio(deck);
+a.pause();
+wheel(deck).style.animationPlayState = "paused";
+}
+function setCue(deck) {
+const a = audio(deck);
+a.dataset.cue = a.currentTime;
+}
+function toggleLoop(deck) {
+const a = audio(deck);
+a.loop = !a.loop;
+}
+function syncDeck(source, target) {
+const aSrc = audio(source);
+const aTgt = audio(target);
+aTgt.playbackRate = aSrc.playbackRate;
+}
+
+/* PITCH: audio + platter speed */
+function setPitch(deck, value) {
+const a = audio(deck);
+a.playbackRate = value;
+const w = wheel(deck);
+const baseSpeed = 2.5;
+w.style.animationDuration = ``${baseSpeed / value}s`;
+}
+
+function setGain(deck, value) {
+const a = audio(deck);
+a.volume = Math.max(0, Math.min(1, value));
+}
+function setPan(deck, value) {
+// placeholder for Web Audio pan
+}
+function setFilter(deck, value) {
+// placeholder
+}
+function setDelay(deck, value) {
+// placeholder
+}
+function setCrossfader(value) {
+const a = audio("A");
+const b = audio("B");
+a.volume = 1 - value;
+b.volume = value;
+}
+
+// --- MASTER LIBRARY DATA ---
+window.masterLibrary = window.masterLibrary || [];
+const banks = window.banks || (window.banks = {});
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => { if (!banks[l]) banks[l] = []; });
+
+let libraryData = [];
+let libraryIndex = 0;
+let selectedLibraryTrack = null;
+let currentSort = { key:null, direction:null };
+
+// --- LOADERS ---
+function loadToDeck(deck, track) {
+if (!track || !track.audioFile) return;
+const a = audio(deck);
+const url = URL.createObjectURL(track.audioFile);
+a.src = url;
+a.dataset.id = track.id;
+drawWaveform(deck);
+updateBpmMeter(deck, track.bpm || 120);
+}
+
+function loadStemToDeck(deck, file, bpm) {
+if (!file) return;
+const a = audio(deck);
+const url = URL.createObjectURL(file);
+a.src = url;
+drawWaveform(deck);
+updateBpmMeter(deck, bpm || 120);
+}
+
+// --- SELECTED SLOT + PLAYER ---
+function updateSelectedSlot(track) {
+const slot = document.getElementById("librarySelectedText");
+if (!track) {
+slot.textContent = "None";
+return;
+}
+const labelArtist = track.artist || "Unknown";
+const labelTitle = track.title || (track.type === "Stem" ? "(Stem)" : "Untitled");
+slot.textContent = ${labelArtist} — ${labelTitle};
+}
+
+function highlightSelectedRow(row) {
+document.querySelectorAll("#libraryTable tbody tr").forEach(r => {
+r.style.backgroundColor = "";
+});
+if (row) row.style.backgroundColor = "rgba(56,189,248,0.15)";
+}
+
+function playLibraryTrack(track) {
+if (!track || !track.audioFile) return;
+const player = document.getElementById("libraryPlayer");
+const nowPlaying = document.getElementById("libraryNowPlaying");
+const url = URL.createObjectURL(track.audioFile);
+
+const labelArtist = track.artist || "Unknown";
+const labelTitle = track.title || (track.type === "Stem" ? "(Stem)" : "Untitled");
+
+nowPlaying.textContent = ${labelArtist} — ${labelTitle};
+player.src = url;
+player.play();
+}
+
+// --- DETAILS + STEMS PANEL ---
+function showDetails(masterId) {
+const panel = document.getElementById("detailsPanel");
+const stemList = document.getElementById("stemList");
+const track = masterLibrary.find(t => String(t.id) === String(masterId));
+
+if (!track) {
+panel.textContent = "No track selected.";
+stemList.textContent = "No stems available.";
+return;
+}
+
+panel.innerHTML = &lt;div&gt;&lt;strong&gt;ID:&lt;/strong&gt; ${track.id || ""}</div>
+<div><strong>Cat No:</strong> ${track.cat_no || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Artist:&lt;/strong&gt; ${track.artist || ""}</div>
+<div><strong>Album:</strong> ${track.album || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Track Title:&lt;/strong&gt; ${track.title || ""}</div>
+<div><strong>Genre:</strong> ${track.genre || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Frequency (Hz):&lt;/strong&gt; ${track.frequency_hz || ""}</div>
+<div><strong>BPM:</strong> ${track.bpm || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Key:&lt;/strong&gt; ${track.key || ""}</div>
+<div><strong>Chakra:</strong> ${track.chakra || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Planet:&lt;/strong&gt; ${track.planet || ""}</div>
+<div><strong>Spatial:</strong> ${track.spatial || ""}&lt;/div&gt; &lt;div&gt;&lt;strong&gt;Notes:&lt;/strong&gt; ${track.notes || ""}</div>
+`;
+
+stemList.innerHTML = "";
+const stems = track.stems || [];
+if (!stems.length) {
+stemList.textContent = "No stems available.";
+} else {
+stems.forEach((stemFile, idx) => {
+const div = document.createElement("div");
+div.className = "bank-track-item";
+div.innerHTML = &lt;span&gt;Stem${idx + 1}</span>
+<span>
+<button data-id=" {idx}" class="stemA">Deck A</button>
+<button data-id=" {idx}" class="stemB">Deck B</button>
+</span>
+`;
+stemList.appendChild(div);
+});
+
+stemList.querySelectorAll(".stemA").forEach(btn => {
+btn.addEventListener("click", () => {
+const t = masterLibrary.find(x => String(x.id) === btn.dataset.id);
+const sIdx = parseInt(btn.dataset.stem, 10);
+if (t && t.stems && t.stems[sIdx]) {
+loadStemToDeck("A", t.stems[sIdx], t.bpm);
+}
+});
+});
+stemList.querySelectorAll(".stemB").forEach(btn => {
+btn.addEventListener("click", () => {
+const t = masterLibrary.find(x => String(x.id) === btn.dataset.id);
+const sIdx = parseInt(btn.dataset.stem, 10);
+if (t && t.stems && t.stems[sIdx]) {
+loadStemToDeck("B", t.stems[sIdx], t.bpm);
+}
+});
+});
+}
+}
+
+// --- BUILD ROWS FROM masterLibrary (MASTER + STEM ROWS) ---
+function buildLibraryRowsFromMaster() {
+libraryData = [];
+masterLibrary.forEach(track => {
+// Master row
+libraryData.push({
+id: track.id,
+type: "Master",
+stemSlot: null,
+cat_no: track.cat_no || "",
+artist: track.artist || "",
+album: track.album || "",
+title: track.title || "",
+genre: track.genre || "",
+frequency_hz: track.frequency_hz || "",
+bpm: track.bpm || "",
+key: track.key || "",
+chakra: track.chakra || "",
+planet: track.planet || "",
+spatial: track.spatial || "",
+notes: track.notes || "",
+cover_art: track.cover_art || "",
+master_audio: track.masterFile ? "●" : "",
+audioFile: track.masterFile || null,
+stems: track.stems || []
+});
+
+// Stem rows
+const stems = track.stems || [];
+stems.forEach((stemFile, idx) => {
+libraryData.push({
+id: ${track.id}-stem-${idx},
+type: "Stem",
+stemSlot: idx, // 0..3
+cat_no: track.cat_no || "",
+artist: track.artist || "",
+album: track.album || "",
+title: "", // blank title for stems
+genre: track.genre || "",
+frequency_hz: track.frequency_hz || "",
+bpm: track.bpm || "",
+key: track.key || "",
+chakra: track.chakra || "",
+planet: track.planet || "",
+spatial: track.spatial || "",
+notes: track.notes || "",
+cover_art: track.cover_art || "",
+master_audio: "●", // stem audio indicator
+audioFile: stemFile,
+stems: [] // stems not nested here
+});
+});
+});
+}
+
+// --- RENDER TABLE ---
+function renderLibrary() {
+const tbody = document.querySelector("#libraryTable tbody");
+if (!tbody) return;
+
+buildLibraryRowsFromMaster();
+tbody.innerHTML = "";
+
+libraryData.forEach((track, idx) => {
+const row = document.createElement("tr");
+row.className = "library-row";
+
+const stem1Icon = track.type === "Master" && track.stems[0] ? "●" :
+track.type === "Stem" && track.stemSlot === 0 ? "●" : "";
+const stem2Icon = track.type === "Master" && track.stems[1] ? "●" :
+track.type === "Stem" && track.stemSlot === 1 ? "●" : "";
+const stem3Icon = track.type === "Master" && track.stems[2] ? "●" :
+track.type === "Stem" && track.stemSlot === 2 ? "●" : "";
+const stem4Icon = track.type === "Master" && track.stems[3] ? "●" :
+track.type === "Stem" && track.stemSlot === 3 ? "●" : "";
+
+row.innerHTML = &lt;td&gt;${track.master_audio || ""}</td>
+<td>${track.type || ""}&lt;/td&gt; &lt;td&gt;${stem1Icon}</td>
+<td>${stem2Icon}&lt;/td&gt; &lt;td&gt;${stem3Icon}</td>
+<td>${stem4Icon}&lt;/td&gt; &lt;td&gt;${track.id || ""}</td>
+<td>${track.cat_no || ""}&lt;/td&gt; &lt;td&gt;${track.artist || ""}</td>
+<td>${track.album || ""}&lt;/td&gt; &lt;td&gt;${track.title || ""}</td>
+<td>${track.genre || ""}&lt;/td&gt; &lt;td&gt;${track.frequency_hz || ""}</td>
+<td>${track.bpm || ""}&lt;/td&gt; &lt;td&gt;${track.key || ""}</td>
+<td>${track.chakra || ""}&lt;/td&gt; &lt;td&gt;${track.planet || ""}</td>
+<td>${track.spatial || ""}&lt;/td&gt; &lt;td&gt;${track.notes || ""}</td>
+<td>${track.cover_art ? "●" : ""}&lt;/td&gt;;
+
+row.addEventListener("click", () => {
+selectedLibraryTrack = track;
+libraryIndex = idx;
+highlightSelectedRow(row);
+updateSelectedSlot(track);
+playLibraryTrack(track);
+
+const masterId = track.type === "Master"
+? track.id
+: String(track.id).split("-stem-")[0];
+
+showDetails(masterId);
+});
+
+tbody.appendChild(row);
+});
+
+applySortIndicator();
+}
+
+// --- SORTING ---
+function sortLibraryColumn(key) {
+if (!key) return;
+
+if (currentSort.key === key) {
+if (currentSort.direction === "asc") currentSort.direction = "desc";
+else if (currentSort.direction === "desc") currentSort.direction = null;
+else currentSort.direction = "asc";
+} else {
+currentSort.key = key;
+currentSort.direction = "asc";
+}
+
+if (!currentSort.direction) {
+renderLibrary();
+return;
+}
+
+libraryData.sort((a, b) => {
+const A = (a[currentSort.key] || "").toString().toLowerCase();
+const B = (b[currentSort.key] || "").toString().toLowerCase();
+const cmp = A.localeCompare(B);
+return currentSort.direction === "asc" ? cmp : -cmp;
+});
+
+const tbody = document.querySelector("#libraryTable tbody");
+tbody.innerHTML = "";
+libraryData.forEach((track, idx) => {
+const row = document.createElement("tr");
+row.className = "library-row";
+
+const stem1Icon = track.type === "Master" && track.stems[0] ? "●" :
+track.type === "Stem" && track.stemSlot === 0 ? "●" : "";
+const stem2Icon = track.type === "Master" && track.stems[1] ? "●" :
+track.type === "Stem" && track.stemSlot === 1 ? "●" : "";
+const stem3Icon = track.type === "Master" && track.stems[2] ? "●" :
+track.type === "Stem" && track.stemSlot === 2 ? "●" : "";
+const stem4Icon = track.type === "Master" && track.stems[3] ? "●" :
+track.type === "Stem" && track.stemSlot === 3 ? "●" : "";
+
+row.innerHTML = &lt;td&gt;${track.type || ""}</td>
+<td>${stem1Icon}&lt;/td&gt; &lt;td&gt;${stem2Icon}</td>
+<td>${stem3Icon}&lt;/td&gt; &lt;td&gt;${stem4Icon}</td>
+<td>${track.id || ""}&lt;/td&gt; &lt;td&gt;${track.cat_no || ""}</td>
+<td>${track.artist || ""}&lt;/td&gt; &lt;td&gt;${track.album || ""}</td>
+<td>${track.title || ""}&lt;/td&gt; &lt;td&gt;${track.genre || ""}</td>
+<td>${track.frequency_hz || ""}&lt;/td&gt; &lt;td&gt;${track.bpm || ""}</td>
+<td>${track.key || ""}&lt;/td&gt; &lt;td&gt;${track.chakra || ""}</td>
+<td>${track.planet || ""}&lt;/td&gt; &lt;td&gt;${track.spatial || ""}</td>
+<td>${track.notes || ""}&lt;/td&gt; &lt;td&gt;${track.cover_art ? "●" : ""}</td>
+<td>${track.master_audio || ""}&lt;/td&gt;;
+
+row.addEventListener("click", () => {
+selectedLibraryTrack = track;
+libraryIndex = idx;
+highlightSelectedRow(row);
+updateSelectedSlot(track);
+playLibraryTrack(track);
+
+const masterId = track.type === "Master"
+? track.id
+: String(track.id).split("-stem-")[0];
+
+showDetails(masterId);
+});
+
+tbody.appendChild(row);
+});
+
+applySortIndicator();
+}
+
+function applySortIndicator() {
+document.querySelectorAll("#libraryTable thead th").forEach(th => {
+const key = th.dataset.key;
+if (!key || key !== currentSort.key || !currentSort.direction) {
+th.textContent = th.textContent.replace(/ ▲| ▼/g,"");
+return;
+}
+const base = th.textContent.replace(/ ▲| ▼/g,"");
+th.textContent = base + (currentSort.direction === "asc" ? " ▲" : " ▼");
+});
+}
+
+// --- BANKS ---
+function renderBank(bankLetter) {
+const container = document.getElementById("bankTracks");
+const list = banks[bankLetter] || [];
+if (!list.length) {
+container.textContent = Bank ${bankLetter}: empty.; return; } container.innerHTML = ""; list.forEach(item =&gt; { const div = document.createElement("div"); div.className = "bank-track-item"; const labelArtist = item.artist || "Unknown"; const labelTitle = item.title || (item.type === "Stem" ? "(Stem)" : "Untitled"); div.innerHTML =
+<span>${labelArtist} — ${labelTitle}&lt;/span&gt; &lt;span&gt; &lt;button class="bankLoadA"&gt;Deck A&lt;/button&gt; &lt;button class="bankLoadB"&gt;Deck B&lt;/button&gt; &lt;/span&gt;;
+div.querySelector(".bankLoadA").addEventListener("click", () => {
+loadToDeck("A", item);
+});
+div.querySelector(".bankLoadB").addEventListener("click", () => {
+loadToDeck("B", item);
+});
+container.appendChild(div);
+});
+}
+
+// --- WIRING ---
+function wireControls() {
+// Deck A
+document.getElementById("playA").addEventListener("click", () => playDeck("A"));
+document.getElementById("stopA").addEventListener("click", () => stopDeck("A"));
+document.getElementById("cueA").addEventListener("click", () => setCue("A"));
+document.getElementById("loopA").addEventListener("click", () => toggleLoop("A"));
+document.getElementById("syncA").addEventListener("click", () => syncDeck("B","A"));
+document.getElementById("pitchA").addEventListener("input", e => setPitch("A", parseFloat(e.target.value)));
+document.getElementById("gainA").addEventListener("input", e => setGain("A", parseFloat(e.target.value)));
+document.getElementById("panA").addEventListener("input", e => setPan("A", parseFloat(e.target.value)));
+document.getElementById("filterA").addEventListener("input", e => setFilter("A", parseFloat(e.target.value)));
+document.getElementById("delayA").addEventListener("input", e => setDelay("A", parseFloat(e.target.value)));
+
+// Deck B
+document.getElementById("playB").addEventListener("click", () => playDeck("B"));
+document.getElementById("stopB").addEventListener("click", () => stopDeck("B"));
+document.getElementById("cueB").addEventListener("click", () => setCue("B"));
+document.getElementById("loopB").addEventListener("click", () => toggleLoop("B"));
+document.getElementById("syncB").addEventListener("click", () => syncDeck("A","B"));
+document.getElementById("pitchB").addEventListener("input", e => setPitch("B", parseFloat(e.target.value)));
+document.getElementById("gainB").addEventListener("input", e => setGain("B", parseFloat(e.target.value)));
+document.getElementById("panB").addEventListener("input", e => setPan("B", parseFloat(e.target.value)));
+document.getElementById("filterB").addEventListener("input", e => setFilter("B", parseFloat(e.target.value)));
+document.getElementById("delayB").addEventListener("input", e => setDelay("B", parseFloat(e.target.value)));
+
+// Crossfader
+document.getElementById("crossfader").addEventListener("input", e => setCrossfader(parseFloat(e.target.value)));
+
+// Library header sorting
+document.querySelectorAll("#libraryTable thead th").forEach(th => {
+const key = th.dataset.key;
+if (!key) return;
+th.addEventListener("click", () => sortLibraryColumn(key));
+});
+
+// Library navigation
+document.getElementById("libraryPrev").addEventListener("click", () => {
+if (!libraryData.length) return;
+libraryIndex = (libraryIndex - 1 + libraryData.length) % libraryData.length;
+const track = libraryData[libraryIndex];
+selectedLibraryTrack = track;
+updateSelectedSlot(track);
+playLibraryTrack(track);
+const rows = document.querySelectorAll("#libraryTable tbody tr");
+highlightSelectedRow(rows[libraryIndex]);
+const masterId = track.type === "Master"
+? track.id
+: String(track.id).split("-stem-")[0];
+showDetails(masterId);
+});
+
+document.getElementById("libraryNext").addEventListener("click", () => {
+if (!libraryData.length) return;
+libraryIndex = (libraryIndex + 1) % libraryData.length;
+const track = libraryData[libraryIndex];
+selectedLibraryTrack = track;
+updateSelectedSlot(track);
+playLibraryTrack(track);
+const rows = document.querySelectorAll("#libraryTable tbody tr");
+highlightSelectedRow(rows[libraryIndex]);
+const masterId = track.type === "Master"
+? track.id
+: String(track.id).split("-stem-")[0];
+showDetails(masterId);
+});
+
+// Load selected to decks
+document.getElementById("libLoadA").addEventListener("click", () => {
+if (!selectedLibraryTrack) return;
+loadToDeck("A", selectedLibraryTrack);
+});
+document.getElementById("libLoadB").addEventListener("click", () => {
+if (!selectedLibraryTrack) return;
+loadToDeck("B", selectedLibraryTrack);
+});
+
+// Add selected to bank
+document.getElementById("libBankAdd").addEventListener("click", () => {
+if (!selectedLibraryTrack) return;
+const letter = prompt("Add to which bank? (A–Z)").toUpperCase();
+if (!banks[letter]) {
+alert("Invalid bank.");
+return;
+}
+banks[letter].push(selectedLibraryTrack);
+renderBank(letter);
+});
+
+// Bank buttons
+document.querySelectorAll(".bank-btn").forEach(btn => {
+btn.addEventListener("click", () => {
+const letter = btn.dataset.bank;
+renderBank(letter);
+});
+});
+}
+
 <script>
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -562,17 +1163,8 @@ const library = JSON.parse(localStorage.getItem("glctc1_library") || "[]");
 const tbody = document.getElementById("libraryBody");
 tbody.innerHTML = "";
 
-if (!library.length) {
-const emptyRow = document.createElement("tr");
-emptyRow.innerHTML =
-<td colspan="18" style="text-align:center; color:#888;"&gt;No tracks uploaded yet&lt;/td>;
-tbody.appendChild(emptyRow);
-return;
-}
-
-library.forEach((track, index) => {
+library.forEach(track => {
 const row = document.createElement("tr");
-
 row.innerHTML = &lt;td&gt;${track.title || ""}</td>
 <td>${track.master_audio || ""}&lt;/td&gt; &lt;td&gt;${track.stem1 || ""}</td>
 <td>${track.stem2 || ""}&lt;/td&gt; &lt;td&gt;${track.stem3 || ""}</td>
@@ -581,25 +1173,15 @@ row.innerHTML = &lt;td&gt;${track.title || ""}</td>
 <td>${track.genre || ""}&lt;/td&gt; &lt;td&gt;${track.key || ""}</td>
 <td>${track.frequency_hz || ""}&lt;/td&gt; &lt;td&gt;${track.chakra || ""}</td>
 <td>${track.planet || ""}&lt;/td&gt; &lt;td&gt;${track.spatial || ""}</td>
-<td>${track.notes || ""}&lt;/td&gt; &lt;td&gt;${track.cover_art ? "●" : ""}</td>
-<td>${track.id || ""}&lt;/td&gt;;
-
-// SELECT ROW
-row.addEventListener("click", () => {
-selectedLibraryTrack = track;
-libraryIndex = index;
-
-document.getElementById("librarySelectedText").textContent =
-${track.artist || "Unknown"} — ${track.title || "Untitled"};
-
-document.querySelectorAll("#libraryTable tbody tr")
-.forEach(r => r.style.background = "");
-row.style.background = "rgba(56,189,248,0.15)";
-});
-
+<td>${track.notes || ""}&lt;/td&gt; &lt;td&gt;${track.cover_art ? "●" : ""}&lt;/td&gt;;
 tbody.appendChild(row);
 });
 
+wireControls();
+drawWaveform("A");
+drawWaveform("B");
 });
 </script>
 
+</body>
+</html>

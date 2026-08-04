@@ -202,25 +202,53 @@
 <button id="addTrackBtn">Add Track to Library</button>
 
   </div>    <!-- ⭐ SCRIPT MUST BE AT THE VERY BOTTOM ⭐ -->    <script>  
-    document.getElementById("addTrackBtn").addEventListener("click", () => {  
-  
-      const title = document.getElementById("title").value.trim();  
-      const artist = document.getElementById("artist").value.trim();  
-      const masterInput = document.getElementById("master_audio");  
-  
-      if (!title || !artist || masterInput.files.length === 0) {  
-        alert("Track Title, Artist, and Master Audio are required.");  
-        return;  
-      }  
-  
-      const masterFile = masterInput.files[0];  
-  
-      const track = {
-  id: Date.now(),
-  title,
-  artist,
-  master_audio: masterFile.name,
-};  
+    document.getElementById("addTrackBtn").addEventListener("click", async () => {
+
+  const title = document.getElementById("title").value.trim();
+  const artist = document.getElementById("artist").value.trim();
+  const masterInput = document.getElementById("master_audio");
+
+  if (!title || !artist || masterInput.files.length === 0) {
+    alert("Track Title, Artist, and Master Audio are required.");
+    return;
+  }
+
+  const masterFile = masterInput.files[0];
+
+  // ⭐ Upload WAV to Supabase Storage (bucket: audio)
+  const { data, error } = await supabase.storage
+    .from("audio")
+    .upload(`masters/${masterFile.name}`, masterFile, {
+      cacheControl: "3600",
+      upsert: true
+    });
+
+  if (error) {
+    console.error("Upload failed:", error);
+    alert("Audio upload failed.");
+    return;
+  }
+
+  // ⭐ Get public URL for the uploaded WAV
+  const { data: urlData } = supabase.storage
+    .from("audio")
+    .getPublicUrl(`masters/${masterFile.name}`);
+
+  // ⭐ Build track object with real Supabase URL
+  const track = {
+    id: Date.now(),
+    title,
+    artist,
+    master_audio: urlData.publicUrl
+  };
+
+  // ⭐ Save track to local library
+  let library = JSON.parse(localStorage.getItem("library")) || [];
+  library.push(track);
+  localStorage.setItem("library", JSON.stringify(library));
+
+  alert("Track added to library!");
+});  
   
         album: document.getElementById("album").value.trim(),  
         genre: document.getElementById("genre").value.trim(),  

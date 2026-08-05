@@ -987,7 +987,7 @@ function platterScratch(deck, movement) {
 
   if (!a.duration) return;
 
-  const scratchAmount = movement * 0.05;
+  const scratchAmount = movement * 0.002;
 
   a.currentTime = Math.max(
     0,
@@ -1250,146 +1250,132 @@ function renderBank(bankLetter) {
   });  
 }  
   
-// --- WIRING ---  
-function wireControls() {  
-
-  // PLATTER SCRATCH CONTROLS
+// ===============================
+// CDJ / VINYL PLATTER CONTROLS
+// ===============================
 
 const wheelA = document.getElementById("wheelA");
 const wheelB = document.getElementById("wheelB");
 
-let dragging = {
-  A: { active:false, lastX:0 },
-  B: { active:false, lastX:0 }
+const platterState = {
+  A: { dragging:false, angle:0, rotation:0 },
+  B: { dragging:false, angle:0, rotation:0 }
 };
 
-function startDrag(deck, x){
-  dragging[deck].active = true;
-  dragging[deck].lastX = x;
+function platterAngle(wheel, x, y) {
+
+  const rect = wheel.getBoundingClientRect();
+
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+
+  return Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+}
+
+function startDrag(deck, x, y) {
+
+  const wheel = deck === "A" ? wheelA : wheelB;
+
+  platterState[deck].dragging = true;
+  platterState[deck].angle = platterAngle(wheel, x, y);
+
   platterHold(deck);
 }
 
-function moveDrag(deck, x){
-  if(!dragging[deck].active) return;
+function moveDrag(deck, x, y) {
 
-  const movement = x - dragging[deck].lastX;
-  dragging[deck].lastX = x;
+  if (!platterState[deck].dragging) return;
 
-  platterScratch(deck, movement);
+  const wheel = deck === "A" ? wheelA : wheelB;
+
+  const angle = platterAngle(wheel, x, y);
+
+  let delta = angle - platterState[deck].angle;
+
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+
+  platterState[deck].angle = angle;
+
+  platterState[deck].rotation += delta;
+
+  wheel.style.transform =
+    `rotate(${platterState[deck].rotation}deg)`;
+
+  platterScratch(deck, delta);
+
 }
 
-function endDrag(deck){
-  if(!dragging[deck].active) return;
+function endDrag(deck) {
 
-  dragging[deck].active = false;
+  if (!platterState[deck].dragging) return;
+
+  platterState[deck].dragging = false;
+
   platterRelease(deck);
+
 }
 
+function wireWheel(deck, wheel) {
 
-// MOUSE CONTROLS
-wheelA.addEventListener("mousedown", e => startDrag("A", e.clientX));
-wheelB.addEventListener("mousedown", e => startDrag("B", e.clientX));
+  // Mouse
 
-document.addEventListener("mousemove", e => {
-  moveDrag("A", e.clientX);
-  moveDrag("B", e.clientX);
-});
+  wheel.addEventListener("mousedown", e => {
 
-document.addEventListener("mouseup", () => {
-  endDrag("A");
-  endDrag("B");
-});
+    e.preventDefault();
 
+    startDrag(deck, e.clientX, e.clientY);
 
-// TOUCH CONTROLS
-wheelA.addEventListener("touchstart", e => {
-  e.preventDefault();
-  startDrag("A", e.touches[0].clientX);
-}, {passive:false});
+  });
 
-wheelB.addEventListener("touchstart", e => {
-  e.preventDefault();
-  startDrag("B", e.touches[0].clientX);
-}, {passive:false});
+  document.addEventListener("mousemove", e => {
 
+    moveDrag(deck, e.clientX, e.clientY);
 
-wheelA.addEventListener("touchmove", e => {
-  e.preventDefault();
-  moveDrag("A", e.touches[0].clientX);
-}, {passive:false});
+  });
 
-wheelB.addEventListener("touchmove", e => {
-  e.preventDefault();
-  moveDrag("B", e.touches[0].clientX);
-}, {passive:false});
+  document.addEventListener("mouseup", () => {
 
+    endDrag(deck);
 
-wheelA.addEventListener("touchend", () => endDrag("A"));
-wheelB.addEventListener("touchend", () => endDrag("B"));
+  });
 
+  // Touch
 
-// MOUSE
+  wheel.addEventListener("touchstart", e => {
 
-wheelA.addEventListener("mousedown", e => {
-  startDrag("A", e.clientX);
-});
+    e.preventDefault();
 
-wheelA.addEventListener("mousemove", e => {
-  moveDrag("A", e.clientX);
-});
+    startDrag(
+      deck,
+      e.touches[0].clientX,
+      e.touches[0].clientY
+    );
 
-wheelA.addEventListener("mouseup", () => {
-  endDrag("A");
-});
+  }, { passive:false });
 
+  wheel.addEventListener("touchmove", e => {
 
-wheelB.addEventListener("mousedown", e => {
-  startDrag("B", e.clientX);
-});
+    e.preventDefault();
 
-wheelB.addEventListener("mousemove", e => {
-  moveDrag("B", e.clientX);
-});
+    moveDrag(
+      deck,
+      e.touches[0].clientX,
+      e.touches[0].clientY
+    );
 
-wheelB.addEventListener("mouseup", () => {
-  endDrag("B");
-});
+  }, { passive:false });
 
+  wheel.addEventListener("touchend", () => {
 
-// TOUCH
+    endDrag(deck);
 
-wheelA.addEventListener("touchstart", e => {
-  e.preventDefault();
-  startDrag("A", e.touches[0].clientX);
-},{passive:false});
+  });
 
+}
 
-wheelA.addEventListener("touchmove", e => {
-  e.preventDefault();
-  moveDrag("A", e.touches[0].clientX);
-},{passive:false});
-
-
-wheelA.addEventListener("touchend", () => {
-  endDrag("A");
-});
-
-
-wheelB.addEventListener("touchstart", e => {
-  e.preventDefault();
-  startDrag("B", e.touches[0].clientX);
-},{passive:false});
-
-
-wheelB.addEventListener("touchmove", e => {
-  e.preventDefault();
-  moveDrag("B", e.touches[0].clientX);
-},{passive:false});
-
-
-wheelB.addEventListener("touchend", () => {
-  endDrag("B");
-});
+wireWheel("A", wheelA);
+wireWheel("B", wheelB);
 
 
 

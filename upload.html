@@ -498,61 +498,28 @@ audio {
   display:block;  
 }  
   
-/* COSMIC SPEED RIBBON */
-
-.speed-ribbon {
-  height:18px;
-  margin-top:6px;
-  border-radius:999px;
-  background:linear-gradient(
-    90deg,
-    #0ff,
-    #3b0764,
-    #a78bfa,
-    #ec4899,
-    #a78bfa,
-    #3b0764,
-    #0ff
-  );
-  box-shadow:0 0 15px rgba(167,139,250,0.9);
-  position:relative;
-  overflow:hidden;
-  cursor:ew-resize;
-  touch-action:none;
+/* Swipe Ribbon */
+.swipe-ribbon {
+  height: 14px;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,#ec4899,#a78bfa,#3b0764,#a78bfa,#ec4899);
+  box-shadow: 0 0 12px rgba(167,139,250,0.8);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
 }
 
-.speed-ribbon::before {
-  content:"";
-  position:absolute;
-  inset:0;
-  background:linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,0.6),
-    transparent
-  );
-  animation:ribbonFlow 2s linear infinite;
-}
-
-.ribbon-label {
-  position:absolute;
-  width:100%;
-  text-align:center;
-  line-height:18px;
-  font-size:0.55rem;
-  color:white;
-  letter-spacing:0.15em;
-  z-index:2;
-  text-shadow:0 0 8px #000;
-}
-
-@keyframes ribbonFlow {
-  from {
-    transform:translateX(-100%);
-  }
-  to {
-    transform:translateX(100%);
-  }
+/* Centre marker */
+.swipe-ribbon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: white;
+  opacity: 0.6;
 }  
   
 /* TRANSPORT */  
@@ -778,9 +745,7 @@ button:hover {
   <div class="wave-strip">  
     <canvas id="waveA" class="wave-canvas"></canvas>  
   </div>  
-  <div class="speed-ribbon" id="ribbonA">
-  <div class="ribbon-label">◀ SPEED / PITCH BEND ▶</div>
-</div>    <div class="transport-row">  
+  <div class="bpm-meter" id="bpmA"></div>    <div class="transport-row">  
     <button id="playA">Play</button>  
     <button id="stopA">Stop</button>  
     <button id="cueA">Cue</button>  
@@ -832,9 +797,7 @@ button:hover {
   <div class="wave-strip">  
     <canvas id="waveB" class="wave-canvas"></canvas>  
   </div>  
-  <div class="speed-ribbon" id="ribbonB">
-  <div class="ribbon-label">◀ SPEED / PITCH BEND ▶</div>
-</div>    <div class="transport-row">  
+  <div class="bpm-meter" id="bpmB"></div>    <div class="transport-row">  
     <button id="playB">Play</button>  
     <button id="stopB">Stop</button>  
     <button id="cueB">Cue</button>  
@@ -1055,80 +1018,14 @@ function syncDeck(source, target) {
   const aTgt = audio(target);  
   aTgt.playbackRate = aSrc.playbackRate;  
 }
-
-
-// --- COSMIC SPEED RIBBON PITCH BEND ---
-
-let ribbonControl = {
-  A: {
-    active:false,
-    startX:0
-  },
-  B: {
-    active:false,
-    startX:0
-  }
-};
-
-
-function speedBend(deck, movement) {
-
-  const a = audio(deck);
-
-  if (!a) return;
-
-  let bend = movement * 0.005;
-
-  let speed = a.playbackRate + bend;
-
-  // limit DJ pitch bend range
-  speed = Math.max(0.5, Math.min(2, speed));
-
-  a.playbackRate = speed;
-
-
-  const w = wheel(deck);
-
-  if (w) {
-    w.style.animationDuration = `${2.5 / speed}s`;
-  }
-
-}
-
-
-function resetSpeed(deck) {
-
-  const a = audio(deck);
-
-  if (!a) return;
-
-  a.playbackRate = 1;
-
-
-  const w = wheel(deck);
-
-  if (w) {
-    w.style.animationDuration = "2.5s";
-  }
-
-}
-
-
-/* PITCH SLIDER: audio + platter speed */
-
-function setPitch(deck, value) {
-
-  const a = audio(deck);
-
-  a.playbackRate = value;
-
-
-  const w = wheel(deck);
-
-  const baseSpeed = 2.5;
-
-  w.style.animationDuration = `${baseSpeed / value}s`;
-
+  
+/* PITCH: audio + platter speed */  
+function setPitch(deck, value) {  
+  const a = audio(deck);  
+  a.playbackRate = value;  
+  const w = wheel(deck);  
+  const baseSpeed = 2.5;  
+  w.style.animationDuration = `${baseSpeed / value}s`;  
 }  
   
 function setGain(deck, value) {  
@@ -1373,153 +1270,6 @@ let dragging = {
   A: false,
   B: false,
   lastX: 0
-};
-
-
-// --- COSMIC SPEED RIBBON CONTROLS ---
-
-const ribbonA = document.getElementById("ribbonA");
-const ribbonB = document.getElementById("ribbonB");
-
-
-function attachRibbon(ribbon, deck) {
-
-  if (!ribbon) return;
-
-
-  ribbon.addEventListener("mousedown", (e) => {
-
-    ribbonControl[deck].active = true;
-    ribbonControl[deck].startX = e.clientX;
-
-  });
-
-
-  ribbon.addEventListener("mousemove", (e) => {
-
-    if (!ribbonControl[deck].active) return;
-
-    const movement = e.clientX - ribbonControl[deck].startX;
-
-    ribbonControl[deck].startX = e.clientX;
-
-    speedBend(deck, movement);
-
-  });
-
-
-  ribbon.addEventListener("mouseup", () => {
-
-    ribbonControl[deck].active = false;
-
-    resetSpeed(deck);
-
-  });
-
-
-  ribbon.addEventListener("mouseleave", () => {
-
-    if (ribbonControl[deck].active) {
-
-      ribbonControl[deck].active = false;
-
-      resetSpeed(deck);
-
-    }
-
-  });
-
-
-  // DOUBLE CLICK / DOUBLE TAP RESET SPEED
-
-  ribbon.addEventListener("dblclick", () => {
-
-    resetSpeed(deck);
-
-  });
-
-
-  // TOUCH SUPPORT
-
-  ribbon.addEventListener("touchstart", (e) => {
-
-    ribbonControl[deck].active = true;
-
-    ribbonControl[deck].startX = e.touches[0].clientX;
-
-  });
-
-
-  ribbon.addEventListener("touchmove", (e) => {
-
-    if (!ribbonControl[deck].active) return;
-
-    const movement =
-      e.touches[0].clientX -
-      ribbonControl[deck].startX;
-
-    ribbonControl[deck].startX =
-      e.touches[0].clientX;
-
-    speedBend(deck, movement);
-
-  });
-
-
-  ribbon.addEventListener("touchend", () => {
-
-    ribbonControl[deck].active = false;
-
-    resetSpeed(deck);
-
-  });
-
-}
-
-
-  // TOUCH SUPPORT
-
-  ribbon.addEventListener("touchstart", (e) => {
-
-    ribbonControl[deck].active = true;
-
-    ribbonControl[deck].startX =
-      e.touches[0].clientX;
-
-  });
-
-
-  ribbon.addEventListener("touchmove", (e) => {
-
-    if (!ribbonControl[deck].active) return;
-
-    const movement =
-      e.touches[0].clientX -
-      ribbonControl[deck].startX;
-
-
-    ribbonControl[deck].startX =
-      e.touches[0].clientX;
-
-
-    speedBend(deck, movement);
-
-  });
-
-
-  ribbon.addEventListener("touchend", () => {
-
-    ribbonControl[deck].active = false;
-
-    resetSpeed(deck);
-
-  });
-
-}
-
-
-attachRibbon(ribbonA, "A");
-attachRibbon(ribbonB, "B");
 };
 
 function platterScratch(deck, movement) {

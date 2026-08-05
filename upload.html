@@ -482,21 +482,24 @@ audio {
   width:100%;  
 }  
   
-/* WAVEFORM */  
-.wave-strip {  
-  height:32px;  
-  background:rgba(15,23,42,0.9);  
-  margin-top:8px;  
-  border-radius:10px;  
-  overflow:hidden;  
-  position:relative;  
-  border:1px solid rgba(148,163,184,0.4);  
-}  
-.wave-canvas {  
-  width:100%;  
-  height:100%;  
-  display:block;  
-}  
+/* WAVE‑RIBBON */
+.wave-ribbon-strip {
+  height:32px;
+  margin-top:8px;
+  border-radius:10px;
+  overflow:hidden;
+  position:relative;
+}
+
+.wave-ribbon {
+  width:100%;
+  height:100%;
+  display:block;
+  background:#0a0014;
+  border-radius:10px;
+  box-shadow:0 0 12px rgba(167,139,250,0.8);
+  cursor:pointer;
+} 
   
 /* BPM */  
 .bpm-meter {  
@@ -1470,13 +1473,125 @@ wheelB.addEventListener("touchend", () => {
   });  
 }  
   
-// --- INIT ---  
-document.addEventListener("DOMContentLoaded", () => {  
-  library = JSON.parse(localStorage.getItem("glctc1_library") || "[]");  
-  renderLibraryTable();  
-  wireControls();  
-  drawWaveform("A");  
-  drawWaveform("B");  
-});  
-</script>  </body>  
-  </html>
+/* WAVE‑RIBBON — DRAW WAVEFORM */
+function drawWaveform(canvas, audioBuffer) {
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+
+  ctx.clearRect(0, 0, width, height);
+
+  const data = audioBuffer.getChannelData(0);
+  const step = Math.floor(data.length / width);
+  const amp = height / 2;
+
+  ctx.beginPath();
+  ctx.moveTo(0, amp);
+
+  for (let i = 0; i < width; i++) {
+    const value = data[i * step] * amp;
+    ctx.lineTo(i, amp + value);
+  }
+
+  ctx.strokeStyle = "#a78bfa";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+/* Load waveform into ribbon when track loads */
+function loadWaveRibbon(deck, audioBuffer) {
+  const canvas = document.querySelector(`.wave-ribbon[data-deck="${deck}"]`);
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+
+  drawWaveform(canvas, audioBuffer);
+}
+
+
+
+/* WAVE‑RIBBON — SWIPE BEND */
+document.querySelectorAll('.wave-ribbon').forEach(ribbon => {
+  let startX = 0;
+
+  ribbon.addEventListener("pointerdown", (e) => {
+    startX = e.clientX;
+  });
+
+  ribbon.addEventListener("pointermove", (e) => {
+    if (!startX) return;
+
+    const deck = ribbon.dataset.deck;
+    const player = deck === "A" ? deck1Player : deck2Player;
+
+    const delta = e.clientX - startX;
+    const bend = delta * 0.003;
+
+    let rate = 1 + bend;
+    rate = Math.max(0.5, Math.min(2.0, rate));
+
+    player.playbackRate = rate;
+  });
+
+  ribbon.addEventListener("pointerup", () => {
+    const deck = ribbon.dataset.deck;
+    const player = deck === "A" ? deck1Player : deck2Player;
+
+    startX = 0;
+    player.playbackRate = 1;
+  });
+
+  ribbon.addEventListener("pointerleave", () => {
+    const deck = ribbon.dataset.deck;
+    const player = deck === "A" ? deck1Player : deck2Player;
+
+    startX = 0;
+    player.playbackRate = 1;
+  });
+});
+
+
+
+/* WAVE‑RIBBON — HOOK INTO TRACK LOADER */
+function handleLoadedTrack(deck, arrayBuffer) {
+  audioCtx.decodeAudioData(arrayBuffer, (buffer) => {
+    loadWaveRibbon(deck, buffer);
+  });
+}
+
+
+
+/* WAVE‑RIBBON — CONNECT TO EXISTING TRACK LOADER */
+function loadTrackIntoDeck(deck, file) {
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    const arrayBuffer = e.target.result;
+
+    // your existing audio loading logic
+    if (deck === "A") {
+      audioA.src = URL.createObjectURL(file);
+    } else {
+      audioB.src = URL.createObjectURL(file);
+    }
+
+    // NEW: load waveform into ribbon
+    handleLoadedTrack(deck, arrayBuffer);
+  };
+
+  reader.readAsArrayBuffer(file);
+}
+
+
+
+/* -----------------------------------
+   NOW YOUR ORIGINAL INIT BLOCK BELOW
+------------------------------------ */
+
+// --- INIT ---
+document.addEventListener("DOMContentLoaded", () => {
+  library = JSON.parse(localStorage.getItem("glctc1_library") || "[]");
+  renderLibraryTable();
+  wireControls();
+  drawWaveform("A");
+  drawWaveform("B");
+});

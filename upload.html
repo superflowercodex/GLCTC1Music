@@ -345,6 +345,7 @@ localStorage.setItem(
 location.reload();
 
 });
+
 </script>  <!DOCTYPE html>  <html lang="en">  
 <head>  
 <meta charset="UTF-8">  
@@ -497,20 +498,61 @@ audio {
   display:block;  
 }  
   
-/* BPM */  
-.bpm-meter {  
-  height:10px;  
-  margin-top:6px;  
-  border-radius:999px;  
-  background:linear-gradient(90deg,#3b0764,#a78bfa,#ec4899);  
-  box-shadow:0 0 12px rgba(167,139,250,0.8);  
-  animation:bpmPulse 1s linear infinite;  
-  transform-origin:left;  
-}  
-@keyframes bpmPulse {  
-  0% { transform:scaleX(0.2); opacity:0.6; }  
-  50% { transform:scaleX(1); opacity:1; }  
-  100% { transform:scaleX(0.2); opacity:0.6; }  
+/* COSMIC SPEED RIBBON */
+
+.speed-ribbon {
+  height:18px;
+  margin-top:6px;
+  border-radius:999px;
+  background:linear-gradient(
+    90deg,
+    #0ff,
+    #3b0764,
+    #a78bfa,
+    #ec4899,
+    #a78bfa,
+    #3b0764,
+    #0ff
+  );
+  box-shadow:0 0 15px rgba(167,139,250,0.9);
+  position:relative;
+  overflow:hidden;
+  cursor:ew-resize;
+  touch-action:none;
+}
+
+.speed-ribbon::before {
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,0.6),
+    transparent
+  );
+  animation:ribbonFlow 2s linear infinite;
+}
+
+.ribbon-label {
+  position:absolute;
+  width:100%;
+  text-align:center;
+  line-height:18px;
+  font-size:0.55rem;
+  color:white;
+  letter-spacing:0.15em;
+  z-index:2;
+  text-shadow:0 0 8px #000;
+}
+
+@keyframes ribbonFlow {
+  from {
+    transform:translateX(-100%);
+  }
+  to {
+    transform:translateX(100%);
+  }
 }  
   
 /* TRANSPORT */  
@@ -736,7 +778,9 @@ button:hover {
   <div class="wave-strip">  
     <canvas id="waveA" class="wave-canvas"></canvas>  
   </div>  
-  <div class="bpm-meter" id="bpmA"></div>    <div class="transport-row">  
+  <div class="speed-ribbon" id="ribbonA">
+  <div class="ribbon-label">◀ SPEED / PITCH BEND ▶</div>
+</div>    <div class="transport-row">  
     <button id="playA">Play</button>  
     <button id="stopA">Stop</button>  
     <button id="cueA">Cue</button>  
@@ -788,7 +832,9 @@ button:hover {
   <div class="wave-strip">  
     <canvas id="waveB" class="wave-canvas"></canvas>  
   </div>  
-  <div class="bpm-meter" id="bpmB"></div>    <div class="transport-row">  
+  <div class="speed-ribbon" id="ribbonB">
+  <div class="ribbon-label">◀ SPEED / PITCH BEND ▶</div>
+</div>    <div class="transport-row">  
     <button id="playB">Play</button>  
     <button id="stopB">Stop</button>  
     <button id="cueB">Cue</button>  
@@ -950,33 +996,139 @@ function playDeck(deck) {
   const a = audio(deck);  
   a.play();  
   wheel(deck).style.animationPlayState = "running";  
-}  
+}
+
 function stopDeck(deck) {  
   const a = audio(deck);  
   a.pause();  
   wheel(deck).style.animationPlayState = "paused";  
-}  
+}
+
+// --- PLATTER TOUCH STOP ---  
+function platterHold(deck) {  
+  const a = audio(deck);  
+  const w = wheel(deck);
+
+  a.pause();  
+  w.style.animationPlayState = "paused";  
+}
+
+function platterRelease(deck) {  
+  const a = audio(deck);  
+  const w = wheel(deck);
+
+  a.play();  
+  w.style.animationPlayState = "running";  
+}
+
+// --- PLATTER SCRATCH ---
+let scratchData = {
+  A: {lastX: 0},
+  B: {lastX: 0}
+};
+
+function platterScratch(deck, movement) {
+  const a = audio(deck);
+
+  if (!a.duration) return;
+
+  const scratchAmount = movement * 0.05;
+
+  a.currentTime = Math.max(
+    0,
+    Math.min(a.duration, a.currentTime + scratchAmount)
+  );
+}
+
 function setCue(deck) {  
   const a = audio(deck);  
   a.dataset.cue = a.currentTime;  
-}  
+}
+
 function toggleLoop(deck) {  
   const a = audio(deck);  
   a.loop = !a.loop;  
-}  
+}
+
 function syncDeck(source, target) {  
   const aSrc = audio(source);  
   const aTgt = audio(target);  
   aTgt.playbackRate = aSrc.playbackRate;  
-}  
-  
-/* PITCH: audio + platter speed */  
-function setPitch(deck, value) {  
-  const a = audio(deck);  
-  a.playbackRate = value;  
-  const w = wheel(deck);  
-  const baseSpeed = 2.5;  
-  w.style.animationDuration = `${baseSpeed / value}s`;  
+}
+
+
+// --- COSMIC SPEED RIBBON PITCH BEND ---
+
+let ribbonControl = {
+  A: {
+    active:false,
+    startX:0
+  },
+  B: {
+    active:false,
+    startX:0
+  }
+};
+
+
+function speedBend(deck, movement) {
+
+  const a = audio(deck);
+
+  if (!a) return;
+
+  let bend = movement * 0.005;
+
+  let speed = a.playbackRate + bend;
+
+  // limit DJ pitch bend range
+  speed = Math.max(0.5, Math.min(2, speed));
+
+  a.playbackRate = speed;
+
+
+  const w = wheel(deck);
+
+  if (w) {
+    w.style.animationDuration = `${2.5 / speed}s`;
+  }
+
+}
+
+
+function resetSpeed(deck) {
+
+  const a = audio(deck);
+
+  if (!a) return;
+
+  a.playbackRate = 1;
+
+
+  const w = wheel(deck);
+
+  if (w) {
+    w.style.animationDuration = "2.5s";
+  }
+
+}
+
+
+/* PITCH SLIDER: audio + platter speed */
+
+function setPitch(deck, value) {
+
+  const a = audio(deck);
+
+  a.playbackRate = value;
+
+
+  const w = wheel(deck);
+
+  const baseSpeed = 2.5;
+
+  w.style.animationDuration = `${baseSpeed / value}s`;
+
 }  
   
 function setGain(deck, value) {  
@@ -1211,6 +1363,287 @@ function renderBank(bankLetter) {
   
 // --- WIRING ---  
 function wireControls() {  
+
+ // --- PLATTER SCRATCH CONTROLS ---
+
+const wheelA = document.getElementById("wheelA");
+const wheelB = document.getElementById("wheelB");
+
+let dragging = {
+  A: false,
+  B: false,
+  lastX: 0
+};
+
+
+// --- COSMIC SPEED RIBBON CONTROLS ---
+
+const ribbonA = document.getElementById("ribbonA");
+const ribbonB = document.getElementById("ribbonB");
+
+
+function attachRibbon(ribbon, deck) {
+
+  if (!ribbon) return;
+
+
+  ribbon.addEventListener("mousedown", (e) => {
+
+    ribbonControl[deck].active = true;
+    ribbonControl[deck].startX = e.clientX;
+
+  });
+
+
+  ribbon.addEventListener("mousemove", (e) => {
+
+    if (!ribbonControl[deck].active) return;
+
+    const movement = e.clientX - ribbonControl[deck].startX;
+
+    ribbonControl[deck].startX = e.clientX;
+
+    speedBend(deck, movement);
+
+  });
+
+
+  ribbon.addEventListener("mouseup", () => {
+
+    ribbonControl[deck].active = false;
+
+    resetSpeed(deck);
+
+  });
+
+
+  ribbon.addEventListener("mouseleave", () => {
+
+    if (ribbonControl[deck].active) {
+
+      ribbonControl[deck].active = false;
+
+      resetSpeed(deck);
+
+    }
+
+  });
+
+
+  // DOUBLE CLICK / DOUBLE TAP RESET SPEED
+
+  ribbon.addEventListener("dblclick", () => {
+
+    resetSpeed(deck);
+
+  });
+
+
+  // TOUCH SUPPORT
+
+  ribbon.addEventListener("touchstart", (e) => {
+
+    ribbonControl[deck].active = true;
+
+    ribbonControl[deck].startX = e.touches[0].clientX;
+
+  });
+
+
+  ribbon.addEventListener("touchmove", (e) => {
+
+    if (!ribbonControl[deck].active) return;
+
+    const movement =
+      e.touches[0].clientX -
+      ribbonControl[deck].startX;
+
+    ribbonControl[deck].startX =
+      e.touches[0].clientX;
+
+    speedBend(deck, movement);
+
+  });
+
+
+  ribbon.addEventListener("touchend", () => {
+
+    ribbonControl[deck].active = false;
+
+    resetSpeed(deck);
+
+  });
+
+}
+
+
+  // TOUCH SUPPORT
+
+  ribbon.addEventListener("touchstart", (e) => {
+
+    ribbonControl[deck].active = true;
+
+    ribbonControl[deck].startX =
+      e.touches[0].clientX;
+
+  });
+
+
+  ribbon.addEventListener("touchmove", (e) => {
+
+    if (!ribbonControl[deck].active) return;
+
+    const movement =
+      e.touches[0].clientX -
+      ribbonControl[deck].startX;
+
+
+    ribbonControl[deck].startX =
+      e.touches[0].clientX;
+
+
+    speedBend(deck, movement);
+
+  });
+
+
+  ribbon.addEventListener("touchend", () => {
+
+    ribbonControl[deck].active = false;
+
+    resetSpeed(deck);
+
+  });
+
+}
+
+
+attachRibbon(ribbonA, "A");
+attachRibbon(ribbonB, "B");
+};
+
+function platterScratch(deck, movement) {
+
+  const a = audio(deck);
+
+  if (!a.duration) return;
+
+  const sensitivity = 0.0035;
+
+  a.currentTime += movement * sensitivity;
+
+  if (a.currentTime < 0) {
+    a.currentTime = 0;
+  }
+
+  if (a.currentTime > a.duration) {
+    a.currentTime = a.duration;
+  }
+}
+
+
+// DECK A
+wheelA.addEventListener("mousedown", (e) => {
+  dragging.A = true;
+  dragging.lastX = e.clientX;
+  platterHold("A");
+});
+
+wheelA.addEventListener("mousemove", (e) => {
+  if (!dragging.A) return;
+
+  const movement = e.clientX - dragging.lastX;
+  dragging.lastX = e.clientX;
+
+  platterScratch("A", movement);
+  scratchPlatter("A", movement);
+});
+
+wheelA.addEventListener("mouseup", () => {
+  dragging.A = false;
+  platterRelease("A");
+});
+
+
+// DECK B
+wheelB.addEventListener("mousedown", (e) => {
+  dragging.B = true;
+  dragging.lastX = e.clientX;
+  platterHold("B");
+});
+
+wheelB.addEventListener("mousemove", (e) => {
+  if (!dragging.B) return;
+
+  const movement = e.clientX - dragging.lastX;
+  dragging.lastX = e.clientX;
+
+  platterScratch("B", movement);
+  scratchPlatter("B", movement);
+});
+
+wheelB.addEventListener("mouseup", () => {
+  dragging.B = false;
+  platterRelease("B");
+});
+
+
+// DECK A
+wheelA.addEventListener("mousedown", () => {
+  dragging.A = true;
+  platterHold("A");
+});
+
+wheelA.addEventListener("mousemove", (e) => {
+  if (!dragging.A) return;
+  platterScratch("A", e.movementX);
+});
+
+wheelA.addEventListener("mouseup", () => {
+  dragging.A = false;
+  platterRelease("A");
+});
+
+
+// DECK B
+wheelB.addEventListener("mousedown", () => {
+  dragging.B = true;
+  platterHold("B");
+});
+
+wheelB.addEventListener("mousemove", (e) => {
+  if (!dragging.B) return;
+  platterScratch("B", e.movementX);
+});
+
+wheelB.addEventListener("mouseup", () => {
+  dragging.B = false;
+  platterRelease("B");
+});
+
+
+// TOUCH SUPPORT
+wheelA.addEventListener("touchstart", () => {
+  dragging.A = true;
+  platterHold("A");
+});
+
+wheelA.addEventListener("touchend", () => {
+  dragging.A = false;
+  platterRelease("A");
+});
+
+wheelB.addEventListener("touchstart", () => {
+  dragging.B = true;
+  platterHold("B");
+});
+
+wheelB.addEventListener("touchend", () => {
+  dragging.B = false;
+  platterRelease("B");
+});
+
+
   // Deck A  
   document.getElementById("playA").addEventListener("click", () => playDeck("A"));  
   document.getElementById("stopA").addEventListener("click", () => stopDeck("A"));  
@@ -1222,7 +1655,8 @@ function wireControls() {
   document.getElementById("panA").addEventListener("input", e => setPan("A", parseFloat(e.target.value)));  
   document.getElementById("filterA").addEventListener("input", e => setFilter("A", parseFloat(e.target.value)));  
   document.getElementById("delayA").addEventListener("input", e => setDelay("A", parseFloat(e.target.value)));  
-  
+
+
   // Deck B  
   document.getElementById("playB").addEventListener("click", () => playDeck("B"));  
   document.getElementById("stopB").addEventListener("click", () => stopDeck("B"));  

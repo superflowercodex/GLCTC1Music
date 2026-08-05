@@ -1001,23 +1001,57 @@ function waveCanvas(deck) {
   return document.getElementById(deck === "A" ? "waveA" : "waveB");  
 }  
   
-function drawWaveform(deck) {  
-  const canvas = waveCanvas(deck);  
-  if (!canvas) return;  
-  const ctx = canvas.getContext("2d");  
-  const w = canvas.width = canvas.offsetWidth;  
-  const h = canvas.height = canvas.offsetHeight;  
-  ctx.clearRect(0,0,w,h);  
-  ctx.strokeStyle = "#a78bfa";  
-  ctx.lineWidth = 2;  
-  ctx.beginPath();  
-  for (let x = 0; x < w; x++) {  
-    const y = h/2 + Math.sin(x/20) * (h/4);  
-    if (x === 0) ctx.moveTo(x,y);  
-    else ctx.lineTo(x,y);  
-  }  
-  ctx.stroke();  
-}  
+// --- REAL WAVEFORM VISUALIZER FOR DECK B ---
+
+// 1. Create audio context + analyser
+const ctxB = new AudioContext();
+const analyserB = ctxB.createAnalyser();
+analyserB.fftSize = 2048;
+
+// 2. Connect <audio> element to analyser
+const sourceB = ctxB.createMediaElementSource(audioB);
+sourceB.connect(analyserB);
+analyserB.connect(ctxB.destination);
+
+// 3. Prepare canvas
+const waveCanvasB = document.getElementById("waveB");
+const waveCtxB = waveCanvasB.getContext("2d");
+
+// 4. Buffer for waveform data
+const bufferLengthB = analyserB.frequencyBinCount;
+const dataArrayB = new Uint8Array(bufferLengthB);
+
+// 5. Draw loop
+function drawWaveB() {
+  requestAnimationFrame(drawWaveB);
+
+  analyserB.getByteTimeDomainData(dataArrayB);
+
+  waveCtxB.clearRect(0, 0, waveCanvasB.width, waveCanvasB.height);
+
+  waveCtxB.lineWidth = 2;
+  waveCtxB.strokeStyle = "#22c55e";
+  waveCtxB.beginPath();
+
+  const sliceWidth = waveCanvasB.width / bufferLengthB;
+  let x = 0;
+
+  for (let i = 0; i < bufferLengthB; i++) {
+    const v = dataArrayB[i] / 128.0;
+    const y = (v * waveCanvasB.height) / 2;
+
+    if (i === 0) waveCtxB.moveTo(x, y);
+    else waveCtxB.lineTo(x, y);
+
+    x += sliceWidth;
+  }
+
+  waveCtxB.stroke();
+}
+
+// 6. Start drawing when audio plays
+audioB.addEventListener("play", () => ctxB.resume());
+drawWaveB(); 
   
 function updateBpmMeter(deck, bpm) {  
   const meter = bpmMeter(deck);  

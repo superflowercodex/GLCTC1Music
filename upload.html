@@ -237,18 +237,16 @@ document.getElementById("addTrackBtn").addEventListener("click", async () => {
   const masterFile = masterInput.files[0];
 
 console.log("Uploading file:", masterFile.name);
-
 alert("Starting Supabase upload");
 
 // UPLOAD MASTER AUDIO TO SUPABASE STORAGE / masters
 const { data: uploadData, error: uploadError } = await supabaseClient.storage
-  .from("tracks")
+  .from("masters")
   .upload(
     `${Date.now()}_${masterFile.name}`,
     masterFile
   );
 
-// DEBUG - CHECK SUPABASE UPLOAD RESULT
 console.log("UPLOAD DATA:", uploadData);
 console.log("UPLOAD ERROR:", uploadError);
 
@@ -257,77 +255,55 @@ if (uploadError) {
   return;
 }
 
-// DEBUG - CHECK SUPABASE UPLOAD PATH
 console.log("PATH:", uploadData.path);
 
-// GET SUPABASE PUBLIC URL
-const { data: publicURL } = supabaseClient.storage
-  .from("tracks")
-  .getPublicUrl(uploadData.path);
+// Extract filename from the upload path
+const masterFileName = uploadData.path.split("/").pop();
 
-const masterURL = publicURL.publicUrl;
+// Build correct playable URL for transport player
+const masterURL = `${supabaseUrl}/storage/v1/object/public/masters/${masterFileName}`;
 
 console.log("PUBLIC URL:", masterURL);
 
-
 // CREATE TRACK OBJECT
 const track = {
-
   id: Date.now(),
-
   title,
-
   artist,
 
-  master_audio: masterURL,
+  master_audio: masterURL,   // transport player will now play this correctly
 
   album: document.getElementById("album").value.trim(),
-
   genre: document.getElementById("genre").value.trim(),
-
   bpm: document.getElementById("bpm").value.trim(),
-
   key: document.getElementById("key").value.trim(),
-
   frequency_hz: document.getElementById("frequency_hz").value.trim(),
-
   chakra: document.getElementById("chakra").value,
-
   copyright: document.getElementById("copyright").value,
-
   planet: document.getElementById("planet").value.trim(),
-
   spatial: document.getElementById("spatial").value.trim(),
-
   notes: document.getElementById("notes").value.trim(),
-
 
   cover_art: document.getElementById("cover_art").files[0]
     ? document.getElementById("cover_art").files[0].name
     : "",
 
-
   stem1: document.getElementById("stem1").files[0]
     ? document.getElementById("stem1").files[0].name
     : "",
-
 
   stem2: document.getElementById("stem2").files[0]
     ? document.getElementById("stem2").files[0].name
     : "",
 
-
   stem3: document.getElementById("stem3").files[0]
     ? document.getElementById("stem3").files[0].name
     : "",
 
-
   stem4: document.getElementById("stem4").files[0]
     ? document.getElementById("stem4").files[0].name
     : ""
-
 };
-
 
 // SAVE TO LOCAL LIBRARY
 const library = JSON.parse(
@@ -1170,61 +1146,41 @@ function loadStemToDeck(deck, fileUrl, bpm) {
   updateBpmMeter(deck, bpm || 120);  
 }  
   
-// --- SELECTED SLOT + PLAYER ---  
-function updateSelectedSlot(track) {  
-  const slot = document.getElementById("librarySelectedText");  
-  if (!track) {  
-    slot.textContent = "None";  
-    return;  
-  }  
-  const labelArtist = track.artist || "Unknown";  
-  const labelTitle = track.title || "Untitled";  
-  slot.textContent = `${labelArtist} — ${labelTitle}`;  
-}  
-  
-function highlightSelectedRow(row) {  
-  document.querySelectorAll("#libraryTable tbody tr").forEach(r => {  
-    r.style.backgroundColor = "";  
-  });  
-  if (row) row.style.backgroundColor = "rgba(56,189,248,0.15)";  
-}  
-  
-function playLibraryTrack(track) {  
-  
-  if (!track) return;  
-  
-  const player = document.getElementById("libraryPlayer");  
-  const nowPlaying = document.getElementById("libraryNowPlaying");  
-  
-  const audioFile =
-  track.master_audio ||
-  track.sample ||
-  track.audio ||
-  track.audio_url;
+function playLibraryTrack(track) {
 
-console.log("Audio URL:", audioFile);
+  if (!track) return;
 
-if (!audioFile) {  
-    console.log("No audio file found");  
-    return;  
-  }  
-  
-  const labelArtist = track.artist || "Unknown";  
-  const labelTitle = track.title || "Untitled";  
-  
-  nowPlaying.textContent = `${labelArtist} — ${labelTitle}`;  
-  
+  const player = document.getElementById("libraryPlayer");
+  const nowPlaying = document.getElementById("libraryNowPlaying");
+
+  // Always use master_audio for GLCTC1 transport
+  const audioFile = track.master_audio;
+
+  console.log("Transport loading:", audioFile);
+
+  if (!audioFile) {
+    console.log("No master audio found in track");
+    return;
+  }
+
+  const labelArtist = track.artist || "Unknown";
+  const labelTitle = track.title || "Untitled";
+
+  nowPlaying.textContent = `${labelArtist} — ${labelTitle}`;
+
+  // Set transport player source
   player.src = audioFile;
-alert(audioFile);  
-  
-  player.load();  
-  
-  player.play().catch(error => {  
-    console.log("Playback waiting:", error);  
-  });  
-  
-}  
-  
+  alert(audioFile);
+
+  // Load + auto‑play
+  player.load();
+
+  player.oncanplay = () => {
+    player.play().catch(error => {
+      console.log("Playback waiting:", error);
+    });
+  };
+}
 // --- DETAILS + STEMS PANEL ---  
 function showDetails(track) {  
   const panel = document.getElementById("detailsPanel");  

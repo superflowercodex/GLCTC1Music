@@ -1577,7 +1577,6 @@ function setGain(deck, value) {
   a.volume = Math.max(0, Math.min(1, value));  
 }  
 
-
 // =====================================================
 // 🎚️ HIGH / LOW EQ
 // Deck A and Deck B
@@ -1590,13 +1589,17 @@ const deckEQ = {
 };
 
 
+// =====================================================
+// CREATE EQ FOR DECK
+// =====================================================
+
 function setupDeckEQ(deck) {
 
   const a = audio(deck);
 
   if (!a) return null;
 
-  // Already created for this deck
+  // Already created
   if (deckEQ[deck]) {
     return deckEQ[deck];
   }
@@ -1615,7 +1618,6 @@ function setupDeckEQ(deck) {
   const source =
     ctx.createMediaElementSource(a);
 
-
   // LOW EQ
   const low =
     ctx.createBiquadFilter();
@@ -1623,7 +1625,6 @@ function setupDeckEQ(deck) {
   low.type = "lowshelf";
   low.frequency.value = 200;
   low.gain.value = 0;
-
 
   // HIGH EQ
   const high =
@@ -1633,19 +1634,25 @@ function setupDeckEQ(deck) {
   high.frequency.value = 5000;
   high.gain.value = 0;
 
+  // FINAL OUTPUT
+  const output =
+    ctx.createGain();
 
-  // AUDIO PATH
+  output.gain.value = 1;
+
+  // AUDIO CHAIN
   source
     .connect(low)
     .connect(high)
+    .connect(output)
     .connect(ctx.destination);
-
 
   deckEQ[deck] = {
     context: ctx,
     source: source,
     low: low,
-    high: high
+    high: high,
+    output: output
   };
 
   return deckEQ[deck];
@@ -1663,9 +1670,15 @@ function setHigh(deck, value) {
 
   if (!eq) return;
 
-  // 0.5 = centre / 0 dB
-  eq.high.gain.value =
+  // Centre = 0 dB
+  const gain =
     (value - 0.5) * 24;
+
+  eq.high.gain.setTargetAtTime(
+    gain,
+    eq.context.currentTime,
+    0.01
+  );
 
   if (eq.context.state === "suspended") {
     eq.context.resume();
@@ -1684,15 +1697,20 @@ function setLow(deck, value) {
 
   if (!eq) return;
 
-  // 0.5 = centre / 0 dB
-  eq.low.gain.value =
+  // Centre = 0 dB
+  const gain =
     (value - 0.5) * 24;
+
+  eq.low.gain.setTargetAtTime(
+    gain,
+    eq.context.currentTime,
+    0.01
+  );
 
   if (eq.context.state === "suspended") {
     eq.context.resume();
   }
 }
-
 
 // =====================================================
 // EXISTING PAN

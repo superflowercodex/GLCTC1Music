@@ -1593,6 +1593,10 @@ const deckEQ = {
 // CREATE EQ FOR DECK
 // =====================================================
 
+// =====================================================
+// CREATE EQ + FILTER FOR DECK
+// =====================================================
+
 function setupDeckEQ(deck) {
 
   const a = audio(deck);
@@ -1603,6 +1607,97 @@ function setupDeckEQ(deck) {
   if (deckEQ[deck]) {
     return deckEQ[deck];
   }
+
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+  if (!AudioContext) {
+    console.log("Web Audio EQ not supported.");
+    return null;
+  }
+
+  const ctx = new AudioContext();
+
+  const source =
+    ctx.createMediaElementSource(a);
+
+
+  // ===================================================
+  // LOW EQ
+  // ===================================================
+
+  const low =
+    ctx.createBiquadFilter();
+
+  low.type = "lowshelf";
+  low.frequency.value = 200;
+  low.gain.value = 0;
+
+
+  // ===================================================
+  // HIGH EQ
+  // ===================================================
+
+  const high =
+    ctx.createBiquadFilter();
+
+  high.type = "highshelf";
+  high.frequency.value = 5000;
+  high.gain.value = 0;
+
+
+  // ===================================================
+  // FILTER
+  // ===================================================
+
+  const filter =
+    ctx.createBiquadFilter();
+
+  filter.type = "lowpass";
+  filter.frequency.value = 20000;
+  filter.Q.value = 0.7;
+
+
+  // ===================================================
+  // FINAL OUTPUT
+  // ===================================================
+
+  const output =
+    ctx.createGain();
+
+  output.gain.value = 1;
+
+
+  // ===================================================
+  // AUDIO CHAIN
+  // ===================================================
+
+  source
+    .connect(low)
+    .connect(high)
+    .connect(filter)
+    .connect(output)
+    .connect(ctx.destination);
+
+
+  // ===================================================
+  // STORE DECK AUDIO
+  // ===================================================
+
+  deckEQ[deck] = {
+    context: ctx,
+    source: source,
+    low: low,
+    high: high,
+    filter: filter,
+    output: output
+  };
+
+  return deckEQ[deck];
+}
+
+
 
   const AudioContext =
     window.AudioContext ||
@@ -1725,14 +1820,75 @@ function setPan(deck, value) {
 // EXISTING FILTER
 // =====================================================
 
+// =====================================================
+// 🎛️ COSMIC AUDIO FILTER
+// Centre = 0.5 = NEUTRAL
+// Left = LOW-PASS
+// Right = HIGH-PASS
+// =====================================================
+
 function setFilter(deck, value) {
 
-  // TEMPORARILY DISABLED
-  // High EQ and Low EQ remain untouched.
+  const eq = setupDeckEQ(deck);
 
-  console.log("FILTER:", deck, value);
+  if (!eq || !eq.filter) return;
+
+  // Make sure the Web Audio system is running
+  if (eq.context.state === "suspended") {
+    eq.context.resume();
+  }
+
+  // ===================================================
+  // CENTRE — FULLY OPEN / NEUTRAL
+  // ===================================================
+
+  if (value === 0.5) {
+
+    eq.filter.type = "lowpass";
+    eq.filter.frequency.setTargetAtTime(
+      20000,
+      eq.context.currentTime,
+      0.01
+    );
+
+    return;
+  }
+
+  // ===================================================
+  // LEFT — LOW-PASS
+  // ===================================================
+
+  if (value < 0.5) {
+
+    eq.filter.type = "lowpass";
+
+    const frequency =
+      200 + (value * 2 * 19800);
+
+    eq.filter.frequency.setTargetAtTime(
+      frequency,
+      eq.context.currentTime,
+      0.01
+    );
+
+    return;
+  }
+
+  // ===================================================
+  // RIGHT — HIGH-PASS
+  // ===================================================
+
+  eq.filter.type = "highpass";
+
+  const frequency =
+    200 + ((value - 0.5) * 2 * 19800);
+
+  eq.filter.frequency.setTargetAtTime(
+    frequency,
+    eq.context.currentTime,
+    0.01
+  );
 }
-
 
 // =====================================================
 

@@ -1560,33 +1560,177 @@ function syncDeck(source, target) {
 }
   
 /* PITCH: audio + platter speed */  
-function setPitch(deck, value) {  
-  const a = audio(deck);  
+function setPitch(deck, value) {   const a = audio(deck);  
   a.playbackRate = value;  
   const w = wheel(deck);  
   const baseSpeed = 2.5;  
   w.style.animationDuration = `${baseSpeed / value}s`;  
 }  
-  
+
+
+// =====================================================
+// 🔊 GAIN
+// =====================================================
+
 function setGain(deck, value) {  
   const a = audio(deck);  
   a.volume = Math.max(0, Math.min(1, value));  
 }  
+
+
+// =====================================================
+// 🎚️ HIGH / LOW EQ
+// Deck A and Deck B
+// Centre = 0.5 = 0 dB
+// =====================================================
+
+const deckEQ = {
+  A: null,
+  B: null
+};
+
+
+function setupDeckEQ(deck) {
+
+  const a = audio(deck);
+
+  if (!a) return null;
+
+  // Already created for this deck
+  if (deckEQ[deck]) {
+    return deckEQ[deck];
+  }
+
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+  if (!AudioContext) {
+    console.log("Web Audio EQ not supported.");
+    return null;
+  }
+
+  const ctx = new AudioContext();
+
+  const source =
+    ctx.createMediaElementSource(a);
+
+
+  // LOW EQ
+  const low =
+    ctx.createBiquadFilter();
+
+  low.type = "lowshelf";
+  low.frequency.value = 200;
+  low.gain.value = 0;
+
+
+  // HIGH EQ
+  const high =
+    ctx.createBiquadFilter();
+
+  high.type = "highshelf";
+  high.frequency.value = 5000;
+  high.gain.value = 0;
+
+
+  // AUDIO PATH
+  source
+    .connect(low)
+    .connect(high)
+    .connect(ctx.destination);
+
+
+  deckEQ[deck] = {
+    context: ctx,
+    source: source,
+    low: low,
+    high: high
+  };
+
+  return deckEQ[deck];
+}
+
+
+// =====================================================
+// 🎚️ HIGH EQ
+// =====================================================
+
+function setHigh(deck, value) {
+
+  const eq =
+    setupDeckEQ(deck);
+
+  if (!eq) return;
+
+  // 0.5 = centre / 0 dB
+  eq.high.gain.value =
+    (value - 0.5) * 24;
+
+  if (eq.context.state === "suspended") {
+    eq.context.resume();
+  }
+}
+
+
+// =====================================================
+// 🎚️ LOW EQ
+// =====================================================
+
+function setLow(deck, value) {
+
+  const eq =
+    setupDeckEQ(deck);
+
+  if (!eq) return;
+
+  // 0.5 = centre / 0 dB
+  eq.low.gain.value =
+    (value - 0.5) * 24;
+
+  if (eq.context.state === "suspended") {
+    eq.context.resume();
+  }
+}
+
+
+// =====================================================
+// EXISTING PAN
+// =====================================================
+
 function setPan(deck, value) {  
   // placeholder for Web Audio pan  
 }  
+
+
+// =====================================================
+// EXISTING FILTER
+// =====================================================
+
 function setFilter(deck, value) {  
   // placeholder  
 }  
+
+
+// =====================================================
+// EXISTING DELAY
+// =====================================================
+
 function setDelay(deck, value) {  
   // placeholder  
 }  
+
+
+// =====================================================
+// 🎚️ CROSSFADER — SEPARATE
+// =====================================================
+
 function setCrossfader(value) {  
   const a = audio("A");  
   const b = audio("B");  
   a.volume = 1 - value;  
   b.volume = value;  
-}  
+}
   
 // --- MASTER LIBRARY / BANKS STATE ---  
 const banks = window.banks || (window.banks = {});  

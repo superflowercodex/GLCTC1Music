@@ -975,7 +975,7 @@ button:hover {
     </div>  
     <div class="slider-block">  
       <div class="slider-label">Filter</div>  
-      <input type="range" id="filterA" min="-1" max="1" step="0.01" value="0">  
+      <input type="range" id="filterA" min="0" max="1" step="0.01" value="0.5">  
     </div>  
     <div class="slider-block">  
       <div class="slider-label">Delay</div>  
@@ -1639,33 +1639,42 @@ function setupDeckEQ(deck) {
 // ===================================================
 
 const filter =
-ctx.createBiquadFilter();
+  ctx.createBiquadFilter();
 
 filter.type = "lowpass";
 filter.frequency.value = 20000;
 filter.Q.value = 0.7;
 
-// FINAL OUTPUT
-const output =
-ctx.createGain();
+  // FINAL OUTPUT
+  const output =
+    ctx.createGain();
 
-output.gain.value = 1;
+  output.gain.value = 1;
 
+  // ===================================================
+// 🎛️ AUDIO CHAIN
 // ===================================================
-// 🎛️ STORE AUDIO NODES
-// ===================================================
 
-deckEQ[deck] = {
-context: ctx,
-source: source,
-low: low,
-high: high,
-filter: filter,
-output: output
-};
+source
+  .connect(low)
+  .connect(high)
+  .connect(filter)
+  .connect(output)
+  .connect(ctx.destination);
 
-return deckEQ[deck];
-} =====================================================
+  deckEQ[deck] = {
+    context: ctx,
+    source: source,
+    low: low,
+    high: high,
+    output: output
+  };
+
+  return deckEQ[deck];
+}
+
+
+// =====================================================
 // 🎚️ HIGH EQ
 // =====================================================
 
@@ -1728,45 +1737,25 @@ function setPan(deck, value) {
 
 
 // =====================================================
-// 🎛️ COSMIC DJ FILTER
+// 🎛️ FILTER
 // Centre = 0.5 = NEUTRAL
-// Left  = LOW-PASS
+// Left = LOW-PASS
 // Right = HIGH-PASS
 // =====================================================
 
 function setFilter(deck, value) {
 
-  const eq = setupDeckEQ(deck);
+  const eq =
+    setupDeckEQ(deck);
 
-  if (!eq || !eq.filter) return;
+  if (!eq) return;
 
-  const ctx = eq.context;
-
-  if (ctx.state === "suspended") {
-    ctx.resume();
-  }
-
-  // ===================================================
-  // CENTRE = NEUTRAL
-  // ===================================================
-
+  // Centre = neutral
   if (value === 0.5) {
-
-    eq.filter.type = "lowpass";
-
-    eq.filter.frequency.setTargetAtTime(
-      20000,
-      ctx.currentTime,
-      0.01
-    );
-
     return;
   }
 
-  // ===================================================
   // LEFT = LOW-PASS
-  // ===================================================
-
   if (value < 0.5) {
 
     eq.filter.type = "lowpass";
@@ -1776,27 +1765,30 @@ function setFilter(deck, value) {
 
     eq.filter.frequency.setTargetAtTime(
       frequency,
-      ctx.currentTime,
+      eq.context.currentTime,
       0.01
     );
 
-    return;
   }
 
-  // ===================================================
   // RIGHT = HIGH-PASS
-  // ===================================================
+  else {
 
-  eq.filter.type = "highpass";
+    eq.filter.type = "highpass";
 
-  const frequency =
-    200 + ((value - 0.5) / 0.5) * 19800;
+    const frequency =
+      200 + ((value - 0.5) / 0.5) * 19800;
 
-  eq.filter.frequency.setTargetAtTime(
-    frequency,
-    ctx.currentTime,
-    0.01
-  );
+    eq.filter.frequency.setTargetAtTime(
+      frequency,
+      eq.context.currentTime,
+      0.01
+    );
+  }
+
+  if (eq.context.state === "suspended") {
+    eq.context.resume();
+  }
 }
 
 

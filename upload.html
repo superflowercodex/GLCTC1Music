@@ -1832,7 +1832,7 @@ async function drawWaveform(deck) {
 
     ctx.stroke();
 
-    audioContext.close();
+        audioContext.close();
 
   } catch (error) {
 
@@ -1842,6 +1842,206 @@ async function drawWaveform(deck) {
     );
   }
 }
+
+
+// =====================================================
+// 🎯 STRONG KICK / LOUD TRANSIENT DETECTOR
+// =====================================================
+
+const transientPoints = {
+  A: [],
+  B: []
+};
+
+function detectStrongTransients(audioBuffer) {
+
+  if (!audioBuffer) return [];
+
+  const data =
+    audioBuffer.getChannelData(0);
+
+  const sampleRate =
+    audioBuffer.sampleRate;
+
+  const points = [];
+
+  // Analyse short blocks of audio
+  const blockSize =
+    Math.floor(sampleRate * 0.02); // 20 ms
+
+  // Minimum gap between detected kicks
+  const minGap =
+    Math.floor(sampleRate * 0.20); // 200 ms
+
+  // Find the loudest level in the track
+  let highest = 0;
+
+  for (let i = 0; i < data.length; i++) {
+
+    const level =
+      Math.abs(data[i]);
+
+    if (level > highest) {
+      highest = level;
+    }
+  }
+
+  // Only consider strong peaks
+  const threshold =
+    highest * 0.55;
+
+  let lastPeak =
+    -minGap;
+
+  for (
+    let start = 0;
+    start < data.length;
+    start += blockSize
+  ) {
+
+    let peak = 0;
+    let peakPosition = start;
+
+    const end =
+      Math.min(
+        start + blockSize,
+        data.length
+      );
+
+    for (
+      let i = start;
+      i < end;
+      i++
+    ) {
+
+      const level =
+        Math.abs(data[i]);
+
+      if (level > peak) {
+
+        peak =
+          level;
+
+        peakPosition =
+          i;
+      }
+    }
+
+    if (
+      peak >= threshold &&
+      peakPosition - lastPeak >= minGap
+    ) {
+
+      points.push(
+        peakPosition / sampleRate
+      );
+
+      lastPeak =
+        peakPosition;
+    }
+  }
+
+  return points;
+}
+
+
+// =====================================================
+// 🎯 BUILD TRANSIENT MAP FOR A DECK
+// =====================================================
+
+async function buildTransientMap(deck) {
+
+  const a =
+    audio(deck);
+
+  if (!a || !a.src) return;
+
+  try {
+
+    const response =
+      await fetch(a.src);
+
+    const arrayBuffer =
+      await response.arrayBuffer();
+
+    const AudioContext =
+      window.AudioContext ||
+      window.webkitAudioContext;
+
+    const audioContext =
+      new AudioContext();
+
+    const audioBuffer =
+      await audioContext.decodeAudioData(
+        arrayBuffer
+      );
+
+    transientPoints[deck] =
+      detectStrongTransients(
+        audioBuffer
+      );
+
+    console.log(
+      `GLCTC1 ${deck} TRANSIENTS:`,
+      transientPoints[deck]
+    );
+
+    await audioContext.close();
+
+  } catch (error) {
+
+       console.error(
+      `GLCTC1 ${deck} TRANSIENT ERROR:`,
+      error
+    );
+  }
+}
+
+
+// =====================================================
+// 🎯 BUILD TRANSIENT MAP WHEN AUDIO LOADS
+// =====================================================
+
+function connectTransientDetection(deck) {
+
+  const a =
+    audio(deck);
+
+  if (!a) return;
+
+  a.addEventListener(
+    "loadedmetadata",
+    () => {
+
+      buildTransientMap(deck);
+
+    }
+  );
+
+  a.addEventListener(
+    "loadeddata",
+    () => {
+
+      if (
+        !transientPoints[deck] ||
+        transientPoints[deck].length === 0
+      ) {
+
+        buildTransientMap(deck);
+
+      }
+
+    }
+  );
+}
+
+
+// =====================================================
+// 🎯 CONNECT BOTH DECKS
+// =====================================================
+
+connectTransientDetection("A");
+connectTransientDetection("B");
   
 // // =====================================================
 // 🎚️ SCRATCH RIBBON — PLAYHEAD + TOUCH CONTROL
@@ -2104,15 +2304,78 @@ function platterScratch(deck, movement) {
 
 
 // =====================================================
-// 🎯 SNAP LEFT / RIGHT
+// 🎯 SNAP TO STRONG KICK / LOUD TRANSIENT
 // =====================================================
 
 function snapLeft(deck) {
-  platterScratch(deck, -1);
+
+  const a = audio(deck);
+
+  if (!a) return;
+
+  const points =
+    transientPoints[deck];
+
+  if (
+    !points ||
+    points.length === 0
+  ) return;
+
+  const current =
+    a.currentTime;
+
+  // Find previous strong transient
+  let previous = null;
+
+  for (let i = 0; i < points.length; i++) {
+
+    if (points[i] < current - 0.01) {
+
+      previous =
+        points[i];
+
+    } else {
+
+      break;
+    }
+  }
+
+  if (previous !== null) {
+
+    a.currentTime =
+      previous;
+  }
 }
 
+
 function snapRight(deck) {
-  platterScratch(deck, 1);
+
+  const a = audio(deck);
+
+  if (!a) return;
+
+  const points =
+    transientPoints[deck];
+
+  if (
+    !points ||
+    points.length === 0
+  ) return;
+
+  const current =
+    a.currentTime;
+
+  // Find next strong transient
+  for (let i = 0; i < points.length; i++) {
+
+    if (points[i] > current + 0.01) {
+
+      a.currentTime =
+        points[i];
+
+      break;
+    }
+  }
 }
 
 // =====================================================

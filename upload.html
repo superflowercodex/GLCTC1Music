@@ -5275,6 +5275,225 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 
   };
 
+// =====================================================
+// 💿 VCI-300 JOG / PLATTER CONTROL
+// =====================================================
+
+let glctc1JogState = {
+  A: {
+    touched: false,
+    high: 0,
+    low: 0
+  },
+
+  B: {
+    touched: false,
+    high: 0,
+    low: 0
+  }
+};
+
+
+function handleGLCTC1VCI300Jog(
+  status,
+  control,
+  value
+) {
+
+  let deck = null;
+
+  // -------------------------------
+  // DECK A
+  // -------------------------------
+
+  if (
+    control === 0x53 ||
+    control === 0x1C ||
+    control === 0x3C
+  ) {
+
+    deck = "A";
+
+  }
+
+
+  // -------------------------------
+  // DECK B
+  // -------------------------------
+
+  if (
+    control === 0x54 ||
+    control === 0x1D ||
+    control === 0x3D
+  ) {
+
+    deck = "B";
+
+  }
+
+
+  if (!deck) {
+    return false;
+  }
+
+
+  const jog =
+    glctc1JogState[deck];
+
+
+  // ===================================================
+  // PLATTER TOUCH
+  // ===================================================
+
+  if (
+    status === 0x90 &&
+    (
+      control === 0x53 ||
+      control === 0x54
+    )
+  ) {
+
+    jog.touched =
+      value > 0;
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // JOG HIGH BYTE
+  // ===================================================
+
+  if (
+    status === 0xB0 &&
+    (
+      control === 0x1C ||
+      control === 0x1D
+    )
+  ) {
+
+    jog.high =
+      value;
+
+  }
+
+
+  // ===================================================
+  // JOG LOW BYTE
+  // ===================================================
+
+  if (
+    status === 0xB0 &&
+    (
+      control === 0x3C ||
+      control === 0x3D
+    )
+  ) {
+
+    jog.low =
+      value;
+
+  }
+
+
+  // ===================================================
+  // BUILD 14-BIT JOG VALUE
+  // ===================================================
+
+  const raw =
+    (
+      jog.high * 128
+    ) +
+    jog.low;
+
+
+  const centre =
+    8192;
+
+
+  let movement =
+    raw - centre;
+
+
+  // Ignore tiny movement/noise
+
+  if (
+    Math.abs(movement) < 20
+  ) {
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // SEND TO EXISTING PLATTER SCRATCH
+  // ===================================================
+
+  if (
+    typeof platterScratch ===
+    "function"
+  ) {
+
+    platterScratch(
+      deck,
+      movement / 128
+    );
+
+  }
+
+
+  // ===================================================
+  // ALSO MOVE THE VISUAL SCRATCH RIBBON
+  // ===================================================
+
+  const a =
+    audio(deck);
+
+  const ribbon =
+    scratchRibbon(deck);
+
+
+  if (
+    a &&
+    ribbon &&
+    isFinite(a.duration)
+  ) {
+
+    const position =
+      (
+        a.currentTime /
+        a.duration
+      ) * 100;
+
+    const handle =
+      document.getElementById(
+        deck === "A"
+          ? "scratchHandleA"
+          : "scratchHandleB"
+      );
+
+    if (handle) {
+
+      handle.style.left =
+        `${Math.max(
+          0,
+          Math.min(
+            100,
+            position
+          )
+        )}%`;
+
+    }
+
+  }
+
+
+  return true;
+
+}
+
 
   // ===================================================
   // STANDARD VCI-300 MIDI HANDLER

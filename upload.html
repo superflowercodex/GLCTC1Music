@@ -4835,7 +4835,7 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 
 
   // =====================================================
-// 💿 VCI-300 JOG / PLATTER → EXISTING SCRATCH RIBBON
+// 💿 VCI-300 JOG / PLATTER → SCRATCH RIBBON
 // =====================================================
 
 let glctc1JogState = {
@@ -4844,14 +4844,14 @@ let glctc1JogState = {
     touched: false,
     high: 0,
     low: 0,
-    lastRaw: 8192
+    lastRaw: null
   },
 
   B: {
     touched: false,
     high: 0,
     low: 0,
-    lastRaw: 8192
+    lastRaw: null
   }
 
 };
@@ -4922,15 +4922,6 @@ function handleGLCTC1VCI300Jog(
     jog.touched =
       value > 0;
 
-
-    // Establish starting platter position
-    jog.lastRaw =
-      (
-        jog.high * 128
-      ) +
-      jog.low;
-
-
     return true;
 
   }
@@ -4950,6 +4941,8 @@ function handleGLCTC1VCI300Jog(
 
     jog.high =
       value & 0x7F;
+
+    return true;
 
   }
 
@@ -4973,10 +4966,26 @@ function handleGLCTC1VCI300Jog(
 
 
   // ===================================================
-  // ONLY MOVE RIBBON WHEN PLATTER IS TOUCHED
+  // BUILD 14-BIT VCI-300 JOG VALUE
   // ===================================================
 
-  if (!jog.touched) {
+  const raw =
+    (
+      jog.high << 7
+    ) |
+    jog.low;
+
+
+  // ===================================================
+  // FIRST JOG VALUE
+  // ===================================================
+
+  if (
+    jog.lastRaw === null
+  ) {
+
+    jog.lastRaw =
+      raw;
 
     return true;
 
@@ -4984,18 +4993,7 @@ function handleGLCTC1VCI300Jog(
 
 
   // ===================================================
-  // CURRENT 14-BIT PLATTER POSITION
-  // ===================================================
-
-  const raw =
-    (
-      jog.high * 128
-    ) +
-    jog.low;
-
-
-  // ===================================================
-  // CALCULATE PLATTER MOVEMENT
+  // CALCULATE JOG MOVEMENT
   // ===================================================
 
   let movement =
@@ -5003,16 +5001,12 @@ function handleGLCTC1VCI300Jog(
     jog.lastRaw;
 
 
-  jog.lastRaw =
-    raw;
-
-
   // ===================================================
-  // 14-BIT WRAPAROUND
+  // 14-BIT CYCLIC WRAP
   // ===================================================
 
   if (
-    movement > 8192
+    movement >= 8192
   ) {
 
     movement -= 16384;
@@ -5029,14 +5023,100 @@ function handleGLCTC1VCI300Jog(
   }
 
 
-  // Ignore tiny MIDI movement
+  jog.lastRaw =
+    raw;
+
+
+  // ===================================================
+  // NO MOVEMENT
+  // ===================================================
+
   if (
-    Math.abs(movement) < 2
+    movement === 0
   ) {
 
     return true;
 
   }
+
+
+  // ===================================================
+  // GET EXISTING AUDIO PLAYER
+  // ===================================================
+
+  const a =
+    audio(deck);
+
+
+  if (
+    !a ||
+    !isFinite(a.duration) ||
+    a.duration <= 0
+  ) {
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // 🎚️ VCI-300 JOG → AUDIO PLAYHEAD
+  // ===================================================
+
+  const secondsPerStep =
+    0.002;
+
+
+  a.currentTime =
+    Math.max(
+      0,
+      Math.min(
+        a.duration,
+        a.currentTime +
+        (
+          movement *
+          secondsPerStep
+        )
+      )
+    );
+
+
+  // ===================================================
+  // 🎚️ AUDIO PLAYHEAD → EXISTING RIBBON HANDLE
+  // ===================================================
+
+  const handle =
+    document.getElementById(
+      deck === "A"
+        ? "scratchHandleA"
+        : "scratchHandleB"
+    );
+
+
+  if (handle) {
+
+    const position =
+      (
+        a.currentTime /
+        a.duration
+      ) * 100;
+
+
+    handle.style.left =
+      `${Math.max(
+        0,
+        Math.min(
+          100,
+          position
+        )
+      )}%`;
+
+  }
+
+
+  return true;
+
+}
 
 
   // ===================================================

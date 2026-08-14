@@ -1764,160 +1764,23 @@ function scratchRibbon(deck) {
 }
 function waveCanvas(deck) {  
   return document.getElementById(deck === "A" ? "waveA" : "waveB");  
-}
-
-// =====================================================
-// 🎧 GLCTC1 AUDIO OUTPUT — DEVICE DETECTION
-// =====================================================
-
-async function connectGLCTC1AudioOutput() {
-
-  const audioA =
-    document.getElementById("audioA");
-
-  const audioB =
-    document.getElementById("audioB");
-
-
-  if (!audioA && !audioB) {
-
-    console.log(
-      "🎧 GLCTC1 AUDIO: Deck audio not found"
-    );
-
-    return;
-  }
-
-
-  if (
-    typeof HTMLMediaElement.prototype.setSinkId !==
-    "function"
-  ) {
-
-    console.log(
-      "🎧 GLCTC1 AUDIO: Browser output selection unavailable"
-    );
-
-    return;
-  }
-
-
-  try {
-
-    const devices =
-      await navigator.mediaDevices.enumerateDevices();
-
-
-    const outputs =
-      devices.filter(
-        device =>
-          device.kind === "audiooutput"
-      );
-
-
-    // Show all audio outputs clearly
-
-    console.log(
-      "🎧 GLCTC1 AUDIO OUTPUTS:",
-      outputs
-    );
-
-    console.table(
-      outputs.map(
-        device => ({
-          kind: device.kind,
-          label: device.label,
-          deviceId: device.deviceId,
-          groupId: device.groupId
-        })
-      )
-    );
-
-
-    // Look for VCI-300
-
-    const vci300 =
-      outputs.find(
-        device =>
-          device.label &&
-          (
-            device.label
-              .toLowerCase()
-              .includes("vci-300") ||
-
-            device.label
-              .toLowerCase()
-              .includes("vestax") ||
-
-            device.label
-              .toLowerCase()
-              .includes("dj controller")
-          )
-      );
-
-
-    if (!vci300) {
-
-      console.log(
-        "🎧 GLCTC1 AUDIO: VCI-300 output not found"
-      );
-
-      return;
-    }
-
-
-    console.log(
-      "🎧 GLCTC1 AUDIO: VCI-300 FOUND:",
-      vci300
-    );
-
-
-    // Deck A → VCI-300
-
-    if (audioA) {
-
-      await audioA.setSinkId(
-        vci300.deviceId
-      );
-
-    }
-
-
-    // Deck B → VCI-300
-
-    if (audioB) {
-
-      await audioB.setSinkId(
-        vci300.deviceId
-      );
-
-    }
-
-
-    console.log(
-      "🎧 GLCTC1 AUDIO: VCI-300 OUTPUT CONNECTED"
-    );
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 AUDIO OUTPUT ERROR:",
-      error
-    );
-
-  }
-
-}
-
-
-connectGLCTC1AudioOutput();
-
-
-// =====================================================
-// 🎵 WAVEFORM
-// =====================================================
+}  
   
+// --- CORE HELPERS ---
+function audio(deck) {  
+  return document.getElementById(deck === "A" ? "audioA" : "audioB");  
+}  
+function wheel(deck) {  
+  return document.getElementById(deck === "A" ? "wheelA" : "wheelB");  
+}  
+function scratchRibbon(deck) {
+  return document.getElementById(
+    deck === "A" ? "scratchA" : "scratchB"
+  );
+}
+function waveCanvas(deck) {  
+  return document.getElementById(deck === "A" ? "waveA" : "waveB");  
+}  
   
 async function drawWaveform(deck) {
 
@@ -5207,21 +5070,25 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
     // -------------------------------
 
     13: "pitchA",
-14: "reverbA",
-15: "highA",
-16: "filterA",
-17: "lowA",
+    14: "gainA",
+    15: "highA",
+    16: "filterA",
+    17: "lowA",
 
-12: "gainA",
+    12: "gainA",
 
 
-19: "pitchB",
-20: "reverbB",
-21: "highB",
-22: "filterB",
-23: "lowB",
+    // -------------------------------
+    // DECK B
+    // -------------------------------
 
-18: "gainB",
+    19: "pitchB",
+    20: "gainB",
+    21: "highB",
+    22: "filterB",
+    23: "lowB",
+
+    18: "gainB",
 
 
     // -------------------------------
@@ -5412,55 +5279,78 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 
 
   // ===================================================
-// 🎛️ MAIN MIDI RECEIVER
-// ===================================================
+  // 🎛️ MAIN MIDI RECEIVER
+  // ===================================================
 
-function handleGLCTC1MIDI(
-  event
-) {
+  function handleGLCTC1MIDI(
+    event
+  ) {
 
-  const [
-    status,
-    control,
-    value
-  ] = event.data;
+    const [
+      status,
+      control,
+      value
+    ] = event.data;
 
 
-  console.log(
-    "🎛️ GLCTC1 MIDI:",
-    {
-      status:
+    console.log(
+      "🎛️ GLCTC1 MIDI:",
+      {
+        status:
+          status,
+
+        control:
+          control,
+
+        value:
+          value
+      }
+    );
+
+
+    // -------------------------------
+    // MIDI LEARN FIRST
+    // -------------------------------
+
+    if (
+      captureGLCTC1MIDILearn(
         status,
-
-      control:
         control,
-
-      value:
         value
+      )
+    ) {
+
+      return;
+
     }
-  );
 
 
-  // -------------------------------
-  // VCI-300 DEFAULTS
-  // -------------------------------
+    // -------------------------------
+    // LEARNED MIDI SECOND
+    // -------------------------------
 
-  handleGLCTC1StandardMIDI(
-    status,
-    control,
-    value
-  );
+    if (
+      handleGLCTC1LearnedMIDI(
+        status,
+        control,
+        value
+      )
+    ) {
 
-}
+      return;
+
+    }
 
 
-    // VCI-300 FACTORY DEFAULTS
+    // -------------------------------
+    // VCI-300 DEFAULTS
+    // -------------------------------
 
-handleGLCTC1StandardMIDI(
-  status,
-  control,
-  value
-);
+    handleGLCTC1StandardMIDI(
+      status,
+      control,
+      value
+    );
 
   }
 

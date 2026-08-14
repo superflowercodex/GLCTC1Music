@@ -4834,33 +4834,292 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
   let glctc1MidiLearnTarget = null;
 
 
+  // =====================================================
+// 💿 VCI-300 JOG / PLATTER → EXISTING SCRATCH RIBBON
+// =====================================================
+
+let glctc1JogState = {
+
+  A: {
+    touched: false,
+    high: 0,
+    low: 0,
+    lastRaw: 8192
+  },
+
+  B: {
+    touched: false,
+    high: 0,
+    low: 0,
+    lastRaw: 8192
+  }
+
+};
+
+
+function handleGLCTC1VCI300Jog(
+  status,
+  control,
+  value
+) {
+
+  let deck = null;
+
+
   // ===================================================
-  // 💿 VCI-300 JOG / PLATTER STATE
+  // DECK A
   // ===================================================
 
-  let glctc1JogState = {
+  if (
+    control === 0x53 ||
+    control === 0x1C ||
+    control === 0x3C
+  ) {
 
-    A: {
-      touched: false,
-      scratch: false,
+    deck = "A";
 
-      high: 0,
-      low: 0,
+  }
 
-      lastRaw: 8192
-    },
 
-    B: {
-      touched: false,
-      scratch: false,
+  // ===================================================
+  // DECK B
+  // ===================================================
 
-      high: 0,
-      low: 0,
+  if (
+    control === 0x54 ||
+    control === 0x1D ||
+    control === 0x3D
+  ) {
 
-      lastRaw: 8192
-    }
+    deck = "B";
 
-  };
+  }
+
+
+  if (!deck) {
+
+    return false;
+
+  }
+
+
+  const jog =
+    glctc1JogState[deck];
+
+
+  // ===================================================
+  // PLATTER TOUCH
+  // ===================================================
+
+  if (
+    status === 0x90 &&
+    (
+      control === 0x53 ||
+      control === 0x54
+    )
+  ) {
+
+    jog.touched =
+      value > 0;
+
+
+    // Establish starting platter position
+    jog.lastRaw =
+      (
+        jog.high * 128
+      ) +
+      jog.low;
+
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // HIGH BYTE
+  // ===================================================
+
+  if (
+    status === 0xB0 &&
+    (
+      control === 0x1C ||
+      control === 0x1D
+    )
+  ) {
+
+    jog.high =
+      value & 0x7F;
+
+  }
+
+
+  // ===================================================
+  // LOW BYTE
+  // ===================================================
+
+  if (
+    status === 0xB0 &&
+    (
+      control === 0x3C ||
+      control === 0x3D
+    )
+  ) {
+
+    jog.low =
+      value & 0x7F;
+
+  }
+
+
+  // ===================================================
+  // ONLY MOVE RIBBON WHEN PLATTER IS TOUCHED
+  // ===================================================
+
+  if (!jog.touched) {
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // CURRENT 14-BIT PLATTER POSITION
+  // ===================================================
+
+  const raw =
+    (
+      jog.high * 128
+    ) +
+    jog.low;
+
+
+  // ===================================================
+  // CALCULATE PLATTER MOVEMENT
+  // ===================================================
+
+  let movement =
+    raw -
+    jog.lastRaw;
+
+
+  jog.lastRaw =
+    raw;
+
+
+  // ===================================================
+  // 14-BIT WRAPAROUND
+  // ===================================================
+
+  if (
+    movement > 8192
+  ) {
+
+    movement -= 16384;
+
+  }
+
+
+  if (
+    movement < -8192
+  ) {
+
+    movement += 16384;
+
+  }
+
+
+  // Ignore tiny MIDI movement
+  if (
+    Math.abs(movement) < 2
+  ) {
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // GET EXISTING DECK AUDIO
+  // ===================================================
+
+  const a =
+    audio(deck);
+
+
+  if (
+    !a ||
+    !isFinite(a.duration) ||
+    a.duration <= 0
+  ) {
+
+    return true;
+
+  }
+
+
+  // ===================================================
+  // 🎚️ VCI-300 → EXISTING RIBBON / PLAYHEAD
+  // ===================================================
+
+  const secondsPerMIDI =
+    0.002;
+
+
+  const newTime =
+    a.currentTime +
+    (
+      movement *
+      secondsPerMIDI
+    );
+
+
+  a.currentTime =
+    Math.max(
+      0,
+      Math.min(
+        a.duration,
+        newTime
+      )
+    );
+
+
+  // ===================================================
+  // UPDATE EXISTING RIBBON HANDLE
+  // ===================================================
+
+  const handle =
+    document.getElementById(
+      deck === "A"
+        ? "scratchHandleA"
+        : "scratchHandleB"
+    );
+
+
+  if (handle) {
+
+    const position =
+      (
+        a.currentTime /
+        a.duration
+      ) * 100;
+
+
+    handle.style.left =
+      `${Math.max(
+        0,
+        Math.min(
+          100,
+          position
+        )
+      )}%`;
+
+  }
+
+
+  return true;
+
+}
 
 
   // ===================================================

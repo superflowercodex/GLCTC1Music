@@ -5284,17 +5284,23 @@ let glctc1JogState = {
   A: {
     touched: false,
     high: 0,
-    low: 0
+    low: 0,
+    lastRaw: 8192
   },
 
   B: {
     touched: false,
     high: 0,
-    low: 0
+    low: 0,
+    lastRaw: 8192
   }
 
 };
 
+
+// =====================================================
+// 💿 VCI-300 JOG / PLATTER HANDLER
+// =====================================================
 
 function handleGLCTC1VCI300Jog(
   status,
@@ -5335,6 +5341,10 @@ function handleGLCTC1VCI300Jog(
   }
 
 
+  // ===================================================
+  // NOT A VCI-300 JOG CONTROL
+  // ===================================================
+
   if (!deck) {
 
     return false;
@@ -5361,6 +5371,22 @@ function handleGLCTC1VCI300Jog(
     jog.touched =
       value > 0;
 
+
+    // -------------------------------------------------
+    // When released, reset the reference position.
+    // -------------------------------------------------
+
+    if (!jog.touched) {
+
+      jog.lastRaw =
+        (
+          jog.high * 128
+        ) +
+        jog.low;
+
+    }
+
+
     return true;
 
   }
@@ -5379,7 +5405,7 @@ function handleGLCTC1VCI300Jog(
   ) {
 
     jog.high =
-      value;
+      value & 0x7F;
 
   }
 
@@ -5397,7 +5423,7 @@ function handleGLCTC1VCI300Jog(
   ) {
 
     jog.low =
-      value;
+      value & 0x7F;
 
   }
 
@@ -5414,7 +5440,7 @@ function handleGLCTC1VCI300Jog(
 
 
   // ===================================================
-  // BUILD 14-BIT VALUE
+  // BUILD CURRENT 14-BIT JOG POSITION
   // ===================================================
 
   const raw =
@@ -5424,18 +5450,47 @@ function handleGLCTC1VCI300Jog(
     jog.low;
 
 
-  const centre =
-    8192;
+  // ===================================================
+  // CALCULATE MOVEMENT FROM PREVIOUS POSITION
+  // ===================================================
+
+  let movement =
+    raw -
+    jog.lastRaw;
 
 
-  const movement =
-    raw - centre;
+  // ===================================================
+  // STORE CURRENT POSITION
+  // ===================================================
+
+  jog.lastRaw =
+    raw;
 
 
-  // Ignore tiny MIDI noise
+  // ===================================================
+  // HANDLE 14-BIT WRAPAROUND
+  // ===================================================
+
+  if (movement > 8192) {
+
+    movement -= 16384;
+
+  }
+
+
+  if (movement < -8192) {
+
+    movement += 16384;
+
+  }
+
+
+  // ===================================================
+  // IGNORE TINY MIDI NOISE
+  // ===================================================
 
   if (
-    Math.abs(movement) < 20
+    Math.abs(movement) < 2
   ) {
 
     return true;
@@ -5444,7 +5499,7 @@ function handleGLCTC1VCI300Jog(
 
 
   // ===================================================
-  // VCI-300 PLATTER → EXISTING SCRATCH ENGINE
+  // VCI-300 → EXISTING SCRATCH ENGINE
   // ===================================================
 
   if (
@@ -5461,14 +5516,21 @@ function handleGLCTC1VCI300Jog(
 
 
   // ===================================================
-  // VCI-300 PLATTER → SCRATCH RIBBON POSITION
+  // UPDATE SCRATCH RIBBON
   // ===================================================
 
   const a =
-    audio(deck);
+    typeof audio ===
+    "function"
+      ? audio(deck)
+      : null;
+
 
   const ribbon =
-    scratchRibbon(deck);
+    typeof scratchRibbon ===
+    "function"
+      ? scratchRibbon(deck)
+      : null;
 
 
   if (

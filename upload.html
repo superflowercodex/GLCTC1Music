@@ -4710,581 +4710,424 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 });
 
 // =====================================================
-// 🎛️ GLCTC1 — COMPLETE MIDI ENGINE
-// VESTAX VCI-300 DEFAULTS + MIDI LEARN
+// 🎛️ GLCTC1 MIDI ENGINE
+// VESTAX VCI-300
+// CONTROLS + BUTTONS + JOG / SCRATCH RIBBON
 // =====================================================
 
 (() => {
 
-  let glctc1MidiAccess = null;
-
-  const GLCTC1_MIDI_STORAGE =
-    "glctc1_midi_mappings";
-
-  let glctc1MidiMappings =
-    JSON.parse(
-      localStorage.getItem(GLCTC1_MIDI_STORAGE) || "{}"
-    );
-
-  let glctc1MidiLearnTarget = null;
+  let midiAccess = null;
 
 
   // ===================================================
-  // SAVE MIDI MAPPINGS
+  // 🎚️ GLCTC1 MIDI VALUE → UI CONTROL
   // ===================================================
 
-  function saveGLCTC1MIDIMappings() {
+  function setGLCTC1Control(id, value) {
 
-    localStorage.setItem(
-      GLCTC1_MIDI_STORAGE,
-      JSON.stringify(glctc1MidiMappings)
-    );
-
-  }
-
-
-  // ===================================================
-  // MIDI MESSAGE KEY
-  // ===================================================
-
-  function glctc1MidiKey(status, control) {
-
-    return `${status}:${control}`;
-
-  }
-
-
-  // ===================================================
-  // MIDI LEARN
-  // RIGHT-CLICK ANY EXISTING CONTROL
-  // ===================================================
-
-  function startGLCTC1MIDILearn(element) {
-
-    if (!element || !element.id) {
-      return;
-    }
-
-    glctc1MidiLearnTarget = element;
-
-    element.style.outline =
-      "3px solid #00ffff";
-
-    element.style.boxShadow =
-      "0 0 18px #00ffff";
-
-    console.log(
-      "🎛️ MIDI LEARN TARGET:",
-      element.id
-    );
-
-    console.log(
-      "🎛️ Move or press the VCI-300 control..."
-    );
-
-  }
-
-
-  // ===================================================
-  // SET UP MIDI LEARN
-  // ===================================================
-
-  function setupGLCTC1MIDILearn() {
-
-    document
-      .querySelectorAll(
-        "button, input[type='range']"
-      )
-      .forEach(control => {
-
-        if (!control.id) {
-          return;
-        }
-
-        control.addEventListener(
-          "contextmenu",
-          event => {
-
-            event.preventDefault();
-
-            startGLCTC1MIDILearn(
-              control
-            );
-
-          }
-        );
-
-      });
-
-    console.log(
-      "🎛️ GLCTC1 MIDI LEARN READY"
-    );
-
-  }
-
-
-  // ===================================================
-  // APPLY MIDI VALUE TO EXISTING GLCTC1 CONTROL
-  // ===================================================
-
-  function applyGLCTC1MIDIValue(
-    element,
-    value
-  ) {
+    const element =
+      document.getElementById(id);
 
     if (!element) {
       return false;
     }
 
 
-    // -------------------------------
-    // RANGE SLIDER
-    // -------------------------------
+    // RANGE / FADER / KNOB
 
     if (
       element.type === "range"
     ) {
 
       const min =
-        parseFloat(
-          element.min || 0
-        );
+        Number(element.min || 0);
 
       const max =
-        parseFloat(
-          element.max || 127
-        );
+        Number(element.max || 127);
 
       element.value =
         min +
         (value / 127) *
         (max - min);
 
-
       element.dispatchEvent(
-        new Event(
-          "input",
-          {
-            bubbles: true
-          }
-        )
+        new Event("input", {
+          bubbles: true
+        })
       );
-
-
-      element.dispatchEvent(
-        new Event(
-          "change",
-          {
-            bubbles: true
-          }
-        )
-      );
-
 
       return true;
-
     }
 
 
-    // -------------------------------
     // BUTTON
-    // -------------------------------
 
     if (
       element.tagName === "BUTTON"
     ) {
 
-      if (
-        value > 0
-      ) {
-
+      if (value > 0) {
         element.click();
-
       }
+
+      return true;
+    }
+
+
+    return false;
+  }
+
+
+  // ===================================================
+  // 💿 VCI-300 JOG STATE
+  // ===================================================
+
+  const jog = {
+
+    A: {
+      touched: false,
+      high: 0,
+      low: 0,
+      lastRaw: null
+    },
+
+    B: {
+      touched: false,
+      high: 0,
+      low: 0,
+      lastRaw: null
+    }
+
+  };
+
+
+  // ===================================================
+  // 💿 VCI-300 JOG → GLCTC1 AUDIO
+  // ===================================================
+
+  function handleJog(
+    status,
+    control,
+    value
+  ) {
+
+    let deck = null;
+
+
+    // DECK A
+
+    if (
+      control === 0x53 ||
+      control === 0x1C ||
+      control === 0x3C
+    ) {
+
+      deck = "A";
+
+    }
+
+
+    // DECK B
+
+    if (
+      control === 0x54 ||
+      control === 0x1D ||
+      control === 0x3D
+    ) {
+
+      deck = "B";
+
+    }
+
+
+    if (!deck) {
+      return false;
+    }
+
+
+    const j =
+      jog[deck];
+
+
+    // =================================================
+    // PLATTER TOUCH
+    // =================================================
+
+    if (
+      status === 0x90 &&
+      (
+        control === 0x53 ||
+        control === 0x54
+      )
+    ) {
+
+      j.touched =
+        value > 0;
+
+      j.lastRaw =
+        null;
+
+      return true;
+    }
+
+
+    // =================================================
+    // HIGH 7 BITS
+    // =================================================
+
+    if (
+      status === 0xB0 &&
+      (
+        control === 0x1C ||
+        control === 0x1D
+      )
+    ) {
+
+      j.high =
+        value & 0x7F;
+
+    }
+
+
+    // =================================================
+    // LOW 7 BITS
+    // =================================================
+
+    if (
+      status === 0xB0 &&
+      (
+        control === 0x3C ||
+        control === 0x3D
+      )
+    ) {
+
+      j.low =
+        value & 0x7F;
+
+    }
+
+
+    // Don't move audio unless platter is touched
+
+    if (!j.touched) {
+      return true;
+    }
+
+
+    // =================================================
+    // BUILD 14-BIT POSITION
+    // =================================================
+
+    const raw =
+      (
+        j.high << 7
+      ) |
+      j.low;
+
+
+    // First position establishes reference
+
+    if (
+      j.lastRaw === null
+    ) {
+
+      j.lastRaw =
+        raw;
+
+      return true;
+    }
+
+
+    // =================================================
+    // MOVEMENT
+    // =================================================
+
+    let movement =
+      raw -
+      j.lastRaw;
+
+    j.lastRaw =
+      raw;
+
+
+    // 14-bit wrap
+
+    if (
+      movement > 8192
+    ) {
+
+      movement -= 16384;
+
+    }
+
+    if (
+      movement < -8192
+    ) {
+
+      movement += 16384;
+
+    }
+
+
+    if (
+      movement === 0
+    ) {
 
       return true;
 
     }
 
 
-    return false;
-
-  }
-
-
-  // ===================================================
-  // MIDI LEARN CAPTURE
-  // ===================================================
-
-  function captureGLCTC1MIDILearn(
-    status,
-    control,
-    value
-  ) {
+    // =================================================
+    // GET GLCTC1 AUDIO
+    // =================================================
 
     if (
-      !glctc1MidiLearnTarget
+      typeof audio !== "function"
     ) {
 
-      return false;
+      return true;
 
     }
 
 
-    const target =
-      glctc1MidiLearnTarget;
+    const player =
+      audio(deck);
 
 
-    const key =
-      glctc1MidiKey(
-        status,
-        control
+    if (
+      !player ||
+      !isFinite(player.duration) ||
+      player.duration <= 0
+    ) {
+
+      return true;
+
+    }
+
+
+    // =================================================
+    // JOG SENSITIVITY
+    // =================================================
+
+    const secondsPerStep =
+      0.002;
+
+
+    // =================================================
+    // MOVE PLAYHEAD
+    // =================================================
+
+    player.currentTime =
+      Math.max(
+        0,
+        Math.min(
+          player.duration,
+          player.currentTime +
+          (
+            movement *
+            secondsPerStep
+          )
+        )
       );
 
 
-    glctc1MidiMappings[key] = {
+    // =================================================
+    // UPDATE SCRATCH RIBBON
+    // =================================================
 
-      id:
-        target.id,
-
-      status:
-        status,
-
-      control:
-        control
-
-    };
+    const handle =
+      document.getElementById(
+        deck === "A"
+          ? "scratchHandleA"
+          : "scratchHandleB"
+      );
 
 
-    saveGLCTC1MIDIMappings();
+    if (handle) {
 
+      handle.style.left =
+        `${
+          (
+            player.currentTime /
+            player.duration
+          ) * 100
+        }%`;
 
-    target.style.outline = "";
-    target.style.boxShadow = "";
-
-
-    console.log(
-      "✅ MIDI LEARN SAVED:",
-      {
-        target:
-          target.id,
-
-        status:
-          status,
-
-        control:
-          control
-      }
-    );
-
-
-    glctc1MidiLearnTarget =
-      null;
+    }
 
 
     return true;
-
   }
 
 
   // ===================================================
-  // LEARNED MIDI
+  // 🎚️ VCI-300 CONTROLS
   // ===================================================
 
-  function handleGLCTC1LearnedMIDI(
-    status,
-    control,
-    value
-  ) {
+  const controls = {
 
-    const key =
-      glctc1MidiKey(
-        status,
-        control
-      );
-
-
-    const mapping =
-      glctc1MidiMappings[key];
-
-
-    if (!mapping) {
-      return false;
-    }
-
-
-    const target =
-      document.getElementById(
-        mapping.id
-      );
-
-
-    if (!target) {
-      return false;
-    }
-
-
-    return applyGLCTC1MIDIValue(
-      target,
-      value
-    );
-
-  }
-
-
-  // ===================================================
-  // 🎛️ VESTAX VCI-300
-  // FACTORY MIDI DEFAULTS
-  // ===================================================
-
-  // CC VALUES
-  //
-  // VCI-300 factory map:
-  //
-  // 0x0C = 12  Channel Fader A
-  // 0x0D = 13  Pitch A
-  // 0x0E = 14  Trim A
-  // 0x0F = 15  High A
-  // 0x10 = 16  Mid A
-  // 0x11 = 17  Low A
-  //
-  // 0x12 = 18  Channel Fader B
-  // 0x13 = 19  Pitch B
-  // 0x14 = 20  Trim B
-  // 0x15 = 21  High B
-  // 0x16 = 22  Mid B
-  // 0x17 = 23  Low B
-  //
-  // 0x18 = 24  Crossfader
-  // 0x19 = 25  Monitor Select
-  //
-  // These are MIDI channel 1 CC messages.
-  //
-  // Status 176 = MIDI CC, channel 1.
-
-
-  const GLCTC1_VCI300_CC = {
-
-    // -------------------------------
     // DECK A
-    // -------------------------------
 
-    13: "pitchA",
-    14: "gainA",
-    15: "highA",
-    16: "filterA",
-    17: "lowA",
-
-    12: "gainA",
+    0x0C: "gainA",
+    0x0D: "pitchA",
+    0x0E: "gainA",
+    0x0F: "highA",
+    0x10: "filterA",
+    0x11: "lowA",
 
 
-    // -------------------------------
     // DECK B
-    // -------------------------------
 
-    19: "pitchB",
-    20: "gainB",
-    21: "highB",
-    22: "filterB",
-    23: "lowB",
-
-    18: "gainB",
+    0x12: "gainB",
+    0x13: "pitchB",
+    0x14: "gainB",
+    0x15: "highB",
+    0x16: "filterB",
+    0x17: "lowB",
 
 
-    // -------------------------------
     // CROSSFADER
-    // -------------------------------
 
-    24: "crossfader",
-
-
-    // -------------------------------
-    // HEADPHONE MONITOR SELECT
-    // -------------------------------
-
-    25: "crossfader"
+    0x18: "crossfader"
 
   };
 
 
   // ===================================================
-  // 🎛️ VESTAX VCI-300 BUTTONS
-  // NOTE ON
+  // 🔘 VCI-300 BUTTONS
   // ===================================================
 
-  // MIDI channel 1 Note On:
-  //
-  // Status 144 = Note On, channel 1.
-  //
-  // Deck A:
-  //
-  // 0x24 = 36 Cue
-  // 0x25 = 37 Play
-  //
-  // Deck B:
-  //
-  // 0x37 = 55 Cue
-  // 0x38 = 56 Play
-  //
-  // Additional VCI-300 buttons are included where
-  // GLCTC1 has an equivalent existing control.
+  const buttons = {
 
-
-  const GLCTC1_VCI300_BUTTONS = {
-
-    // -------------------------------
     // DECK A
-    // -------------------------------
 
-    36: "cueA",
-    37: "playA",
-
-    // Auto Tempo
-    41: "syncA",
-
-    // Scratch
-    45: "slowMoA",
-
-    // Censor
-    50: "slowMoA",
-
-    // Auto Loop
-    51: "loopA",
+    0x24: "cueA",
+    0x25: "playA",
+    0x29: "syncA",
+    0x2D: "slowMoA",
+    0x32: "slowMoA",
+    0x33: "loopA",
 
 
-    // -------------------------------
     // DECK B
-    // -------------------------------
 
-    55: "cueB",
-    56: "playB",
-
-    // Auto Tempo B
-    60: "syncB",
-
-    // Scratch B
-    64: "slowMoB",
-
-    // Censor B
-    69: "slowMoB",
-
-    // Auto Loop B
-    70: "loopB"
+    0x37: "cueB",
+    0x38: "playB",
+    0x3C: "syncB",
+    0x40: "slowMoB",
+    0x45: "slowMoB",
+    0x46: "loopB"
 
   };
 
 
   // ===================================================
-  // STANDARD VCI-300 MIDI HANDLER
+  // 🎛️ GLCTC1 MIDI MESSAGE
   // ===================================================
 
-  function handleGLCTC1StandardMIDI(
-    status,
-    control,
-    value
-  ) {
-
-    // -------------------------------
-    // MIDI CHANNEL 1 CC
-    // -------------------------------
-
-    if (
-      status === 176
-    ) {
-
-      const targetId =
-        GLCTC1_VCI300_CC[
-          control
-        ];
-
-
-      if (!targetId) {
-        return false;
-      }
-
-
-      const target =
-        document.getElementById(
-          targetId
-        );
-
-
-      if (!target) {
-        return false;
-      }
-
-
-      return applyGLCTC1MIDIValue(
-        target,
-        value
-      );
-
-    }
-
-
-    // -------------------------------
-    // MIDI CHANNEL 1 NOTE ON
-    // -------------------------------
-
-    if (
-      status === 144
-    ) {
-
-      const targetId =
-        GLCTC1_VCI300_BUTTONS[
-          control
-        ];
-
-
-      if (!targetId) {
-        return false;
-      }
-
-
-      const target =
-        document.getElementById(
-          targetId
-        );
-
-
-      if (!target) {
-        return false;
-      }
-
-
-      return applyGLCTC1MIDIValue(
-        target,
-        value
-      );
-
-    }
-
-
-    // -------------------------------
-    // MIDI CHANNEL 1 NOTE OFF
-    // -------------------------------
-
-    if (
-      status === 128
-    ) {
-
-      return true;
-
-    }
-
-
-    return false;
-
-  }
-
-
-  // ===================================================
-  // 🎛️ MAIN MIDI RECEIVER
-  // ===================================================
-
-  function handleGLCTC1MIDI(
-    event
-  ) {
+  function handleMIDI(event) {
 
     const [
       status,
@@ -5293,111 +5136,109 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
     ] = event.data;
 
 
-    console.log(
-      "🎛️ GLCTC1 MIDI:",
-      {
-        status:
-          status,
+    // =================================================
+    // JOG FIRST
+    // =================================================
 
-        control:
-          control,
+    if (
+      handleJog(
+        status,
+        control,
+        value
+      )
+    ) {
 
-        value:
+      return;
+    }
+
+
+    // =================================================
+    // CHANNEL 1 CC
+    // =================================================
+
+    if (
+      status === 0xB0
+    ) {
+
+      const id =
+        controls[control];
+
+      if (id) {
+
+        setGLCTC1Control(
+          id,
           value
+        );
+
       }
-    );
-
-
-    // -------------------------------
-    // MIDI LEARN FIRST
-    // -------------------------------
-
-    if (
-      captureGLCTC1MIDILearn(
-        status,
-        control,
-        value
-      )
-    ) {
 
       return;
-
     }
 
 
-    // -------------------------------
-    // LEARNED MIDI SECOND
-    // -------------------------------
+    // =================================================
+    // CHANNEL 1 NOTE ON
+    // =================================================
 
     if (
-      handleGLCTC1LearnedMIDI(
-        status,
-        control,
-        value
-      )
+      status === 0x90 &&
+      value > 0
     ) {
 
+      const id =
+        buttons[control];
+
+      if (id) {
+
+        setGLCTC1Control(
+          id,
+          value
+        );
+
+      }
+
       return;
-
     }
-
-
-    // -------------------------------
-    // VCI-300 DEFAULTS
-    // -------------------------------
-
-    handleGLCTC1StandardMIDI(
-      status,
-      control,
-      value
-    );
 
   }
 
 
   // ===================================================
-  // 🎛️ CONNECT MIDI CONTROLLERS
+  // 🎛️ CONNECT VCI-300
   // ===================================================
 
-  async function initGLCTC1MIDI() {
+  async function initMIDI() {
 
     if (
       !navigator.requestMIDIAccess
     ) {
 
       console.log(
-        "🎛️ GLCTC1 MIDI: Web MIDI not available"
+        "🎛️ GLCTC1: Web MIDI unavailable"
       );
 
       return;
-
     }
 
 
     try {
 
-      glctc1MidiAccess =
+      midiAccess =
         await navigator.requestMIDIAccess();
 
 
-      console.log(
-        "🎛️ GLCTC1 MIDI READY"
-      );
+      function connect() {
 
-
-      function connectMIDIInputs() {
-
-        glctc1MidiAccess.inputs.forEach(
+        midiAccess.inputs.forEach(
           input => {
 
             console.log(
-              "🎛️ MIDI INPUT:",
+              "🎛️ GLCTC1 MIDI:",
               input.name
             );
 
-
             input.onmidimessage =
-              handleGLCTC1MIDI;
+              handleMIDI;
 
           }
         );
@@ -5405,23 +5246,16 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
       }
 
 
-      connectMIDIInputs();
+      connect();
 
 
-      glctc1MidiAccess.onstatechange =
-        event => {
-
-          console.log(
-            "🎛️ MIDI STATE:",
-            event.port.name,
-            event.port.state
-          );
+      midiAccess.onstatechange =
+        connect;
 
 
-          connectMIDIInputs();
-
-        };
-
+      console.log(
+        "🎛️ GLCTC1 VCI-300 READY"
+      );
 
     } catch (error) {
 
@@ -5436,18 +5270,10 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 
 
   // ===================================================
-  // 🎛️ START MIDI
+  // 🚀 START GLCTC1 MIDI
   // ===================================================
 
-  setupGLCTC1MIDILearn();
-
-  initGLCTC1MIDI();
-
-
-  console.log(
-    "🎛️ GLCTC1 COMPLETE MIDI ENGINE READY"
-  );
-
+  initMIDI();
 
 })();
 

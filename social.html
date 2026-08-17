@@ -4740,122 +4740,201 @@ wireControls();
 // 🗑 GLCTC1 DELETE SELECTED MASTER LIBRARY TRACK
 // =====================================================
 
-document.getElementById("deleteAllTrack").addEventListener("click", async () => {
+const deleteAllTrack =
+  document.getElementById("deleteAllTrack");
 
-  if (!selectedLibraryTrack) {
-    alert("Please select a track from the Master Library first.");
-    return;
-  }
+if (deleteAllTrack) {
 
-  const track = selectedLibraryTrack;
+  deleteAllTrack.addEventListener(
+    "click",
+    async () => {
 
-  const trackName =
-    `${track.artist || "Unknown"} — ${track.title || "Untitled"}`;
+      if (!selectedLibraryTrack) {
+        alert(
+          "Please select a track from the Master Library first."
+        );
+        return;
+      }
 
-  const confirmed = confirm(
-    `DELETE THIS TRACK?\n\n${trackName}\n\n` +
-    `This will permanently delete the track from the Master Library ` +
-    `and remove its stored audio files.\n\n` +
-    `THIS CANNOT BE UNDONE.`
+      const track =
+        selectedLibraryTrack;
+
+      const trackName =
+        `${track.artist || "Unknown"} — ${track.title || "Untitled"}`;
+
+      const confirmed =
+        confirm(
+          `DELETE THIS TRACK?\n\n${trackName}\n\n` +
+          `This will permanently delete the track from the Master Library ` +
+          `and remove its stored audio files.\n\n` +
+          `THIS CANNOT BE UNDONE.`
+        );
+
+      if (!confirmed) return;
+
+      try {
+
+        console.log(
+          "GLCTC1 DELETE START:",
+          track
+        );
+
+
+        // ===============================
+        // COLLECT SUPABASE FILE PATHS
+        // ===============================
+
+        const filesToDelete = [
+
+          track.master_audio,
+          track.stem1,
+          track.stem2,
+          track.stem3,
+          track.stem4
+
+        ].filter(
+          path =>
+            path &&
+            !path.startsWith("http")
+        );
+
+
+        console.log(
+          "GLCTC1 FILES TO DELETE:",
+          filesToDelete
+        );
+
+
+        // ===============================
+        // DELETE FILES FROM SUPABASE
+        // ===============================
+
+        if (filesToDelete.length > 0) {
+
+          const {
+            data: deleteData,
+            error: deleteError
+          } =
+            await supabaseClient.storage
+              .from("tracks")
+              .remove(filesToDelete);
+
+
+          console.log(
+            "GLCTC1 SUPABASE DELETE:",
+            deleteData
+          );
+
+          console.log(
+            "GLCTC1 SUPABASE DELETE ERROR:",
+            deleteError
+          );
+
+
+          if (deleteError) {
+
+            throw new Error(
+              deleteError.message
+            );
+
+          }
+
+        }
+
+
+        // ===============================
+        // REMOVE TRACK FROM LOCAL LIBRARY
+        // ===============================
+
+        library =
+          library.filter(
+            trackItem =>
+              trackItem !== track
+          );
+
+
+        localStorage.setItem(
+          "glctc1_library",
+          JSON.stringify(library)
+        );
+
+
+        // ===============================
+        // CLEAR SELECTED TRACK
+        // ===============================
+
+        selectedLibraryTrack =
+          null;
+
+
+        const selectedText =
+          document.getElementById(
+            "librarySelectedText"
+          );
+
+
+        if (selectedText) {
+
+          selectedText.textContent =
+            "None";
+
+        }
+
+
+        // ===============================
+        // HIDE EDITOR
+        // ===============================
+
+        const detailsPanel =
+          document.getElementById(
+            "detailsPanel"
+          );
+
+
+        if (detailsPanel) {
+
+          detailsPanel.style.display =
+            "none";
+
+        }
+
+
+        // ===============================
+        // REFRESH MASTER LIBRARY
+        // ===============================
+
+        renderLibraryTable();
+
+
+        alert(
+          "✅ Track and stored audio files deleted successfully."
+        );
+
+
+        console.log(
+          "GLCTC1 DELETE COMPLETE"
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "GLCTC1 DELETE ERROR:",
+          error
+        );
+
+
+        alert(
+          "❌ DELETE FAILED:\n\n" +
+          error.message
+        );
+
+      }
+
+    }
   );
 
-  if (!confirmed) return;
-
-  try {
-
-    console.log("GLCTC1 DELETE START:", track);
-
-    // ===============================
-    // COLLECT SUPABASE FILE PATHS
-    // ===============================
-
-    const filesToDelete = [
-      track.master_audio,
-      track.stem1,
-      track.stem2,
-      track.stem3,
-      track.stem4
-    ].filter(path => path && !path.startsWith("http"));
-
-    console.log("GLCTC1 FILES TO DELETE:", filesToDelete);
-
-    // ===============================
-    // DELETE FILES FROM SUPABASE
-    // ===============================
-
-    if (filesToDelete.length > 0) {
-
-      const { data: deleteData, error: deleteError } =
-        await supabaseClient.storage
-          .from("tracks")
-          .remove(filesToDelete);
-
-      console.log("GLCTC1 SUPABASE DELETE:", deleteData);
-      console.log("GLCTC1 SUPABASE DELETE ERROR:", deleteError);
-
-      if (deleteError) {
-        throw new Error(deleteError.message);
-      }
-    }
-
-    // ===============================
-    // REMOVE TRACK FROM LOCAL LIBRARY
-    // ===============================
-
-    library = library.filter(trackItem => {
-      return trackItem !== track;
-    });
-
-    localStorage.setItem(
-      "glctc1_library",
-      JSON.stringify(library)
-    );
-
-    // ===============================
-    // CLEAR SELECTED TRACK
-    // ===============================
-
-    selectedLibraryTrack = null;
-
-    const selectedText =
-      document.getElementById("librarySelectedText");
-
-    if (selectedText) {
-      selectedText.textContent = "None";
-    }
-
-    // ===============================
-    // HIDE EDITOR
-    // ===============================
-
-    const detailsPanel =
-      document.getElementById("detailsPanel");
-
-    if (detailsPanel) {
-      detailsPanel.style.display = "none";
-    }
-
-    // ===============================
-    // REFRESH MASTER LIBRARY
-    // ===============================
-
-    renderLibraryTable();
-
-    alert("✅ Track and stored audio files deleted successfully.");
-
-    console.log("GLCTC1 DELETE COMPLETE");
-
-  } catch (error) {
-
-    console.error("GLCTC1 DELETE ERROR:", error);
-
-    alert(
-      "❌ DELETE FAILED:\n\n" +
-      error.message
-    );
-  }
-
-});
+}
 
 // =====================================================
 // 🎛️ GLCTC1 MIDI ENGINE

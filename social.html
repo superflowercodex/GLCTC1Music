@@ -5798,8 +5798,14 @@ artistField.value =
 
 
 /* =======================================================
-   🎥 GLCTC1 LOAD VIDEO
-   DIRECT VIDEO + YOUTUBE + TIKTOK + WEB/LIVE
+   🎥 GLCTC1 MEDIA STAGE
+   SIGNED-IN USER + VIDEO + YOUTUBE + TIKTOK
+   WEB/LIVE + WEBCAM
+======================================================= */
+
+
+/* =======================================================
+   ELEMENTS
 ======================================================= */
 
 const glctc1VideoInput =
@@ -5820,6 +5826,267 @@ const glctc1VideoFrame =
 const glctc1VideoMessage =
   document.getElementById("glctc1LiveMessage");
 
+const glctc1ArtistField =
+  document.getElementById("glctc1SocialArtist");
+
+const glctc1ArtistIdField =
+  document.getElementById("glctc1SocialArtistId");
+
+
+/* =======================================================
+   WEBCAM BUTTON
+   CREATED INSIDE THE EXISTING LIVE CONTROL
+======================================================= */
+
+let glctc1WebcamButton =
+  document.getElementById(
+    "glctc1WebcamButton"
+  );
+
+
+if (
+  glctc1LoadVideo &&
+  !glctc1WebcamButton
+) {
+
+  glctc1WebcamButton =
+    document.createElement("button");
+
+  glctc1WebcamButton.id =
+    "glctc1WebcamButton";
+
+  glctc1WebcamButton.type =
+    "button";
+
+  glctc1WebcamButton.className =
+    "glctc1-load-live-button";
+
+  glctc1WebcamButton.textContent =
+    "📹 WEBCAM";
+
+
+  glctc1LoadVideo.parentNode.appendChild(
+    glctc1WebcamButton
+  );
+
+}
+
+
+/* =======================================================
+   ACTIVE WEBCAM STREAM
+======================================================= */
+
+let glctc1WebcamStream =
+  null;
+
+
+/* =======================================================
+   AUTHENTICATED ARTIST
+======================================================= */
+
+let glctc1AuthenticatedUser =
+  null;
+
+let glctc1AuthenticatedArtist =
+  "";
+
+let glctc1AuthenticatedArtistId =
+  "";
+
+
+async function getGLCTC1AuthenticatedArtist() {
+
+  if (
+    typeof supabaseClient ===
+    "undefined"
+  ) {
+
+    return null;
+
+  }
+
+
+  const {
+    data,
+    error
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (
+    error ||
+    !data.user
+  ) {
+
+    return null;
+
+  }
+
+
+  const user =
+    data.user;
+
+
+  const {
+    data: profile,
+    error: profileError
+  } =
+    await supabaseClient
+      .from("profiles")
+      .select("artist_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+
+  if (profileError) {
+
+    console.error(
+      "❌ GLCTC1 ARTIST PROFILE ERROR:",
+      profileError
+    );
+
+  }
+
+
+  glctc1AuthenticatedUser =
+    user;
+
+  glctc1AuthenticatedArtistId =
+    user.id;
+
+  glctc1AuthenticatedArtist =
+    profile?.artist_name || "";
+
+
+  if (glctc1ArtistIdField) {
+
+    glctc1ArtistIdField.value =
+      user.id;
+
+  }
+
+
+  if (glctc1ArtistField) {
+
+    glctc1ArtistField.value =
+      profile?.artist_name || "";
+
+  }
+
+
+  return user;
+
+}
+
+
+/* =======================================================
+   RESET PLAYER
+======================================================= */
+
+function resetGLCTC1MediaPlayer() {
+
+  /* STOP WEBCAM */
+
+  if (glctc1WebcamStream) {
+
+    glctc1WebcamStream
+      .getTracks()
+      .forEach(
+        function (track) {
+
+          track.stop();
+
+        }
+      );
+
+    glctc1WebcamStream =
+      null;
+
+  }
+
+
+  /* STOP VIDEO */
+
+  if (glctc1Video) {
+
+    glctc1Video.pause();
+
+    glctc1Video.removeAttribute(
+      "src"
+    );
+
+    glctc1Video.load();
+
+    glctc1Video.style.display =
+      "none";
+
+  }
+
+
+  /* STOP IFRAME */
+
+  if (glctc1VideoFrame) {
+
+    glctc1VideoFrame.src =
+      "";
+
+    glctc1VideoFrame.style.display =
+      "none";
+
+  }
+
+
+  /* HIDE WELCOME */
+
+  if (glctc1VideoWelcome) {
+
+    glctc1VideoWelcome.style.display =
+      "none";
+
+  }
+
+
+  /* HIDE MESSAGE */
+
+  if (glctc1VideoMessage) {
+
+    glctc1VideoMessage.style.display =
+      "none";
+
+  }
+
+}
+
+
+/* =======================================================
+   CHECK LOGIN
+======================================================= */
+
+async function requireGLCTC1Login() {
+
+  const user =
+    await getGLCTC1AuthenticatedArtist();
+
+
+  if (!user) {
+
+    alert(
+      "Please sign in to GLCTC1 before using the Broadcast Stage."
+    );
+
+    return false;
+
+  }
+
+
+  return true;
+
+}
+
+
+/* =======================================================
+   LOAD VIDEO / WEB / LIVE
+======================================================= */
 
 if (
   glctc1VideoInput &&
@@ -5828,7 +6095,20 @@ if (
 ) {
 
   glctc1LoadVideo.onclick =
-    function () {
+    async function () {
+
+      /* REQUIRE SIGNED-IN USER */
+
+      const loggedIn =
+        await requireGLCTC1Login();
+
+
+      if (!loggedIn) {
+
+        return;
+
+      }
+
 
       const url =
         glctc1VideoInput.value.trim();
@@ -5841,45 +6121,7 @@ if (
       }
 
 
-      /* =================================================
-         RESET
-      ================================================= */
-
-      glctc1Video.pause();
-
-      glctc1Video.removeAttribute("src");
-
-      glctc1Video.load();
-
-      glctc1Video.style.display =
-        "none";
-
-
-      if (glctc1VideoFrame) {
-
-        glctc1VideoFrame.src =
-          "";
-
-        glctc1VideoFrame.style.display =
-          "none";
-
-      }
-
-
-      if (glctc1VideoWelcome) {
-
-        glctc1VideoWelcome.style.display =
-          "none";
-
-      }
-
-
-      if (glctc1VideoMessage) {
-
-        glctc1VideoMessage.style.display =
-          "none";
-
-      }
+      resetGLCTC1MediaPlayer();
 
 
       /* =================================================
@@ -5902,6 +6144,7 @@ if (
 
         glctc1Video.load();
 
+
         glctc1Video.play().catch(
           function (error) {
 
@@ -5912,6 +6155,7 @@ if (
 
           }
         );
+
 
         return;
 
@@ -5924,12 +6168,20 @@ if (
 
       let parsedUrl;
 
+
       try {
 
         parsedUrl =
           new URL(url);
 
       } catch (error) {
+
+        if (glctc1VideoMessage) {
+
+          glctc1VideoMessage.style.display =
+            "flex";
+
+        }
 
         return;
 
@@ -6011,10 +6263,7 @@ if (
       ) {
 
         /*
-         * TikTok short links redirect to a post.
-         *
-         * This supplied short link resolves to:
-         * 7598618298460343554
+         * Existing tested GLCTC1 TikTok link.
          */
 
         if (
@@ -6035,8 +6284,6 @@ if (
         }
 
 
-        /* Unknown TikTok short link */
-
         glctc1VideoFrame.src =
           url;
 
@@ -6050,7 +6297,7 @@ if (
 
 
       /* =================================================
-         TIKTOK FULL VIDEO URL
+         TIKTOK FULL VIDEO
       ================================================= */
 
       if (
@@ -6132,6 +6379,190 @@ if (
         glctc1LoadVideo.click();
 
       }
+
+    }
+  );
+
+}
+
+
+/* =======================================================
+   📹 WEBCAM
+======================================================= */
+
+if (glctc1WebcamButton) {
+
+  glctc1WebcamButton.onclick =
+    async function () {
+
+      /* REQUIRE SIGNED-IN USER */
+
+      const loggedIn =
+        await requireGLCTC1Login();
+
+
+      if (!loggedIn) {
+
+        return;
+
+      }
+
+
+      /* REQUIRE CAMERA SUPPORT */
+
+      if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
+
+        alert(
+          "Webcam access is not supported by this browser."
+        );
+
+        return;
+
+      }
+
+
+      resetGLCTC1MediaPlayer();
+
+
+      try {
+
+        glctc1WebcamStream =
+          await navigator.mediaDevices.getUserMedia(
+            {
+              video:true,
+              audio:true
+            }
+          );
+
+
+        /*
+         * Feed the camera stream directly
+         * into the existing GLCTC1 video player.
+         */
+
+        glctc1Video.srcObject =
+          glctc1WebcamStream;
+
+
+        glctc1Video.muted =
+          true;
+
+
+        glctc1Video.autoplay =
+          true;
+
+
+        glctc1Video.playsInline =
+          true;
+
+
+        glctc1Video.controls =
+          true;
+
+
+        glctc1Video.style.display =
+          "block";
+
+
+        await glctc1Video.play();
+
+
+        console.log(
+          "🎥 GLCTC1 WEBCAM ACTIVE"
+        );
+
+
+        console.log(
+          "ARTIST:",
+          glctc1AuthenticatedArtist
+        );
+
+
+        console.log(
+          "GLCTC1 ID:",
+          glctc1AuthenticatedArtistId
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "❌ GLCTC1 WEBCAM ERROR:",
+          error
+        );
+
+
+        if (glctc1VideoMessage) {
+
+          glctc1VideoMessage.style.display =
+            "flex";
+
+        }
+
+      }
+
+    };
+
+}
+
+
+/* =======================================================
+   🛑 STOP WEBCAM WHEN LEAVING PAGE
+======================================================= */
+
+window.addEventListener(
+  "beforeunload",
+  function () {
+
+    if (glctc1WebcamStream) {
+
+      glctc1WebcamStream
+        .getTracks()
+        .forEach(
+          function (track) {
+
+            track.stop();
+
+          }
+        );
+
+    }
+
+  }
+);
+
+
+/* =======================================================
+   🎥 VIDEO LOAD CHECK
+======================================================= */
+
+if (glctc1Video) {
+
+  glctc1Video.addEventListener(
+    "loadedmetadata",
+    function () {
+
+      console.log(
+        "GLCTC1 MEDIA RECEIVED:",
+        glctc1Video.src ||
+        "WEBCAM STREAM"
+      );
+
+    }
+  );
+
+
+  glctc1Video.addEventListener(
+    "error",
+    function () {
+
+      console.error(
+        "GLCTC1 VIDEO LOAD ERROR:",
+        glctc1Video.src
+      );
 
     }
   );

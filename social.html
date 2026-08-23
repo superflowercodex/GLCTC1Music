@@ -221,7 +221,7 @@
     id="glctc1GoLiveButton"
     type="button"
   >
-    GO LIVE
+    🔴 GO LIVE
   </button>
 
   <button
@@ -229,7 +229,7 @@
     type="button"
     style="display:none;"
   >
-    END LIVE
+    ⏹ END LIVE
   </button>
 
 </article>
@@ -8876,32 +8876,366 @@ let selectedLibraryTrack = null;
 
 
   /* =======================================================
-     CROWD ENERGY
-  ======================================================== */
+   🔴 GLCTC1 LIVE NOW
+======================================================= */
 
-  let crowdEnergy = 0;
+const glctc1LiveArtistList =
+  document.getElementById(
+    "glctc1LiveArtistList"
+  );
+
+const glctc1GoLiveButton =
+  document.getElementById(
+    "glctc1GoLiveButton"
+  );
+
+const glctc1EndLiveButton =
+  document.getElementById(
+    "glctc1EndLiveButton"
+  );
 
 
-  function updateCrowdEnergy(value) {
+/* =======================================================
+   LIVE ARTIST POOL
+======================================================= */
 
-    crowdEnergy =
-      Math.max(
-        0,
-        Number(value) || 0
-      );
+function renderGLCTC1LiveArtists(
+  artists
+) {
+
+  if (!glctc1LiveArtistList) {
+    return;
+  }
+
+  glctc1LiveArtistList.innerHTML = "";
 
 
-    if (reactionNumber) {
+  if (!artists || !artists.length) {
 
-      reactionNumber.textContent =
-        crowdEnergy.toLocaleString();
-
-    }
+    return;
 
   }
 
 
-  updateCrowdEnergy(0);
+  artists.forEach(
+    function (artist) {
+
+      const artistButton =
+        document.createElement(
+          "button"
+        );
+
+      artistButton.type =
+        "button";
+
+      artistButton.textContent =
+        artist.artist_name || "ARTIST";
+
+
+      artistButton.dataset.userId =
+        artist.user_id;
+
+
+      /* FIRST TAP = SELECT */
+
+      artistButton.addEventListener(
+        "click",
+        function () {
+
+          if (
+            artistButton.dataset.selected !==
+            "true"
+          ) {
+
+            document
+              .querySelectorAll(
+                "#glctc1LiveArtistList button"
+              )
+              .forEach(
+                function (button) {
+
+                  button.dataset.selected =
+                    "false";
+
+                }
+              );
+
+
+            artistButton.dataset.selected =
+              "true";
+
+            return;
+
+          }
+
+
+          /* SECOND TAP = SOCIAL PAGE */
+
+          if (artist.user_id) {
+
+            window.location.href =
+              "social.html?artist=" +
+              encodeURIComponent(
+                artist.user_id
+              );
+
+          }
+
+        }
+      );
+
+
+      glctc1LiveArtistList.appendChild(
+        artistButton
+      );
+
+    }
+  );
+
+}
+
+
+/* =======================================================
+   LOAD LIVE ARTISTS
+======================================================= */
+
+async function loadGLCTC1LiveArtists() {
+
+  const {
+    data,
+    error
+  } =
+    await supabaseClient
+      .from("live_artists")
+      .select(
+        "user_id, artist_name"
+      )
+      .eq(
+        "is_live",
+        true
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false
+        }
+      );
+
+
+  if (error) {
+
+    console.error(
+      "❌ GLCTC1 LIVE ARTISTS ERROR:",
+      error
+    );
+
+    return;
+
+  }
+
+
+  renderGLCTC1LiveArtists(
+    data || []
+  );
+
+}
+
+
+/* =======================================================
+   GO LIVE
+======================================================= */
+
+if (glctc1GoLiveButton) {
+
+  glctc1GoLiveButton.addEventListener(
+    "click",
+    async function () {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        error ||
+        !data.user
+      ) {
+
+        return;
+
+      }
+
+
+      const user =
+        data.user;
+
+
+      const {
+        data: profile,
+        error: profileError
+      } =
+        await supabaseClient
+          .from("profiles")
+          .select(
+            "artist_name"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .maybeSingle();
+
+
+      if (profileError) {
+
+        console.error(
+          "❌ GLCTC1 LIVE PROFILE ERROR:",
+          profileError
+        );
+
+        return;
+
+      }
+
+
+      const {
+        error: liveError
+      } =
+        await supabaseClient
+          .from("live_artists")
+          .upsert(
+            {
+              user_id:
+                user.id,
+
+              artist_name:
+                profile?.artist_name || "",
+
+              is_live:
+                true
+            },
+            {
+              onConflict:
+                "user_id"
+            }
+          );
+
+
+      if (liveError) {
+
+        console.error(
+          "❌ GLCTC1 GO LIVE ERROR:",
+          liveError
+        );
+
+        return;
+
+      }
+
+
+      glctc1GoLiveButton.style.display =
+        "none";
+
+
+      if (glctc1EndLiveButton) {
+
+        glctc1EndLiveButton.style.display =
+          "block";
+
+      }
+
+
+      loadGLCTC1LiveArtists();
+
+    }
+  );
+
+}
+
+
+/* =======================================================
+   END LIVE
+======================================================= */
+
+if (glctc1EndLiveButton) {
+
+  glctc1EndLiveButton.addEventListener(
+    "click",
+    async function () {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        error ||
+        !data.user
+      ) {
+
+        return;
+
+      }
+
+
+      const {
+        error: liveError
+      } =
+        await supabaseClient
+          .from("live_artists")
+          .update(
+            {
+              is_live:
+                false
+            }
+          )
+          .eq(
+            "user_id",
+            data.user.id
+          );
+
+
+      if (liveError) {
+
+        console.error(
+          "❌ GLCTC1 END LIVE ERROR:",
+          liveError
+        );
+
+        return;
+
+      }
+
+
+      glctc1EndLiveButton.style.display =
+        "none";
+
+
+      if (glctc1GoLiveButton) {
+
+        glctc1GoLiveButton.style.display =
+          "block";
+
+      }
+
+
+      loadGLCTC1LiveArtists();
+
+    }
+  );
+
+}
+
+
+/* =======================================================
+   INITIAL LOAD
+======================================================= */
+
+loadGLCTC1LiveArtists();
 
 
   /* =======================================================

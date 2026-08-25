@@ -793,20 +793,92 @@ const supabaseClient = window.supabase.createClient(
 })();
 
 
-document.getElementById("addTrackBtn").addEventListener("click", async () => {
+document
+  .getElementById("addTrackBtn")
+  .addEventListener("click", async () => {
 
-  const title = document.getElementById("title").value.trim();
-  const artist = document.getElementById("artist").value.trim();
-  const masterInput = document.getElementById("master_audio");
 
-  if (!title || !artist || masterInput.files.length === 0) {
-    alert("Track Title, Artist, and Master Audio are required.");
+  // ===================================================
+  // 🔐 GET LOGGED-IN SUPABASE USER
+  // ===================================================
+
+  const {
+    data: {
+      user
+    },
+    error: userError
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (userError || !user) {
+
+    alert(
+      "🔐 Please sign in before adding a track."
+    );
+
     return;
   }
 
-console.log("Uploading file:", masterInput.files[0].name);
 
-alert("Starting Supabase upload");
+  // ===================================================
+  // 👤 ARTIST ID
+  // This is the same ID used by profiles.id
+  // ===================================================
+
+  const currentUserId =
+    user.id;
+
+
+  // ===================================================
+  // TRACK DETAILS
+  // ===================================================
+
+  const title =
+    document
+      .getElementById("title")
+      .value
+      .trim();
+
+  const artist =
+    document
+      .getElementById("artist")
+      .value
+      .trim();
+
+  const masterInput =
+    document.getElementById("master_audio");
+
+
+  if (
+    !title ||
+    !artist ||
+    masterInput.files.length === 0
+  ) {
+
+    alert(
+      "Track Title, Artist, and Master Audio are required."
+    );
+
+    return;
+  }
+
+
+  console.log(
+    "GLCTC1 LOGGED-IN ARTIST ID:",
+    currentUserId
+  );
+
+
+  console.log(
+    "Uploading file:",
+    masterInput.files[0].name
+  );
+
+
+  alert(
+    "Starting Supabase upload"
+  );
 
 // ===============================
 // FULL MASTER + STEM UPLOAD SYSTEM
@@ -913,6 +985,10 @@ const track = {
   // 🎵 GLCTC1 MASTER LIBRARY CAT ID
   id_cat_no:
     `GLCTC1-${Date.now()}`,
+
+  // 👤 GLCTC1 ARTIST / PROFILE ID
+  artist_id:
+    currentUserId,
 
   title: title,
   artist: artist,
@@ -5279,102 +5355,240 @@ wireControls();
 
 // =====================================================
 // 🗑 GLCTC1 DELETE SELECTED MASTER LIBRARY TRACK
+// 🔐 ONLY THE ARTIST WHO UPLOADED IT CAN DELETE IT
 // =====================================================
 
-document.getElementById("deleteAllTrack").addEventListener("click", async () => {
+document
+  .getElementById("deleteAllTrack")
+  .addEventListener("click", async () => {
+
+
+  // ===================================================
+  // CHECK TRACK SELECTION
+  // ===================================================
 
   if (!selectedLibraryTrack) {
-    alert("Please select a track from the Master Library first.");
+
+    alert(
+      "Please select a track from the Master Library first."
+    );
+
     return;
   }
 
-  const track = selectedLibraryTrack;
+
+  const track =
+    selectedLibraryTrack;
+
+
+  // ===================================================
+  // 🔐 GET CURRENT LOGGED-IN USER
+  // ===================================================
+
+  const {
+    data: {
+      user
+    },
+    error: userError
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (userError || !user) {
+
+    alert(
+      "🔐 Please sign in before deleting a track."
+    );
+
+    return;
+  }
+
+
+  // ===================================================
+  // 🔐 CHECK ARTIST OWNERSHIP
+  // ===================================================
+
+  if (
+    !track.artist_id ||
+    String(track.artist_id) !== String(user.id)
+  ) {
+
+    alert(
+      "🔐 You can only delete tracks belonging to your artist account."
+    );
+
+    console.warn(
+      "GLCTC1 DELETE BLOCKED — ARTIST MISMATCH:",
+      {
+        trackArtistId: track.artist_id,
+        loggedInUserId: user.id,
+        catId: track.id_cat_no
+      }
+    );
+
+    return;
+  }
+
+
+  // ===================================================
+  // TRACK NAME
+  // ===================================================
 
   const trackName =
     `${track.artist || "Unknown"} — ${track.title || "Untitled"}`;
 
-  const confirmed = confirm(
-    `DELETE THIS TRACK?\n\n${trackName}\n\n` +
-    `This will permanently delete the track from the Master Library ` +
-    `and remove its stored audio files.\n\n` +
-    `THIS CANNOT BE UNDONE.`
-  );
+
+  // ===================================================
+  // CONFIRM DELETE
+  // ===================================================
+
+  const confirmed =
+    confirm(
+      `DELETE THIS TRACK?\n\n${trackName}\n\n` +
+      `This will permanently delete the track from the Master Library ` +
+      `and remove its stored audio files.\n\n` +
+      `THIS CANNOT BE UNDONE.`
+    );
+
 
   if (!confirmed) return;
 
+
   try {
 
-    console.log("GLCTC1 DELETE START:", track);
+    console.log(
+      "GLCTC1 DELETE START:",
+      track
+    );
+
 
     // ===============================
     // COLLECT SUPABASE FILE PATHS
     // ===============================
 
     const filesToDelete = [
+
       track.master_audio,
       track.stem1,
       track.stem2,
       track.stem3,
       track.stem4
-    ].filter(path => path && !path.startsWith("http"));
 
-    console.log("GLCTC1 FILES TO DELETE:", filesToDelete);
+    ].filter(
+      path =>
+        path &&
+        !path.startsWith("http")
+    );
+
+
+    console.log(
+      "GLCTC1 FILES TO DELETE:",
+      filesToDelete
+    );
+
 
     // ===============================
     // DELETE FILES FROM SUPABASE
     // ===============================
 
-    if (filesToDelete.length > 0) {
+    if (
+      filesToDelete.length > 0
+    ) {
 
-      const { data: deleteData, error: deleteError } =
-        await supabaseClient.storage
+      const {
+        data: deleteData,
+        error: deleteError
+      } =
+        await supabaseClient
+          .storage
           .from("tracks")
-          .remove(filesToDelete);
+          .remove(
+            filesToDelete
+          );
 
-      console.log("GLCTC1 SUPABASE DELETE:", deleteData);
-      console.log("GLCTC1 SUPABASE DELETE ERROR:", deleteError);
+
+      console.log(
+        "GLCTC1 SUPABASE DELETE:",
+        deleteData
+      );
+
+
+      console.log(
+        "GLCTC1 SUPABASE DELETE ERROR:",
+        deleteError
+      );
+
 
       if (deleteError) {
-        throw new Error(deleteError.message);
+
+        throw new Error(
+          deleteError.message
+        );
+
       }
+
     }
+
 
     // ===============================
     // REMOVE TRACK FROM LOCAL LIBRARY
     // ===============================
 
-    library = library.filter(trackItem => {
-      return trackItem !== track;
-    });
+    library =
+      library.filter(
+        trackItem => {
+
+          return trackItem !== track;
+
+        }
+      );
+
 
     localStorage.setItem(
       "glctc1_library",
       JSON.stringify(library)
     );
 
+
     // ===============================
     // CLEAR SELECTED TRACK
     // ===============================
 
-    selectedLibraryTrack = null;
+    selectedLibraryTrack =
+      null;
+
 
     const selectedText =
-      document.getElementById("librarySelectedText");
+      document.getElementById(
+        "librarySelectedText"
+      );
+
 
     if (selectedText) {
-      selectedText.textContent = "None";
+
+      selectedText.textContent =
+        "None";
+
     }
+
 
     // ===============================
     // HIDE EDITOR
     // ===============================
 
     const detailsPanel =
-      document.getElementById("detailsPanel");
+      document.getElementById(
+        "detailsPanel"
+      );
+
 
     if (detailsPanel) {
-      detailsPanel.style.display = "none";
+
+      detailsPanel.style.display =
+        "none";
+
     }
+
 
     // ===============================
     // REFRESH MASTER LIBRARY
@@ -5382,18 +5596,30 @@ document.getElementById("deleteAllTrack").addEventListener("click", async () => 
 
     renderLibraryTable();
 
-    alert("✅ Track and stored audio files deleted successfully.");
 
-    console.log("GLCTC1 DELETE COMPLETE");
+    alert(
+      "✅ Track and stored audio files deleted successfully."
+    );
+
+
+    console.log(
+      "GLCTC1 DELETE COMPLETE"
+    );
+
 
   } catch (error) {
 
-    console.error("GLCTC1 DELETE ERROR:", error);
+    console.error(
+      "GLCTC1 DELETE ERROR:",
+      error
+    );
+
 
     alert(
       "❌ DELETE FAILED:\n\n" +
       error.message
     );
+
   }
 
 });

@@ -5355,7 +5355,7 @@ wireControls();
 
 // =====================================================
 // 🗑 GLCTC1 DELETE SELECTED MASTER LIBRARY TRACK
-// 🔐 ARTIST OWNERSHIP + CAT ID CHECK
+// 🔐 ARTIST OWNERSHIP + ADMIN OVERRIDE + CAT ID CHECK
 // =====================================================
 
 document
@@ -5405,6 +5405,32 @@ document
 
 
   // ===================================================
+  // 🔐 GLCTC1 ADMIN USER ID
+  // ===================================================
+
+  const ADMIN_USER_ID =
+    "8c70a492-3cf1-4053-b0ee-b5b186529d54";
+
+
+  // ===================================================
+  // 🔐 CHECK ADMIN STATUS
+  // ===================================================
+
+  const isAdmin =
+    String(user.id) ===
+    String(ADMIN_USER_ID);
+
+
+  console.log(
+    "GLCTC1 DELETE PERMISSION CHECK:",
+    {
+      loggedInUserId: user.id,
+      isAdmin: isAdmin
+    }
+  );
+
+
+  // ===================================================
   // 🔐 LOAD ARTIST PROFILE
   // ===================================================
 
@@ -5434,7 +5460,12 @@ document
   }
 
 
-  if (!profile) {
+  // ===================================================
+  // 🔐 NORMAL USER MUST HAVE PROFILE
+  // ADMIN DOES NOT REQUIRE ARTIST PROFILE
+  // ===================================================
+
+  if (!profile && !isAdmin) {
 
     alert(
       "🔐 No GLCTC1 artist profile was found for this account."
@@ -5445,10 +5476,11 @@ document
 
 
   // ===================================================
-  // 🔐 VERIFY USER ID
+  // 🔐 VERIFY USER ID FOR NORMAL ARTIST
   // ===================================================
 
   if (
+    !isAdmin &&
     String(profile.id) !==
     String(user.id)
   ) {
@@ -5462,47 +5494,66 @@ document
 
 
   // ===================================================
-  // 🔐 VERIFY ARTIST
+  // 🔐 VERIFY ARTIST FOR NORMAL USER
   // ===================================================
 
-  const profileArtist =
-    String(profile.artist_name || "")
-      .trim()
-      .toLowerCase();
+  if (!isAdmin) {
+
+    const profileArtist =
+      String(profile.artist_name || "")
+        .trim()
+        .toLowerCase();
 
 
-  const trackArtist =
-    String(track.artist || "")
-      .trim()
-      .toLowerCase();
+    const trackArtist =
+      String(track.artist || "")
+        .trim()
+        .toLowerCase();
 
 
-  if (
-    !profileArtist ||
-    !trackArtist ||
-    profileArtist !== trackArtist
-  ) {
+    if (
+      !profileArtist ||
+      !trackArtist ||
+      profileArtist !== trackArtist
+    ) {
 
-    alert(
-      "🔐 You can only delete tracks belonging to your artist account."
-    );
+      alert(
+        "🔐 You can only delete tracks belonging to your artist account."
+      );
 
-    console.warn(
-      "GLCTC1 DELETE BLOCKED — ARTIST MISMATCH:",
-      {
-        profileArtist: profile.artist_name,
-        trackArtist: track.artist,
-        glctc1UserId: user.id,
-        catId: track.id_cat_no
-      }
-    );
+      console.warn(
+        "GLCTC1 DELETE BLOCKED — ARTIST MISMATCH:",
+        {
+          profileArtist:
+            profile.artist_name,
 
-    return;
+          trackArtist:
+            track.artist,
+
+          glctc1UserId:
+            user.id,
+
+          catId:
+            track.id_cat_no
+        }
+      );
+
+      return;
+    }
+
   }
 
 
   // ===================================================
-  // 🔐 VERIFY CAT ID
+  // TRACK NAME
+  // ===================================================
+
+  const trackName =
+    `${track.artist || "Unknown"} — ${track.title || "Untitled"}`;
+
+
+  // ===================================================
+  // CAT ID
   // ===================================================
 
   const catId =
@@ -5526,14 +5577,6 @@ document
 
 
   // ===================================================
-  // TRACK NAME
-  // ===================================================
-
-  const trackName =
-    `${track.artist || "Unknown"} — ${track.title || "Untitled"}`;
-
-
-  // ===================================================
   // CONFIRM DELETE
   // ===================================================
 
@@ -5542,6 +5585,9 @@ document
       `DELETE THIS TRACK?\n\n` +
       `${trackName}\n\n` +
       `GLCTC1 CAT ID: ${catId}\n\n` +
+      `${isAdmin
+        ? "⚡ ADMINISTRATOR DELETE"
+        : "ARTIST DELETE"}\n\n` +
       `This will permanently delete the track from the ` +
       `Master Library and remove its stored audio files.\n\n` +
       `THIS CANNOT BE UNDONE.`
@@ -5558,14 +5604,18 @@ document
       {
         track: track,
         glctc1UserId: user.id,
-        artistName: profile.artist_name,
+        isAdmin: isAdmin,
+        artistName:
+          profile
+            ? profile.artist_name
+            : "ADMINISTRATOR",
         catId: catId
       }
     );
 
 
     // =================================================
-    // 🔐 VERIFY THE EXACT MASTER LIBRARY ROW
+    // 🔐 VERIFY EXACT MASTER LIBRARY ROW
     // =================================================
 
     const {
@@ -5601,40 +5651,56 @@ document
 
 
     // =================================================
-    // 🔐 FINAL ARTIST CHECK AGAINST MASTER LIBRARY
+    // 🔐 FINAL ARTIST CHECK
+    // NORMAL ARTIST ONLY
+    // ADMIN BYPASSES THIS CHECK
     // =================================================
 
-    const masterArtist =
-      String(masterRow["Artist"] || "")
-        .trim()
-        .toLowerCase();
+    if (!isAdmin) {
+
+      const masterArtist =
+        String(
+          masterRow["Artist"] || ""
+        )
+          .trim()
+          .toLowerCase();
 
 
-    if (
-      masterArtist !==
-      profileArtist
-    ) {
+      const profileArtist =
+        String(
+          profile.artist_name || ""
+        )
+          .trim()
+          .toLowerCase();
 
-      console.warn(
-        "GLCTC1 DELETE BLOCKED — MASTER ARTIST MISMATCH:",
-        {
-          masterArtist:
-            masterRow["Artist"],
 
-          profileArtist:
-            profile.artist_name,
+      if (
+        masterArtist !==
+        profileArtist
+      ) {
 
-          glctc1UserId:
-            user.id,
+        console.warn(
+          "GLCTC1 DELETE BLOCKED — MASTER ARTIST MISMATCH:",
+          {
+            masterArtist:
+              masterRow["Artist"],
 
-          catId:
-            catId
-        }
-      );
+            profileArtist:
+              profile.artist_name,
 
-      throw new Error(
-        "This track does not belong to your artist profile."
-      );
+            glctc1UserId:
+              user.id,
+
+            catId:
+              catId
+          }
+        );
+
+        throw new Error(
+          "This track does not belong to your artist profile."
+        );
+      }
+
     }
 
 
@@ -5700,66 +5766,31 @@ document
     }
 
 
-// =================================================
-// 🗑 DELETE EXACT ROW FROM MASTER LIBRARY
-// =================================================
+    // =================================================
+    // 🗑 DELETE EXACT MASTER LIBRARY ROW
+    // =================================================
 
-console.log(
-  "GLCTC1 DELETING SUPABASE ROW:",
-  {
-    catId: catId,
-    masterRow: masterRow
-  }
-);
-
-const {
-  data: deletedRows,
-  error: masterDeleteError
-} =
-  await supabaseClient
-    .from("master_library")
-    .delete()
-    .eq(
-      "ID Cat No",
-      catId
-    )
-    .select();
+    const {
+      error: masterDeleteError
+    } =
+      await supabaseClient
+        .from("master_library")
+        .delete()
+        .eq("ID Cat No", catId);
 
 
-if (masterDeleteError) {
+    if (masterDeleteError) {
 
-  console.error(
-    "GLCTC1 MASTER LIBRARY DELETE ERROR:",
-    masterDeleteError
-  );
+      console.error(
+        "GLCTC1 MASTER LIBRARY DELETE ERROR:",
+        masterDeleteError
+      );
 
-  throw new Error(
-    masterDeleteError.message
-  );
+      throw new Error(
+        masterDeleteError.message
+      );
 
-}
-
-
-// =================================================
-// 🔎 CONFIRM DATABASE ROW WAS ACTUALLY DELETED
-// =================================================
-
-console.log(
-  "GLCTC1 SUPABASE ROWS DELETED:",
-  deletedRows
-);
-
-
-if (
-  !deletedRows ||
-  deletedRows.length === 0
-) {
-
-  throw new Error(
-    "Supabase did not delete the Master Library row. Check the table RLS DELETE policy."
-  );
-
-}
+    }
 
 
     // =================================================
@@ -5826,8 +5857,14 @@ if (
     renderLibraryTable();
 
 
+    // =================================================
+    // SUCCESS
+    // =================================================
+
     alert(
-      "✅ Track, Master Library record and stored audio files deleted successfully."
+      isAdmin
+        ? "⚡ ADMIN: Track, Master Library record and stored audio files deleted successfully."
+        : "✅ Track, Master Library record and stored audio files deleted successfully."
     );
 
 
@@ -5835,8 +5872,8 @@ if (
       "GLCTC1 DELETE COMPLETE:",
       {
         catId: catId,
-        artist: profile.artist_name,
-        glctc1UserId: user.id
+        isAdmin: isAdmin,
+        deletedByUserId: user.id
       }
     );
 

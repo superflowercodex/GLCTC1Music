@@ -6345,7 +6345,7 @@ glctc1PeerConnection.onicecandidate =
     if (error) {
 
       console.error(
-        "❌ GLCTC1 ARTIST ICE ERROR:",
+        "❌ GLCTC1 ICE READ ERROR:",
         error
       );
 
@@ -6357,17 +6357,8 @@ glctc1PeerConnection.onicecandidate =
       room?.signaling_data || {};
 
 
-    const artistIce =
-      signaling.artist_ice || [];
-
-
-    artistIce.push(
-      event.candidate.toJSON()
-    );
-
-
-    signaling.artist_ice =
-      artistIce;
+    signaling.ice_candidate =
+      event.candidate.toJSON();
 
 
     await supabaseClient
@@ -7009,140 +7000,6 @@ let glctc1LiveAudioDestination = null;
 
 let glctc1PeerConnection = null;
 
-// =====================================================
-// 👁️ GLCTC1 VIEWER AUDIO CONNECTION
-// =====================================================
-
-async function connectGLCTC1Viewer(
-  artistUserId
-) {
-
-  if (!artistUserId) return;
-
-  const {
-    data: room,
-    error
-  } =
-    await supabaseClient
-      .from("glctc1_live_rooms")
-      .select(
-        "signaling_data"
-      )
-      .eq(
-        "user_id",
-        artistUserId
-      )
-      .eq(
-        "is_live",
-        true
-      )
-      .maybeSingle();
-
-
-  if (error) {
-
-    console.error(
-      "❌ GLCTC1 VIEWER ROOM ERROR:",
-      error
-    );
-
-    return;
-
-  }
-
-
-  if (
-    !room ||
-    !room.signaling_data
-  ) {
-
-    console.warn(
-      "⚠️ GLCTC1 ARTIST HAS NO LIVE SIGNAL YET"
-    );
-
-    return;
-
-  }
-
-
-  const viewerConnection =
-    new RTCPeerConnection();
-
-
-  viewerConnection.ontrack =
-    function (event) {
-
-      const stream =
-        event.streams[0];
-
-      if (
-        glctc1LiveAudio
-      ) {
-
-        glctc1LiveAudio.srcObject =
-          stream;
-
-        glctc1LiveAudio
-          .play()
-          .catch(
-            function (error) {
-
-              console.warn(
-                "⚠️ GLCTC1 VIEWER AUDIO:",
-                error
-              );
-
-            }
-          );
-
-      }
-
-    };
-
-
-  const offer =
-    room.signaling_data;
-
-
-  await viewerConnection.setRemoteDescription(
-    offer
-  );
-
-
-  const answer =
-    await viewerConnection.createAnswer();
-
-
-  await viewerConnection.setLocalDescription(
-    answer
-  );
-
-
-  await supabaseClient
-    .from("glctc1_live_rooms")
-    .update({
-      signaling_data: {
-        ...offer,
-        answer: {
-          type:
-            answer.type,
-
-          sdp:
-            answer.sdp
-        }
-      }
-    })
-    .eq(
-      "user_id",
-      artistUserId
-    );
-
-
-  console.log(
-    "👁️ GLCTC1 VIEWER CONNECTED TO ARTIST"
-  );
-
-}
 
 function getGLCTC1LiveAudioStream() {
 

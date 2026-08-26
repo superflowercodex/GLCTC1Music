@@ -511,7 +511,7 @@
 
 <!-- =====================================================
      🔴 GLCTC1 LIVE NOW — FULL WIDTH
-====================================================== →
+====================================================== -->
 
 <section
   id="glctc1LiveNowSection"
@@ -6066,10 +6066,6 @@ async function loadGLCTC1LiveArtists() {
         artist.user_id;
 
 
-      artistRow.dataset.selected =
-        "false";
-
-
       artistRow.style.cssText =
         `
         width:100%;
@@ -6086,46 +6082,13 @@ async function loadGLCTC1LiveArtists() {
         `;
 
 
+      /* =================================================
+         🔴 ONE-PRESS OPEN ARTIST WATCH PAGE
+      ================================================= */
+
       artistRow.addEventListener(
         "click",
         function () {
-
-          const alreadySelected =
-            artistRow.dataset.selected ===
-            "true";
-
-
-          document
-            .querySelectorAll(
-              "#glctc1LiveArtistList [data-selected]"
-            )
-            .forEach(
-              function (row) {
-
-                row.dataset.selected =
-                  "false";
-
-                row.style.outline =
-                  "none";
-
-              }
-            );
-
-
-          if (
-            !alreadySelected
-          ) {
-
-            artistRow.dataset.selected =
-              "true";
-
-            artistRow.style.outline =
-              "1px solid rgba(139,53,255,0.8)";
-
-            return;
-
-          }
-
 
           window.location.href =
             "social.html?artist=" +
@@ -6157,6 +6120,10 @@ if (glctc1GoLiveButton) {
     "click",
     async function () {
 
+      /* -----------------------------------------------
+         REQUIRE SIGNED-IN USER
+      ----------------------------------------------- */
+
       const {
         data,
         error
@@ -6181,6 +6148,10 @@ if (glctc1GoLiveButton) {
       const user =
         data.user;
 
+
+      /* -----------------------------------------------
+         GET ARTIST PROFILE
+      ----------------------------------------------- */
 
       const {
         data: profile,
@@ -6209,6 +6180,10 @@ if (glctc1GoLiveButton) {
 
       }
 
+
+      /* =================================================
+         🔴 CREATE / UPDATE LIVE ARTIST LISTING
+      ================================================= */
 
       const {
         error: liveError
@@ -6249,6 +6224,27 @@ if (glctc1GoLiveButton) {
       }
 
 
+      /* =================================================
+         🏠 CREATE / UPDATE ARTIST LIVE ROOM
+      ================================================= */
+
+      const roomSaved =
+        await saveGLCTC1CurrentLiveRoom();
+
+
+      if (!roomSaved) {
+
+        console.warn(
+          "⚠️ GLCTC1 LIVE LISTING IS ACTIVE, BUT NO LIVE ROOM MEDIA URL HAS BEEN SAVED YET."
+        );
+
+      }
+
+
+      /* =================================================
+         UPDATE GO LIVE / END LIVE BUTTONS
+      ================================================= */
+
       glctc1GoLiveButton.style.display =
         "none";
 
@@ -6261,13 +6257,441 @@ if (glctc1GoLiveButton) {
       }
 
 
+      /* =================================================
+         REFRESH LIVE ARTIST POOL
+      ================================================= */
+
       await loadGLCTC1LiveArtists();
+
+
+      console.log(
+        "🔴 GLCTC1 ARTIST IS LIVE:",
+        profile?.artist_name ||
+        "ARTIST"
+      );
 
     }
   );
 
 }
 
+/* =======================================================
+   🏠 GLCTC1 LIVE ROOM — CREATE / UPDATE HOST ROOM
+======================================================= */
+
+async function saveGLCTC1LiveRoom(
+  mediaUrl,
+  mediaType
+) {
+
+  /* -----------------------------------------------
+     REQUIRE SIGNED-IN HOST
+  ----------------------------------------------- */
+
+  const {
+    data,
+    error: authError
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (
+    authError ||
+    !data.user
+  ) {
+
+    console.warn(
+      "⚠️ GLCTC1 LIVE ROOM: Host is not logged in."
+    );
+
+    return false;
+
+  }
+
+
+  const user =
+    data.user;
+
+
+  /* -----------------------------------------------
+     GET ARTIST PROFILE
+  ----------------------------------------------- */
+
+  const {
+    data: profile,
+    error: profileError
+  } =
+    await supabaseClient
+      .from("profiles")
+      .select(
+        "artist_name"
+      )
+      .eq(
+        "id",
+        user.id
+      )
+      .maybeSingle();
+
+
+  if (profileError) {
+
+    console.error(
+      "❌ GLCTC1 LIVE ROOM PROFILE ERROR:",
+      profileError
+    );
+
+    return false;
+
+  }
+
+
+  /* -----------------------------------------------
+     SAVE LIVE ROOM
+  ----------------------------------------------- */
+
+  const {
+    error: roomError
+  } =
+    await supabaseClient
+      .from("glctc1_live_rooms")
+      .upsert(
+        {
+          user_id:
+            user.id,
+
+          artist_name:
+            profile?.artist_name ||
+            "",
+
+          media_type:
+            mediaType ||
+            "web",
+
+          media_url:
+            mediaUrl ||
+            "",
+
+          is_live:
+            true,
+
+          updated_at:
+            new Date().toISOString()
+        },
+        {
+          onConflict:
+            "user_id"
+        }
+      );
+
+
+  if (roomError) {
+
+    console.error(
+      "❌ GLCTC1 LIVE ROOM SAVE ERROR:",
+      roomError
+    );
+
+    return false;
+
+  }
+
+
+  console.log(
+    "🏠 GLCTC1 LIVE ROOM SAVED:",
+    {
+      artist:
+        profile?.artist_name || "",
+
+      user_id:
+        user.id,
+
+      media_type:
+        mediaType || "web",
+
+      media_url:
+        mediaUrl || ""
+    }
+  );
+
+
+  return true;
+
+}
+
+
+/* =======================================================
+   🔴 SAVE CURRENT HOST VIDEO / LIVE URL
+======================================================= */
+
+async function saveGLCTC1CurrentLiveRoom() {
+
+  const url =
+    glctc1VideoInput?.value?.trim() ||
+    "";
+
+
+  if (!url) {
+
+    console.warn(
+      "⚠️ GLCTC1 LIVE ROOM: No media URL supplied."
+    );
+
+    return false;
+
+  }
+
+
+  let mediaType =
+    "web";
+
+
+  if (
+    /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(
+      url
+    )
+  ) {
+
+    mediaType =
+      "video";
+
+  }
+
+
+  else {
+
+    let parsedUrl;
+
+    try {
+
+      parsedUrl =
+        new URL(url);
+
+    } catch {
+
+      mediaType =
+        "web";
+
+    }
+
+
+    if (parsedUrl) {
+
+      const hostname =
+        parsedUrl.hostname
+          .toLowerCase()
+          .replace(
+            /^www\./,
+            ""
+          );
+
+
+      if (
+        hostname ===
+        "youtube.com" ||
+        hostname ===
+        "youtu.be"
+      ) {
+
+        mediaType =
+          "youtube";
+
+      }
+
+
+      else if (
+        hostname ===
+        "tiktok.com" ||
+        hostname ===
+        "vm.tiktok.com"
+      ) {
+
+        mediaType =
+          "tiktok";
+
+      }
+
+    }
+
+  }
+
+
+  return await saveGLCTC1LiveRoom(
+    url,
+    mediaType
+  );
+
+}
+
+
+/* =======================================================
+   📹 SAVE HOST WEBCAM ROOM
+======================================================= */
+
+async function saveGLCTC1WebcamLiveRoom() {
+
+  /*
+   * Browser webcam streams cannot be stored as
+   * a normal URL. The actual camera stream remains
+   * local to the host browser.
+   *
+   * This records the room as a webcam room so
+   * the host/viewer system knows the room is live.
+   */
+
+  const {
+    data,
+    error
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (
+    error ||
+    !data.user
+  ) {
+
+    return false;
+
+  }
+
+
+  const user =
+    data.user;
+
+
+  const {
+    data: profile
+  } =
+    await supabaseClient
+      .from("profiles")
+      .select(
+        "artist_name"
+      )
+      .eq(
+        "id",
+        user.id
+      )
+      .maybeSingle();
+
+
+  const {
+    error: roomError
+  } =
+    await supabaseClient
+      .from("glctc1_live_rooms")
+      .upsert(
+        {
+          user_id:
+            user.id,
+
+          artist_name:
+            profile?.artist_name ||
+            "",
+
+          media_type:
+            "webcam",
+
+          media_url:
+            "",
+
+          is_live:
+            true,
+
+          updated_at:
+            new Date().toISOString()
+        },
+        {
+          onConflict:
+            "user_id"
+        }
+      );
+
+
+  if (roomError) {
+
+    console.error(
+      "❌ GLCTC1 WEBCAM ROOM SAVE ERROR:",
+      roomError
+    );
+
+    return false;
+
+  }
+
+
+  console.log(
+    "📹 GLCTC1 WEBCAM ROOM ACTIVE"
+  );
+
+
+  return true;
+
+}
+
+
+/* =======================================================
+   🛑 CLOSE HOST LIVE ROOM
+======================================================= */
+
+async function closeGLCTC1LiveRoom() {
+
+  const {
+    data,
+    error
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (
+    error ||
+    !data.user
+  ) {
+
+    return false;
+
+  }
+
+
+  const {
+    error: roomError
+  } =
+    await supabaseClient
+      .from("glctc1_live_rooms")
+      .update(
+        {
+          is_live:
+            false,
+
+          updated_at:
+            new Date().toISOString()
+        }
+      )
+      .eq(
+        "user_id",
+        data.user.id
+      );
+
+
+  if (roomError) {
+
+    console.error(
+      "❌ GLCTC1 LIVE ROOM CLOSE ERROR:",
+      roomError
+    );
+
+    return false;
+
+  }
+
+
+  console.log(
+    "🛑 GLCTC1 LIVE ROOM CLOSED"
+  );
+
+
+  return true;
+
+}
 
 /* =======================================================
    END LIVE
@@ -6278,6 +6702,10 @@ if (glctc1EndLiveButton) {
   glctc1EndLiveButton.addEventListener(
     "click",
     async function () {
+
+      /* -----------------------------------------------
+         REQUIRE SIGNED-IN USER
+      ----------------------------------------------- */
 
       const {
         data,
@@ -6296,6 +6724,14 @@ if (glctc1EndLiveButton) {
       }
 
 
+      const userId =
+        data.user.id;
+
+
+      /* =================================================
+         🔴 REMOVE ARTIST FROM LIVE ARTISTS
+      ================================================= */
+
       const {
         error: liveError
       } =
@@ -6312,7 +6748,7 @@ if (glctc1EndLiveButton) {
           )
           .eq(
             "user_id",
-            data.user.id
+            userId
           );
 
 
@@ -6327,6 +6763,29 @@ if (glctc1EndLiveButton) {
 
       }
 
+
+      /* =================================================
+         🏠 CLOSE ARTIST LIVE ROOM
+      ================================================= */
+
+      const roomClosed =
+        await closeGLCTC1LiveRoom();
+
+
+      if (!roomClosed) {
+
+        console.error(
+          "❌ GLCTC1 LIVE ROOM COULD NOT BE CLOSED."
+        );
+
+        return;
+
+      }
+
+
+      /* =================================================
+         UPDATE BUTTONS
+      ================================================= */
 
       if (glctc1EndLiveButton) {
 
@@ -6344,7 +6803,17 @@ if (glctc1EndLiveButton) {
       }
 
 
+      /* =================================================
+         REFRESH LIVE ARTIST POOL
+      ================================================= */
+
       await loadGLCTC1LiveArtists();
+
+
+      console.log(
+        "🛑 GLCTC1 ARTIST LIVE SESSION ENDED:",
+        userId
+      );
 
     }
   );
@@ -6795,6 +7264,124 @@ artistField.value =
 
 }
 
+/* =======================================================
+   🏠 GLCTC1 ARTIST LIVE ROOM
+   ROOM OWNER IS TAKEN FROM:
+   social.html?artist=USER_ID
+======================================================= */
+
+const glctc1RoomArtistId =
+  new URLSearchParams(
+    window.location.search
+  ).get("artist");
+
+
+let glctc1IsRoomHost =
+  false;
+
+
+let glctc1RoomViewer =
+  true;
+
+
+/* =======================================================
+   CHECK CURRENT USER AGAINST ROOM OWNER
+======================================================= */
+
+async function checkGLCTC1RoomHost() {
+
+  glctc1IsRoomHost =
+    false;
+
+  glctc1RoomViewer =
+    true;
+
+
+  if (
+    !glctc1RoomArtistId
+  ) {
+
+    console.warn(
+      "⚠️ GLCTC1 ROOM: No artist ID supplied."
+    );
+
+    return false;
+
+  }
+
+
+  const {
+    data,
+    error
+  } =
+    await supabaseClient.auth.getUser();
+
+
+  if (
+    error ||
+    !data.user
+  ) {
+
+    console.log(
+      "👤 GLCTC1 ROOM: Viewer is not logged in."
+    );
+
+    return false;
+
+  }
+
+
+  const loggedInUserId =
+    String(
+      data.user.id
+    );
+
+
+  const roomOwnerId =
+    String(
+      glctc1RoomArtistId
+    );
+
+
+  if (
+    loggedInUserId ===
+    roomOwnerId
+  ) {
+
+    glctc1IsRoomHost =
+      true;
+
+    glctc1RoomViewer =
+      false;
+
+
+    console.log(
+      "🎛️ GLCTC1 ROOM HOST:",
+      loggedInUserId
+    );
+
+
+    return true;
+
+  }
+
+
+  console.log(
+    "👁️ GLCTC1 ROOM VIEWER:",
+    loggedInUserId
+  );
+
+
+  return false;
+
+}
+
+
+/* =======================================================
+   INITIAL ROOM ID CHECK
+======================================================= */
+
+checkGLCTC1RoomHost();
 
 /* =======================================================
    🎥 GLCTC1 MEDIA STAGE
@@ -7082,6 +7669,223 @@ async function requireGLCTC1Login() {
 
 }
 
+/* =======================================================
+   🎥 GLCTC1 SHARED MEDIA PLAYER
+   Used by HOST and VIEWERS
+======================================================= */
+
+function playGLCTC1MediaUrl(url) {
+
+  if (!url) {
+
+    return;
+
+  }
+
+
+  /* =====================================================
+     RESET EXISTING PLAYER
+  ===================================================== */
+
+  resetGLCTC1MediaPlayer();
+
+
+  /* =====================================================
+     SAVE CURRENT URL
+  ===================================================== */
+
+  glctc1CurrentLiveUrl =
+    url;
+
+
+  /* =====================================================
+     DIRECT VIDEO
+  ===================================================== */
+
+  const directVideo =
+    /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(
+      url
+    );
+
+
+  if (directVideo) {
+
+    if (glctc1Video) {
+
+      glctc1Video.src =
+        url;
+
+      glctc1Video.style.display =
+        "block";
+
+      glctc1Video.load();
+
+
+      glctc1Video.play().catch(
+        function (error) {
+
+          console.warn(
+            "GLCTC1 VIDEO PLAYBACK:",
+            error
+          );
+
+        }
+      );
+
+    }
+
+    return;
+
+  }
+
+
+  /* =====================================================
+     PARSE URL
+  ===================================================== */
+
+  let parsedUrl;
+
+
+  try {
+
+    parsedUrl =
+      new URL(url);
+
+  } catch (error) {
+
+    if (glctc1VideoMessage) {
+
+      glctc1VideoMessage.style.display =
+        "flex";
+
+    }
+
+    return;
+
+  }
+
+
+  const hostname =
+    parsedUrl.hostname
+      .toLowerCase()
+      .replace(
+        /^www\./,
+        ""
+      );
+
+
+  /* =====================================================
+     YOUTUBE
+  ===================================================== */
+
+  let youtubeId =
+    null;
+
+
+  if (
+    hostname ===
+    "youtube.com"
+  ) {
+
+    youtubeId =
+      parsedUrl.searchParams.get(
+        "v"
+      );
+
+  }
+
+
+  if (
+    hostname ===
+    "youtu.be"
+  ) {
+
+    youtubeId =
+      parsedUrl.pathname
+        .replace(
+          /^\/+/,
+          ""
+        )
+        .split("/")[0];
+
+  }
+
+
+  if (youtubeId) {
+
+    if (glctc1VideoFrame) {
+
+      glctc1VideoFrame.src =
+        "https://www.youtube.com/embed/" +
+        encodeURIComponent(
+          youtubeId
+        ) +
+        "?autoplay=1&rel=0";
+
+      glctc1VideoFrame.style.display =
+        "block";
+
+    }
+
+    return;
+
+  }
+
+
+  /* =====================================================
+     TIKTOK
+  ===================================================== */
+
+  if (
+    hostname ===
+    "tiktok.com"
+  ) {
+
+    const videoMatch =
+      parsedUrl.pathname.match(
+        /\/video\/(\d+)/
+      );
+
+
+    if (
+      videoMatch &&
+      videoMatch[1]
+    ) {
+
+      if (glctc1VideoFrame) {
+
+        glctc1VideoFrame.src =
+          "https://www.tiktok.com/player/v1/" +
+          videoMatch[1] +
+          "?autoplay=1&controls=1";
+
+        glctc1VideoFrame.style.display =
+          "block";
+
+      }
+
+      return;
+
+    }
+
+  }
+
+
+  /* =====================================================
+     OTHER EMBEDDABLE WEB / LIVE URL
+  ===================================================== */
+
+  if (glctc1VideoFrame) {
+
+    glctc1VideoFrame.src =
+      url;
+
+    glctc1VideoFrame.style.display =
+      "block";
+
+  }
+
+}
 
 /* =======================================================
    LOAD VIDEO / WEB / LIVE
@@ -7096,7 +7900,9 @@ if (
   glctc1LoadVideo.onclick =
     async function () {
 
-      /* REQUIRE SIGNED-IN USER */
+      /* -----------------------------------------------
+         REQUIRE SIGNED-IN USER
+      ----------------------------------------------- */
 
       const loggedIn =
         await requireGLCTC1Login();
@@ -7116,6 +7922,68 @@ if (
       if (!url) {
 
         return;
+
+      }
+
+
+      /* =================================================
+         🔴 SAVE URL TO ARTIST LIVE ROOM
+      ================================================= */
+
+      const roomSaved =
+        await saveGLCTC1LiveRoom(
+          url,
+          "web"
+        );
+
+
+      if (!roomSaved) {
+
+        console.error(
+          "❌ GLCTC1 LIVE ROOM COULD NOT BE UPDATED."
+        );
+
+        return;
+
+      }
+
+
+      /* =================================================
+         MAKE SURE ARTIST IS MARKED LIVE
+      ================================================= */
+
+      const {
+        data: authData
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        authData?.user
+      ) {
+
+        await supabaseClient
+          .from("live_artists")
+          .upsert(
+            {
+              user_id:
+                authData.user.id,
+
+              artist_name:
+                glctc1AuthenticatedArtist ||
+                "ARTIST",
+
+              is_live:
+                true,
+
+              updated_at:
+                new Date().toISOString()
+            },
+            {
+              onConflict:
+                "user_id"
+            }
+          );
 
       }
 
@@ -7155,6 +8023,8 @@ if (
           }
         );
 
+
+        await loadGLCTC1LiveArtists();
 
         return;
 
@@ -7247,6 +8117,8 @@ if (
           "block";
 
 
+        await loadGLCTC1LiveArtists();
+
         return;
 
       }
@@ -7261,10 +8133,6 @@ if (
         "vm.tiktok.com"
       ) {
 
-        /*
-         * Existing tested GLCTC1 TikTok link.
-         */
-
         if (
           url ===
           "https://vm.tiktok.com/ZGdxgfxuV/"
@@ -7278,6 +8146,8 @@ if (
             "block";
 
 
+          await loadGLCTC1LiveArtists();
+
           return;
 
         }
@@ -7289,6 +8159,8 @@ if (
         glctc1VideoFrame.style.display =
           "block";
 
+
+        await loadGLCTC1LiveArtists();
 
         return;
 
@@ -7329,12 +8201,12 @@ if (
             "block";
 
 
+          await loadGLCTC1LiveArtists();
+
           return;
 
         }
 
-
-        /* TikTok LIVE / other TikTok URL */
 
         glctc1VideoFrame.src =
           url;
@@ -7342,6 +8214,8 @@ if (
         glctc1VideoFrame.style.display =
           "block";
 
+
+        await loadGLCTC1LiveArtists();
 
         return;
 
@@ -7358,7 +8232,12 @@ if (
       glctc1VideoFrame.style.display =
         "block";
 
+
+      await loadGLCTC1LiveArtists();
+
     };
+
+}
 
 
   /* =====================================================
@@ -7386,7 +8265,7 @@ if (
 
 
 /* =======================================================
-   📹 WEBCAM
+   📹 HOST-ONLY WEBCAM
 ======================================================= */
 
 if (glctc1WebcamButton) {
@@ -7394,7 +8273,28 @@ if (glctc1WebcamButton) {
   glctc1WebcamButton.onclick =
     async function () {
 
-      /* REQUIRE SIGNED-IN USER */
+      /* ================================================
+         CHECK THAT THIS USER OWNS THIS LIVE ROOM
+      ================================================ */
+
+      const isHost =
+        await checkGLCTC1RoomHost();
+
+
+      if (!isHost) {
+
+        alert(
+          "👁️ This is the artist's live room. Only the artist can control the webcam."
+        );
+
+        return;
+
+      }
+
+
+      /* ================================================
+         REQUIRE SIGNED-IN USER
+      ================================================ */
 
       const loggedIn =
         await requireGLCTC1Login();
@@ -7407,7 +8307,9 @@ if (glctc1WebcamButton) {
       }
 
 
-      /* REQUIRE CAMERA SUPPORT */
+      /* ================================================
+         REQUIRE CAMERA SUPPORT
+      ================================================ */
 
       if (
         !navigator.mediaDevices ||

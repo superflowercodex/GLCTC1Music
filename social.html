@@ -6336,96 +6336,26 @@ async function createGLCTC1LiveOffer() {
       "🔴 GLCTC1 LIVE OFFER CREATED"
     );
 
-// =====================================================
-// 🔴 STEP 6 — GET VIEWER ANSWER
-// =====================================================
 
-async function getGLCTC1ViewerAnswer(
-  artistUserId
-) {
-
-  try {
+    // =================================================
+    // 🔴 SAVE OFFER TO SUPABASE
+    // =================================================
 
     const {
-      data: room,
-      error
+      data: userData,
+      error: userError
     } =
-      await supabaseClient
-        .from("glctc1_live_rooms")
-        .select(
-          "signaling_data"
-        )
-        .eq(
-          "user_id",
-          artistUserId
-        )
-        .maybeSingle();
-
-
-    if (error) {
-
-      console.error(
-        "❌ GLCTC1 VIEWER ANSWER READ ERROR:",
-        error
-      );
-
-      return null;
-
-    }
-
-
-    const signaling =
-      room?.signaling_data;
+      await supabaseClient.auth.getUser();
 
 
     if (
-      !signaling ||
-      !signaling.answer
+      userError ||
+      !userData?.user
     ) {
 
-      console.warn(
-        "⚠️ GLCTC1 VIEWER ANSWER NOT AVAILABLE"
-      );
-
-      return null;
-
-    }
-
-
-    console.log(
-      "🔴 GLCTC1 VIEWER ANSWER RECEIVED"
-    );
-
-
-    return signaling.answer;
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 VIEWER ANSWER ERROR:",
-      error
-    );
-
-    return null;
-
-  }
-
-}
-
-// =====================================================
-// 🔴 STEP 6 — APPLY VIEWER ANSWER
-// =====================================================
-
-async function applyGLCTC1ViewerAnswer(
-  artistUserId
-) {
-
-  try {
-
-    if (!glctc1PeerConnection) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST CONNECTION NOT READY"
+      console.error(
+        "❌ GLCTC1 LIVE USER ERROR:",
+        userError
       );
 
       return false;
@@ -6433,35 +6363,151 @@ async function applyGLCTC1ViewerAnswer(
     }
 
 
-    const answer =
-      await getGLCTC1ViewerAnswer(
-        artistUserId
+    const {
+      error: saveError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .update({
+
+          signaling_data: {
+
+            offer: {
+              type:
+                offer.type,
+
+              sdp:
+                offer.sdp
+            },
+
+            answer: null,
+
+            artist_ice: [],
+
+            viewer_ice: []
+
+          }
+
+        })
+        .eq(
+          "user_id",
+          userData.user.id
+        );
+
+
+    if (saveError) {
+
+      console.error(
+        "❌ GLCTC1 LIVE OFFER SAVE ERROR:",
+        saveError
       );
-
-
-    if (!answer) {
 
       return false;
 
     }
 
 
-    await glctc1PeerConnection.setRemoteDescription(
-      answer
-    );
-
-
     console.log(
-      "🔴 GLCTC1 VIEWER ANSWER APPLIED"
+      "🔴 GLCTC1 LIVE OFFER SAVED"
     );
+
+
+    // =================================================
+    // 🔴 STEP 5 — ARTIST ICE CANDIDATES
+    // =================================================
+
+    glctc1PeerConnection.onicecandidate =
+      async function (event) {
+
+        if (!event.candidate) return;
+
+
+        const {
+          data: room,
+          error: roomError
+        } =
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .select("signaling_data")
+            .eq(
+              "user_id",
+              userData.user.id
+            )
+            .maybeSingle();
+
+
+        if (roomError) {
+
+          console.error(
+            "❌ GLCTC1 ARTIST ICE READ ERROR:",
+            roomError
+          );
+
+          return;
+
+        }
+
+
+        const signaling =
+          room?.signaling_data || {};
+
+
+        const artistIce =
+          signaling.artist_ice || [];
+
+
+        artistIce.push(
+          event.candidate.toJSON()
+        );
+
+
+        signaling.artist_ice =
+          artistIce;
+
+
+        const {
+          error: iceError
+        } =
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .update({
+
+              signaling_data:
+                signaling
+
+            })
+            .eq(
+              "user_id",
+              userData.user.id
+            );
+
+
+        if (iceError) {
+
+          console.error(
+            "❌ GLCTC1 ARTIST ICE SAVE ERROR:",
+            iceError
+          );
+
+          return;
+
+        }
+
+
+        console.log(
+          "🔴 GLCTC1 ARTIST ICE CANDIDATE SAVED"
+        );
+
+      };
 
 
     return true;
 
+
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 VIEWER ANSWER APPLY ERROR:",
+      "❌ GLCTC1 LIVE OFFER ERROR:",
       error
     );
 

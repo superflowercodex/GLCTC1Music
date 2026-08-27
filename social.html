@@ -6550,6 +6550,197 @@ return true;
 
 }
 
+// =====================================================
+// 🔴 STEP 6 — COMPLETE GLCTC1 LIVE HANDSHAKE
+// =====================================================
+
+async function completeGLCTC1LiveHandshake(
+  artistUserId
+) {
+
+  try {
+
+    if (!artistUserId) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST ID NOT PROVIDED"
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 LIVE HANDSHAKE STARTING:",
+      artistUserId
+    );
+
+
+    // =================================================
+    // 🔴 WAIT FOR VIEWER ANSWER
+    // =================================================
+
+    let answer =
+      null;
+
+
+    for (
+      let attempt = 0;
+      attempt < 30;
+      attempt++
+    ) {
+
+      answer =
+        await getGLCTC1ViewerAnswer(
+          artistUserId
+        );
+
+
+      if (answer) {
+
+        break;
+
+      }
+
+
+      await new Promise(
+        function (resolve) {
+
+          setTimeout(
+            resolve,
+            1000
+          );
+
+        }
+      );
+
+    }
+
+
+    if (!answer) {
+
+      console.warn(
+        "⚠️ GLCTC1 VIEWER ANSWER TIMEOUT"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 APPLY VIEWER ANSWER
+    // =================================================
+
+    if (!glctc1PeerConnection) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST PEER CONNECTION NOT READY"
+      );
+
+      return false;
+
+    }
+
+
+    await glctc1PeerConnection.setRemoteDescription(
+      answer
+    );
+
+
+    console.log(
+      "🔴 GLCTC1 VIEWER ANSWER APPLIED"
+    );
+
+
+    // =================================================
+    // 🔴 APPLY VIEWER ICE
+    // =================================================
+
+    const {
+      data: room,
+      error: roomError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .select(
+          "signaling_data"
+        )
+        .eq(
+          "user_id",
+          artistUserId
+        )
+        .maybeSingle();
+
+
+    if (roomError) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER ICE READ ERROR:",
+        roomError
+      );
+
+      return false;
+
+    }
+
+
+    const signaling =
+      room?.signaling_data || {};
+
+
+    const viewerIce =
+      signaling.viewer_ice || [];
+
+
+    for (
+      const candidate of viewerIce
+    ) {
+
+      try {
+
+        await glctc1PeerConnection.addIceCandidate(
+          candidate
+        );
+
+      } catch (iceError) {
+
+        console.warn(
+          "⚠️ GLCTC1 VIEWER ICE ERROR:",
+          iceError
+        );
+
+      }
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 VIEWER ICE APPLIED"
+    );
+
+
+    console.log(
+      "🔴 GLCTC1 LIVE HANDSHAKE COMPLETE"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 LIVE HANDSHAKE ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
 
 /* =======================================================
    END LIVE

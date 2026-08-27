@@ -6412,211 +6412,7 @@ async function createGLCTC1LiveOffer() {
     );
 
 
-    // =================================================
-    // 🔴 STEP 5 — ARTIST ICE CANDIDATES
-    // =================================================
-
-    glctc1PeerConnection.onicecandidate =
-      async function (event) {
-
-        if (!event.candidate) return;
-
-
-        const {
-          data: room,
-          error: roomError
-        } =
-          await supabaseClient
-            .from("glctc1_live_rooms")
-            .select("signaling_data")
-            .eq(
-              "user_id",
-              userData.user.id
-            )
-            .maybeSingle();
-
-
-        if (roomError) {
-
-          console.error(
-            "❌ GLCTC1 ARTIST ICE READ ERROR:",
-            roomError
-          );
-
-          return;
-
-        }
-
-
-        const signaling =
-          room?.signaling_data || {};
-
-
-        const artistIce =
-          signaling.artist_ice || [];
-
-
-        artistIce.push(
-          event.candidate.toJSON()
-        );
-
-
-        signaling.artist_ice =
-          artistIce;
-
-
-        const {
-          error: iceError
-        } =
-          await supabaseClient
-            .from("glctc1_live_rooms")
-            .update({
-
-              signaling_data:
-                signaling
-
-            })
-            .eq(
-              "user_id",
-              userData.user.id
-            );
-
-
-        if (iceError) {
-
-          console.error(
-            "❌ GLCTC1 ARTIST ICE SAVE ERROR:",
-            iceError
-          );
-
-          return;
-
-        }
-
-
-        console.log(
-          "🔴 GLCTC1 ARTIST ICE CANDIDATE SAVED"
-        );
-
-      };
-
-
-    return true;
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 LIVE OFFER ERROR:",
-      error
-    );
-
-    return false;
-
-  }
-
-}
-
-// =====================================================
-// 🔴 STEP 6 — APPLY VIEWER ICE
-// =====================================================
-
-async function applyGLCTC1ViewerIce(
-  artistUserId
-) {
-
-  try {
-
-    if (!glctc1PeerConnection) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST CONNECTION NOT READY"
-      );
-
-      return false;
-
-    }
-
-
-    const {
-      data: room,
-      error
-    } =
-      await supabaseClient
-        .from("glctc1_live_rooms")
-        .select(
-          "signaling_data"
-        )
-        .eq(
-          "user_id",
-          artistUserId
-        )
-        .maybeSingle();
-
-
-    if (error) {
-
-      console.error(
-        "❌ GLCTC1 VIEWER ICE READ ERROR:",
-        error
-      );
-
-      return false;
-
-    }
-
-
-    const signaling =
-      room?.signaling_data;
-
-
-    const viewerIce =
-      signaling?.viewer_ice || [];
-
-
-    for (
-      const candidate of viewerIce
-    ) {
-
-      try {
-
-        await glctc1PeerConnection.addIceCandidate(
-          candidate
-        );
-
-      } catch (iceError) {
-
-        console.warn(
-          "⚠️ GLCTC1 VIEWER ICE CANDIDATE ERROR:",
-          iceError
-        );
-
-      }
-
-    }
-
-
-    console.log(
-      "🔴 GLCTC1 VIEWER ICE APPLIED"
-    );
-
-
-    return true;
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 VIEWER ICE APPLY ERROR:",
-      error
-    );
-
-    return false;
-
-  }
-
-}
-
-// =====================================================
+    // =====================================================
 // 🔴 STEP 6 — COMPLETE LIVE HANDSHAKE
 // =====================================================
 
@@ -6637,22 +6433,61 @@ async function completeGLCTC1LiveHandshake(
     }
 
 
-    const answerApplied =
-      await applyGLCTC1ViewerAnswer(
-        artistUserId
+    // =================================================
+    // 🔴 WAIT FOR VIEWER ANSWER
+    // =================================================
+
+    let answerApplied =
+      false;
+
+
+    for (
+      let attempt = 0;
+      attempt < 30;
+      attempt++
+    ) {
+
+      answerApplied =
+        await applyGLCTC1ViewerAnswer(
+          artistUserId
+        );
+
+
+      if (answerApplied) {
+
+        break;
+
+      }
+
+
+      await new Promise(
+        function (resolve) {
+
+          setTimeout(
+            resolve,
+            1000
+          );
+
+        }
       );
+
+    }
 
 
     if (!answerApplied) {
 
       console.warn(
-        "⚠️ GLCTC1 VIEWER ANSWER NOT READY"
+        "⚠️ GLCTC1 VIEWER ANSWER TIMEOUT"
       );
 
       return false;
 
     }
 
+
+    // =================================================
+    // 🔴 APPLY VIEWER ICE
+    // =================================================
 
     const iceApplied =
       await applyGLCTC1ViewerIce(
@@ -6677,6 +6512,7 @@ async function completeGLCTC1LiveHandshake(
 
 
     return true;
+
 
   } catch (error) {
 
@@ -6992,54 +6828,6 @@ async function startGLCTC1LiveArtistConnection() {
   }
 
 }
-
-    // =================================================
-    // 🔴 WAIT FOR VIEWER ANSWER
-    // =================================================
-
-    let answerApplied =
-      false;
-
-    for (
-      let attempt = 0;
-      attempt < 30;
-      attempt++
-    ) {
-
-      answerApplied =
-        await applyGLCTC1ViewerAnswer(
-          artistUserId
-        );
-
-
-      if (answerApplied) {
-        break;
-      }
-
-
-      await new Promise(
-        function (resolve) {
-
-          setTimeout(
-            resolve,
-            1000
-          );
-
-        }
-      );
-
-    }
-
-
-    if (!answerApplied) {
-
-      console.warn(
-        "⚠️ GLCTC1 VIEWER ANSWER TIMEOUT"
-      );
-
-      return false;
-
-    }
 
 
     // =================================================

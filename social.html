@@ -4073,45 +4073,246 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
 
 });
   
-// --- LOADERS ---  
+// =====================================================
+// 🎚️ LOADERS — GLCTC1
+// =====================================================
+
 async function loadToDeck(deck, track) {
 
-  if (!track || !track.master_audio) return;
-
-  let audioFile = track.master_audio;
-
-  // Create a playable signed URL for Supabase storage paths
-  if (!audioFile.startsWith("http")) {
-
-    const { data: signedData, error: signedError } =
-      await supabaseClient.storage
-        .from("tracks")
-        .createSignedUrl(audioFile, 60 * 60 * 24);
-
-    if (signedError) {
-      console.error("GLCTC1 DECK SIGNED URL ERROR:", signedError);
-      return;
-    }
-
-    audioFile = signedData.signedUrl;
+  if (!track || !track.master_audio) {
+    return;
   }
 
-  const a = audio(deck);
 
-  a.src = audioFile;
+  /* =================================================
+     🔊 MAKE SURE DECK EQ / LIVE OUTPUT EXISTS
+  ================================================= */
+
+  const eq =
+    setupDeckEQ(deck);
+
+
+  if (!eq) {
+
+    console.error(
+      "❌ GLCTC1 DECK AUDIO SYSTEM COULD NOT START:",
+      deck
+    );
+
+    return;
+
+  }
+
+
+  /* =================================================
+     ☁️ GET AUDIO FILE
+  ================================================= */
+
+  let audioFile =
+    track.master_audio;
+
+
+  /* =================================================
+     🔗 CREATE SUPABASE SIGNED URL
+  ================================================= */
+
+  if (
+    audioFile &&
+    !audioFile.startsWith("http")
+  ) {
+
+    const {
+      data: signedData,
+      error: signedError
+    } =
+      await supabaseClient.storage
+        .from("tracks")
+        .createSignedUrl(
+          audioFile,
+          60 * 60 * 24
+        );
+
+
+    if (signedError) {
+
+      console.error(
+        "❌ GLCTC1 DECK SIGNED URL ERROR:",
+        signedError
+      );
+
+      return;
+
+    }
+
+
+    audioFile =
+      signedData?.signedUrl || "";
+
+  }
+
+
+  if (!audioFile) {
+
+    console.error(
+      "❌ GLCTC1 DECK AUDIO URL EMPTY"
+    );
+
+    return;
+
+  }
+
+
+  /* =================================================
+     🎵 LOAD AUDIO INTO DECK
+  ================================================= */
+
+  const a =
+    audio(deck);
+
+
+  if (!a) {
+
+    console.error(
+      "❌ GLCTC1 AUDIO ELEMENT NOT FOUND:",
+      deck
+    );
+
+    return;
+
+  }
+
+
+  a.src =
+    audioFile;
+
   a.load();
 
+
+  /* =================================================
+     🔴 VERIFY LIVE AUDIO STREAM
+  ================================================= */
+
+  if (
+    glctc1LiveAudioDestination
+  ) {
+
+    glctc1AudioStream =
+      glctc1LiveAudioDestination.stream;
+
+
+    console.log(
+      "🔴 GLCTC1 LIVE AUDIO STREAM READY"
+    );
+
+  } else {
+
+    console.warn(
+      "⚠️ GLCTC1 LIVE AUDIO DESTINATION NOT READY"
+    );
+
+  }
+
+
+  /* =================================================
+     🌊 DRAW WAVEFORM
+  ================================================= */
+
   drawWaveform(deck);
-  updateBpmMeter(deck, track.bpm || 120);
+
+
+  /* =================================================
+     🎚️ BPM — ONLY IF AVAILABLE
+  ================================================= */
+
+  if (
+    typeof updateBpmMeter ===
+    "function"
+  ) {
+
+    updateBpmMeter(
+      deck,
+      track.bpm || 120
+    );
+
+  }
+
 }
-  
-function loadStemToDeck(deck, fileUrl, bpm) {  
-  if (!fileUrl) return;  
-  const a = audio(deck);  
-  a.src = fileUrl;  
-  drawWaveform(deck);  
-  updateBpmMeter(deck, bpm || 120);  
-}  
+
+
+// =====================================================
+// 🎵 LOAD STEM TO DECK
+// =====================================================
+
+function loadStemToDeck(
+  deck,
+  fileUrl,
+  bpm
+) {
+
+  if (!fileUrl) {
+    return;
+  }
+
+
+  /* =================================================
+     🔊 MAKE SURE DECK EQ / LIVE OUTPUT EXISTS
+  ================================================= */
+
+  const eq =
+    setupDeckEQ(deck);
+
+
+  if (!eq) {
+
+    console.error(
+      "❌ GLCTC1 STEM AUDIO SYSTEM COULD NOT START:",
+      deck
+    );
+
+    return;
+
+  }
+
+
+  const a =
+    audio(deck);
+
+
+  if (!a) {
+    return;
+  }
+
+
+  a.src =
+    fileUrl;
+
+  a.load();
+
+
+  /* =================================================
+     🌊 DRAW WAVEFORM
+  ================================================= */
+
+  drawWaveform(deck);
+
+
+  /* =================================================
+     🎚️ BPM — ONLY IF AVAILABLE
+  ================================================= */
+
+  if (
+    typeof updateBpmMeter ===
+    "function"
+  ) {
+
+    updateBpmMeter(
+      deck,
+      bpm || 120
+    );
+
+  }
+
+}
   
 // --- SELECTED SLOT + PLAYER ---  
 function updateSelectedSlot(track) {  
@@ -8521,94 +8722,6 @@ async function startGLCTC1ArtistLiveBroadcast() {
     );
 
     return false;
-
-  }
-
-}
-
-// =====================================================
-// 👁️ STEP 23 — GET ARTIST LIVE OFFER
-// =====================================================
-
-async function getGLCTC1ArtistLiveOffer(
-  artistUserId
-) {
-
-  try {
-
-    if (!artistUserId) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST ID NOT PROVIDED"
-      );
-
-      return null;
-
-    }
-
-
-    const {
-      data: room,
-      error
-    } =
-      await supabaseClient
-        .from("glctc1_live_rooms")
-        .select(
-          "signaling_data"
-        )
-        .eq(
-          "user_id",
-          artistUserId
-        )
-        .maybeSingle();
-
-
-    if (error) {
-
-      console.error(
-        "❌ GLCTC1 ARTIST OFFER READ ERROR:",
-        error
-      );
-
-      return null;
-
-    }
-
-
-    const signaling =
-      room?.signaling_data;
-
-
-    if (
-      !signaling ||
-      !signaling.offer
-    ) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST LIVE OFFER NOT READY"
-      );
-
-      return null;
-
-    }
-
-
-    console.log(
-      "👁️ GLCTC1 ARTIST LIVE OFFER RECEIVED"
-    );
-
-
-    return signaling.offer;
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 ARTIST OFFER ERROR:",
-      error
-    );
-
-    return null;
 
   }
 

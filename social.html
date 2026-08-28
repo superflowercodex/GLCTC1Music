@@ -11113,6 +11113,302 @@ function initialiseGLCTC1ViewerSessionCleanup() {
 }
 
 // =====================================================
+// 👁️ STEP 32 — GLCTC1 WATCH PAGE AUTO RECONNECT
+// =====================================================
+
+let glctc1WatchReconnectTimer = null;
+
+let glctc1WatchReconnectAttempts = 0;
+
+const GLCTC1_WATCH_RECONNECT_MAX =
+  30;
+
+
+// =====================================================
+// 👁️ START WATCH PAGE RECONNECT MONITOR
+// =====================================================
+
+function startGLCTC1WatchReconnectMonitor(
+  artistUserId
+) {
+
+  if (!artistUserId) {
+
+    console.warn(
+      "⚠️ GLCTC1 WATCH RECONNECT ARTIST ID MISSING"
+    );
+
+    return;
+
+  }
+
+
+  if (glctc1WatchReconnectTimer) {
+
+    clearInterval(
+      glctc1WatchReconnectTimer
+    );
+
+  }
+
+
+  glctc1WatchReconnectAttempts =
+    0;
+
+
+  console.log(
+    "👁️ GLCTC1 WATCH RECONNECT MONITOR STARTED:",
+    artistUserId
+  );
+
+
+  glctc1WatchReconnectTimer =
+    setInterval(
+      async function () {
+
+        try {
+
+          glctc1WatchReconnectAttempts++;
+
+
+          if (
+            glctc1WatchReconnectAttempts >
+            GLCTC1_WATCH_RECONNECT_MAX
+          ) {
+
+            clearInterval(
+              glctc1WatchReconnectTimer
+            );
+
+            glctc1WatchReconnectTimer =
+              null;
+
+
+            console.log(
+              "ℹ️ GLCTC1 WATCH RECONNECT MONITOR FINISHED"
+            );
+
+            return;
+
+          }
+
+
+          // =========================================
+          // CHECK ARTIST LIVE STATUS
+          // =========================================
+
+          const {
+            data: artist,
+            error
+          } =
+            await supabaseClient
+              .from("live_artists")
+              .select(
+                "user_id, artist_name, is_live"
+              )
+              .eq(
+                "user_id",
+                artistUserId
+              )
+              .maybeSingle();
+
+
+          if (error) {
+
+            console.warn(
+              "⚠️ GLCTC1 WATCH RECONNECT STATUS ERROR:",
+              error
+            );
+
+            return;
+
+          }
+
+
+          if (
+            !artist ||
+            !artist.is_live
+          ) {
+
+            console.log(
+              "⏳ GLCTC1 WATCH RECONNECT WAITING FOR ARTIST:",
+              glctc1WatchReconnectAttempts,
+              "/",
+              GLCTC1_WATCH_RECONNECT_MAX
+            );
+
+            return;
+
+          }
+
+
+          console.log(
+            "🔴 GLCTC1 WATCH RECONNECT ARTIST IS LIVE:",
+            artist.artist_name ||
+            "ARTIST"
+          );
+
+
+          // =========================================
+          // CHECK EXISTING VIEWER CONNECTION
+          // =========================================
+
+          const existingConnection =
+            window.glctc1ViewerConnection;
+
+
+          if (
+            existingConnection &&
+            (
+              existingConnection.connectionState ===
+                "connected" ||
+              existingConnection.connectionState ===
+                "connecting"
+            )
+          ) {
+
+            console.log(
+              "👁️ GLCTC1 WATCH CONNECTION ALREADY ACTIVE"
+            );
+
+            return;
+
+          }
+
+
+          // =========================================
+          // STOP OLD CONNECTION
+          // =========================================
+
+          closeGLCTC1ViewerConnection();
+
+
+          // =========================================
+          // CREATE NEW VIEWER CONNECTION
+          // =========================================
+
+          const connected =
+            await createGLCTC1ViewerConnection(
+              artistUserId
+            );
+
+
+          if (!connected) {
+
+            console.warn(
+              "⚠️ GLCTC1 WATCH RECONNECT CONNECTION FAILED"
+            );
+
+            return;
+
+          }
+
+
+          // =========================================
+          // COMPLETE VIEWER CONNECTION
+          // =========================================
+
+          const completed =
+            await completeGLCTC1ViewerConnection(
+              artistUserId
+            );
+
+
+          if (!completed) {
+
+            console.warn(
+              "⚠️ GLCTC1 WATCH RECONNECT COULD NOT COMPLETE"
+            );
+
+            return;
+
+          }
+
+
+          // =========================================
+          // RESET SESSION STATE
+          // =========================================
+
+          glctc1ViewerSessionEnded =
+            false;
+
+
+          // =========================================
+          // ATTACH CONNECTION MONITOR
+          // =========================================
+
+          monitorGLCTC1ViewerConnection();
+
+
+          console.log(
+            "👁️ GLCTC1 WATCH VIEWER RECONNECTED"
+          );
+
+
+          // =========================================
+          // STOP RECONNECT MONITOR
+          // =========================================
+
+          clearInterval(
+            glctc1WatchReconnectTimer
+          );
+
+          glctc1WatchReconnectTimer =
+            null;
+
+
+          console.log(
+            "👁️ GLCTC1 WATCH RECONNECT COMPLETE"
+          );
+
+
+        } catch (error) {
+
+          console.error(
+            "❌ GLCTC1 WATCH RECONNECT ERROR:",
+            error
+          );
+
+        }
+
+      },
+      2000
+    );
+
+}
+
+
+// =====================================================
+// 👁️ STOP WATCH PAGE RECONNECT MONITOR
+// =====================================================
+
+function stopGLCTC1WatchReconnectMonitor() {
+
+  if (
+    glctc1WatchReconnectTimer
+  ) {
+
+    clearInterval(
+      glctc1WatchReconnectTimer
+    );
+
+    glctc1WatchReconnectTimer =
+      null;
+
+  }
+
+
+  glctc1WatchReconnectAttempts =
+    0;
+
+
+  console.log(
+    "👁️ GLCTC1 WATCH RECONNECT MONITOR STOPPED"
+  );
+
+}
+
+// =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION
 // =====================================================
 

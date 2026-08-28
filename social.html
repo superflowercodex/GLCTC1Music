@@ -8134,91 +8134,21 @@ async function completeGLCTC1ViewerConnection(
 }
 
 // =====================================================
-// 👁️ STEP 17 — START VIEWER FROM ARTIST URL
+// 🔒 STEP 23 — LOCK ARTIST WATCH PAGE
+// =====================================================
+//
+// The Live Artist Pool sends the viewer to:
+//
+// social.html?artist=ARTIST_USER_ID
+//
+// This step makes that artist ID the ONLY artist used
+// by the Watch Page.
+//
 // =====================================================
 
-async function startGLCTC1ViewerFromArtistURL() {
-
-  try {
-
-    const artistUserId =
-      getGLCTC1LiveArtistFromURL();
-
-
-    if (!artistUserId) {
-
-      console.warn(
-        "⚠️ GLCTC1 NO ARTIST ID IN URL"
-      );
-
-      return false;
-
-    }
-
-
-    console.log(
-      "👁️ GLCTC1 STARTING VIEWER FROM ARTIST URL:",
-      artistUserId
-    );
-
-
-    const connected =
-      await createGLCTC1ViewerConnection(
-        artistUserId
-      );
-
-
-    if (!connected) {
-
-      console.warn(
-        "⚠️ GLCTC1 VIEWER CONNECTION COULD NOT START"
-      );
-
-      return false;
-
-    }
-
-
-    const completed =
-      await completeGLCTC1ViewerConnection(
-        artistUserId
-      );
-
-
-    if (!completed) {
-
-      console.warn(
-        "⚠️ GLCTC1 VIEWER CONNECTION COULD NOT COMPLETE"
-      );
-
-      return false;
-
-    }
-
-
-    console.log(
-      "👁️ GLCTC1 VIEWER STARTED FROM ARTIST URL"
-    );
-
-
-    return true;
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 VIEWER URL START ERROR:",
-      error
-    );
-
-    return false;
-
-  }
-
-}
 
 // =====================================================
-// 👁️ STEP 18A — GET GLCTC1 LIVE ARTIST FROM URL
+// 👁️ GET GLCTC1 LIVE ARTIST FROM URL
 // =====================================================
 
 function getGLCTC1LiveArtistFromURL() {
@@ -8238,7 +8168,7 @@ function getGLCTC1LiveArtistFromURL() {
     if (!artistUserId) {
 
       console.log(
-        "ℹ️ GLCTC1 NO ARTIST ID IN URL"
+        "ℹ️ GLCTC1 NO ARTIST ID IN WATCH URL"
       );
 
       return null;
@@ -8247,7 +8177,7 @@ function getGLCTC1LiveArtistFromURL() {
 
 
     console.log(
-      "👁️ GLCTC1 LIVE ARTIST URL:",
+      "🔒 GLCTC1 WATCH ARTIST URL:",
       artistUserId
     );
 
@@ -8258,7 +8188,7 @@ function getGLCTC1LiveArtistFromURL() {
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 ARTIST URL READ ERROR:",
+      "❌ GLCTC1 WATCH ARTIST URL ERROR:",
       error
     );
 
@@ -8268,8 +8198,265 @@ function getGLCTC1LiveArtistFromURL() {
 
 }
 
+
 // =====================================================
-// 🔴 STEP 18B — RUN GLCTC1 LIVE VIEWER FROM URL
+// 🔒 LOCKED WATCH ARTIST
+// =====================================================
+
+let glctc1LockedWatchArtistId =
+  null;
+
+
+// =====================================================
+// 🔒 LOCK WATCH PAGE TO ARTIST
+// =====================================================
+
+function lockGLCTC1WatchArtist(
+  artistUserId
+) {
+
+  if (!artistUserId) {
+
+    glctc1LockedWatchArtistId =
+      null;
+
+    return false;
+
+  }
+
+
+  glctc1LockedWatchArtistId =
+    artistUserId;
+
+
+  console.log(
+    "🔒 GLCTC1 WATCH PAGE LOCKED TO ARTIST:",
+    glctc1LockedWatchArtistId
+  );
+
+
+  return true;
+
+}
+
+
+// =====================================================
+// 🔴 VERIFY ARTIST IS LIVE
+// =====================================================
+
+async function verifyGLCTC1WatchArtistLive(
+  artistUserId
+) {
+
+  try {
+
+    if (!artistUserId) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH ARTIST ID NOT PROVIDED"
+      );
+
+      return false;
+
+    }
+
+
+    const {
+      data,
+      error
+    } =
+      await supabaseClient
+        .from("live_artists")
+        .select(
+          "user_id, artist_name, is_live"
+        )
+        .eq(
+          "user_id",
+          artistUserId
+        )
+        .eq(
+          "is_live",
+          true
+        )
+        .maybeSingle();
+
+
+    if (error) {
+
+      console.error(
+        "❌ GLCTC1 WATCH ARTIST VERIFY ERROR:",
+        error
+      );
+
+      return false;
+
+    }
+
+
+    if (!data) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH ARTIST IS NOT LIVE:",
+        artistUserId
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 WATCH ARTIST VERIFIED LIVE:",
+      data.artist_name ||
+      "ARTIST"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 WATCH ARTIST VERIFY FAILED:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 👁️ START LOCKED ARTIST WATCH
+// =====================================================
+
+async function startGLCTC1LockedArtistWatch() {
+
+  try {
+
+    const artistUserId =
+      getGLCTC1LiveArtistFromURL();
+
+
+    if (!artistUserId) {
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔒 LOCK TO EXACT ARTIST FROM POOL
+    // =================================================
+
+    const locked =
+      lockGLCTC1WatchArtist(
+        artistUserId
+      );
+
+
+    if (!locked) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH ARTIST COULD NOT BE LOCKED"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 CONFIRM ARTIST IS LIVE
+    // =================================================
+
+    const artistIsLive =
+      await verifyGLCTC1WatchArtistLive(
+        glctc1LockedWatchArtistId
+      );
+
+
+    if (!artistIsLive) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH ARTIST IS OFFLINE"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 👁️ CREATE VIEWER FOR LOCKED ARTIST
+    // =================================================
+
+    const connected =
+      await createGLCTC1ViewerConnection(
+        glctc1LockedWatchArtistId
+      );
+
+
+    if (!connected) {
+
+      console.warn(
+        "⚠️ GLCTC1 LOCKED WATCH CONNECTION COULD NOT START"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 👁️ COMPLETE VIEWER CONNECTION
+    // =================================================
+
+    const completed =
+      await completeGLCTC1ViewerConnection(
+        glctc1LockedWatchArtistId
+      );
+
+
+    if (!completed) {
+
+      console.warn(
+        "⚠️ GLCTC1 LOCKED WATCH CONNECTION COULD NOT COMPLETE"
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "🔒 GLCTC1 ARTIST WATCH PAGE READY:",
+      glctc1LockedWatchArtistId
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 LOCKED WATCH ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 👁️ RUN LOCKED WATCH PAGE
 // =====================================================
 
 document.addEventListener(
@@ -8290,19 +8477,19 @@ document.addEventListener(
 
 
       console.log(
-        "🔴 GLCTC1 STARTING LIVE VIEWER:",
+        "👁️ GLCTC1 OPENING ARTIST WATCH PAGE:",
         artistUserId
       );
 
 
       const started =
-        await startGLCTC1ViewerFromArtistURL();
+        await startGLCTC1LockedArtistWatch();
 
 
       if (!started) {
 
         console.warn(
-          "⚠️ GLCTC1 LIVE VIEWER COULD NOT START"
+          "⚠️ GLCTC1 ARTIST WATCH PAGE COULD NOT START"
         );
 
         return;
@@ -8311,14 +8498,14 @@ document.addEventListener(
 
 
       console.log(
-        "🔴 GLCTC1 LIVE VIEWER STARTED"
+        "🔒 GLCTC1 ARTIST WATCH PAGE LOCKED AND READY"
       );
 
 
     } catch (error) {
 
       console.error(
-        "❌ GLCTC1 LIVE VIEWER START ERROR:",
+        "❌ GLCTC1 ARTIST WATCH PAGE ERROR:",
         error
       );
 
@@ -8326,6 +8513,8 @@ document.addEventListener(
 
   }
 );
+
+
 
 // =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION

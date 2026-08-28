@@ -14693,15 +14693,15 @@ console.log(
 );
 
 // =====================================================
-// 👁️ STEP 46 — GLCTC1 VIEWER LIVE AUDIO RECEIVER
+// 🔴 STEP 46 — GLCTC1 VIEWER LIVE AUDIO + VIDEO RECEIVER
 // =====================================================
 //
 // ARTIST
-//   ↓
-// WebRTC AUDIO TRACK
-//   ↓
-// glctc1_live_rooms
-//   ↓
+//   🎵 PROCESSED DECK AUDIO
+//   🎥 EXISTING WEBCAM VIDEO
+//          ↓
+//       WebRTC
+//          ↓
 // VIEWER
 //
 // Uses the existing GLCTC1 WebRTC signalling system.
@@ -14714,6 +14714,7 @@ console.log(
 //   • Share
 //   • Master Library
 //   • Artist controls
+//   • Supabase signalling structure
 // =====================================================
 
 
@@ -14774,6 +14775,54 @@ function getGLCTC1ViewerAudioElement() {
 
 
   return audio;
+
+}
+
+
+// =====================================================
+// 🎥 GET EXISTING GLCTC1 VIDEO ELEMENT
+// =====================================================
+
+function getGLCTC1ViewerVideoElement() {
+
+  const video =
+    document.getElementById(
+      "glctc1Video"
+    );
+
+
+  if (!video) {
+
+    console.warn(
+      "⚠️ GLCTC1 VIEWER VIDEO ELEMENT NOT FOUND"
+    );
+
+    return null;
+
+  }
+
+
+  video.autoplay =
+    true;
+
+
+  video.playsInline =
+    true;
+
+
+  video.controls =
+    true;
+
+
+  video.muted =
+    true;
+
+
+  video.style.display =
+    "block";
+
+
+  return video;
 
 }
 
@@ -14914,70 +14963,149 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     // =================================================
-    // 🎵 RECEIVE ARTIST AUDIO
+    // 🎵🎥 RECEIVE ARTIST LIVE MEDIA
     // =================================================
 
     viewerConnection.ontrack =
       function (event) {
 
         console.log(
-          "🎵 GLCTC1 VIEWER RECEIVED LIVE TRACK:",
+          "👁️ GLCTC1 VIEWER RECEIVED LIVE TRACK:",
           event.track.kind
         );
-
-
-        if (
-          event.track.kind !==
-          "audio"
-        ) {
-
-          return;
-
-        }
-
-
-        const audio =
-          getGLCTC1ViewerAudioElement();
 
 
         const incomingStream =
           event.streams?.[0];
 
 
-        if (incomingStream) {
+        // =================================================
+        // 🎵 RECEIVE LIVE AUDIO
+        // =================================================
 
-          audio.srcObject =
-            incomingStream;
+        if (
+          event.track.kind ===
+          "audio"
+        ) {
 
-        } else {
-
-          const stream =
-            audio.srcObject ||
-            new MediaStream();
+          const audio =
+            getGLCTC1ViewerAudioElement();
 
 
-          stream.addTrack(
-            event.track
+          if (!audio) {
+
+            return;
+
+          }
+
+
+          if (incomingStream) {
+
+            audio.srcObject =
+              incomingStream;
+
+          } else {
+
+            const stream =
+              audio.srcObject ||
+              new MediaStream();
+
+
+            stream.addTrack(
+              event.track
+            );
+
+
+            audio.srcObject =
+              stream;
+
+          }
+
+
+          audio.play()
+            .catch(
+              function (error) {
+
+                console.warn(
+                  "⚠️ GLCTC1 VIEWER AUDIO AUTOPLAY BLOCKED:",
+                  error
+                );
+
+              }
+            );
+
+
+          console.log(
+            "🔊 GLCTC1 VIEWER LIVE AUDIO RECEIVED"
           );
 
 
-          audio.srcObject =
-            stream;
+          return;
 
         }
 
 
-        audio.play()
-          .catch(
-            function (error) {
+        // =================================================
+        // 🎥 RECEIVE LIVE VIDEO
+        // =================================================
 
-              console.warn(
-                "⚠️ GLCTC1 VIEWER AUDIO AUTOPLAY BLOCKED:",
-                error
-              );
+        if (
+          event.track.kind ===
+          "video"
+        ) {
 
-            }
+          const video =
+            getGLCTC1ViewerVideoElement();
+
+
+          if (!video) {
+
+            return;
+
+          }
+
+
+          if (incomingStream) {
+
+            video.srcObject =
+              incomingStream;
+
+          } else {
+
+            const stream =
+              video.srcObject ||
+              new MediaStream();
+
+
+            stream.addTrack(
+              event.track
+            );
+
+
+            video.srcObject =
+              stream;
+
+          }
+
+
+          video.play()
+            .catch(
+              function (error) {
+
+                console.warn(
+                  "⚠️ GLCTC1 VIEWER VIDEO AUTOPLAY BLOCKED:",
+                  error
+                );
+
+              }
+            );
+
+
+          console.log(
+            "🎥 GLCTC1 VIEWER LIVE VIDEO RECEIVED"
           );
+
+        }
 
       };
 
@@ -15058,6 +15186,7 @@ async function startGLCTC1ViewerFromArtistURL() {
               usernameFragment:
                 event.candidate.usernameFragment ||
                 null
+
             }
           );
 
@@ -15106,6 +15235,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
           sdp:
             offer.sdp
+
         }
       )
     );
@@ -15174,31 +15304,56 @@ async function startGLCTC1ViewerFromArtistURL() {
       {};
 
 
-    await supabaseClient
-      .from("glctc1_live_rooms")
-      .update({
+    const {
+      error: answerSaveError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .update({
 
-        signaling_data: {
+          signaling_data: {
 
-          ...answerSignaling,
+            ...answerSignaling,
 
-          answer: {
+            answer: {
 
-            type:
-              answer.type,
+              type:
+                answer.type,
 
-            sdp:
-              answer.sdp
+              sdp:
+                answer.sdp
+
+            }
 
           }
 
-        }
+        })
+        .eq(
+          "user_id",
+          artistUserId
+        );
 
-      })
-      .eq(
-        "user_id",
-        artistUserId
+
+    if (answerSaveError) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER ANSWER SAVE ERROR:",
+        answerSaveError
       );
+
+      viewerConnection.close();
+
+      window.glctc1ViewerConnection =
+        null;
+
+      return false;
+
+    }
+
+
+    console.log(
+      "👁️ GLCTC1 VIEWER ANSWER SAVED"
+    );
 
 
     // =================================================
@@ -15230,6 +15385,10 @@ async function startGLCTC1ViewerFromArtistURL() {
       };
 
 
+    // =================================================
+    // 🔴 ICE CONNECTION MONITOR
+    // =================================================
+
     viewerConnection.oniceconnectionstatechange =
       function () {
 
@@ -15242,7 +15401,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     console.log(
-      "🎵 GLCTC1 VIEWER LIVE AUDIO CONNECTION READY"
+      "🎵🎥 GLCTC1 VIEWER LIVE AUDIO + VIDEO CONNECTION READY"
     );
 
 
@@ -15334,6 +15493,10 @@ async function cleanupGLCTC1ViewerConnection() {
     null;
 
 
+  // =================================================
+  // 🎵 CLEANUP AUDIO
+  // =================================================
+
   const audio =
     document.getElementById(
       "glctc1ViewerAudio"
@@ -15361,6 +15524,37 @@ async function cleanupGLCTC1ViewerConnection() {
   }
 
 
+  // =================================================
+  // 🎥 CLEANUP VIDEO
+  // =================================================
+
+  const video =
+    document.getElementById(
+      "glctc1Video"
+    );
+
+
+  if (video) {
+
+    try {
+
+      video.pause();
+
+      video.srcObject =
+        null;
+
+    } catch (error) {
+
+      console.warn(
+        "⚠️ GLCTC1 VIEWER VIDEO CLEANUP:",
+        error
+      );
+
+    }
+
+  }
+
+
   return true;
 
 }
@@ -15371,7 +15565,7 @@ async function cleanupGLCTC1ViewerConnection() {
 // =====================================================
 
 console.log(
-  "🔴 GLCTC1 STEP 46 — VIEWER LIVE AUDIO RECEIVER READY"
+  "🔴 GLCTC1 STEP 46 — VIEWER LIVE AUDIO + VIDEO RECEIVER READY"
 );
 
 
@@ -15437,7 +15631,7 @@ async function createGLCTC1ArtistLiveConnection() {
 
 
     /* =================================================
-       🔴 ADD AUDIO TRACKS
+       🎵 ADD EXISTING PROCESSED LIVE AUDIO
     ================================================= */
 
     const audioTracks =
@@ -15473,8 +15667,59 @@ async function createGLCTC1ArtistLiveConnection() {
 
 
     console.log(
-      "🔴 GLCTC1 ARTIST AUDIO TRACK ADDED"
+      "🔊 GLCTC1 ARTIST PROCESSED AUDIO TRACK ADDED"
     );
+
+
+    /* =================================================
+       🎥 ADD EXISTING WEBCAM VIDEO
+    ================================================= */
+
+    if (
+      typeof glctc1WebcamStream !==
+        "undefined" &&
+      glctc1WebcamStream
+    ) {
+
+      const videoTracks =
+        glctc1WebcamStream.getVideoTracks();
+
+
+      if (
+        videoTracks.length
+      ) {
+
+        videoTracks.forEach(
+          function (track) {
+
+            glctc1PeerConnection.addTrack(
+              track,
+              glctc1WebcamStream
+            );
+
+          }
+        );
+
+
+        console.log(
+          "🎥 GLCTC1 ARTIST WEBCAM VIDEO TRACK ADDED"
+        );
+
+      } else {
+
+        console.warn(
+          "⚠️ GLCTC1 WEBCAM STREAM HAS NO VIDEO TRACK"
+        );
+
+      }
+
+    } else {
+
+      console.warn(
+        "ℹ️ GLCTC1 WEBCAM NOT ACTIVE — AUDIO ONLY LIVE"
+      );
+
+    }
 
 
     /* =================================================
@@ -15522,11 +15767,37 @@ async function createGLCTC1ArtistLiveConnection() {
       error
     );
 
+    if (
+      glctc1PeerConnection
+    ) {
+
+      try {
+
+        glctc1PeerConnection.close();
+
+      } catch (cleanupError) {
+
+        console.warn(
+          "⚠️ GLCTC1 ARTIST CONNECTION CLEANUP ERROR:",
+          cleanupError
+        );
+
+      }
+
+    }
+
+
+    glctc1PeerConnection =
+      null;
+
+
     return false;
 
   }
 
 }
+
+
 
 // =====================================================
 // 🔴 STEP 20 — CREATE GLCTC1 ARTIST LIVE OFFER

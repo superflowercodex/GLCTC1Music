@@ -13542,15 +13542,15 @@ console.log(
 );
 
 // =====================================================
-// 🔴 STEP 44 — ARTIST WATCH PAGE AUTO-LIVE HAND-OFF
+// 🔴 STEP 44 — ARTIST WATCH PAGE IDENTITY LOCK
 // =====================================================
 
-async function glctc1AutoStartArtistWatchLive() {
+async function glctc1InitialiseArtistWatchPage() {
 
   try {
 
     // -------------------------------------------------
-    // GET THE ARTIST ID FROM THE CURRENT WATCH URL
+    // READ ARTIST ID FROM THIS PAGE'S URL
     // -------------------------------------------------
 
     const params =
@@ -13565,7 +13565,7 @@ async function glctc1AutoStartArtistWatchLive() {
     if (!artistUserId) {
 
       console.log(
-        "ℹ️ GLCTC1 NO ARTIST ID IN WATCH URL"
+        "ℹ️ GLCTC1 NORMAL SOCIAL PAGE"
       );
 
       return false;
@@ -13573,8 +13573,14 @@ async function glctc1AutoStartArtistWatchLive() {
     }
 
 
+    console.log(
+      "🔒 GLCTC1 WATCH PAGE ARTIST ID:",
+      artistUserId
+    );
+
+
     // -------------------------------------------------
-    // GET CURRENT LOGGED-IN USER
+    // GET THE REAL CURRENT AUTH USER
     // -------------------------------------------------
 
     const {
@@ -13584,45 +13590,57 @@ async function glctc1AutoStartArtistWatchLive() {
       await supabaseClient.auth.getUser();
 
 
-    if (
-      error ||
-      !data?.user
-    ) {
+    if (error) {
 
       console.warn(
-        "⚠️ GLCTC1 WATCH PAGE — ARTIST NOT LOGGED IN"
+        "⚠️ GLCTC1 WATCH AUTH CHECK:",
+        error
       );
-
-      return false;
 
     }
 
 
-    // -------------------------------------------------
-    // ONLY THE ARTIST WHO OWNS THE PAGE CAN AUTO-LIVE
-    // -------------------------------------------------
-
-    if (
-      data.user.id !==
-      artistUserId
-    ) {
-
-      console.log(
-        "👁️ GLCTC1 WATCH PAGE — VIEWER MODE:",
-        artistUserId
-      );
-
-      return false;
-
-    }
+    const currentUser =
+      data?.user ||
+      null;
 
 
     // -------------------------------------------------
-    // GET ARTIST NAME
+    // DETERMINE WHETHER THIS IS THE ARTIST'S OWN PAGE
+    // OR A VIEWER'S PAGE
+    // -------------------------------------------------
+
+    const isArtistOwner =
+      !!currentUser &&
+      currentUser.id ===
+      artistUserId;
+
+
+    window.glctc1WatchPage = {
+
+      active:
+        true,
+
+      artistUserId:
+        artistUserId,
+
+      isArtistOwner:
+        isArtistOwner,
+
+      currentUserId:
+        currentUser?.id ||
+        null
+
+    };
+
+
+    // -------------------------------------------------
+    // GET THE ARTIST PROFILE
     // -------------------------------------------------
 
     const {
-      data: profile
+      data: profile,
+      error: profileError
     } =
       await supabaseClient
         .from("profiles")
@@ -13636,55 +13654,27 @@ async function glctc1AutoStartArtistWatchLive() {
         .maybeSingle();
 
 
+    if (profileError) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH PROFILE READ:",
+        profileError
+      );
+
+    }
+
+
     const artistName =
       profile?.artist_name ||
       "ARTIST";
 
 
-    // -------------------------------------------------
-    // MARK THIS ARTIST LIVE
-    // -------------------------------------------------
-
-    const {
-      error: liveError
-    } =
-      await supabaseClient
-        .from("live_artists")
-        .upsert(
-          {
-            user_id:
-              artistUserId,
-
-            artist_name:
-              artistName,
-
-            is_live:
-              true,
-
-            updated_at:
-              new Date().toISOString()
-          },
-          {
-            onConflict:
-              "user_id"
-          }
-        );
-
-
-    if (liveError) {
-
-      console.error(
-        "❌ GLCTC1 WATCH AUTO-LIVE ERROR:",
-        liveError
-      );
-
-      return false;
-
-    }
+    window.glctc1WatchPage.artistName =
+      artistName;
 
 
     // -------------------------------------------------
-    // STORE WATCH SESSION
+    // STORE WATCH SESSION FOR THE EXISTING SYSTEM
     // -------------------------------------------------
 
     if (
@@ -13701,46 +13691,80 @@ async function glctc1AutoStartArtistWatchLive() {
 
 
     // -------------------------------------------------
-    // UPDATE GO LIVE BUTTON
+    // ARTIST OWNER
     // -------------------------------------------------
 
-    const button =
-      document.getElementById(
-        "glctc1GoLiveButton"
+    if (isArtistOwner) {
+
+      console.log(
+        "🔴 GLCTC1 ARTIST OWNER WATCH PAGE:",
+        artistName
       );
 
 
-    if (button) {
-
-      button.textContent =
-        "🔴 END LIVE";
-
-      button.dataset.live =
-        "true";
+      // IMPORTANT:
+      // We DO NOT start the broadcast here.
+      // We DO NOT sign the user in.
+      // We DO NOT create another End Live button.
+      //
+      // The existing Go Live / End Live system
+      // remains responsible for live control.
 
     }
 
 
     // -------------------------------------------------
-    // END LIVE BUTTON
+    // NORMAL VIEWER
     // -------------------------------------------------
 
-    const endButton =
+    else {
+
+      console.log(
+        "👁️ GLCTC1 VIEWER WATCHING:",
+        artistName
+      );
+
+    }
+
+
+    // -------------------------------------------------
+    // UPDATE ARTIST DISPLAY IF PRESENT
+    // -------------------------------------------------
+
+    const artistDisplay =
       document.getElementById(
-        "glctc1EndLiveButton"
+        "glctc1SocialArtist"
       );
 
 
-    if (endButton) {
+    if (artistDisplay) {
 
-      endButton.style.display =
-        "";
+      artistDisplay.value =
+        artistName;
+
+    }
+
+
+    // -------------------------------------------------
+    // UPDATE ARTIST ID DISPLAY IF PRESENT
+    // -------------------------------------------------
+
+    const artistIdDisplay =
+      document.getElementById(
+        "glctc1SocialArtistId"
+      );
+
+
+    if (artistIdDisplay) {
+
+      artistIdDisplay.value =
+        artistUserId;
 
     }
 
 
     console.log(
-      "🔴 GLCTC1 ARTIST AUTO-LIVE ACTIVE:",
+      "🔒 GLCTC1 ARTIST WATCH PAGE READY:",
       artistName,
       artistUserId
     );
@@ -13752,7 +13776,7 @@ async function glctc1AutoStartArtistWatchLive() {
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 AUTO-LIVE HAND-OFF ERROR:",
+      "❌ GLCTC1 WATCH PAGE INITIALISATION ERROR:",
       error
     );
 
@@ -13764,28 +13788,14 @@ async function glctc1AutoStartArtistWatchLive() {
 
 
 // =====================================================
-// 🔴 START WHEN ARTIST WATCH PAGE OPENS
+// 🔴 STEP 44 — PAGE START
 // =====================================================
 
 document.addEventListener(
   "DOMContentLoaded",
   async function () {
 
-    const params =
-      new URLSearchParams(
-        window.location.search
-      );
-
-    const artistUserId =
-      params.get("artist");
-
-
-    if (!artistUserId) {
-      return;
-    }
-
-
-    await glctc1AutoStartArtistWatchLive();
+    await glctc1InitialiseArtistWatchPage();
 
   }
 );
@@ -13796,7 +13806,7 @@ document.addEventListener(
 // =====================================================
 
 console.log(
-  "🔴 GLCTC1 STEP 44 — ARTIST WATCH AUTO-LIVE READY"
+  "🔴 GLCTC1 STEP 44 — WATCH PAGE IDENTITY LOCK READY"
 );
 
 // =====================================================

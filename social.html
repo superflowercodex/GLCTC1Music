@@ -13823,42 +13823,60 @@ console.log(
 );
 
 // =====================================================
-// 🔐 STEP 45 — ARTIST WATCH PAGE OWNER LOCK
+// 🔴 STEP 45 — GLCTC1 LIVE PAGE
+// ARTIST CONTROL MODE / VIEWER WATCH MODE
 // =====================================================
 //
-// PURPOSE:
+// ONE LIVE PAGE
 //
-// The ?artist= ID identifies the artist whose page
-// is being watched.
+// ?artist=ARTIST_USER_ID
 //
-// Supabase Auth identifies the person actually logged in.
+// ARTIST OWNER:
+//   Full control of their live session.
 //
-// ONLY when:
-//
-//     loggedInUser.id === URL artist ID
-//
-// is the person treated as the page owner.
-//
-// Everyone else remains a viewer.
+// VIEWER:
+//   Receives the same live session.
+//   Can WATCH + CHAT + SHARE.
+//   Cannot operate artist controls.
 //
 // IMPORTANT:
-// This does NOT:
-// - log anyone in
-// - log anyone out
-// - start Go Live
-// - end Live
-// - create buttons
-// - alter the Live Pool
-// - alter Share
+//   • Does NOT create another login system.
+//   • Does NOT log anyone in.
+//   • Does NOT log anyone out.
+//   • Does NOT create another Go Live button.
+//   • Does NOT create another End Live button.
+//   • Does NOT alter the Live Pool.
+//   • Does NOT start or stop the broadcast.
+//   • Does NOT interfere with Share or Chat.
 // =====================================================
 
 
-async function glctc1ApplyArtistWatchOwnerLock() {
+window.glctc1LivePageMode =
+  "viewer";
+
+
+window.glctc1LivePageArtistId =
+  null;
+
+
+window.glctc1LivePageCurrentUserId =
+  null;
+
+
+window.glctc1LivePageOwner =
+  false;
+
+
+// =====================================================
+// 🔐 DETERMINE ARTIST / VIEWER MODE
+// =====================================================
+
+async function initialiseGLCTC1LivePageMode() {
 
   try {
 
     // -------------------------------------------------
-    // GET ARTIST ID FROM WATCH PAGE URL
+    // READ ARTIST ID FROM URL
     // -------------------------------------------------
 
     const params =
@@ -13866,15 +13884,15 @@ async function glctc1ApplyArtistWatchOwnerLock() {
         window.location.search
       );
 
+
     const artistUserId =
       params.get("artist");
 
 
-    // Normal social page — nothing to lock.
     if (!artistUserId) {
 
       console.log(
-        "ℹ️ GLCTC1 OWNER LOCK — NORMAL SOCIAL PAGE"
+        "ℹ️ GLCTC1 NORMAL SOCIAL PAGE"
       );
 
       return false;
@@ -13882,8 +13900,12 @@ async function glctc1ApplyArtistWatchOwnerLock() {
     }
 
 
+    window.glctc1LivePageArtistId =
+      artistUserId;
+
+
     // -------------------------------------------------
-    // GET THE REAL SUPABASE AUTH USER
+    // GET REAL SUPABASE USER
     // -------------------------------------------------
 
     const {
@@ -13896,61 +13918,60 @@ async function glctc1ApplyArtistWatchOwnerLock() {
     if (error) {
 
       console.warn(
-        "⚠️ GLCTC1 OWNER LOCK AUTH CHECK:",
+        "⚠️ GLCTC1 AUTH CHECK:",
         error
       );
 
     }
 
 
-    const loggedInUser =
+    const currentUser =
       data?.user ||
       null;
 
 
+    window.glctc1LivePageCurrentUserId =
+      currentUser?.id ||
+      null;
+
+
     // -------------------------------------------------
-    // DETERMINE PAGE OWNERSHIP
+    // OWNER CHECK
     // -------------------------------------------------
 
     const isOwner =
-      !!loggedInUser &&
-      loggedInUser.id ===
+      !!currentUser &&
+      currentUser.id ===
       artistUserId;
 
 
-    // -------------------------------------------------
-    // STORE THE RESULT
-    // -------------------------------------------------
-
-    window.glctc1WatchPage =
-      window.glctc1WatchPage ||
-      {};
-
-    window.glctc1WatchPage.artistUserId =
-      artistUserId;
-
-    window.glctc1WatchPage.currentUserId =
-      loggedInUser?.id ||
-      null;
-
-    window.glctc1WatchPage.isArtistOwner =
+    window.glctc1LivePageOwner =
       isOwner;
 
 
     // -------------------------------------------------
-    // ARTIST OWNS THIS PAGE
+    // ARTIST CONTROL MODE
     // -------------------------------------------------
 
     if (isOwner) {
 
-      console.log(
-        "🔴 GLCTC1 WATCH OWNER VERIFIED:",
-        loggedInUser.id
-      );
+      window.glctc1LivePageMode =
+        "artist";
+
 
       console.log(
-        "🔓 GLCTC1 ARTIST CONTROLS UNLOCKED"
+        "🔴 GLCTC1 LIVE PAGE MODE: ARTIST CONTROL"
       );
+
+
+      console.log(
+        "🔐 GLCTC1 ARTIST OWNER VERIFIED:",
+        artistUserId
+      );
+
+
+      // Nothing is locked.
+      // Existing artist controls remain untouched.
 
       return true;
 
@@ -13958,137 +13979,186 @@ async function glctc1ApplyArtistWatchOwnerLock() {
 
 
     // -------------------------------------------------
-    // VIEWER / DIFFERENT USER
+    // VIEWER WATCH MODE
     // -------------------------------------------------
 
+    window.glctc1LivePageMode =
+      "viewer";
+
+
     console.log(
-      "👁️ GLCTC1 WATCH VIEWER MODE:",
+      "👁️ GLCTC1 LIVE PAGE MODE: VIEWER"
+    );
+
+
+    console.log(
+      "👁️ GLCTC1 WATCHING ARTIST:",
       artistUserId
     );
 
 
     // -------------------------------------------------
-    // FIND SHARE
-    //
-    // We deliberately do NOT touch Share itself.
+    // APPLY VIEWER CONTROL LOCK
     // -------------------------------------------------
 
-    const allElements =
-      Array.from(
-        document.querySelectorAll(
-          "button, a, input, select, textarea"
+    lockGLCTC1ArtistControlsForViewer();
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 LIVE PAGE MODE ERROR:",
+      error
+    );
+
+
+    // Fail safely as VIEWER.
+    window.glctc1LivePageMode =
+      "viewer";
+
+
+    window.glctc1LivePageOwner =
+      false;
+
+
+    lockGLCTC1ArtistControlsForViewer();
+
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 🔒 VIEWER CONTROL LOCK
+// =====================================================
+
+function lockGLCTC1ArtistControlsForViewer() {
+
+  // ---------------------------------------------------
+  // PUBLIC ELEMENTS
+  //
+  // These remain usable by everybody.
+  // ---------------------------------------------------
+
+  const publicSelectors = [
+
+    // Crowd Chat
+    "#glctc1CommentsCard",
+    "#glctc1Chat",
+    "#glctc1ChatMessages",
+    "#glctc1ChatComposer",
+    "#glctc1ChatInput",
+
+    // Share
+    "#glctc1Share",
+    "#glctc1ShareButton",
+
+    // Live media / viewing
+    "#glctc1LiveFrame",
+    "#glctc1VideoFrame",
+    "#glctc1AudioPlayer",
+    "#glctc1LiveVideo",
+    "#glctc1LiveAudio"
+
+  ];
+
+
+  // ---------------------------------------------------
+  // FIND EVERYTHING INTERACTIVE
+  // ---------------------------------------------------
+
+  const controls =
+    Array.from(
+      document.querySelectorAll(
+        "button, input, select, textarea"
+      )
+    );
+
+
+  controls.forEach(
+    function (control) {
+
+      // ------------------------------------------------
+      // NEVER LOCK CHAT
+      // ------------------------------------------------
+
+      if (
+        control.id ===
+          "glctc1ChatInput"
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        control.closest(
+          "#glctc1ChatComposer"
         )
-      );
+      ) {
+
+        return;
+
+      }
 
 
-    const shareElement =
-      allElements.find(
-        function (element) {
+      // ------------------------------------------------
+      // NEVER LOCK SHARE
+      // ------------------------------------------------
 
-          const text =
-            (
-              element.textContent ||
-              element.value ||
-              ""
-            )
-              .trim()
-              .toUpperCase();
+      if (
+        control.id ===
+          "glctc1Share" ||
+        control.id ===
+          "glctc1ShareButton"
+      ) {
 
+        return;
 
-          return (
-            text === "SHARE" ||
-            text.includes("SHARE")
-          );
-
-        }
-      );
+      }
 
 
-    if (!shareElement) {
-
-      console.warn(
-        "⚠️ GLCTC1 SHARE CONTROL NOT FOUND — NO CONTROLS LOCKED"
-      );
-
-      return false;
-
-    }
-
-
-    // -------------------------------------------------
-    // FIND THE MAIN PAGE SECTION CONTAINING SHARE
-    // -------------------------------------------------
-
-    const shareSection =
-      shareElement.closest(
-        "section, article, .card, .module, .panel, div"
-      );
-
-
-    if (!shareSection) {
-
-      console.warn(
-        "⚠️ GLCTC1 SHARE CONTAINER NOT FOUND"
-      );
-
-      return false;
-
-    }
-
-
-    // -------------------------------------------------
-    // LOCK INTERACTIVE CONTENT AFTER SHARE
-    //
-    // SHARE ITSELF REMAINS AVAILABLE.
-    // -------------------------------------------------
-
-    const sectionElements =
-      Array.from(
-        shareSection.querySelectorAll(
-          "button, a, input, select, textarea"
+      if (
+        control.closest(
+          "[data-glctc1-public='share']"
         )
-      );
+      ) {
+
+        return;
+
+      }
 
 
-    const shareIndex =
-      sectionElements.indexOf(
-        shareElement
-      );
+      // ------------------------------------------------
+      // NEVER LOCK AUTHENTICATION
+      // ------------------------------------------------
 
-
-    if (shareIndex === -1) {
-
-      console.warn(
-        "⚠️ GLCTC1 SHARE POSITION NOT FOUND"
-      );
-
-      return false;
-
-    }
-
-
-    for (
-      let i = shareIndex + 1;
-      i < sectionElements.length;
-      i++
-    ) {
-
-      const control =
-        sectionElements[i];
-
-
-      // Never interfere with authentication.
       if (
         control.id ===
           "loginButton" ||
         control.id ===
-          "logoutButton"
+          "logoutButton" ||
+        control.id ===
+          "loginBtn" ||
+        control.id ===
+          "logoutBtn"
       ) {
 
-        continue;
+        return;
 
       }
 
+
+      // ------------------------------------------------
+      // LOCK ARTIST CONTROL
+      // ------------------------------------------------
 
       control.disabled =
         true;
@@ -14100,66 +14170,239 @@ async function glctc1ApplyArtistWatchOwnerLock() {
       );
 
 
-      control.style.opacity =
-        "0.45";
-
-
-      control.style.cursor =
-        "not-allowed";
+      control.dataset.glctc1OwnerOnly =
+        "true";
 
     }
+  );
 
 
-    // -------------------------------------------------
-    // FINAL STATE
-    // -------------------------------------------------
+  // ---------------------------------------------------
+  // ARTIST CONTROL AREAS
+  //
+  // These are common GLCTC1 control containers.
+  // We do NOT hide them because the viewer should
+  // still see the live page.
+  //
+  // We only prevent interaction.
+  // ---------------------------------------------------
 
-    console.log(
-      "🔒 GLCTC1 ARTIST CONTROLS LOCKED FOR VIEWER"
-    );
+  const ownerControlSelectors = [
 
-    console.log(
-      "👁️ GLCTC1 SHARE REMAINS AVAILABLE"
-    );
+    "#glctc1GoLiveButton",
+    "#glctc1EndLiveButton",
+
+    "#glctc1LiveControls",
+    "#glctc1ArtistControls",
+    "#glctc1DJControls",
+    "#glctc1DeckControls",
+    "#glctc1PrivateDJRoom",
+    "#glctc1MusicControls",
+    "#glctc1MasterLibrary",
+    "#masterLibrary",
+    "#deckA",
+    "#deckB"
+
+  ];
 
 
-    return false;
+  ownerControlSelectors.forEach(
+    function (selector) {
+
+      const element =
+        document.querySelector(
+          selector
+        );
 
 
-  } catch (error) {
+      if (!element) {
+        return;
+      }
 
-    console.error(
-      "❌ GLCTC1 OWNER LOCK ERROR:",
-      error
-    );
 
-    return false;
+      // ------------------------------------------------
+      // NEVER LOCK CHAT OR SHARE CONTAINERS
+      // ------------------------------------------------
 
-  }
+      if (
+        element.closest(
+          "#glctc1CommentsCard"
+        )
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        element.closest(
+          "[data-glctc1-public='share']"
+        )
+      ) {
+
+        return;
+
+      }
+
+
+      element
+        .querySelectorAll(
+          "button, input, select, textarea"
+        )
+        .forEach(
+          function (control) {
+
+            control.disabled =
+              true;
+
+            control.setAttribute(
+              "aria-disabled",
+              "true"
+            );
+
+            control.dataset.glctc1OwnerOnly =
+              "true";
+
+          }
+        );
+
+    }
+  );
+
+
+  // ---------------------------------------------------
+  // FINAL VIEWER STATE
+  // ---------------------------------------------------
+
+  document.documentElement.dataset.glctc1Mode =
+    "viewer";
+
+
+  console.log(
+    "🔒 GLCTC1 ARTIST CONTROLS LOCKED"
+  );
+
+
+  console.log(
+    "👁️ GLCTC1 VIEWER CAN WATCH + CHAT + SHARE"
+  );
 
 }
 
 
 // =====================================================
-// 🔐 STEP 45 — RUN AFTER PAGE LOAD
+// 🔓 OWNER CONTROL STATE
+// =====================================================
+
+function unlockGLCTC1ArtistControls() {
+
+  document
+    .querySelectorAll(
+      "[data-glctc1-owner-only='true']"
+    )
+    .forEach(
+      function (control) {
+
+        control.disabled =
+          false;
+
+
+        control.removeAttribute(
+          "aria-disabled"
+        );
+
+
+        delete control.dataset
+          .glctc1OwnerOnly;
+
+      }
+    );
+
+
+  document.documentElement.dataset.glctc1Mode =
+    "artist";
+
+
+  console.log(
+    "🔓 GLCTC1 ARTIST CONTROLS AVAILABLE"
+  );
+
+}
+
+
+// =====================================================
+// 🔐 PAGE INITIALISATION
 // =====================================================
 
 document.addEventListener(
   "DOMContentLoaded",
   async function () {
 
-    await glctc1ApplyArtistWatchOwnerLock();
+    const isReady =
+      await initialiseGLCTC1LivePageMode();
+
+
+    if (!isReady) {
+
+      return;
+
+    }
+
+
+    if (
+      window.glctc1LivePageOwner ===
+      true
+    ) {
+
+      unlockGLCTC1ArtistControls();
+
+    }
 
   }
 );
 
 
 // =====================================================
-// 🔐 STEP 45 READY
+// 🔐 AUTH STATE CHANGE
+// =====================================================
+//
+// If somebody logs in or out while the page is open,
+// recalculate ownership.
+//
+// This does NOT perform login or logout.
+// It only observes Supabase's existing auth state.
+// =====================================================
+
+if (
+  typeof supabaseClient !==
+  "undefined"
+) {
+
+  supabaseClient.auth.onAuthStateChange(
+    function () {
+
+      setTimeout(
+        async function () {
+
+          await initialiseGLCTC1LivePageMode();
+
+        },
+        0
+      );
+
+    }
+  );
+
+}
+
+
+// =====================================================
+// 🔴 STEP 45 READY
 // =====================================================
 
 console.log(
-  "🔐 GLCTC1 STEP 45 — ARTIST OWNER LOCK READY"
+  "🔴 GLCTC1 STEP 45 — LIVE PAGE ARTIST / VIEWER MODE READY"
 );
 
 // =====================================================

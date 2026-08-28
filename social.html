@@ -13823,6 +13823,346 @@ console.log(
 );
 
 // =====================================================
+// 🔐 STEP 45 — ARTIST WATCH PAGE OWNER LOCK
+// =====================================================
+//
+// PURPOSE:
+//
+// The ?artist= ID identifies the artist whose page
+// is being watched.
+//
+// Supabase Auth identifies the person actually logged in.
+//
+// ONLY when:
+//
+//     loggedInUser.id === URL artist ID
+//
+// is the person treated as the page owner.
+//
+// Everyone else remains a viewer.
+//
+// IMPORTANT:
+// This does NOT:
+// - log anyone in
+// - log anyone out
+// - start Go Live
+// - end Live
+// - create buttons
+// - alter the Live Pool
+// - alter Share
+// =====================================================
+
+
+async function glctc1ApplyArtistWatchOwnerLock() {
+
+  try {
+
+    // -------------------------------------------------
+    // GET ARTIST ID FROM WATCH PAGE URL
+    // -------------------------------------------------
+
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
+
+    const artistUserId =
+      params.get("artist");
+
+
+    // Normal social page — nothing to lock.
+    if (!artistUserId) {
+
+      console.log(
+        "ℹ️ GLCTC1 OWNER LOCK — NORMAL SOCIAL PAGE"
+      );
+
+      return false;
+
+    }
+
+
+    // -------------------------------------------------
+    // GET THE REAL SUPABASE AUTH USER
+    // -------------------------------------------------
+
+    const {
+      data,
+      error
+    } =
+      await supabaseClient.auth.getUser();
+
+
+    if (error) {
+
+      console.warn(
+        "⚠️ GLCTC1 OWNER LOCK AUTH CHECK:",
+        error
+      );
+
+    }
+
+
+    const loggedInUser =
+      data?.user ||
+      null;
+
+
+    // -------------------------------------------------
+    // DETERMINE PAGE OWNERSHIP
+    // -------------------------------------------------
+
+    const isOwner =
+      !!loggedInUser &&
+      loggedInUser.id ===
+      artistUserId;
+
+
+    // -------------------------------------------------
+    // STORE THE RESULT
+    // -------------------------------------------------
+
+    window.glctc1WatchPage =
+      window.glctc1WatchPage ||
+      {};
+
+    window.glctc1WatchPage.artistUserId =
+      artistUserId;
+
+    window.glctc1WatchPage.currentUserId =
+      loggedInUser?.id ||
+      null;
+
+    window.glctc1WatchPage.isArtistOwner =
+      isOwner;
+
+
+    // -------------------------------------------------
+    // ARTIST OWNS THIS PAGE
+    // -------------------------------------------------
+
+    if (isOwner) {
+
+      console.log(
+        "🔴 GLCTC1 WATCH OWNER VERIFIED:",
+        loggedInUser.id
+      );
+
+      console.log(
+        "🔓 GLCTC1 ARTIST CONTROLS UNLOCKED"
+      );
+
+      return true;
+
+    }
+
+
+    // -------------------------------------------------
+    // VIEWER / DIFFERENT USER
+    // -------------------------------------------------
+
+    console.log(
+      "👁️ GLCTC1 WATCH VIEWER MODE:",
+      artistUserId
+    );
+
+
+    // -------------------------------------------------
+    // FIND SHARE
+    //
+    // We deliberately do NOT touch Share itself.
+    // -------------------------------------------------
+
+    const allElements =
+      Array.from(
+        document.querySelectorAll(
+          "button, a, input, select, textarea"
+        )
+      );
+
+
+    const shareElement =
+      allElements.find(
+        function (element) {
+
+          const text =
+            (
+              element.textContent ||
+              element.value ||
+              ""
+            )
+              .trim()
+              .toUpperCase();
+
+
+          return (
+            text === "SHARE" ||
+            text.includes("SHARE")
+          );
+
+        }
+      );
+
+
+    if (!shareElement) {
+
+      console.warn(
+        "⚠️ GLCTC1 SHARE CONTROL NOT FOUND — NO CONTROLS LOCKED"
+      );
+
+      return false;
+
+    }
+
+
+    // -------------------------------------------------
+    // FIND THE MAIN PAGE SECTION CONTAINING SHARE
+    // -------------------------------------------------
+
+    const shareSection =
+      shareElement.closest(
+        "section, article, .card, .module, .panel, div"
+      );
+
+
+    if (!shareSection) {
+
+      console.warn(
+        "⚠️ GLCTC1 SHARE CONTAINER NOT FOUND"
+      );
+
+      return false;
+
+    }
+
+
+    // -------------------------------------------------
+    // LOCK INTERACTIVE CONTENT AFTER SHARE
+    //
+    // SHARE ITSELF REMAINS AVAILABLE.
+    // -------------------------------------------------
+
+    const sectionElements =
+      Array.from(
+        shareSection.querySelectorAll(
+          "button, a, input, select, textarea"
+        )
+      );
+
+
+    const shareIndex =
+      sectionElements.indexOf(
+        shareElement
+      );
+
+
+    if (shareIndex === -1) {
+
+      console.warn(
+        "⚠️ GLCTC1 SHARE POSITION NOT FOUND"
+      );
+
+      return false;
+
+    }
+
+
+    for (
+      let i = shareIndex + 1;
+      i < sectionElements.length;
+      i++
+    ) {
+
+      const control =
+        sectionElements[i];
+
+
+      // Never interfere with authentication.
+      if (
+        control.id ===
+          "loginButton" ||
+        control.id ===
+          "logoutButton"
+      ) {
+
+        continue;
+
+      }
+
+
+      control.disabled =
+        true;
+
+
+      control.setAttribute(
+        "aria-disabled",
+        "true"
+      );
+
+
+      control.style.opacity =
+        "0.45";
+
+
+      control.style.cursor =
+        "not-allowed";
+
+    }
+
+
+    // -------------------------------------------------
+    // FINAL STATE
+    // -------------------------------------------------
+
+    console.log(
+      "🔒 GLCTC1 ARTIST CONTROLS LOCKED FOR VIEWER"
+    );
+
+    console.log(
+      "👁️ GLCTC1 SHARE REMAINS AVAILABLE"
+    );
+
+
+    return false;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 OWNER LOCK ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 🔐 STEP 45 — RUN AFTER PAGE LOAD
+// =====================================================
+
+document.addEventListener(
+  "DOMContentLoaded",
+  async function () {
+
+    await glctc1ApplyArtistWatchOwnerLock();
+
+  }
+);
+
+
+// =====================================================
+// 🔐 STEP 45 READY
+// =====================================================
+
+console.log(
+  "🔐 GLCTC1 STEP 45 — ARTIST OWNER LOCK READY"
+);
+
+// =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION
 // =====================================================
 

@@ -14692,7 +14692,687 @@ console.log(
   "🔴 GLCTC1 STEP 45 — ARTIST OWNER LOCK + MASTER LIBRARY LOCK READY"
 );
 
+// =====================================================
+// 👁️ STEP 46 — GLCTC1 VIEWER LIVE AUDIO RECEIVER
+// =====================================================
+//
+// ARTIST
+//   ↓
+// WebRTC AUDIO TRACK
+//   ↓
+// glctc1_live_rooms
+//   ↓
+// VIEWER
+//
+// Uses the existing GLCTC1 WebRTC signalling system.
+//
+// Does NOT change:
+//   • Step 45 page lock
+//   • Login / Logout
+//   • Go Live / End Live
+//   • Chat
+//   • Share
+//   • Master Library
+//   • Artist controls
+// =====================================================
 
+
+// =====================================================
+// 👁️ VIEWER CONNECTION
+// =====================================================
+
+window.glctc1ViewerConnection =
+  window.glctc1ViewerConnection ||
+  null;
+
+
+// =====================================================
+// 👁️ VIEWER AUDIO ELEMENT
+// =====================================================
+
+function getGLCTC1ViewerAudioElement() {
+
+  let audio =
+    document.getElementById(
+      "glctc1ViewerAudio"
+    );
+
+
+  if (!audio) {
+
+    audio =
+      document.createElement(
+        "audio"
+      );
+
+
+    audio.id =
+      "glctc1ViewerAudio";
+
+
+    audio.autoplay =
+      true;
+
+
+    audio.controls =
+      false;
+
+
+    audio.playsInline =
+      true;
+
+
+    audio.style.display =
+      "none";
+
+
+    document.body.appendChild(
+      audio
+    );
+
+  }
+
+
+  return audio;
+
+}
+
+
+// =====================================================
+// 👁️ GET ARTIST ID FROM WATCH URL
+// =====================================================
+
+function getGLCTC1ViewerArtistId() {
+
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
+
+
+  return (
+    params.get("artist") ||
+    null
+  );
+
+}
+
+
+// =====================================================
+// 👁️ START VIEWER CONNECTION
+// =====================================================
+
+async function startGLCTC1ViewerFromArtistURL() {
+
+  try {
+
+    const artistUserId =
+      getGLCTC1ViewerArtistId();
+
+
+    if (!artistUserId) {
+
+      console.warn(
+        "⚠️ GLCTC1 VIEWER — NO ARTIST ID"
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "👁️ GLCTC1 VIEWER CONNECTING TO ARTIST:",
+      artistUserId
+    );
+
+
+    // =================================================
+    // 🔴 GET ARTIST LIVE ROOM
+    // =================================================
+
+    const {
+      data: room,
+      error: roomError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .select(
+          "user_id, signaling_data"
+        )
+        .eq(
+          "user_id",
+          artistUserId
+        )
+        .maybeSingle();
+
+
+    if (roomError) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER ROOM ERROR:",
+        roomError
+      );
+
+      return false;
+
+    }
+
+
+    if (!room) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE ROOM NOT FOUND"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 GET ARTIST OFFER
+    // =================================================
+
+    const signalingData =
+      room.signaling_data;
+
+
+    const offer =
+      signalingData?.offer;
+
+
+    if (
+      !offer ||
+      !offer.sdp
+    ) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE OFFER NOT READY"
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 ARTIST OFFER FOUND"
+    );
+
+
+    // =================================================
+    // 👁️ CREATE VIEWER PEER CONNECTION
+    // =================================================
+
+    const viewerConnection =
+      new RTCPeerConnection();
+
+
+    window.glctc1ViewerConnection =
+      viewerConnection;
+
+
+    // =================================================
+    // 🎵 RECEIVE ARTIST AUDIO
+    // =================================================
+
+    viewerConnection.ontrack =
+      function (event) {
+
+        console.log(
+          "🎵 GLCTC1 VIEWER RECEIVED LIVE TRACK:",
+          event.track.kind
+        );
+
+
+        if (
+          event.track.kind !==
+          "audio"
+        ) {
+
+          return;
+
+        }
+
+
+        const audio =
+          getGLCTC1ViewerAudioElement();
+
+
+        const incomingStream =
+          event.streams?.[0];
+
+
+        if (incomingStream) {
+
+          audio.srcObject =
+            incomingStream;
+
+        } else {
+
+          const stream =
+            audio.srcObject ||
+            new MediaStream();
+
+
+          stream.addTrack(
+            event.track
+          );
+
+
+          audio.srcObject =
+            stream;
+
+        }
+
+
+        audio.play()
+          .catch(
+            function (error) {
+
+              console.warn(
+                "⚠️ GLCTC1 VIEWER AUDIO AUTOPLAY BLOCKED:",
+                error
+              );
+
+            }
+          );
+
+      };
+
+
+    // =================================================
+    // 🔴 VIEWER ICE CANDIDATES
+    // =================================================
+
+    viewerConnection.onicecandidate =
+      async function (event) {
+
+        if (!event.candidate) {
+
+          return;
+
+        }
+
+
+        try {
+
+          const {
+            data: latestRoom,
+            error: latestRoomError
+          } =
+            await supabaseClient
+              .from("glctc1_live_rooms")
+              .select(
+                "signaling_data"
+              )
+              .eq(
+                "user_id",
+                artistUserId
+              )
+              .maybeSingle();
+
+
+          if (
+            latestRoomError ||
+            !latestRoom
+          ) {
+
+            console.warn(
+              "⚠️ GLCTC1 VIEWER ICE ROOM READ FAILED:",
+              latestRoomError
+            );
+
+            return;
+
+          }
+
+
+          const latestSignaling =
+            latestRoom.signaling_data ||
+            {};
+
+
+          const viewerIce =
+            Array.isArray(
+              latestSignaling.viewer_ice
+            )
+              ? [
+                  ...latestSignaling.viewer_ice
+                ]
+              : [];
+
+
+          viewerIce.push(
+            {
+              candidate:
+                event.candidate.candidate,
+
+              sdpMid:
+                event.candidate.sdpMid,
+
+              sdpMLineIndex:
+                event.candidate.sdpMLineIndex,
+
+              usernameFragment:
+                event.candidate.usernameFragment ||
+                null
+            }
+          );
+
+
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .update({
+
+              signaling_data: {
+
+                ...latestSignaling,
+
+                viewer_ice:
+                  viewerIce
+
+              }
+
+            })
+            .eq(
+              "user_id",
+              artistUserId
+            );
+
+
+        } catch (error) {
+
+          console.error(
+            "❌ GLCTC1 VIEWER ICE ERROR:",
+            error
+          );
+
+        }
+
+      };
+
+
+    // =================================================
+    // 🔴 SET ARTIST OFFER
+    // =================================================
+
+    await viewerConnection.setRemoteDescription(
+      new RTCSessionDescription(
+        {
+          type:
+            offer.type,
+
+          sdp:
+            offer.sdp
+        }
+      )
+    );
+
+
+    // =================================================
+    // 👁️ CREATE VIEWER ANSWER
+    // =================================================
+
+    const answer =
+      await viewerConnection.createAnswer();
+
+
+    await viewerConnection.setLocalDescription(
+      answer
+    );
+
+
+    console.log(
+      "👁️ GLCTC1 VIEWER ANSWER CREATED"
+    );
+
+
+    // =================================================
+    // 🔴 SAVE VIEWER ANSWER
+    // =================================================
+
+    const {
+      data: latestRoomAfterAnswer,
+      error: latestRoomAfterAnswerError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .select(
+          "signaling_data"
+        )
+        .eq(
+          "user_id",
+          artistUserId
+        )
+        .maybeSingle();
+
+
+    if (
+      latestRoomAfterAnswerError ||
+      !latestRoomAfterAnswer
+    ) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER ANSWER ROOM ERROR:",
+        latestRoomAfterAnswerError
+      );
+
+      viewerConnection.close();
+
+      window.glctc1ViewerConnection =
+        null;
+
+      return false;
+
+    }
+
+
+    const answerSignaling =
+      latestRoomAfterAnswer.signaling_data ||
+      {};
+
+
+    await supabaseClient
+      .from("glctc1_live_rooms")
+      .update({
+
+        signaling_data: {
+
+          ...answerSignaling,
+
+          answer: {
+
+            type:
+              answer.type,
+
+            sdp:
+              answer.sdp
+
+          }
+
+        }
+
+      })
+      .eq(
+        "user_id",
+        artistUserId
+      );
+
+
+    // =================================================
+    // 🔴 CONNECTION MONITOR
+    // =================================================
+
+    viewerConnection.onconnectionstatechange =
+      function () {
+
+        console.log(
+          "👁️ GLCTC1 VIEWER CONNECTION STATE:",
+          viewerConnection.connectionState
+        );
+
+
+        if (
+          viewerConnection.connectionState ===
+            "failed" ||
+          viewerConnection.connectionState ===
+            "closed"
+        ) {
+
+          console.warn(
+            "⚠️ GLCTC1 VIEWER CONNECTION LOST"
+          );
+
+        }
+
+      };
+
+
+    viewerConnection.oniceconnectionstatechange =
+      function () {
+
+        console.log(
+          "👁️ GLCTC1 VIEWER ICE STATE:",
+          viewerConnection.iceConnectionState
+        );
+
+      };
+
+
+    console.log(
+      "🎵 GLCTC1 VIEWER LIVE AUDIO CONNECTION READY"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 VIEWER CONNECTION ERROR:",
+      error
+    );
+
+
+    if (
+      window.glctc1ViewerConnection
+    ) {
+
+      try {
+
+        window.glctc1ViewerConnection.close();
+
+      } catch (cleanupError) {
+
+        console.warn(
+          "⚠️ GLCTC1 VIEWER CLEANUP ERROR:",
+          cleanupError
+        );
+
+      }
+
+    }
+
+
+    window.glctc1ViewerConnection =
+      null;
+
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 👁️ CLEANUP VIEWER CONNECTION
+// =====================================================
+
+async function cleanupGLCTC1ViewerConnection() {
+
+  try {
+
+    const connection =
+      window.glctc1ViewerConnection;
+
+
+    if (connection) {
+
+      connection.ontrack =
+        null;
+
+      connection.onicecandidate =
+        null;
+
+      connection.onconnectionstatechange =
+        null;
+
+      connection.oniceconnectionstatechange =
+        null;
+
+
+      connection.close();
+
+    }
+
+
+  } catch (error) {
+
+    console.warn(
+      "⚠️ GLCTC1 VIEWER CONNECTION CLEANUP:",
+      error
+    );
+
+  }
+
+
+  window.glctc1ViewerConnection =
+    null;
+
+
+  const audio =
+    document.getElementById(
+      "glctc1ViewerAudio"
+    );
+
+
+  if (audio) {
+
+    try {
+
+      audio.pause();
+
+      audio.srcObject =
+        null;
+
+    } catch (error) {
+
+      console.warn(
+        "⚠️ GLCTC1 VIEWER AUDIO CLEANUP:",
+        error
+      );
+
+    }
+
+  }
+
+
+  return true;
+
+}
+
+
+// =====================================================
+// 🔴 STEP 46 READY
+// =====================================================
+
+console.log(
+  "🔴 GLCTC1 STEP 46 — VIEWER LIVE AUDIO RECEIVER READY"
+);
 
 
 

@@ -8141,14 +8141,15 @@ async function completeGLCTC1ViewerConnection(
 //
 // social.html?artist=ARTIST_USER_ID
 //
-// This step makes that artist ID the ONLY artist used
-// by the Watch Page.
+// This page stays locked to that exact artist.
+// It waits for the artist to become LIVE before
+// starting the viewer connection.
 //
 // =====================================================
 
 
 // =====================================================
-// 👁️ GET GLCTC1 LIVE ARTIST FROM URL
+// 👁️ GET ARTIST ID FROM WATCH URL
 // =====================================================
 
 function getGLCTC1LiveArtistFromURL() {
@@ -8241,7 +8242,7 @@ function lockGLCTC1WatchArtist(
 
 
 // =====================================================
-// 🔴 VERIFY ARTIST IS LIVE
+// 🔴 CHECK IF LOCKED ARTIST IS LIVE
 // =====================================================
 
 async function verifyGLCTC1WatchArtistLive(
@@ -8251,10 +8252,6 @@ async function verifyGLCTC1WatchArtistLive(
   try {
 
     if (!artistUserId) {
-
-      console.warn(
-        "⚠️ GLCTC1 WATCH ARTIST ID NOT PROVIDED"
-      );
 
       return false;
 
@@ -8295,11 +8292,6 @@ async function verifyGLCTC1WatchArtistLive(
 
     if (!data) {
 
-      console.warn(
-        "⚠️ GLCTC1 WATCH ARTIST IS NOT LIVE:",
-        artistUserId
-      );
-
       return false;
 
     }
@@ -8325,6 +8317,90 @@ async function verifyGLCTC1WatchArtistLive(
     return false;
 
   }
+
+}
+
+
+// =====================================================
+// 🔴 WAIT FOR LOCKED ARTIST TO GO LIVE
+// =====================================================
+
+async function waitForGLCTC1WatchArtistLive(
+  artistUserId
+) {
+
+  const maxAttempts =
+    30;
+
+  const waitMilliseconds =
+    1000;
+
+
+  for (
+    let attempt = 1;
+    attempt <= maxAttempts;
+    attempt++
+  ) {
+
+    if (
+      glctc1LockedWatchArtistId !==
+      artistUserId
+    ) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH ARTIST LOCK CHANGED"
+      );
+
+      return false;
+
+    }
+
+
+    const artistIsLive =
+      await verifyGLCTC1WatchArtistLive(
+        artistUserId
+      );
+
+
+    if (artistIsLive) {
+
+      console.log(
+        "🔴 GLCTC1 WATCH ARTIST IS LIVE"
+      );
+
+      return true;
+
+    }
+
+
+    console.log(
+      "⏳ GLCTC1 WAITING FOR ARTIST TO GO LIVE:",
+      attempt,
+      "/",
+      maxAttempts
+    );
+
+
+    await new Promise(
+      function (resolve) {
+
+        setTimeout(
+          resolve,
+          waitMilliseconds
+        );
+
+      }
+    );
+
+  }
+
+
+  console.warn(
+    "⚠️ GLCTC1 WATCH ARTIST DID NOT GO LIVE IN TIME"
+  );
+
+
+  return false;
 
 }
 
@@ -8370,11 +8446,11 @@ async function startGLCTC1LockedArtistWatch() {
 
 
     // =================================================
-    // 🔴 CONFIRM ARTIST IS LIVE
+    // 🔴 WAIT FOR ARTIST TO BE LIVE
     // =================================================
 
     const artistIsLive =
-      await verifyGLCTC1WatchArtistLive(
+      await waitForGLCTC1WatchArtistLive(
         glctc1LockedWatchArtistId
       );
 
@@ -8382,7 +8458,7 @@ async function startGLCTC1LockedArtistWatch() {
     if (!artistIsLive) {
 
       console.warn(
-        "⚠️ GLCTC1 WATCH ARTIST IS OFFLINE"
+        "⚠️ GLCTC1 WATCH ARTIST DID NOT BECOME LIVE"
       );
 
       return false;
@@ -8513,8 +8589,6 @@ document.addEventListener(
 
   }
 );
-
-
 
 // =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION

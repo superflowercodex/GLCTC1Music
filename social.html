@@ -6302,6 +6302,26 @@ async function loadGLCTC1LiveArtists() {
   data.forEach(
     function (artist) {
 
+      /* ===============================================
+         👤 REAL SUPABASE ARTIST ID
+      =============================================== */
+
+      const artistUserId =
+        artist.user_id;
+
+
+      if (!artistUserId) {
+
+        console.warn(
+          "⚠️ GLCTC1 LIVE ARTIST HAS NO USER ID:",
+          artist
+        );
+
+        return;
+
+      }
+
+
       const artistRow =
         document.createElement(
           "div"
@@ -6317,7 +6337,7 @@ async function loadGLCTC1LiveArtists() {
 
 
       artistRow.dataset.userId =
-        artist.user_id;
+        artistUserId;
 
 
       artistRow.style.cssText =
@@ -6337,18 +6357,36 @@ async function loadGLCTC1LiveArtists() {
 
 
       /* =================================================
-         🔴 ONE-PRESS OPEN ARTIST WATCH PAGE
+         👁️ ARTIST NAME → ARTIST-SPECIFIC WATCH PAGE
       ================================================= */
 
       artistRow.addEventListener(
         "click",
         function () {
 
-          window.location.href =
+          const watchUrl =
             "social.html?artist=" +
             encodeURIComponent(
-              artist.user_id
+              artistUserId
             );
+
+
+          console.log(
+            "👁️ GLCTC1 OPENING ARTIST WATCH PAGE:",
+            artist.artist_name ||
+            "ARTIST",
+            artistUserId
+          );
+
+
+          console.log(
+            "🔒 GLCTC1 WATCH URL:",
+            watchUrl
+          );
+
+
+          window.location.href =
+            watchUrl;
 
         }
       );
@@ -6365,7 +6403,7 @@ async function loadGLCTC1LiveArtists() {
 
 
 /* =======================================================
-   🔴 GO LIVE — ARTIST → NEW LOCKED WATCH PAGE
+   🔴 GO LIVE
 ======================================================= */
 
 if (glctc1GoLiveButton) {
@@ -6399,9 +6437,9 @@ if (glctc1GoLiveButton) {
         data.user;
 
 
-      /* =================================================
+      /* ===============================================
          👤 GET ARTIST PROFILE
-      ================================================= */
+      =============================================== */
 
       const {
         data: profile,
@@ -6431,9 +6469,9 @@ if (glctc1GoLiveButton) {
       }
 
 
-      /* =================================================
-         🔴 MARK ARTIST LIVE
-      ================================================= */
+      /* ===============================================
+         🔴 MARK THIS ARTIST LIVE
+      =============================================== */
 
       const {
         error: liveError
@@ -6474,106 +6512,17 @@ if (glctc1GoLiveButton) {
       }
 
 
-      /* =================================================
-         🔴 START ARTIST LIVE BROADCAST
-      ================================================= */
+      /* ===============================================
+         🔴 REFRESH LIVE ARTIST LIST
+      =============================================== */
 
-      const broadcastStarted =
-        await startGLCTC1ArtistLiveBroadcast();
-
-
-      if (!broadcastStarted) {
-
-        console.warn(
-          "⚠️ GLCTC1 ARTIST BROADCAST DID NOT START"
-        );
-
-        return;
-
-      }
+      await loadGLCTC1LiveArtists();
 
 
       console.log(
-        "🔴 GLCTC1 ARTIST LIVE BROADCAST STARTED:",
-        user.id
-      );
-
-
-      /* =================================================
-         👁️ CREATE ARTIST WATCH SESSION
-      ================================================= */
-
-      setGLCTC1WatchSession(
-        user.id,
+        "🔴 GLCTC1 ARTIST IS LIVE:",
         profile?.artist_name ||
-        ""
-      );
-
-
-      /* =================================================
-         🔒 BUILD ARTIST-SPECIFIC WATCH URL
-      ================================================= */
-
-      const watchUrl =
-        window.location.origin +
-        window.location.pathname +
-        "?artist=" +
-        encodeURIComponent(
-          user.id
-        );
-
-
-      console.log(
-        "🔒 GLCTC1 ARTIST WATCH URL:",
-        watchUrl
-      );
-
-
-      /* =================================================
-         🪟 OPEN ARTIST WATCH PAGE
-      ================================================= */
-
-      const watchWindow =
-        window.open(
-          watchUrl,
-          "_blank"
-        );
-
-
-      if (!watchWindow) {
-
-        console.warn(
-          "⚠️ GLCTC1 WATCH PAGE WINDOW BLOCKED"
-        );
-
-        return;
-
-      }
-
-
-      try {
-
-        watchWindow.focus();
-
-      } catch (error) {
-
-        console.warn(
-          "⚠️ GLCTC1 WATCH WINDOW FOCUS WARNING:",
-          error
-        );
-
-      }
-
-
-      console.log(
-        "👁️ GLCTC1 ARTIST WATCH PAGE OPENED:",
-        profile?.artist_name ||
-        user.id
-      );
-
-
-      console.log(
-        "🔒 GLCTC1 ARTIST WATCH PAGE LOCKED TO:",
+        "ARTIST",
         user.id
       );
 
@@ -6581,6 +6530,101 @@ if (glctc1GoLiveButton) {
   );
 
 }
+
+
+/* =======================================================
+   🔴 END LIVE
+======================================================= */
+
+if (glctc1EndLiveButton) {
+
+  glctc1EndLiveButton.addEventListener(
+    "click",
+    async function () {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        error ||
+        !data?.user
+      ) {
+
+        alert(
+          "Please sign in to end your live session."
+        );
+
+        return;
+
+      }
+
+
+      const {
+        error: endLiveError
+      } =
+        await supabaseClient
+          .from("live_artists")
+          .update(
+            {
+              is_live:
+                false,
+
+              updated_at:
+                new Date().toISOString()
+            }
+          )
+          .eq(
+            "user_id",
+            data.user.id
+          );
+
+
+      if (endLiveError) {
+
+        console.error(
+          "❌ GLCTC1 END LIVE ERROR:",
+          endLiveError
+        );
+
+        return;
+
+      }
+
+
+      await loadGLCTC1LiveArtists();
+
+
+      console.log(
+        "⚫ GLCTC1 ARTIST LIVE SESSION ENDED:",
+        data.user.id
+      );
+
+    }
+  );
+
+}
+
+
+/* =======================================================
+   🔴 INITIAL LIVE ARTIST LOAD
+======================================================= */
+
+loadGLCTC1LiveArtists();
+
+
+/* =======================================================
+   🔴 GLCTC1 LIVE NOW READY
+======================================================= */
+
+console.log(
+  "🔴 GLCTC1 LIVE NOW — ARTIST ID WATCH LINKS READY"
+);
+
+</script>
 
 
 
@@ -13636,234 +13680,6 @@ if (
 
 console.log(
   "🔴 GLCTC1 STEP 43 — GO LIVE → ARTIST WATCH PAGE READY"
-);
-
-// =====================================================
-// 👁️ STEP 44 — ARTIST POOL → ARTIST-SPECIFIC WATCH PAGE
-// =====================================================
-
-function openGLCTC1ArtistFromPool(
-  artistUserId,
-  artistName
-) {
-
-  try {
-
-    if (!artistUserId) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST POOL — NO ARTIST USER ID"
-      );
-
-      return false;
-
-    }
-
-
-    // =================================================
-    // 🔒 BUILD THE ARTIST-SPECIFIC WATCH URL
-    // =================================================
-
-    const watchUrl =
-      window.location.origin +
-      window.location.pathname +
-      "?artist=" +
-      encodeURIComponent(
-        artistUserId
-      );
-
-
-    console.log(
-      "👁️ GLCTC1 ARTIST SELECTED:",
-      artistName || artistUserId
-    );
-
-
-    console.log(
-      "🔒 GLCTC1 ARTIST WATCH URL:",
-      watchUrl
-    );
-
-
-    // =================================================
-    // 👁️ STORE THE SELECTED ARTIST
-    // =================================================
-
-    setGLCTC1WatchSession(
-      artistUserId,
-      artistName || null
-    );
-
-
-    // =================================================
-    // 🪟 OPEN THAT ARTIST'S WATCH PAGE
-    // =================================================
-
-    const watchWindow =
-      window.open(
-        watchUrl,
-        "_blank"
-      );
-
-
-    if (!watchWindow) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST WATCH WINDOW BLOCKED"
-      );
-
-      return false;
-
-    }
-
-
-    try {
-
-      watchWindow.focus();
-
-    } catch (error) {
-
-      console.warn(
-        "⚠️ GLCTC1 WATCH WINDOW FOCUS WARNING:",
-        error
-      );
-
-    }
-
-
-    console.log(
-      "👁️ GLCTC1 ARTIST WATCH PAGE OPENED:",
-      artistName || artistUserId
-    );
-
-
-    console.log(
-      "🔒 GLCTC1 WATCH PAGE LOCKED TO ARTIST:",
-      artistUserId
-    );
-
-
-    return true;
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 ARTIST POOL WATCH ERROR:",
-      error
-    );
-
-    return false;
-
-  }
-
-}
-
-
-// =====================================================
-// 👁️ STEP 44B — WIRE ARTIST POOL ITEMS
-// =====================================================
-
-function wireGLCTC1ArtistPoolClicks() {
-
-  const artistItems =
-    document.querySelectorAll(
-      "[data-artist-user-id]"
-    );
-
-
-  if (!artistItems.length) {
-
-    console.log(
-      "ℹ️ GLCTC1 ARTIST POOL — NO ARTIST ITEMS FOUND"
-    );
-
-    return;
-
-  }
-
-
-  artistItems.forEach(
-    function (item) {
-
-      if (
-        item.dataset.glctc1WatchWired ===
-        "true"
-      ) {
-
-        return;
-
-      }
-
-
-      const artistUserId =
-        item.dataset.artistUserId;
-
-
-      if (!artistUserId) {
-
-        return;
-
-      }
-
-
-      item.dataset.glctc1WatchWired =
-        "true";
-
-
-      item.style.cursor =
-        "pointer";
-
-
-      item.addEventListener(
-        "click",
-        function () {
-
-          const artistName =
-            item.dataset.artistName ||
-            item.textContent.trim();
-
-
-          openGLCTC1ArtistFromPool(
-            artistUserId,
-            artistName
-          );
-
-        }
-      );
-
-    }
-  );
-
-
-  console.log(
-    "👁️ GLCTC1 ARTIST POOL CLICKS READY:",
-    artistItems.length
-  );
-
-}
-
-
-// =====================================================
-// 👁️ STEP 44C — INITIALISE ARTIST POOL CLICKS
-// =====================================================
-
-document.addEventListener(
-  "DOMContentLoaded",
-  function () {
-
-    wireGLCTC1ArtistPoolClicks();
-
-  }
-);
-
-
-// =====================================================
-// 👁️ STEP 44 READY
-// =====================================================
-
-console.log(
-  "👁️ GLCTC1 STEP 44 — ARTIST POOL WATCH LINKS READY"
 );
 
 // =====================================================

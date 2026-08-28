@@ -13299,168 +13299,55 @@ console.log(
 );
 
 // =====================================================
-// 👁️ STEP 43 — GLCTC1 ARTIST LIVE PAGE CONTROLLER
+// 👁️ STEP 43 — ENTER ARTIST LIVE ROOM
 // =====================================================
 //
-// FLOW:
-//
-// MAIN PAGE
-//   ↓
-// GO LIVE
-//   ↓
-// OPENS ARTIST LIVE PAGE
-//
-// ARTIST LIVE PAGE
-//   ↓
-// GO LIVE
-//   ↓
-// STARTS BROADCAST ON THIS PAGE
-//   ↓
-// BUTTON BECOMES END LIVE
+// NORMAL PAGE
+//     ↓
+//     GO LIVE
+//     ↓
+// OPENS:
+//     social.html?artist=ARTIST_ID
 //
 // IMPORTANT:
-// The Artist Live page NEVER opens another Artist Live
-// page when its own GO LIVE button is pressed.
 //
-// The page detects:
+// The GO LIVE button on the NORMAL PAGE does NOT
+// start the broadcast.
 //
-//   ?artist=USER_ID
+// It only opens the artist's dedicated Live Room.
 //
-// and treats that page as the Artist Live workspace.
+// Once inside the Artist Live Room:
+//
+//     GO LIVE
+//         ↓
+//     starts the actual broadcast
+//
+//     END LIVE
+//         ↓
+//     stops the broadcast
+//
+// The Artist Live Room does NOT open another page.
 //
 // =====================================================
 
 
 // =====================================================
-// 🔴 ARTIST LIVE PAGE DETECTION
+// 🔴 FIND NORMAL PAGE GO LIVE BUTTON
 // =====================================================
 
-function isGLCTC1ArtistLivePage() {
-
-  const params =
-    new URLSearchParams(
-      window.location.search
-    );
-
-  return !!params.get("artist");
-
-}
-
-
-// =====================================================
-// 🔴 GET CURRENT ARTIST ID
-// =====================================================
-
-function getGLCTC1CurrentArtistLiveId() {
-
-  const params =
-    new URLSearchParams(
-      window.location.search
-    );
-
-  return (
-    params.get("artist") ||
-    null
+const glctc1GoLiveButton =
+  document.getElementById(
+    "glctc1GoLiveButton"
   );
 
-}
-
 
 // =====================================================
-// 🔴 UPDATE LIVE BUTTON
+// 🔐 GET LOGGED-IN ARTIST ID
 // =====================================================
 
-function updateGLCTC1LiveButton(
-  live
-) {
-
-  if (!glctc1GoLiveButton) {
-
-    return;
-
-  }
-
-
-  if (live) {
-
-    glctc1GoLiveButton.textContent =
-      "🛑 END LIVE";
-
-
-    glctc1GoLiveButton.dataset.glctc1Live =
-      "true";
-
-
-    if (glctc1EndLiveButton) {
-
-      glctc1EndLiveButton.style.display =
-        "none";
-
-    }
-
-  } else {
-
-    glctc1GoLiveButton.textContent =
-      "🔴 GO LIVE";
-
-
-    glctc1GoLiveButton.dataset.glctc1Live =
-      "false";
-
-
-    if (glctc1EndLiveButton) {
-
-      glctc1EndLiveButton.style.display =
-        "none";
-
-    }
-
-  }
-
-}
-
-
-// =====================================================
-// 🔴 START LIVE DIRECTLY ON ARTIST LIVE PAGE
-// =====================================================
-
-async function startGLCTC1ArtistLivePage() {
+async function getGLCTC1LoggedInArtistId() {
 
   try {
-
-    const artistUserId =
-      getGLCTC1CurrentArtistLiveId();
-
-
-    if (!artistUserId) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST LIVE PAGE HAS NO ARTIST ID"
-      );
-
-      return false;
-
-    }
-
-
-    // -------------------------------------------------
-    // REQUIRE LOGIN
-    // -------------------------------------------------
-
-    const loggedIn =
-      await requireGLCTC1Login();
-
-
-    if (!loggedIn) {
-
-      return false;
-
-    }
-
-
-    // -------------------------------------------------
-    // VERIFY CURRENT USER IS THE ARTIST
-    // -------------------------------------------------
 
     const {
       data,
@@ -13475,86 +13362,25 @@ async function startGLCTC1ArtistLivePage() {
     ) {
 
       console.warn(
-        "⚠️ GLCTC1 ARTIST IS NOT LOGGED IN"
+        "⚠️ GLCTC1 ARTIST MUST BE LOGGED IN"
       );
 
-      return false;
+      return null;
 
     }
 
 
-    if (
-      data.user.id !==
-      artistUserId
-    ) {
-
-      console.warn(
-        "⚠️ GLCTC1 ONLY THE ARTIST CAN START THIS LIVE"
-      );
-
-      alert(
-        "Only the logged-in artist can start this live broadcast."
-      );
-
-      return false;
-
-    }
-
-
-    console.log(
-      "🔴 GLCTC1 ARTIST LIVE PAGE — STARTING LIVE:",
-      artistUserId
-    );
-
-
-    // -------------------------------------------------
-    // START EXISTING ARTIST BROADCAST
-    // -------------------------------------------------
-
-    const broadcastStarted =
-      await startGLCTC1ArtistLiveBroadcast();
-
-
-    if (!broadcastStarted) {
-
-      console.warn(
-        "⚠️ GLCTC1 ARTIST BROADCAST DID NOT START"
-      );
-
-      return false;
-
-    }
-
-
-    // -------------------------------------------------
-    // LIVE IS NOW ACTIVE ON THIS PAGE
-    // -------------------------------------------------
-
-    window.glctc1ArtistLiveActive =
-      true;
-
-
-    updateGLCTC1LiveButton(
-      true
-    );
-
-
-    console.log(
-      "🔴 GLCTC1 ARTIST LIVE ACTIVE ON CURRENT PAGE"
-    );
-
-
-    return true;
+    return data.user.id;
 
 
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 ARTIST LIVE PAGE START ERROR:",
+      "❌ GLCTC1 ARTIST ID ERROR:",
       error
     );
 
-    return false;
+    return null;
 
   }
 
@@ -13562,43 +13388,133 @@ async function startGLCTC1ArtistLivePage() {
 
 
 // =====================================================
-// 🛑 END LIVE DIRECTLY ON ARTIST LIVE PAGE
+// 🔴 OPEN ARTIST LIVE ROOM
 // =====================================================
 
-async function endGLCTC1ArtistLivePage() {
+async function openGLCTC1ArtistLiveRoom() {
 
   try {
 
-    console.log(
-      "🛑 GLCTC1 ARTIST ENDING LIVE"
-    );
-
-
     // -------------------------------------------------
-    // USE EXISTING END LIVE SYSTEM
+    // REQUIRE LOGIN
     // -------------------------------------------------
 
-    if (
-      typeof endGLCTC1ArtistLiveBroadcast ===
-      "function"
-    ) {
+    const artistId =
+      await getGLCTC1LoggedInArtistId();
 
-      await endGLCTC1ArtistLiveBroadcast();
+
+    if (!artistId) {
+
+      if (
+        typeof requireGLCTC1Login ===
+        "function"
+      ) {
+
+        const loggedIn =
+          await requireGLCTC1Login();
+
+
+        if (!loggedIn) {
+
+          return false;
+
+        }
+
+      }
+
+
+      return false;
 
     }
 
 
-    window.glctc1ArtistLiveActive =
-      false;
+    // -------------------------------------------------
+    // BUILD ARTIST LIVE PAGE
+    // -------------------------------------------------
+
+    const livePageUrl =
+      "social.html?artist=" +
+      encodeURIComponent(
+        artistId
+      );
 
 
-    updateGLCTC1LiveButton(
-      false
+    console.log(
+      "🔴 GLCTC1 OPENING ARTIST LIVE ROOM:",
+      livePageUrl
+    );
+
+
+    // -------------------------------------------------
+    // OPEN DEDICATED ARTIST LIVE PAGE
+    // -------------------------------------------------
+    //
+    // This is ONLY entering the room.
+    //
+    // It does NOT start the broadcast.
+    //
+    // -------------------------------------------------
+
+    const liveWindow =
+      window.open(
+        livePageUrl,
+        "_blank"
+      );
+
+
+    // -------------------------------------------------
+    // POPUP BLOCKED
+    // -------------------------------------------------
+
+    if (!liveWindow) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE PAGE POPUP BLOCKED"
+      );
+
+
+      // Fallback to the same tab.
+
+      window.location.href =
+        livePageUrl;
+
+
+      return true;
+
+    }
+
+
+    // -------------------------------------------------
+    // FOCUS LIVE ROOM
+    // -------------------------------------------------
+
+    try {
+
+      liveWindow.focus();
+
+    } catch (focusError) {
+
+      console.warn(
+        "⚠️ GLCTC1 LIVE ROOM FOCUS:",
+        focusError
+      );
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 ARTIST LIVE ROOM OPENED"
     );
 
 
     console.log(
-      "🛑 GLCTC1 ARTIST LIVE ENDED"
+      "👤 ARTIST:",
+      artistId
+    );
+
+
+    console.log(
+      "ℹ️ BROADCAST HAS NOT STARTED YET"
     );
 
 
@@ -13608,7 +13524,7 @@ async function endGLCTC1ArtistLivePage() {
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 END LIVE ERROR:",
+      "❌ GLCTC1 ARTIST LIVE ROOM ERROR:",
       error
     );
 
@@ -13620,7 +13536,21 @@ async function endGLCTC1ArtistLivePage() {
 
 
 // =====================================================
-// 👁️ GO LIVE BUTTON
+// 🔴 NORMAL PAGE GO LIVE BUTTON
+// =====================================================
+//
+// IMPORTANT:
+//
+// This button ONLY ENTERS the Artist Live Room.
+//
+// It does NOT:
+//
+// ❌ start broadcast
+// ❌ create viewer connection
+// ❌ create offer
+// ❌ open another watch page
+// ❌ call startGLCTC1ArtistLiveBroadcast()
+//
 // =====================================================
 
 if (
@@ -13629,124 +13559,34 @@ if (
 
   glctc1GoLiveButton.addEventListener(
     "click",
-    async function () {
+    async function (event) {
 
-      try {
-
-        // =================================================
-        // 🔴 ALREADY ON ARTIST LIVE PAGE
-        // =================================================
-        //
-        // DO NOT OPEN ANOTHER WINDOW.
-        //
-        // GO LIVE / END LIVE happens directly here.
-        // =================================================
-
-        if (
-          isGLCTC1ArtistLivePage()
-        ) {
-
-          const currentlyLive =
-            window.glctc1ArtistLiveActive ===
-            true;
+      event.preventDefault();
 
 
-          if (currentlyLive) {
-
-            await endGLCTC1ArtistLivePage();
-
-          } else {
-
-            await startGLCTC1ArtistLivePage();
-
-          }
+      console.log(
+        "🔴 GLCTC1 GO LIVE SELECTED"
+      );
 
 
-          return;
-
-        }
-
-
-        // =================================================
-        // 🌐 MAIN PAGE
-        // =================================================
-        //
-        // Main page GO LIVE opens the Artist Live page.
-        //
-        // It does NOT start the broadcast here.
-        // =================================================
-
-        const loggedIn =
-          await requireGLCTC1Login();
+      const opened =
+        await openGLCTC1ArtistLiveRoom();
 
 
-        if (!loggedIn) {
+      if (!opened) {
 
-          return;
-
-        }
-
-
-        const {
-          data,
-          error
-        } =
-          await supabaseClient.auth.getUser();
-
-
-        if (
-          error ||
-          !data?.user
-        ) {
-
-          console.warn(
-            "⚠️ GLCTC1 USER NOT AVAILABLE"
-          );
-
-          return;
-
-        }
-
-
-        const artistUserId =
-          data.user.id;
-
-
-        // -------------------------------------------------
-        // OPEN ARTIST LIVE PAGE
-        // -------------------------------------------------
-
-        const watchOpened =
-          await openGLCTC1ArtistLiveWatchWindow(
-            artistUserId
-          );
-
-
-        if (!watchOpened) {
-
-          console.warn(
-            "⚠️ GLCTC1 ARTIST LIVE PAGE COULD NOT OPEN"
-          );
-
-          return;
-
-        }
-
-
-        console.log(
-          "🔴 GLCTC1 ARTIST LIVE PAGE OPENED:",
-          artistUserId
+        console.warn(
+          "⚠️ GLCTC1 ARTIST LIVE ROOM COULD NOT OPEN"
         );
 
-
-      } catch (error) {
-
-        console.error(
-          "❌ GLCTC1 GO LIVE ERROR:",
-          error
-        );
+        return;
 
       }
+
+
+      console.log(
+        "🔴 GLCTC1 ARTIST NOW IN LIVE ROOM"
+      );
 
     }
   );
@@ -13755,61 +13595,11 @@ if (
 
 
 // =====================================================
-// 🔴 ARTIST LIVE PAGE INITIALISATION
-// =====================================================
-//
-// When the new Artist Live page opens:
-//
-// • It does NOT automatically start another window.
-// • It remains on this page.
-// • The artist sees GO LIVE.
-// • Artist presses GO LIVE.
-// • Broadcast starts here.
-// • Button becomes END LIVE.
-//
-// =====================================================
-
-document.addEventListener(
-  "DOMContentLoaded",
-  function () {
-
-    if (
-      !isGLCTC1ArtistLivePage()
-    ) {
-
-      return;
-
-    }
-
-
-    const artistUserId =
-      getGLCTC1CurrentArtistLiveId();
-
-
-    console.log(
-      "🔴 GLCTC1 ARTIST LIVE PAGE READY:",
-      artistUserId
-    );
-
-
-    window.glctc1ArtistLiveActive =
-      false;
-
-
-    updateGLCTC1LiveButton(
-      false
-    );
-
-  }
-);
-
-
-// =====================================================
 // 🔴 STEP 43 READY
 // =====================================================
 
 console.log(
-  "🔴 GLCTC1 STEP 43 — ARTIST LIVE PAGE CONTROLLER READY"
+  "🔴 GLCTC1 STEP 43 — ENTER ARTIST LIVE ROOM READY"
 );
 
 // =====================================================

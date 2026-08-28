@@ -9176,6 +9176,375 @@ function setupGLCTC1ArtistLiveWatchDisplay(
 }
 
 // =====================================================
+// 🔴 STEP 26 — END GLCTC1 ARTIST LIVE SESSION
+// =====================================================
+
+async function endGLCTC1ArtistLiveSession() {
+
+  try {
+
+    // =================================================
+    // 🔐 GET CURRENT ARTIST
+    // =================================================
+
+    const {
+      data,
+      error
+    } =
+      await supabaseClient.auth.getUser();
+
+
+    if (
+      error ||
+      !data?.user
+    ) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST NOT SIGNED IN"
+      );
+
+      return false;
+
+    }
+
+
+    const user =
+      data.user;
+
+
+    // =================================================
+    // 🔴 CLOSE ARTIST PEER CONNECTION
+    // =================================================
+
+    if (glctc1PeerConnection) {
+
+      try {
+
+        glctc1PeerConnection.close();
+
+      } catch (connectionError) {
+
+        console.warn(
+          "⚠️ GLCTC1 ARTIST CONNECTION CLOSE ERROR:",
+          connectionError
+        );
+
+      }
+
+
+      glctc1PeerConnection =
+        null;
+
+    }
+
+
+    // =================================================
+    // 🔴 CLEAR LIVE AUDIO CONNECTION
+    // =================================================
+
+    if (
+      glctc1AudioStream
+    ) {
+
+      glctc1AudioStream
+        .getTracks()
+        .forEach(
+          function (track) {
+
+            try {
+
+              track.stop();
+
+            } catch (trackError) {
+
+              console.warn(
+                "⚠️ GLCTC1 AUDIO TRACK STOP ERROR:",
+                trackError
+              );
+
+            }
+
+          }
+        );
+
+      glctc1AudioStream =
+        null;
+
+    }
+
+
+    // =================================================
+    // 🔴 CLEAR LIVE ROOM SIGNALING
+    // =================================================
+
+    const {
+      error: roomError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .update({
+
+          signaling_data: {
+
+            offer: null,
+
+            answer: null,
+
+            artist_ice: [],
+
+            viewer_ice: []
+
+          },
+
+          updated_at:
+            new Date().toISOString()
+
+        })
+        .eq(
+          "user_id",
+          user.id
+        );
+
+
+    if (roomError) {
+
+      console.error(
+        "❌ GLCTC1 LIVE ROOM CLEANUP ERROR:",
+        roomError
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 REMOVE ARTIST FROM LIVE POOL
+    // =================================================
+
+    const {
+      error: liveError
+    } =
+      await supabaseClient
+        .from("live_artists")
+        .update({
+
+          is_live:
+            false,
+
+          updated_at:
+            new Date().toISOString()
+
+        })
+        .eq(
+          "user_id",
+          user.id
+        );
+
+
+    if (liveError) {
+
+      console.error(
+        "❌ GLCTC1 LIVE ARTIST STATUS ERROR:",
+        liveError
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 RESET LOCAL WATCH STATE
+    // =================================================
+
+    if (
+      window.glctc1ViewerConnection
+    ) {
+
+      try {
+
+        window.glctc1ViewerConnection.close();
+
+      } catch (viewerError) {
+
+        console.warn(
+          "⚠️ GLCTC1 VIEWER CONNECTION CLOSE ERROR:",
+          viewerError
+        );
+
+      }
+
+
+      window.glctc1ViewerConnection =
+        null;
+
+    }
+
+
+    // =================================================
+    // 🔴 RESET LIVE AUDIO ELEMENT
+    // =================================================
+
+    const liveAudio =
+      document.getElementById(
+        "glctc1LiveAudio"
+      );
+
+
+    if (liveAudio) {
+
+      liveAudio.pause();
+
+      liveAudio.srcObject =
+        null;
+
+    }
+
+
+    // =================================================
+    // 🔴 RESET LIVE VIDEO ELEMENT
+    // =================================================
+
+    const liveVideo =
+      document.getElementById(
+        "glctc1LiveVideo"
+      );
+
+
+    if (liveVideo) {
+
+      liveVideo.pause();
+
+      liveVideo.srcObject =
+        null;
+
+    }
+
+
+    // =================================================
+    // 🔴 UPDATE LIVE STATUS
+    // =================================================
+
+    const statusElements = [
+
+      "glctc1LiveStatus",
+
+      "glctc1WatchStatus",
+
+      "glctc1LiveHeaderStatus"
+
+    ];
+
+
+    statusElements.forEach(
+      function (elementId) {
+
+        const element =
+          document.getElementById(
+            elementId
+          );
+
+
+        if (!element) {
+          return;
+        }
+
+
+        element.textContent =
+          "⚫ OFFLINE";
+
+      }
+    );
+
+
+    // =================================================
+    // 🔴 REFRESH LIVE ARTIST POOL
+    // =================================================
+
+    if (
+      typeof loadGLCTC1LiveArtists ===
+      "function"
+    ) {
+
+      await loadGLCTC1LiveArtists();
+
+    }
+
+
+    console.log(
+      "⚫ GLCTC1 ARTIST LIVE SESSION ENDED"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 END LIVE SESSION ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 🔴 STEP 26A — END LIVE BUTTON
+// =====================================================
+
+if (
+  glctc1EndLiveButton
+) {
+
+  glctc1EndLiveButton.addEventListener(
+    "click",
+    async function () {
+
+      const ended =
+        await endGLCTC1ArtistLiveSession();
+
+
+      if (!ended) {
+
+        console.warn(
+          "⚠️ GLCTC1 LIVE SESSION COULD NOT END"
+        );
+
+        return;
+
+      }
+
+
+      glctc1EndLiveButton.style.display =
+        "none";
+
+
+      if (
+        glctc1GoLiveButton
+      ) {
+
+        glctc1GoLiveButton.style.display =
+          "inline-block";
+
+      }
+
+
+      console.log(
+        "⚫ GLCTC1 END LIVE COMPLETE"
+      );
+
+    }
+  );
+
+}
+
+// =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION
 // =====================================================
 

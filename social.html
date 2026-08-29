@@ -13554,6 +13554,528 @@ console.log(
   "🔴 GLCTC1 STEP 43 — GO LIVE → ARTIST WATCH PAGE READY"
 );
 
+/* =====================================================
+   🔴 STEP 43B — GLCTC1 SINGLE GO LIVE BUTTON OVERRIDE
+   =====================================================
+
+   ONE BUTTON — TWO BEHAVIOURS
+
+   -----------------------------------------------------
+   WATCH / OTHER MODE
+   -----------------------------------------------------
+
+   GO LIVE
+      ↓
+   Opens the artist's Social / Live page
+      ↓
+   DOES NOT start a broadcast
+
+
+   -----------------------------------------------------
+   ARTIST MODE
+   -----------------------------------------------------
+
+   The page contains:
+
+      ?artist=AUTHENTICATED_USER_ID
+
+   GO LIVE
+      ↓
+   Starts existing GLCTC1 artist broadcast
+      ↓
+   Existing live system changes button to END LIVE
+
+
+   END LIVE
+      ↓
+   Existing end-live system ends the broadcast
+      ↓
+   Button returns to GO LIVE
+
+
+   IMPORTANT:
+
+   This is an OVERRIDE.
+
+   It does not create a second WebRTC system.
+   It does not replace the existing broadcast functions.
+   It does not alter the GLCTC1 Music / Deck system.
+
+===================================================== */
+
+(function () {
+
+  "use strict";
+
+
+  /* ===================================================
+     🔴 FIND EXISTING GO LIVE BUTTON
+  =================================================== */
+
+  const originalGoLiveButton =
+    document.getElementById(
+      "glctc1GoLiveButton"
+    );
+
+
+  if (!originalGoLiveButton) {
+
+    console.warn(
+      "⚠️ GLCTC1 STEP 43B: GO LIVE BUTTON NOT FOUND"
+    );
+
+    return;
+
+  }
+
+
+  /* ===================================================
+     🔒 REMOVE OLD GO LIVE LISTENER
+  =================================================== */
+
+  /*
+     Clone the existing button.
+
+     This removes the old STEP 43 click listener,
+     including the old behaviour that did:
+
+        START BROADCAST
+        +
+        OPEN WATCH PAGE
+
+     The new button keeps the same:
+
+        ID
+        HTML
+        CSS
+        position
+        appearance
+    */
+
+  const glctc1CleanGoLiveButton =
+    originalGoLiveButton.cloneNode(true);
+
+
+  originalGoLiveButton.parentNode.replaceChild(
+    glctc1CleanGoLiveButton,
+    originalGoLiveButton
+  );
+
+
+  /*
+     Keep the global reference pointing at the
+     replacement button.
+  */
+
+  window.glctc1GoLiveButton =
+    glctc1CleanGoLiveButton;
+
+
+  /* ===================================================
+     👤 GET AUTHENTICATED USER
+  =================================================== */
+
+  async function getGLCTC1AuthenticatedUser() {
+
+    try {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        error ||
+        !data?.user
+      ) {
+
+        return null;
+
+      }
+
+
+      return data.user;
+
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 STEP 43B USER CHECK ERROR:",
+        error
+      );
+
+
+      return null;
+
+    }
+
+  }
+
+
+  /* ===================================================
+     👁️ DETERMINE WHETHER THIS IS THE ARTIST'S
+     OWN LIVE CONTROL PAGE
+  =================================================== */
+
+  async function isGLCTC1ArtistControlPage() {
+
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
+
+
+    const pageArtistId =
+      params.get(
+        "artist"
+      );
+
+
+    /*
+       No artist parameter means this is NOT the
+       artist-specific control page.
+    */
+
+    if (!pageArtistId) {
+
+      return false;
+
+    }
+
+
+    const user =
+      await getGLCTC1AuthenticatedUser();
+
+
+    /*
+       No authenticated user means this cannot be
+       the artist's control page.
+    */
+
+    if (!user) {
+
+      return false;
+
+    }
+
+
+    /*
+       CRITICAL SECURITY / MODE CHECK:
+
+       The artist ID in the URL must match the
+       authenticated Supabase user ID.
+
+       This prevents a viewer looking at another
+       artist's page from receiving artist controls.
+    */
+
+    return (
+      pageArtistId ===
+      user.id
+    );
+
+  }
+
+
+  /* ===================================================
+     👁️ OPEN ARTIST LIVE PAGE
+  =================================================== */
+
+  async function openGLCTC1ArtistLivePage() {
+
+    const user =
+      await getGLCTC1AuthenticatedUser();
+
+
+    if (!user) {
+
+      alert(
+        "Please sign in to go live."
+      );
+
+      return false;
+
+    }
+
+
+    /*
+       Existing GLCTC1 artist-specific Social page.
+
+       IMPORTANT:
+
+       Opening this URL DOES NOT start the broadcast.
+
+       The artist must press GO LIVE on that page.
+    */
+
+    const watchUrl =
+      "social.html?artist=" +
+      encodeURIComponent(
+        user.id
+      );
+
+
+    console.log(
+      "👁️ GLCTC1 ARTIST LIVE PAGE:",
+      watchUrl
+    );
+
+
+    const watchWindow =
+      window.open(
+        watchUrl,
+        "_blank"
+      );
+
+
+    if (!watchWindow) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE PAGE WINDOW BLOCKED"
+      );
+
+      return false;
+
+    }
+
+
+    try {
+
+      watchWindow.focus();
+
+    } catch (error) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE WINDOW FOCUS WARNING:",
+        error
+      );
+
+    }
+
+
+    console.log(
+      "👁️ GLCTC1 ARTIST LIVE PAGE OPENED"
+    );
+
+
+    return true;
+
+  }
+
+
+  /* ===================================================
+     🔴 ARTIST GO LIVE
+  =================================================== */
+
+  async function startGLCTC1ArtistLiveFromButton() {
+
+    /*
+       Prevent accidental duplicate clicks.
+    */
+
+    if (
+      glctc1CleanGoLiveButton.disabled
+    ) {
+
+      return;
+
+    }
+
+
+    glctc1CleanGoLiveButton.disabled =
+      true;
+
+
+    const originalButtonText =
+      glctc1CleanGoLiveButton.textContent;
+
+
+    glctc1CleanGoLiveButton.textContent =
+      "🟡 STARTING LIVE...";
+
+
+    try {
+
+      /*
+         ------------------------------------------------
+         USE EXISTING BROADCAST FUNCTION
+         ------------------------------------------------
+
+         We do NOT recreate:
+
+           WebRTC
+           audio connection
+           offer
+           Supabase signalling
+
+         Your existing function already does that.
+      */
+
+      if (
+        typeof startGLCTC1ArtistLiveBroadcast !==
+        "function"
+      ) {
+
+        console.error(
+          "❌ GLCTC1 START FUNCTION NOT FOUND"
+        );
+
+        glctc1CleanGoLiveButton.textContent =
+          originalButtonText;
+
+        return false;
+
+      }
+
+
+      const started =
+        await startGLCTC1ArtistLiveBroadcast();
+
+
+      if (!started) {
+
+        console.warn(
+          "⚠️ GLCTC1 ARTIST BROADCAST DID NOT START"
+        );
+
+
+        glctc1CleanGoLiveButton.textContent =
+          "🔴 GO LIVE";
+
+
+        return false;
+
+      }
+
+
+      /*
+         IMPORTANT:
+
+         Do not open another Watch page here.
+
+         The artist is already on their own
+         artist control page.
+
+         The existing STEP 3 / live-start code
+         remains responsible for changing the
+         live controls after successful startup.
+      */
+
+      console.log(
+        "🔴 GLCTC1 ARTIST BROADCAST STARTED"
+      );
+
+
+      return true;
+
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 ARTIST GO LIVE ERROR:",
+        error
+      );
+
+
+      glctc1CleanGoLiveButton.textContent =
+        "🔴 GO LIVE";
+
+
+      return false;
+
+
+    } finally {
+
+      /*
+         Only re-enable if the existing live system
+         has not already taken control of the button.
+      */
+
+      glctc1CleanGoLiveButton.disabled =
+        false;
+
+    }
+
+  }
+
+
+  /* ===================================================
+     🔴 SINGLE GO LIVE BUTTON CONTROLLER
+  =================================================== */
+
+  glctc1CleanGoLiveButton.addEventListener(
+    "click",
+    async function () {
+
+      /*
+         ------------------------------------------------
+         CHECK PAGE MODE
+         ------------------------------------------------
+      */
+
+      const artistControlPage =
+        await isGLCTC1ArtistControlPage();
+
+
+      /* =================================================
+         🎧 ARTIST MODE
+      ================================================= */
+
+      if (
+        artistControlPage
+      ) {
+
+        /*
+           SAME BUTTON:
+
+           GO LIVE
+              ↓
+           START EXISTING BROADCAST
+
+           The existing live code then changes the
+           control to END LIVE.
+        */
+
+        await startGLCTC1ArtistLiveFromButton();
+
+        return;
+
+      }
+
+
+      /* =================================================
+         👁️ WATCH / OTHER MODE
+      ================================================= */
+
+      /*
+         SAME BUTTON:
+
+         GO LIVE
+            ↓
+         OPEN ARTIST PAGE ONLY
+
+         NO broadcast is started here.
+      */
+
+      await openGLCTC1ArtistLivePage();
+
+    }
+  );
+
+
+  /* ===================================================
+     🔴 STEP 43B READY
+  =================================================== */
+
+  console.log(
+    "🔴 GLCTC1 STEP 43B — SINGLE GO LIVE BUTTON / TWO MODE SYSTEM READY"
+  );
+
+
+})();
+
 // =====================================================
 // 🔴 STEP 44 — ARTIST WATCH PAGE IDENTITY LOCK
 // =====================================================

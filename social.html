@@ -16171,973 +16171,192 @@ if (glctc1EndLiveButton) {
 
 loadGLCTC1LiveArtists();
 
-/* =========================================================
-   🔴 GLCTC1 FINAL LIVE MEDIA OVERRIDE
-   =========================================================
-   🎤 MICROPHONE AUDIO
-   🎥 WEBCAM VIDEO
-   🔴 ONE ARTIST WEBRTC CONNECTION
-   👁️ VIEWER RECEIVES AUDIO + VIDEO
-   ========================================================= */
+// =====================================================
+// 🔊 GLCTC1 AUDIO-ONLY GO LIVE INSERT
+// =====================================================
 
-(function () {
+if (glctc1GoLiveButton) {
 
-  console.log(
-    "🔴 GLCTC1 FINAL LIVE MEDIA OVERRIDE LOADED"
-  );
-
-
-  /* =======================================================
-     🎤 LIVE MICROPHONE STREAM
-  ======================================================= */
-
-  const originalGetLiveAudioStream =
-    window.getGLCTC1LiveAudioStream;
-
-
-  window.getGLCTC1LiveAudioStream =
+  glctc1GoLiveButton.addEventListener(
+    "click",
     async function () {
 
       try {
 
-        /*
-         * If the existing GLCTC1 audio stream is already
-         * active, keep using it.
-         */
-
-        if (
-          window.glctc1LiveAudioStream &&
-          window.glctc1LiveAudioStream.active &&
-          window.glctc1LiveAudioStream
-            .getAudioTracks()
-            .length
-        ) {
-
-          return window.glctc1LiveAudioStream;
-
-        }
+        console.log(
+          "🔊 GLCTC1 AUDIO GO LIVE REQUESTED"
+        );
 
 
-        /*
-         * Preserve the existing GLCTC1 audio function
-         * if one already exists.
-         */
-
-        if (
-          typeof originalGetLiveAudioStream ===
-          "function"
-        ) {
-
-          const existingStream =
-            await originalGetLiveAudioStream();
-
-
-          if (
-            existingStream &&
-            existingStream
-              .getAudioTracks()
-              .length
-          ) {
-
-            window.glctc1LiveAudioStream =
-              existingStream;
-
-            return existingStream;
-
-          }
-
-        }
-
-
-        /*
-         * Final microphone fallback.
-         */
+        // =================================================
+        // 🎤 REQUEST MICROPHONE
+        // =================================================
 
         if (
           !navigator.mediaDevices ||
           !navigator.mediaDevices.getUserMedia
         ) {
 
-          console.error(
-            "❌ GLCTC1 MICROPHONE NOT SUPPORTED"
+          alert(
+            "Microphone access is not supported by this browser."
           );
 
-          return null;
+          return;
 
         }
 
 
         const microphoneStream =
-          await navigator.mediaDevices.getUserMedia(
-            {
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-              },
+          await navigator.mediaDevices.getUserMedia({
 
-              video: false
-            }
+            audio: true,
+            video: false
+
+          });
+
+
+        if (!microphoneStream) {
+
+          console.error(
+            "❌ GLCTC1 MICROPHONE STREAM NOT CREATED"
           );
 
+          return;
+
+        }
+
+
+        const audioTracks =
+          microphoneStream.getAudioTracks();
+
+
+        if (!audioTracks.length) {
+
+          console.error(
+            "❌ GLCTC1 NO MICROPHONE AUDIO TRACK"
+          );
+
+          return;
+
+        }
+
+
+        // =================================================
+        // 🔊 STORE LIVE MICROPHONE
+        // =================================================
 
         window.glctc1LiveAudioStream =
           microphoneStream;
 
 
         console.log(
-          "🎤 GLCTC1 MICROPHONE READY"
+          "🎤 GLCTC1 MICROPHONE ACTIVE"
         );
 
 
-        return microphoneStream;
+        // =================================================
+        // 🔴 USE EXISTING PEER CONNECTION
+        // =================================================
+
+        if (!glctc1PeerConnection) {
+
+          glctc1PeerConnection =
+            new RTCPeerConnection();
+
+        }
 
 
-      } catch (error) {
+        // =================================================
+        // 🎤 SEND MICROPHONE TO CROWD
+        // =================================================
 
-        console.error(
-          "❌ GLCTC1 MICROPHONE STREAM ERROR:",
-          error
-        );
+        audioTracks.forEach(
+          function (track) {
 
-        return null;
-
-      }
-
-    };
-
-
-  /* =======================================================
-     🎥 WEBCAM + 🎤 MICROPHONE
-     ENSURE BOTH ARE AVAILABLE
-  ======================================================= */
-
-  window.prepareGLCTC1LiveMedia =
-    async function () {
-
-      try {
-
-        /*
-         * If webcam is already active, use its
-         * microphone track as the live audio source.
-         */
-
-        if (
-          window.glctc1WebcamStream &&
-          window.glctc1WebcamStream.active
-        ) {
-
-          const webcamAudioTracks =
-            window.glctc1WebcamStream
-              .getAudioTracks();
-
-
-          if (webcamAudioTracks.length) {
-
-            window.glctc1LiveAudioStream =
-              new MediaStream(
-                webcamAudioTracks
-              );
+            glctc1PeerConnection.addTrack(
+              track,
+              microphoneStream
+            );
 
           }
-
-
-          console.log(
-            "🎥 GLCTC1 WEBCAM + 🎤 MICROPHONE ALREADY READY"
-          );
-
-
-          return true;
-
-        }
-
-
-        /*
-         * No webcam active:
-         * microphone remains the live audio source.
-         */
-
-        const audioStream =
-          await window.getGLCTC1LiveAudioStream();
-
-
-        if (!audioStream) {
-
-          return false;
-
-        }
+        );
 
 
         console.log(
-          "🎤 GLCTC1 AUDIO-ONLY LIVE MEDIA READY"
+          "🔊 GLCTC1 MICROPHONE ADDED TO LIVE BROADCAST"
         );
 
 
-        return true;
+        // =================================================
+        // 🔴 CREATE AUDIO OFFER
+        // =================================================
+
+        const offer =
+          await glctc1PeerConnection.createOffer();
 
 
-      } catch (error) {
-
-        console.error(
-          "❌ GLCTC1 LIVE MEDIA PREPARE ERROR:",
-          error
+        await glctc1PeerConnection.setLocalDescription(
+          offer
         );
-
-        return false;
-
-      }
-
-    };
-
-
-  /* =======================================================
-     🔴 ALIGN EXISTING ARTIST PEER CONNECTION
-     🎤 AUDIO + 🎥 VIDEO
-  ======================================================= */
-
-  window.alignGLCTC1ArtistLiveMedia =
-    async function () {
-
-      try {
-
-        /*
-         * Prepare microphone first.
-         */
-
-        const mediaReady =
-          await window.prepareGLCTC1LiveMedia();
-
-
-        if (!mediaReady) {
-
-          console.error(
-            "❌ GLCTC1 LIVE MEDIA NOT READY"
-          );
-
-          return false;
-
-        }
-
-
-        /*
-         * The existing system may already have created
-         * the peer connection.
-         */
-
-        if (
-          !window.glctc1PeerConnection
-        ) {
-
-          console.warn(
-            "⚠️ GLCTC1 PEER CONNECTION NOT CREATED YET"
-          );
-
-          return false;
-
-        }
-
-
-        const peer =
-          window.glctc1PeerConnection;
-
-
-        /*
-         * Check existing senders so we do not add
-         * duplicate microphone/video tracks.
-         */
-
-        const existingSenders =
-          peer.getSenders();
-
-
-        /* =================================================
-           🎤 ADD MICROPHONE
-        ================================================= */
-
-        const audioStream =
-          window.glctc1LiveAudioStream;
-
-
-        if (audioStream) {
-
-          const audioTracks =
-            audioStream.getAudioTracks();
-
-
-          audioTracks.forEach(
-            function (track) {
-
-              const alreadyAdded =
-                existingSenders.some(
-                  function (sender) {
-
-                    return (
-                      sender.track === track ||
-                      (
-                        sender.track &&
-                        sender.track.kind ===
-                          "audio"
-                      );
-
-                  }
-                );
-
-
-              if (!alreadyAdded) {
-
-                peer.addTrack(
-                  track,
-                  audioStream
-                );
-
-
-                console.log(
-                  "🎤 GLCTC1 MICROPHONE ADDED TO PEER"
-                );
-
-              }
-
-            }
-          );
-
-        }
-
-
-        /* =================================================
-           🎥 ADD WEBCAM VIDEO
-        ================================================= */
-
-        const webcamStream =
-          window.glctc1WebcamStream;
-
-
-        if (webcamStream) {
-
-          const videoTracks =
-            webcamStream.getVideoTracks();
-
-
-          videoTracks.forEach(
-            function (track) {
-
-              const alreadyAdded =
-                existingSenders.some(
-                  function (sender) {
-
-                    return (
-                      sender.track === track ||
-                      (
-                        sender.track &&
-                        sender.track.kind ===
-                          "video"
-                      );
-
-                  }
-                );
-
-
-              if (!alreadyAdded) {
-
-                peer.addTrack(
-                  track,
-                  webcamStream
-                );
-
-
-                console.log(
-                  "🎥 GLCTC1 WEBCAM VIDEO ADDED TO PEER"
-                );
-
-              }
-
-            }
-          );
-
-        }
 
 
         console.log(
-          "✅ GLCTC1 ARTIST MEDIA ALIGNED:"
-        );
-
-        console.log(
-          "🎤 AUDIO:",
-          peer.getSenders()
-            .some(
-              sender =>
-                sender.track &&
-                sender.track.kind === "audio"
-            )
-        );
-
-        console.log(
-          "🎥 VIDEO:",
-          peer.getSenders()
-            .some(
-              sender =>
-                sender.track &&
-                sender.track.kind === "video"
-            )
-        );
-
-
-        return true;
-
-
-      } catch (error) {
-
-        console.error(
-          "❌ GLCTC1 ARTIST MEDIA ALIGN ERROR:",
-          error
-        );
-
-        return false;
-
-      }
-
-    };
-
-
-  /* =======================================================
-     👁️ VIEWER — RECEIVE AUDIO + VIDEO
-  ======================================================= */
-
-  const originalViewerConnection =
-    window.createGLCTC1ViewerConnection;
-
-
-  window.createGLCTC1ViewerConnection =
-    async function (
-      artistUserId
-    ) {
-
-      const result =
-        typeof originalViewerConnection ===
-        "function"
-          ? await originalViewerConnection(
-              artistUserId
-            )
-          : false;
-
-
-      const viewer =
-        window.glctc1ViewerConnection;
-
-
-      if (
-        viewer
-      ) {
-
-        viewer.ontrack =
-          function (event) {
-
-            const stream =
-              event.streams &&
-              event.streams[0];
-
-
-            if (!stream) {
-
-              return;
-
-            }
-
-
-            /*
-             * 🎤 AUDIO
-             */
-
-            const liveAudio =
-              document.getElementById(
-                "glctc1LiveAudio"
-              );
-
-
-            if (liveAudio) {
-
-              const audioTracks =
-                stream.getAudioTracks();
-
-
-              if (audioTracks.length) {
-
-                liveAudio.srcObject =
-                  stream;
-
-                liveAudio.muted =
-                  false;
-
-                liveAudio.playsInline =
-                  true;
-
-                console.log(
-                  "🔊 GLCTC1 VIEWER AUDIO RECEIVED"
-                );
-
-              }
-
-            }
-
-
-            /*
-             * 🎥 VIDEO
-             */
-
-            const liveVideo =
-              document.getElementById(
-                "glctc1VideoPlayer"
-              );
-
-
-            if (
-              liveVideo &&
-              stream.getVideoTracks().length
-            ) {
-
-              liveVideo.srcObject =
-                stream;
-
-              liveVideo.muted =
-                false;
-
-              liveVideo.autoplay =
-                true;
-
-              liveVideo.playsInline =
-                true;
-
-              liveVideo.controls =
-                true;
-
-              liveVideo.style.display =
-                "block";
-
-
-              liveVideo.play()
-                .catch(
-                  function (error) {
-
-                    console.warn(
-                      "⚠️ GLCTC1 VIEWER VIDEO PLAY:",
-                      error
-                    );
-
-                  }
-                );
-
-
-              console.log(
-                "🎥 GLCTC1 VIEWER VIDEO RECEIVED"
-              );
-
-            }
-
-          };
-
-      }
-
-
-      return result;
-
-    };
-
-
-  /* =======================================================
-     🔊 VIEWER AUDIO UNLOCK
-  ======================================================= */
-
-  window.setupGLCTC1ViewerLiveAudioUnlock =
-    function () {
-
-      const liveAudio =
-        document.getElementById(
-          "glctc1LiveAudio"
-        );
-
-
-      if (!liveAudio) {
-
-        return;
-
-      }
-
-
-      liveAudio.autoplay =
-        false;
-
-      liveAudio.muted =
-        false;
-
-      liveAudio.playsInline =
-        true;
-
-
-      let enableButton =
-        document.getElementById(
-          "glctc1EnableLiveAudio"
-        );
-
-
-      if (!enableButton) {
-
-        enableButton =
-          document.createElement(
-            "button"
-          );
-
-
-        enableButton.id =
-          "glctc1EnableLiveAudio";
-
-
-        enableButton.type =
-          "button";
-
-
-        enableButton.textContent =
-          "🔊 ENABLE LIVE";
-
-
-        enableButton.style.cssText =
-          `
-          display:inline-block;
-          width:100%;
-          box-sizing:border-box;
-          margin:8px 0;
-          padding:12px 16px;
-          border:1px solid rgba(139,53,255,0.45);
-          border-radius:8px;
-          background:rgba(139,53,255,0.18);
-          color:#ffffff;
-          font-weight:bold;
-          font-size:14px;
-          cursor:pointer;
-          `;
-
-
-        liveAudio.parentNode.insertBefore(
-          enableButton,
-          liveAudio
-        );
-
-      }
-
-
-      enableButton.onclick =
-        async function () {
-
-          try {
-
-            liveAudio.muted =
-              false;
-
-
-            await liveAudio.play();
-
-
-            enableButton.textContent =
-              "🔴 LIVE AUDIO ON";
-
-
-            enableButton.disabled =
-              true;
-
-
-            enableButton.style.opacity =
-              "0.7";
-
-
-            console.log(
-              "🔊 GLCTC1 LIVE AUDIO ENABLED"
-            );
-
-
-          } catch (error) {
-
-            console.error(
-              "❌ GLCTC1 LIVE AUDIO UNLOCK ERROR:",
-              error
-            );
-
-
-            enableButton.textContent =
-              "🔊 TAP TO ENABLE LIVE";
-
-          }
-
-        };
-
-    };
-
-
-  /* =======================================================
-     🛑 LIVE MEDIA CLEANUP
-     Used by END LIVE / PAGE EXIT
-  ======================================================= */
-
-  window.cleanupGLCTC1LiveMedia =
-    function () {
-
-      try {
-
-        if (
-          window.glctc1PeerConnection
-        ) {
-
-          window.glctc1PeerConnection
-            .getSenders()
-            .forEach(
-              function (sender) {
-
-                try {
-
-                  sender.track?.stop();
-
-                } catch (e) {}
-
-              }
-            );
-
-
-          try {
-
-            window.glctc1PeerConnection.close();
-
-          } catch (e) {}
-
-
-          window.glctc1PeerConnection =
-            null;
-
-        }
-
-
-        if (
-          window.glctc1LiveAudioStream
-        ) {
-
-          window.glctc1LiveAudioStream
-            .getTracks()
-            .forEach(
-              function (track) {
-
-                track.stop();
-
-              }
-            );
-
-
-          window.glctc1LiveAudioStream =
-            null;
-
-        }
-
-
-        if (
-          window.glctc1WebcamStream
-        ) {
-
-          window.glctc1WebcamStream
-            .getTracks()
-            .forEach(
-              function (track) {
-
-                track.stop();
-
-              }
-            );
-
-
-          window.glctc1WebcamStream =
-            null;
-
-        }
-
-
-        console.log(
-          "🛑 GLCTC1 LIVE MEDIA CLEANED UP"
+          "🔴 GLCTC1 AUDIO OFFER CREATED"
         );
 
 
       } catch (error) {
 
         console.error(
-          "❌ GLCTC1 LIVE MEDIA CLEANUP ERROR:",
+          "❌ GLCTC1 AUDIO GO LIVE ERROR:",
           error
         );
-
-      }
-
-    };
-
-
-  /* =======================================================
-     🛑 PAGE EXIT
-  ======================================================= */
-
-  window.addEventListener(
-    "beforeunload",
-    function () {
-
-      if (
-        typeof window.cleanupGLCTC1LiveMedia ===
-        "function"
-      ) {
-
-        window.cleanupGLCTC1LiveMedia();
 
       }
 
     }
   );
 
-
-  /* =======================================================
-     🔴 MEDIA ALIGNMENT WATCHER
-  ======================================================= */
-
-  let alignmentAttempts =
-    0;
+}
 
 
-  const alignmentTimer =
-    setInterval(
-      async function () {
+// =====================================================
+// 🔊 GLCTC1 AUDIO CLEANUP ON END LIVE
+// =====================================================
 
-        alignmentAttempts++;
+if (glctc1EndLiveButton) {
 
+  glctc1EndLiveButton.addEventListener(
+    "click",
+    function () {
 
-        if (
-          window.glctc1PeerConnection
-        ) {
+      if (
+        window.glctc1LiveAudioStream
+      ) {
 
-          const peer =
-            window.glctc1PeerConnection;
+        window.glctc1LiveAudioStream
+          .getTracks()
+          .forEach(
+            function (track) {
 
+              track.stop();
 
-          const senders =
-            peer.getSenders();
-
-
-          const hasAudio =
-            senders.some(
-              function (sender) {
-
-                return (
-                  sender.track &&
-                  sender.track.kind ===
-                    "audio"
-                );
-
-              }
-            );
-
-
-          const hasVideo =
-            senders.some(
-              function (sender) {
-
-                return (
-                  sender.track &&
-                  sender.track.kind ===
-                    "video"
-                );
-
-              }
-            );
-
-
-          /*
-           * Only align when the peer exists.
-           */
-
-          if (
-            !hasAudio ||
-            (
-              window.glctc1WebcamStream &&
-              !hasVideo
-            )
-          ) {
-
-            await window
-              .alignGLCTC1ArtistLiveMedia();
-
-          }
-
-
-          /*
-           * Once correctly aligned, stop checking.
-           */
-
-          const finalSenders =
-            peer.getSenders();
-
-
-          const finalAudio =
-            finalSenders.some(
-              sender =>
-                sender.track &&
-                sender.track.kind ===
-                  "audio"
-            );
-
-
-          const finalVideo =
-            finalSenders.some(
-              sender =>
-                sender.track &&
-                sender.track.kind ===
-                  "video"
-            );
-
-
-          if (
-            finalAudio &&
-            (
-              !window.glctc1WebcamStream ||
-              finalVideo
-            )
-          ) {
-
-            console.log(
-              "✅ GLCTC1 LIVE MEDIA FULLY ALIGNED"
-            );
-
-
-            clearInterval(
-              alignmentTimer
-            );
-
-          }
-
-        }
-
-
-        /*
-         * Safety stop.
-         */
-
-        if (
-          alignmentAttempts >= 60
-        ) {
-
-          clearInterval(
-            alignmentTimer
+            }
           );
 
-        }
+        window.glctc1LiveAudioStream =
+          null;
 
-      },
-      1000
-    );
+        console.log(
+          "🛑 GLCTC1 LIVE MICROPHONE STOPPED"
+        );
 
+      }
 
-  console.log(
-    "✅ GLCTC1 FINAL LIVE MEDIA OVERRIDE READY"
+    }
   );
 
-})();
-
+}
 
 </script>
 

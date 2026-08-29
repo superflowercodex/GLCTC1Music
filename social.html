@@ -15067,7 +15067,19 @@ console.log(
 //          ↓
 // VIEWER
 //
-// Uses the existing GLCTC1 WebRTC signalling system.
+// Uses the EXISTING GLCTC1 WebRTC signalling path.
+//
+// Viewer path:
+//
+// social.html?artist=USER_ID
+//        ↓
+// find artist live room
+//        ↓
+// wait for artist offer
+//        ↓
+// receive artist audio/video
+//        ↓
+// display in existing GLCTC1 video player
 //
 // Does NOT change:
 //   • Step 45 page lock
@@ -15087,6 +15099,19 @@ console.log(
 
 window.glctc1ViewerConnection =
   window.glctc1ViewerConnection ||
+  null;
+
+
+// =====================================================
+// 👁️ VIEWER CONNECTION ATTEMPT CONTROL
+// =====================================================
+
+window.glctc1ViewerConnecting =
+  window.glctc1ViewerConnecting ||
+  false;
+
+window.glctc1ViewerRetryTimer =
+  window.glctc1ViewerRetryTimer ||
   null;
 
 
@@ -15143,7 +15168,7 @@ function getGLCTC1ViewerAudioElement() {
 
 
 // =====================================================
-// 🎥 GET EXISTING GLCTC1 VIDEO ELEMENT
+// 🎥 EXISTING GLCTC1 VIDEO ELEMENT
 // =====================================================
 
 function getGLCTC1ViewerVideoElement() {
@@ -15176,6 +15201,14 @@ function getGLCTC1ViewerVideoElement() {
   video.controls =
     true;
 
+
+  /*
+   * Keep viewer video muted so the browser
+   * does not block the incoming media.
+   *
+   * Audio is handled by the dedicated
+   * viewer audio element.
+   */
 
   video.muted =
     true;
@@ -15211,6 +15244,28 @@ function getGLCTC1ViewerArtistId() {
 
 
 // =====================================================
+// 🔴 CLEAR VIEWER RETRY TIMER
+// =====================================================
+
+function clearGLCTC1ViewerRetryTimer() {
+
+  if (
+    window.glctc1ViewerRetryTimer
+  ) {
+
+    clearTimeout(
+      window.glctc1ViewerRetryTimer
+    );
+
+    window.glctc1ViewerRetryTimer =
+      null;
+
+  }
+
+}
+
+
+// =====================================================
 // 👁️ START VIEWER CONNECTION
 // =====================================================
 
@@ -15231,6 +15286,41 @@ async function startGLCTC1ViewerFromArtistURL() {
       return false;
 
     }
+
+
+    /*
+     * Prevent duplicate viewer connections.
+     */
+
+    if (
+      window.glctc1ViewerConnecting
+    ) {
+
+      return false;
+
+    }
+
+
+    if (
+      window.glctc1ViewerConnection &&
+      (
+        window.glctc1ViewerConnection.connectionState ===
+          "connected" ||
+        window.glctc1ViewerConnection.connectionState ===
+          "connecting"
+      )
+    ) {
+
+      return true;
+
+    }
+
+
+    window.glctc1ViewerConnecting =
+      true;
+
+
+    clearGLCTC1ViewerRetryTimer();
 
 
     console.log(
@@ -15266,6 +15356,9 @@ async function startGLCTC1ViewerFromArtistURL() {
         roomError
       );
 
+      window.glctc1ViewerConnecting =
+        false;
+
       return false;
 
     }
@@ -15277,6 +15370,9 @@ async function startGLCTC1ViewerFromArtistURL() {
         "⚠️ GLCTC1 ARTIST LIVE ROOM NOT FOUND"
       );
 
+      window.glctc1ViewerConnecting =
+        false;
+
       return false;
 
     }
@@ -15287,21 +15383,47 @@ async function startGLCTC1ViewerFromArtistURL() {
     // =================================================
 
     const signalingData =
-      room.signaling_data;
+      room.signaling_data ||
+      {};
 
 
     const offer =
-      signalingData?.offer;
+      signalingData.offer;
 
+
+    /*
+     * The artist may have opened the live page
+     * but not pressed GO LIVE yet.
+     *
+     * Do not create a broken viewer connection.
+     *
+     * Wait for the artist offer.
+     */
 
     if (
       !offer ||
       !offer.sdp
     ) {
 
-      console.warn(
-        "⚠️ GLCTC1 ARTIST LIVE OFFER NOT READY"
+      console.log(
+        "👁️ GLCTC1 VIEWER WAITING FOR ARTIST TO GO LIVE..."
       );
+
+
+      window.glctc1ViewerConnecting =
+        false;
+
+
+      window.glctc1ViewerRetryTimer =
+        setTimeout(
+          function () {
+
+            startGLCTC1ViewerFromArtistURL();
+
+          },
+          2000
+        );
+
 
       return false;
 
@@ -15309,7 +15431,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     console.log(
-      "🔴 GLCTC1 ARTIST OFFER FOUND"
+      "🔴 GLCTC1 ARTIST LIVE OFFER FOUND"
     );
 
 
@@ -15369,18 +15491,18 @@ async function startGLCTC1ViewerFromArtistURL() {
 
           } else {
 
-            const stream =
+            const existingStream =
               audio.srcObject ||
               new MediaStream();
 
 
-            stream.addTrack(
+            existingStream.addTrack(
               event.track
             );
 
 
             audio.srcObject =
-              stream;
+              existingStream;
 
           }
 
@@ -15435,18 +15557,18 @@ async function startGLCTC1ViewerFromArtistURL() {
 
           } else {
 
-            const stream =
+            const existingStream =
               video.srcObject ||
               new MediaStream();
 
 
-            stream.addTrack(
+            existingStream.addTrack(
               event.track
             );
 
 
             video.srcObject =
-              stream;
+              existingStream;
 
           }
 
@@ -15657,6 +15779,9 @@ async function startGLCTC1ViewerFromArtistURL() {
       window.glctc1ViewerConnection =
         null;
 
+      window.glctc1ViewerConnecting =
+        false;
+
       return false;
 
     }
@@ -15709,6 +15834,9 @@ async function startGLCTC1ViewerFromArtistURL() {
       window.glctc1ViewerConnection =
         null;
 
+      window.glctc1ViewerConnecting =
+        false;
+
       return false;
 
     }
@@ -15734,6 +15862,18 @@ async function startGLCTC1ViewerFromArtistURL() {
 
         if (
           viewerConnection.connectionState ===
+          "connected"
+        ) {
+
+          console.log(
+            "🔴 GLCTC1 VIEWER IS NOW CONNECTED TO ARTIST"
+          );
+
+        }
+
+
+        if (
+          viewerConnection.connectionState ===
             "failed" ||
           viewerConnection.connectionState ===
             "closed"
@@ -15742,6 +15882,14 @@ async function startGLCTC1ViewerFromArtistURL() {
           console.warn(
             "⚠️ GLCTC1 VIEWER CONNECTION LOST"
           );
+
+
+          window.glctc1ViewerConnection =
+            null;
+
+
+          window.glctc1ViewerConnecting =
+            false;
 
         }
 
@@ -15761,6 +15909,10 @@ async function startGLCTC1ViewerFromArtistURL() {
         );
 
       };
+
+
+    window.glctc1ViewerConnecting =
+      false;
 
 
     console.log(
@@ -15790,7 +15942,7 @@ async function startGLCTC1ViewerFromArtistURL() {
       } catch (cleanupError) {
 
         console.warn(
-          "⚠️ GLCTC1 VIEWER CLEANUP ERROR:",
+          "⚠️ GLCTC1 VIEWER CONNECTION CLEANUP ERROR:",
           cleanupError
         );
 
@@ -15801,6 +15953,10 @@ async function startGLCTC1ViewerFromArtistURL() {
 
     window.glctc1ViewerConnection =
       null;
+
+
+    window.glctc1ViewerConnecting =
+      false;
 
 
     return false;
@@ -15815,6 +15971,13 @@ async function startGLCTC1ViewerFromArtistURL() {
 // =====================================================
 
 async function cleanupGLCTC1ViewerConnection() {
+
+  clearGLCTC1ViewerRetryTimer();
+
+
+  window.glctc1ViewerConnecting =
+    false;
+
 
   try {
 
@@ -15930,6 +16093,8 @@ async function cleanupGLCTC1ViewerConnection() {
 console.log(
   "🔴 GLCTC1 STEP 46 — VIEWER LIVE AUDIO + VIDEO RECEIVER READY"
 );
+
+
 
 
 

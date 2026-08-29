@@ -15067,29 +15067,33 @@ console.log(
 //          ↓
 // VIEWER
 //
-// Uses the EXISTING GLCTC1 WebRTC signalling path.
-//
-// Viewer path:
+// EXISTING PATH:
 //
 // social.html?artist=USER_ID
 //        ↓
-// find artist live room
+// glctc1_live_rooms
 //        ↓
-// wait for artist offer
+// artist offer
 //        ↓
-// receive artist audio/video
+// viewer answer
 //        ↓
-// display in existing GLCTC1 video player
+// artist audio + video
 //
-// Does NOT change:
-//   • Step 45 page lock
-//   • Login / Logout
-//   • Go Live / End Live
+// IMPORTANT:
+//
+// This step ONLY receives the artist's live media.
+//
+// It does NOT change:
+//   • GO LIVE
+//   • END LIVE
+//   • Artist Live Module
+//   • Step 43
+//   • Step 45
 //   • Chat
 //   • Share
 //   • Master Library
 //   • Artist controls
-//   • Supabase signalling structure
+//   • Existing buttons
 // =====================================================
 
 
@@ -15099,19 +15103,6 @@ console.log(
 
 window.glctc1ViewerConnection =
   window.glctc1ViewerConnection ||
-  null;
-
-
-// =====================================================
-// 👁️ VIEWER CONNECTION ATTEMPT CONTROL
-// =====================================================
-
-window.glctc1ViewerConnecting =
-  window.glctc1ViewerConnecting ||
-  false;
-
-window.glctc1ViewerRetryTimer =
-  window.glctc1ViewerRetryTimer ||
   null;
 
 
@@ -15203,11 +15194,10 @@ function getGLCTC1ViewerVideoElement() {
 
 
   /*
-   * Keep viewer video muted so the browser
-   * does not block the incoming media.
+   * Keep the video element muted.
    *
-   * Audio is handled by the dedicated
-   * viewer audio element.
+   * Incoming live audio is handled by
+   * glctc1ViewerAudio.
    */
 
   video.muted =
@@ -15244,28 +15234,6 @@ function getGLCTC1ViewerArtistId() {
 
 
 // =====================================================
-// 🔴 CLEAR VIEWER RETRY TIMER
-// =====================================================
-
-function clearGLCTC1ViewerRetryTimer() {
-
-  if (
-    window.glctc1ViewerRetryTimer
-  ) {
-
-    clearTimeout(
-      window.glctc1ViewerRetryTimer
-    );
-
-    window.glctc1ViewerRetryTimer =
-      null;
-
-  }
-
-}
-
-
-// =====================================================
 // 👁️ START VIEWER CONNECTION
 // =====================================================
 
@@ -15286,41 +15254,6 @@ async function startGLCTC1ViewerFromArtistURL() {
       return false;
 
     }
-
-
-    /*
-     * Prevent duplicate viewer connections.
-     */
-
-    if (
-      window.glctc1ViewerConnecting
-    ) {
-
-      return false;
-
-    }
-
-
-    if (
-      window.glctc1ViewerConnection &&
-      (
-        window.glctc1ViewerConnection.connectionState ===
-          "connected" ||
-        window.glctc1ViewerConnection.connectionState ===
-          "connecting"
-      )
-    ) {
-
-      return true;
-
-    }
-
-
-    window.glctc1ViewerConnecting =
-      true;
-
-
-    clearGLCTC1ViewerRetryTimer();
 
 
     console.log(
@@ -15356,9 +15289,6 @@ async function startGLCTC1ViewerFromArtistURL() {
         roomError
       );
 
-      window.glctc1ViewerConnecting =
-        false;
-
       return false;
 
     }
@@ -15369,9 +15299,6 @@ async function startGLCTC1ViewerFromArtistURL() {
       console.warn(
         "⚠️ GLCTC1 ARTIST LIVE ROOM NOT FOUND"
       );
-
-      window.glctc1ViewerConnecting =
-        false;
 
       return false;
 
@@ -15391,39 +15318,14 @@ async function startGLCTC1ViewerFromArtistURL() {
       signalingData.offer;
 
 
-    /*
-     * The artist may have opened the live page
-     * but not pressed GO LIVE yet.
-     *
-     * Do not create a broken viewer connection.
-     *
-     * Wait for the artist offer.
-     */
-
     if (
       !offer ||
       !offer.sdp
     ) {
 
-      console.log(
-        "👁️ GLCTC1 VIEWER WAITING FOR ARTIST TO GO LIVE..."
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE OFFER NOT READY"
       );
-
-
-      window.glctc1ViewerConnecting =
-        false;
-
-
-      window.glctc1ViewerRetryTimer =
-        setTimeout(
-          function () {
-
-            startGLCTC1ViewerFromArtistURL();
-
-          },
-          2000
-        );
-
 
       return false;
 
@@ -15431,7 +15333,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     console.log(
-      "🔴 GLCTC1 ARTIST LIVE OFFER FOUND"
+      "🔴 GLCTC1 ARTIST OFFER FOUND"
     );
 
 
@@ -15491,18 +15393,18 @@ async function startGLCTC1ViewerFromArtistURL() {
 
           } else {
 
-            const existingStream =
+            const audioStream =
               audio.srcObject ||
               new MediaStream();
 
 
-            existingStream.addTrack(
+            audioStream.addTrack(
               event.track
             );
 
 
             audio.srcObject =
-              existingStream;
+              audioStream;
 
           }
 
@@ -15557,18 +15459,18 @@ async function startGLCTC1ViewerFromArtistURL() {
 
           } else {
 
-            const existingStream =
+            const videoStream =
               video.srcObject ||
               new MediaStream();
 
 
-            existingStream.addTrack(
+            videoStream.addTrack(
               event.track
             );
 
 
             video.srcObject =
-              existingStream;
+              videoStream;
 
           }
 
@@ -15745,7 +15647,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     // =================================================
-    // 🔴 SAVE VIEWER ANSWER
+    // 🔴 GET LATEST SIGNALLING DATA
     // =================================================
 
     const {
@@ -15779,9 +15681,6 @@ async function startGLCTC1ViewerFromArtistURL() {
       window.glctc1ViewerConnection =
         null;
 
-      window.glctc1ViewerConnecting =
-        false;
-
       return false;
 
     }
@@ -15791,6 +15690,10 @@ async function startGLCTC1ViewerFromArtistURL() {
       latestRoomAfterAnswer.signaling_data ||
       {};
 
+
+    // =================================================
+    // 🔴 SAVE VIEWER ANSWER
+    // =================================================
 
     const {
       error: answerSaveError
@@ -15834,9 +15737,6 @@ async function startGLCTC1ViewerFromArtistURL() {
       window.glctc1ViewerConnection =
         null;
 
-      window.glctc1ViewerConnecting =
-        false;
-
       return false;
 
     }
@@ -15848,7 +15748,7 @@ async function startGLCTC1ViewerFromArtistURL() {
 
 
     // =================================================
-    // 🔴 CONNECTION MONITOR
+    // 🔴 CONNECTION STATE MONITOR
     // =================================================
 
     viewerConnection.onconnectionstatechange =
@@ -15883,14 +15783,6 @@ async function startGLCTC1ViewerFromArtistURL() {
             "⚠️ GLCTC1 VIEWER CONNECTION LOST"
           );
 
-
-          window.glctc1ViewerConnection =
-            null;
-
-
-          window.glctc1ViewerConnecting =
-            false;
-
         }
 
       };
@@ -15909,10 +15801,6 @@ async function startGLCTC1ViewerFromArtistURL() {
         );
 
       };
-
-
-    window.glctc1ViewerConnecting =
-      false;
 
 
     console.log(
@@ -15955,10 +15843,6 @@ async function startGLCTC1ViewerFromArtistURL() {
       null;
 
 
-    window.glctc1ViewerConnecting =
-      false;
-
-
     return false;
 
   }
@@ -15971,13 +15855,6 @@ async function startGLCTC1ViewerFromArtistURL() {
 // =====================================================
 
 async function cleanupGLCTC1ViewerConnection() {
-
-  clearGLCTC1ViewerRetryTimer();
-
-
-  window.glctc1ViewerConnecting =
-    false;
-
 
   try {
 
@@ -16093,10 +15970,6 @@ async function cleanupGLCTC1ViewerConnection() {
 console.log(
   "🔴 GLCTC1 STEP 46 — VIEWER LIVE AUDIO + VIDEO RECEIVER READY"
 );
-
-
-
-
 
 // =====================================================
 // 🔴 STEP 19 — CREATE ARTIST LIVE CONNECTION

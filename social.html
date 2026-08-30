@@ -16165,31 +16165,430 @@ if (glctc1EndLiveButton) {
 }
 
 // =====================================================
-// 🔴 GLCTC1 FINAL OUTPUT AUDIO LIVE OVERRIDE
-// 🎵 MAIN PROCESSED OUTPUT + 🎤 ARTIST MICROPHONE
+// 🔴 GLCTC1 LIVE AUDIO — COMPLETE 3-PART SYSTEM
 // =====================================================
 //
-// FINAL AUDIO PATH:
+// PART 1 = Create/start the artist audio broadcast
+// PART 2 = GO LIVE button → main output + microphone
+// PART 3 = Viewer → receive artist live audio
 //
-// GLCTC1 MAIN FINAL OUTPUT
-//          ↓
-//      + MICROPHONE
-//          ↓
-//   ONE LIVE AUDIO STREAM
-//          ↓
-//    WEBRTC BROADCAST
-//          ↓
-//        CROWD
+// 🎵 SOURCE:
+// GLCTC1 MAIN FINAL PROCESSED AUDIO OUTPUT
 //
-// IMPORTANT:
-// ❌ Does NOT require decks to be "live"
-// ❌ Does NOT use getGLCTC1LiveAudioStream()
-// ❌ Does NOT touch webcam
-// ✅ Uses the MAIN PROCESSED FINAL OUTPUT
-// ✅ Adds artist microphone
-// ✅ Completes OFFER → ANSWER → ICE handshake
+// 🎤 MICROPHONE:
+// Artist microphone is mixed into the live stream.
+//
+// 🔴 BROADCAST:
+// WebRTC peer connection.
+//
+// 👁️ VIEWER:
+// Receives the live audio into glctc1LiveAudio.
+//
+// 🎥 WEBCAM:
+// NOT INCLUDED YET. Audio first.
 // =====================================================
 
+
+// =====================================================
+// 🔴 PART 1 — START GLCTC1 AUDIO BROADCAST
+// =====================================================
+
+async function startGLCTC1AudioBroadcast() {
+
+  try {
+
+    console.log(
+      "🔴 GLCTC1 STARTING AUDIO BROADCAST"
+    );
+
+
+    // =================================================
+    // 👤 GET CURRENT ARTIST
+    // =================================================
+
+    const {
+      data: userData,
+      error: userError
+    } =
+      await supabaseClient.auth.getUser();
+
+
+    if (
+      userError ||
+      !userData?.user
+    ) {
+
+      console.error(
+        "❌ GLCTC1 ARTIST NOT AUTHENTICATED:",
+        userError
+      );
+
+      return false;
+
+    }
+
+
+    const user =
+      userData.user;
+
+
+    // =================================================
+    // 🔊 CHECK FINAL LIVE AUDIO
+    // =================================================
+
+    const liveStream =
+      window.glctc1LiveAudioStream;
+
+
+    if (!liveStream) {
+
+      console.error(
+        "❌ GLCTC1 LIVE AUDIO STREAM NOT READY"
+      );
+
+      return false;
+
+    }
+
+
+    const audioTracks =
+      liveStream.getAudioTracks();
+
+
+    if (!audioTracks.length) {
+
+      console.error(
+        "❌ GLCTC1 LIVE AUDIO HAS NO AUDIO TRACK"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 CREATE FRESH ARTIST PEER CONNECTION
+    // =================================================
+
+    if (
+      glctc1PeerConnection
+    ) {
+
+      try {
+
+        glctc1PeerConnection.close();
+
+      } catch (error) {
+
+        console.warn(
+          "⚠️ GLCTC1 OLD PEER CONNECTION CLOSE:",
+          error
+        );
+
+      }
+
+    }
+
+
+    glctc1PeerConnection =
+      new RTCPeerConnection();
+
+
+    // =================================================
+    // 🔊 ATTACH FINAL MIXED AUDIO
+    // =================================================
+
+    audioTracks.forEach(
+      function (track) {
+
+        glctc1PeerConnection.addTrack(
+          track,
+          liveStream
+        );
+
+      }
+    );
+
+
+    console.log(
+      "🔊 GLCTC1 FINAL LIVE AUDIO TRACK ATTACHED"
+    );
+
+
+    // =================================================
+    // 🔴 ARTIST ICE CANDIDATES
+    // =================================================
+
+    glctc1PeerConnection.onicecandidate =
+      async function (event) {
+
+        if (!event.candidate) {
+
+          return;
+
+        }
+
+
+        try {
+
+          const {
+            data: roomData,
+            error: roomReadError
+          } =
+            await supabaseClient
+              .from("glctc1_live_rooms")
+              .select("signaling_data")
+              .eq(
+                "user_id",
+                user.id
+              )
+              .maybeSingle();
+
+
+          if (roomReadError) {
+
+            console.error(
+              "❌ GLCTC1 ARTIST ICE READ ERROR:",
+              roomReadError
+            );
+
+            return;
+
+          }
+
+
+          const signaling =
+            roomData?.signaling_data || {};
+
+
+          const artistIce =
+            signaling.artist_ice || [];
+
+
+          artistIce.push(
+            event.candidate.toJSON()
+          );
+
+
+          signaling.artist_ice =
+            artistIce;
+
+
+          const {
+            error: iceSaveError
+          } =
+            await supabaseClient
+              .from("glctc1_live_rooms")
+              .update({
+
+                signaling_data:
+                  signaling,
+
+                updated_at:
+                  new Date().toISOString()
+
+              })
+              .eq(
+                "user_id",
+                user.id
+              );
+
+
+          if (iceSaveError) {
+
+            console.error(
+              "❌ GLCTC1 ARTIST ICE SAVE ERROR:",
+              iceSaveError
+            );
+
+          }
+
+        } catch (iceError) {
+
+          console.error(
+            "❌ GLCTC1 ARTIST ICE ERROR:",
+            iceError
+          );
+
+        }
+
+      };
+
+
+    // =================================================
+    // 🔴 CREATE OFFER
+    // =================================================
+
+    const offer =
+      await glctc1PeerConnection.createOffer();
+
+
+    await glctc1PeerConnection.setLocalDescription(
+      offer
+    );
+
+
+    console.log(
+      "🔴 GLCTC1 AUDIO OFFER CREATED"
+    );
+
+
+    // =================================================
+    // 👤 GET ARTIST PROFILE
+    // =================================================
+
+    const {
+      data: profile
+    } =
+      await supabaseClient
+        .from("profiles")
+        .select("artist_name")
+        .eq(
+          "id",
+          user.id
+        )
+        .maybeSingle();
+
+
+    // =================================================
+    // 🔴 CREATE / UPDATE LIVE ROOM
+    // =================================================
+
+    const {
+      error: roomError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .upsert(
+          {
+
+            user_id:
+              user.id,
+
+            artist_name:
+              profile?.artist_name || "",
+
+            media_type:
+              "audio",
+
+            is_live:
+              true,
+
+            signaling_data: {
+
+              offer: {
+
+                type:
+                  offer.type,
+
+                sdp:
+                  offer.sdp
+
+              },
+
+              answer:
+                null,
+
+              artist_ice:
+                [],
+
+              viewer_ice:
+                []
+
+            },
+
+            updated_at:
+              new Date().toISOString()
+
+          },
+          {
+            onConflict:
+              "user_id"
+          }
+        );
+
+
+    if (roomError) {
+
+      console.error(
+        "❌ GLCTC1 LIVE ROOM ERROR:",
+        roomError
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 MARK ARTIST LIVE
+    // =================================================
+
+    const {
+      error: liveArtistError
+    } =
+      await supabaseClient
+        .from("live_artists")
+        .upsert(
+          {
+
+            user_id:
+              user.id,
+
+            artist_name:
+              profile?.artist_name || "",
+
+            is_live:
+              true,
+
+            updated_at:
+              new Date().toISOString()
+
+          },
+          {
+            onConflict:
+              "user_id"
+          }
+        );
+
+
+    if (liveArtistError) {
+
+      console.error(
+        "❌ GLCTC1 LIVE ARTIST ERROR:",
+        liveArtistError
+      );
+
+      return false;
+
+    }
+
+
+    console.log(
+      "🔴 GLCTC1 AUDIO BROADCAST IS LIVE"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 AUDIO BROADCAST START ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 🔴 PART 2 — GO LIVE AUDIO OVERRIDE
+// =====================================================
 
 if (glctc1GoLiveButton) {
 
@@ -16200,15 +16599,16 @@ if (glctc1GoLiveButton) {
       event.preventDefault();
       event.stopImmediatePropagation();
 
+
       try {
 
         console.log(
-          "🔴 GLCTC1 FINAL OUTPUT AUDIO LIVE START"
+          "🔴 GLCTC1 GO LIVE AUDIO OVERRIDE"
         );
 
 
         // =================================================
-        // 👤 GET SIGNED-IN ARTIST
+        // 👤 AUTHENTICATED ARTIST
         // =================================================
 
         const {
@@ -16224,8 +16624,12 @@ if (glctc1GoLiveButton) {
         ) {
 
           console.error(
-            "❌ GLCTC1 LIVE USER ERROR:",
+            "❌ GLCTC1 USER NOT AUTHENTICATED:",
             userError
+          );
+
+          alert(
+            "Please log in before going live."
           );
 
           return;
@@ -16233,12 +16637,8 @@ if (glctc1GoLiveButton) {
         }
 
 
-        const user =
-          userData.user;
-
-
         // =================================================
-        // 🎵 GET MAIN GLCTC1 FINAL OUTPUT
+        // 🎵 FIND MAIN FINAL OUTPUT
         // =================================================
 
         let finalOutputStream =
@@ -16284,7 +16684,7 @@ if (glctc1GoLiveButton) {
         if (!finalOutputStream) {
 
           console.error(
-            "❌ GLCTC1 MAIN FINAL OUTPUT NOT AVAILABLE"
+            "❌ GLCTC1 MAIN FINAL OUTPUT NOT FOUND"
           );
 
           alert(
@@ -16296,11 +16696,11 @@ if (glctc1GoLiveButton) {
         }
 
 
-        const finalTracks =
+        const outputTracks =
           finalOutputStream.getAudioTracks();
 
 
-        if (!finalTracks.length) {
+        if (!outputTracks.length) {
 
           console.error(
             "❌ GLCTC1 MAIN FINAL OUTPUT HAS NO AUDIO TRACK"
@@ -16321,7 +16721,7 @@ if (glctc1GoLiveButton) {
 
 
         // =================================================
-        // 🎤 REQUEST ARTIST MICROPHONE
+        // 🎤 REQUEST MICROPHONE
         // =================================================
 
         if (
@@ -16347,18 +16747,15 @@ if (glctc1GoLiveButton) {
           });
 
 
-        if (!microphoneStream) {
-
-          return;
-
-        }
-
-
         const microphoneTracks =
           microphoneStream.getAudioTracks();
 
 
         if (!microphoneTracks.length) {
+
+          console.error(
+            "❌ GLCTC1 MICROPHONE TRACK NOT FOUND"
+          );
 
           microphoneStream
             .getTracks()
@@ -16376,7 +16773,7 @@ if (glctc1GoLiveButton) {
 
 
         console.log(
-          "🎤 GLCTC1 ARTIST MICROPHONE ACTIVE"
+          "🎤 GLCTC1 MICROPHONE ACTIVE"
         );
 
 
@@ -16384,7 +16781,7 @@ if (glctc1GoLiveButton) {
         // 🔊 CREATE FINAL LIVE MIX
         // =================================================
 
-        const liveContext =
+        const audioContext =
           new (
             window.AudioContext ||
             window.webkitAudioContext
@@ -16392,40 +16789,40 @@ if (glctc1GoLiveButton) {
 
 
         if (
-          liveContext.state ===
+          audioContext.state ===
           "suspended"
         ) {
 
-          await liveContext.resume();
+          await audioContext.resume();
 
         }
 
 
         const liveDestination =
-          liveContext.createMediaStreamDestination();
+          audioContext.createMediaStreamDestination();
 
 
         // =================================================
-        // 🎵 MAIN FINAL OUTPUT → LIVE MIX
+        // 🎵 MAIN FINAL OUTPUT → LIVE
         // =================================================
 
-        const finalOutputSource =
-          liveContext.createMediaStreamSource(
+        const finalSource =
+          audioContext.createMediaStreamSource(
             finalOutputStream
           );
 
 
-        finalOutputSource.connect(
+        finalSource.connect(
           liveDestination
         );
 
 
         // =================================================
-        // 🎤 MICROPHONE → LIVE MIX
+        // 🎤 MICROPHONE → LIVE
         // =================================================
 
         const microphoneSource =
-          liveContext.createMediaStreamSource(
+          audioContext.createMediaStreamSource(
             microphoneStream
           );
 
@@ -16436,209 +16833,36 @@ if (glctc1GoLiveButton) {
 
 
         // =================================================
-        // 🔊 FINAL BROADCAST STREAM
-        // =================================================
-
-        const liveStream =
-          liveDestination.stream;
-
-
-        const liveTracks =
-          liveStream.getAudioTracks();
-
-
-        if (!liveTracks.length) {
-
-          console.error(
-            "❌ GLCTC1 FINAL LIVE AUDIO TRACK NOT CREATED"
-          );
-
-          microphoneStream
-            .getTracks()
-            .forEach(
-              function (track) {
-
-                track.stop();
-
-              }
-            );
-
-          await liveContext.close();
-
-          return;
-
-        }
-
-
-        // =================================================
-        // 🔊 STORE LIVE REFERENCES
+        // 🔊 STORE FINAL LIVE STREAM
         // =================================================
 
         window.glctc1LiveAudioStream =
-          liveStream;
+          liveDestination.stream;
 
         window.glctc1LiveMicrophoneStream =
           microphoneStream;
 
         window.glctc1LiveAudioContext =
-          liveContext;
+          audioContext;
 
 
         console.log(
-          "🔊 GLCTC1 FINAL OUTPUT + MIC MIX READY"
+          "🔊 GLCTC1 FINAL OUTPUT + MICROPHONE MIX READY"
         );
 
 
         // =================================================
-        // 🔴 CLOSE ANY OLD PEER
+        // 🔴 START ACTUAL BROADCAST
         // =================================================
 
-        if (
-          glctc1PeerConnection
-        ) {
-
-          try {
-
-            glctc1PeerConnection.close();
-
-          } catch (error) {
-
-            console.warn(
-              "⚠️ GLCTC1 OLD PEER CLOSE:",
-              error
-            );
-
-          }
-
-        }
+        const broadcastStarted =
+          await startGLCTC1AudioBroadcast();
 
 
-        // =================================================
-        // 🔴 CREATE ARTIST PEER CONNECTION
-        // =================================================
-
-        glctc1PeerConnection =
-          new RTCPeerConnection();
-
-
-        // =================================================
-        // 🔊 ADD FINAL MIX TO PEER
-        // =================================================
-
-        liveTracks.forEach(
-          function (track) {
-
-            glctc1PeerConnection.addTrack(
-              track,
-              liveStream
-            );
-
-          }
-        );
-
-
-        console.log(
-          "🔊 GLCTC1 FINAL MIX ADDED TO WEBRTC"
-        );
-
-
-        // =================================================
-        // 🔴 ARTIST CONNECTION MONITOR
-        // =================================================
-
-        glctc1PeerConnection.onconnectionstatechange =
-          function () {
-
-            console.log(
-              "🔴 GLCTC1 ARTIST CONNECTION:",
-              glctc1PeerConnection.connectionState
-            );
-
-          };
-
-
-        glctc1PeerConnection.oniceconnectionstatechange =
-          function () {
-
-            console.log(
-              "🔴 GLCTC1 ARTIST ICE:",
-              glctc1PeerConnection.iceConnectionState
-            );
-
-          };
-
-
-        // =================================================
-        // 🔴 CREATE EMPTY LIVE ROOM FIRST
-        // =================================================
-
-        const {
-          data: profile
-        } =
-          await supabaseClient
-            .from("profiles")
-            .select("artist_name")
-            .eq(
-              "id",
-              user.id
-            )
-            .maybeSingle();
-
-
-        const {
-          error: roomError
-        } =
-          await supabaseClient
-            .from("glctc1_live_rooms")
-            .upsert(
-              {
-
-                user_id:
-                  user.id,
-
-                artist_name:
-                  profile?.artist_name ||
-                  "",
-
-                media_type:
-                  "audio",
-
-                is_live:
-                  true,
-
-                signaling_data:
-                  {
-
-                    offer:
-                      null,
-
-                    answer:
-                      null,
-
-                    artist_ice:
-                      [],
-
-                    viewer_ice:
-                      []
-
-                  },
-
-                updated_at:
-                  new Date().toISOString()
-
-              },
-              {
-                onConflict:
-                  "user_id"
-              }
-            );
-
-
-        if (roomError) {
+        if (!broadcastStarted) {
 
           console.error(
-            "❌ GLCTC1 LIVE ROOM CREATE ERROR:",
-            roomError
+            "❌ GLCTC1 AUDIO BROADCAST FAILED"
           );
 
           return;
@@ -16647,368 +16871,7 @@ if (glctc1GoLiveButton) {
 
 
         // =================================================
-        // 🔴 ARTIST ICE CANDIDATES
-        // =================================================
-
-        glctc1PeerConnection.onicecandidate =
-          async function (event) {
-
-            if (
-              !event.candidate
-            ) {
-
-              return;
-
-            }
-
-
-            try {
-
-              const {
-                data: room,
-                error
-              } =
-                await supabaseClient
-                  .from("glctc1_live_rooms")
-                  .select("signaling_data")
-                  .eq(
-                    "user_id",
-                    user.id
-                  )
-                  .maybeSingle();
-
-
-              if (error) {
-
-                console.error(
-                  "❌ GLCTC1 ARTIST ICE READ ERROR:",
-                  error
-                );
-
-                return;
-
-              }
-
-
-              const signaling =
-                room?.signaling_data || {};
-
-
-              const artistIce =
-                signaling.artist_ice || [];
-
-
-              artistIce.push(
-                event.candidate.toJSON()
-              );
-
-
-              signaling.artist_ice =
-                artistIce;
-
-
-              await supabaseClient
-                .from("glctc1_live_rooms")
-                .update({
-
-                  signaling_data:
-                    signaling,
-
-                  updated_at:
-                    new Date().toISOString()
-
-                })
-                .eq(
-                  "user_id",
-                  user.id
-                );
-
-
-              console.log(
-                "🔴 GLCTC1 ARTIST ICE SAVED"
-              );
-
-
-            } catch (iceError) {
-
-              console.error(
-                "❌ GLCTC1 ARTIST ICE ERROR:",
-                iceError
-              );
-
-            }
-
-          };
-
-
-        // =================================================
-        // 🔴 CREATE LIVE OFFER
-        // =================================================
-
-        const offer =
-          await glctc1PeerConnection.createOffer();
-
-
-        await glctc1PeerConnection.setLocalDescription(
-          offer
-        );
-
-
-        console.log(
-          "🔴 GLCTC1 LIVE OFFER CREATED"
-        );
-
-
-        // =================================================
-        // 🔴 SAVE OFFER
-        // =================================================
-
-        const {
-          error: offerSaveError
-        } =
-          await supabaseClient
-            .from("glctc1_live_rooms")
-            .update({
-
-              signaling_data:
-                {
-
-                  offer:
-                    {
-
-                      type:
-                        offer.type,
-
-                      sdp:
-                        offer.sdp
-
-                    },
-
-                  answer:
-                    null,
-
-                  artist_ice:
-                    [],
-
-                  viewer_ice:
-                    []
-
-                },
-
-              updated_at:
-                new Date().toISOString()
-
-            })
-            .eq(
-              "user_id",
-              user.id
-            );
-
-
-        if (offerSaveError) {
-
-          console.error(
-            "❌ GLCTC1 LIVE OFFER SAVE ERROR:",
-            offerSaveError
-          );
-
-          return;
-
-        }
-
-
-        console.log(
-          "🔴 GLCTC1 LIVE OFFER SAVED"
-        );
-
-
-        // =================================================
-        // 🔴 MARK ARTIST LIVE
-        // =================================================
-
-        const {
-          error: liveError
-        } =
-          await supabaseClient
-            .from("live_artists")
-            .upsert(
-              {
-
-                user_id:
-                  user.id,
-
-                artist_name:
-                  profile?.artist_name ||
-                  "",
-
-                is_live:
-                  true,
-
-                updated_at:
-                  new Date().toISOString()
-
-              },
-              {
-                onConflict:
-                  "user_id"
-              }
-            );
-
-
-        if (liveError) {
-
-          console.error(
-            "❌ GLCTC1 LIVE ARTIST ERROR:",
-            liveError
-          );
-
-          return;
-
-        }
-
-
-        // =================================================
-        // 🔴 WAIT FOR CROWD ANSWER
-        // =================================================
-
-        window.glctc1LiveAnswerWatcher =
-          setInterval(
-            async function () {
-
-              try {
-
-                if (
-                  !glctc1PeerConnection ||
-                  glctc1PeerConnection.signalingState ===
-                    "closed"
-                ) {
-
-                  return;
-
-                }
-
-
-                if (
-                  glctc1PeerConnection.currentRemoteDescription
-                ) {
-
-                  return;
-
-                }
-
-
-                const {
-                  data: room,
-                  error
-                } =
-                  await supabaseClient
-                    .from("glctc1_live_rooms")
-                    .select("signaling_data")
-                    .eq(
-                      "user_id",
-                      user.id
-                    )
-                    .maybeSingle();
-
-
-                if (error) {
-
-                  return;
-
-                }
-
-
-                const signaling =
-                  room?.signaling_data;
-
-
-                if (
-                  !signaling ||
-                  !signaling.answer
-                ) {
-
-                  return;
-
-                }
-
-
-                console.log(
-                  "👁️ GLCTC1 CROWD ANSWER RECEIVED"
-                );
-
-
-                await glctc1PeerConnection
-                  .setRemoteDescription(
-                    signaling.answer
-                  );
-
-
-                console.log(
-                  "🔴 GLCTC1 CROWD ANSWER APPLIED"
-                );
-
-
-                // =================================================
-                // 👁️ APPLY VIEWER ICE TO ARTIST
-                // =================================================
-
-                const viewerIce =
-                  signaling.viewer_ice || [];
-
-
-                for (
-                  const candidate of viewerIce
-                ) {
-
-                  try {
-
-                    await glctc1PeerConnection
-                      .addIceCandidate(
-                        candidate
-                      );
-
-                  } catch (iceError) {
-
-                    console.warn(
-                      "⚠️ GLCTC1 VIEWER ICE ERROR:",
-                      iceError
-                    );
-
-                  }
-
-                }
-
-
-                console.log(
-                  "👁️ GLCTC1 VIEWER ICE APPLIED"
-                );
-
-
-                clearInterval(
-                  window.glctc1LiveAnswerWatcher
-                );
-
-
-                window.glctc1LiveAnswerWatcher =
-                  null;
-
-
-              } catch (answerError) {
-
-                console.error(
-                  "❌ GLCTC1 ANSWER WATCH ERROR:",
-                  answerError
-                );
-
-              }
-
-            },
-            1000
-          );
-
-
-        // =================================================
-        // 🔴 UPDATE LIVE BUTTONS
+        // 🔴 UPDATE GO LIVE BUTTON
         // =================================================
 
         if (
@@ -17035,22 +16898,13 @@ if (glctc1GoLiveButton) {
 
 
         console.log(
-          "🔴 GLCTC1 ARTIST IS NOW BROADCASTING"
+          "🔴 GLCTC1 GO LIVE COMPLETE"
         );
-
-        console.log(
-          "🎵 MAIN FINAL OUTPUT → CROWD"
-        );
-
-        console.log(
-          "🎤 MICROPHONE → CROWD"
-        );
-
 
       } catch (error) {
 
         console.error(
-          "❌ GLCTC1 FINAL AUDIO LIVE ERROR:",
+          "❌ GLCTC1 GO LIVE AUDIO ERROR:",
           error
         );
 
@@ -17064,7 +16918,374 @@ if (glctc1GoLiveButton) {
 
 
 // =====================================================
-// 🛑 GLCTC1 FINAL AUDIO LIVE CLEANUP
+// 👁️ PART 3 — VIEWER RECEIVES LIVE AUDIO
+// =====================================================
+
+async function connectGLCTC1LiveAudioViewer(
+  artistUserId
+) {
+
+  try {
+
+    if (!artistUserId) {
+
+      console.error(
+        "❌ GLCTC1 ARTIST ID NOT PROVIDED"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 READ ARTIST LIVE ROOM
+    // =================================================
+
+    const {
+      data: room,
+      error: roomError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .select(
+          "signaling_data"
+        )
+        .eq(
+          "user_id",
+          artistUserId
+        )
+        .maybeSingle();
+
+
+    if (roomError) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER LIVE ROOM ERROR:",
+        roomError
+      );
+
+      return false;
+
+    }
+
+
+    const signaling =
+      room?.signaling_data;
+
+
+    if (
+      !signaling?.offer
+    ) {
+
+      console.warn(
+        "⚠️ GLCTC1 ARTIST LIVE OFFER NOT READY"
+      );
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 👁️ CREATE VIEWER PEER CONNECTION
+    // =================================================
+
+    const viewerConnection =
+      new RTCPeerConnection();
+
+
+    // =================================================
+    // 🔊 RECEIVE LIVE AUDIO
+    // =================================================
+
+    viewerConnection.ontrack =
+      function (event) {
+
+        const liveAudio =
+          document.getElementById(
+            "glctc1LiveAudio"
+          );
+
+
+        if (!liveAudio) {
+
+          console.error(
+            "❌ GLCTC1 LIVE AUDIO ELEMENT NOT FOUND"
+          );
+
+          return;
+
+        }
+
+
+        const stream =
+          event.streams?.[0];
+
+
+        if (!stream) {
+
+          console.error(
+            "❌ GLCTC1 LIVE AUDIO STREAM NOT RECEIVED"
+          );
+
+          return;
+
+        }
+
+
+        liveAudio.srcObject =
+          stream;
+
+
+        liveAudio.autoplay =
+          true;
+
+        liveAudio.playsInline =
+          true;
+
+
+        liveAudio.play()
+          .catch(
+            function (error) {
+
+              console.warn(
+                "⚠️ GLCTC1 LIVE AUDIO PLAY:",
+                error
+              );
+
+            }
+          );
+
+
+        console.log(
+          "🔊 GLCTC1 LIVE AUDIO RECEIVED"
+        );
+
+      };
+
+
+    // =================================================
+    // 🔴 VIEWER ICE CANDIDATES
+    // =================================================
+
+    viewerConnection.onicecandidate =
+      async function (event) {
+
+        if (!event.candidate) {
+
+          return;
+
+        }
+
+
+        try {
+
+          const {
+            data: latestRoom,
+            error: latestRoomError
+          } =
+            await supabaseClient
+              .from("glctc1_live_rooms")
+              .select("signaling_data")
+              .eq(
+                "user_id",
+                artistUserId
+              )
+              .maybeSingle();
+
+
+          if (latestRoomError) {
+
+            console.error(
+              "❌ GLCTC1 VIEWER ICE READ ERROR:",
+              latestRoomError
+            );
+
+            return;
+
+          }
+
+
+          const signalingData =
+            latestRoom?.signaling_data || {};
+
+
+          const viewerIce =
+            signalingData.viewer_ice || [];
+
+
+          viewerIce.push(
+            event.candidate.toJSON()
+          );
+
+
+          signalingData.viewer_ice =
+            viewerIce;
+
+
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .update({
+
+              signaling_data:
+                signalingData
+
+            })
+            .eq(
+              "user_id",
+              artistUserId
+            );
+
+
+        } catch (error) {
+
+          console.error(
+            "❌ GLCTC1 VIEWER ICE ERROR:",
+            error
+          );
+
+        }
+
+      };
+
+
+    // =================================================
+    // 🔴 ACCEPT ARTIST OFFER
+    // =================================================
+
+    await viewerConnection.setRemoteDescription(
+      signaling.offer
+    );
+
+
+    // =================================================
+    // 👁️ CREATE VIEWER ANSWER
+    // =================================================
+
+    const answer =
+      await viewerConnection.createAnswer();
+
+
+    await viewerConnection.setLocalDescription(
+      answer
+    );
+
+
+    // =================================================
+    // 🔴 SAVE VIEWER ANSWER
+    // =================================================
+
+    const updatedSignaling = {
+
+      ...signaling,
+
+      answer: {
+
+        type:
+          answer.type,
+
+        sdp:
+          answer.sdp
+
+      }
+
+    };
+
+
+    const {
+      error: answerError
+    } =
+      await supabaseClient
+        .from("glctc1_live_rooms")
+        .update({
+
+          signaling_data:
+            updatedSignaling
+
+        })
+        .eq(
+          "user_id",
+          artistUserId
+        );
+
+
+    if (answerError) {
+
+      console.error(
+        "❌ GLCTC1 VIEWER ANSWER SAVE ERROR:",
+        answerError
+      );
+
+      viewerConnection.close();
+
+      return false;
+
+    }
+
+
+    // =================================================
+    // 🔴 STORE VIEWER CONNECTION
+    // =================================================
+
+    window.glctc1ViewerConnection =
+      viewerConnection;
+
+
+    // =================================================
+    // 🔴 APPLY EXISTING ARTIST ICE
+    // =================================================
+
+    const artistIce =
+      signaling.artist_ice || [];
+
+
+    for (
+      const candidate of artistIce
+    ) {
+
+      try {
+
+        await viewerConnection.addIceCandidate(
+          candidate
+        );
+
+      } catch (iceError) {
+
+        console.warn(
+          "⚠️ GLCTC1 ARTIST ICE ERROR:",
+          iceError
+        );
+
+      }
+
+    }
+
+
+    console.log(
+      "👁️ GLCTC1 LIVE AUDIO VIEWER CONNECTED"
+    );
+
+
+    return true;
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 LIVE AUDIO VIEWER ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// 🛑 END LIVE — AUDIO CLEANUP
 // =====================================================
 
 if (glctc1EndLiveButton) {
@@ -17074,24 +17295,6 @@ if (glctc1EndLiveButton) {
     async function () {
 
       try {
-
-        // =================================================
-        // 🛑 STOP ANSWER WATCHER
-        // =================================================
-
-        if (
-          window.glctc1LiveAnswerWatcher
-        ) {
-
-          clearInterval(
-            window.glctc1LiveAnswerWatcher
-          );
-
-          window.glctc1LiveAnswerWatcher =
-            null;
-
-        }
-
 
         // =================================================
         // 🎤 STOP MICROPHONE
@@ -17118,7 +17321,7 @@ if (glctc1EndLiveButton) {
 
 
         // =================================================
-        // 🔊 CLOSE LIVE AUDIO MIX
+        // 🔊 CLOSE LIVE AUDIO CONTEXT
         // =================================================
 
         if (
@@ -17129,11 +17332,11 @@ if (glctc1EndLiveButton) {
 
             await window.glctc1LiveAudioContext.close();
 
-          } catch (audioError) {
+          } catch (error) {
 
             console.warn(
               "⚠️ GLCTC1 AUDIO CONTEXT CLOSE ERROR:",
-              audioError
+              error
             );
 
           }
@@ -17149,7 +17352,7 @@ if (glctc1EndLiveButton) {
 
 
         // =================================================
-        // 🔴 CLOSE PEER
+        // 🔴 CLOSE ARTIST PEER
         // =================================================
 
         if (
@@ -17160,11 +17363,11 @@ if (glctc1EndLiveButton) {
 
             glctc1PeerConnection.close();
 
-          } catch (peerError) {
+          } catch (error) {
 
             console.warn(
               "⚠️ GLCTC1 PEER CLOSE ERROR:",
-              peerError
+              error
             );
 
           }
@@ -17175,15 +17378,65 @@ if (glctc1EndLiveButton) {
         }
 
 
+        // =================================================
+        // 🔴 MARK ROOM OFFLINE
+        // =================================================
+
+        const {
+          data: userData
+        } =
+          await supabaseClient.auth.getUser();
+
+
+        if (
+          userData?.user
+        ) {
+
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .update({
+
+              is_live:
+                false,
+
+              updated_at:
+                new Date().toISOString()
+
+            })
+            .eq(
+              "user_id",
+              userData.user.id
+            );
+
+
+          await supabaseClient
+            .from("live_artists")
+            .update({
+
+              is_live:
+                false,
+
+              updated_at:
+                new Date().toISOString()
+
+            })
+            .eq(
+              "user_id",
+              userData.user.id
+            );
+
+        }
+
+
         console.log(
-          "🛑 GLCTC1 FINAL OUTPUT AUDIO BROADCAST STOPPED"
+          "🛑 GLCTC1 LIVE AUDIO ENDED"
         );
 
 
       } catch (error) {
 
         console.error(
-          "❌ GLCTC1 FINAL AUDIO CLEANUP ERROR:",
+          "❌ GLCTC1 END LIVE AUDIO ERROR:",
           error
         );
 
@@ -17194,15 +17447,14 @@ if (glctc1EndLiveButton) {
 
 }
 
+
 /* =======================================================
    INITIAL LOAD
 ======================================================= */
 
 loadGLCTC1LiveArtists();
 
-
 </script>
-
 
 <!-- =======================================================
      💬 GLCTC1 CROWD CHAT — STANDALONE

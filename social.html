@@ -6409,28 +6409,97 @@ if (glctc1GoLiveButton) {
     "click",
     async function () {
 
-      const started =
-        await startArtistLive();
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
 
-      if (!started) {
 
-        console.warn(
-          "⚠️ GLCTC1 LIVE ENGINE COULD NOT START"
+      if (
+        error ||
+        !data.user
+      ) {
+
+        alert(
+          "Please sign in to go live."
         );
 
         return;
+
       }
 
-      console.log(
-        "🔴 GLCTC1 LIVE ENGINE STARTED"
-      );
 
-      await loadGLCTC1LiveArtists();
+      const user =
+        data.user;
 
-    }
-  );
 
-}
+      const {
+        data: profile,
+        error: profileError
+      } =
+        await supabaseClient
+          .from("profiles")
+          .select(
+            "artist_name"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .maybeSingle();
+
+
+      if (profileError) {
+
+        console.error(
+          "❌ GLCTC1 ARTIST PROFILE ERROR:",
+          profileError
+        );
+
+        return;
+
+      }
+
+
+      const {
+        error: liveError
+      } =
+        await supabaseClient
+          .from("live_artists")
+          .upsert(
+            {
+              user_id:
+                user.id,
+
+              artist_name:
+                profile?.artist_name ||
+                "",
+
+              is_live:
+                true,
+
+              updated_at:
+                new Date().toISOString()
+            },
+            {
+              onConflict:
+                "user_id"
+            }
+          );
+
+
+      if (liveError) {
+
+        console.error(
+          "❌ GLCTC1 GO LIVE ERROR:",
+          liveError
+        );
+
+        return;
+
+      }
+
 
 
 /* =================================================
@@ -13302,7 +13371,17 @@ async function openGLCTC1ArtistLiveWatchWindow() {
 
 
 // =====================================================
-// 🔴 STEP 43 — ONLY RUN ON NORMAL PAGE
+// 👁️ STEP 43 — ONLY RUN ON NORMAL PAGE
+// =====================================================
+//
+// If the URL contains:
+//
+// social.html?artist=USER_ID
+//
+// then this is already the artist's Live module.
+//
+// STEP 43 MUST NOT attach another GO LIVE listener.
+//
 // =====================================================
 
 const glctc1ArtistPageId =
@@ -13314,7 +13393,7 @@ const glctc1ArtistPageId =
 
 
 // =====================================================
-// 🔴 NORMAL PAGE → OPEN MODULE
+// 👁️ NORMAL PAGE → OPEN MODULE
 // =====================================================
 
 if (
@@ -13326,13 +13405,17 @@ if (
     "click",
     async function (event) {
 
+      // Prevent another click handler on the
+      // normal page from starting the broadcast.
       event.preventDefault();
       event.stopImmediatePropagation();
+
 
       try {
 
         const watchOpened =
           await openGLCTC1ArtistLiveWatchWindow();
+
 
         if (!watchOpened) {
 
@@ -13341,15 +13424,19 @@ if (
           );
 
           return;
+
         }
 
+
         console.log(
-          "🔴 GLCTC1 ARTIST LIVE MODULE OPENED"
+          "👁️ GLCTC1 ARTIST LIVE MODULE OPENED"
         );
+
 
         console.log(
           "⏸️ GLCTC1 BROADCAST NOT STARTED — READY INSIDE MODULE"
         );
+
 
       } catch (error) {
 
@@ -13372,8 +13459,9 @@ if (
 // =====================================================
 
 console.log(
-  "🔴 GLCTC1 STEP 43 — LIVE MODULE ROUTING READY"
+  "👁️ GLCTC1 STEP 43 — LIVE MODULE ROUTING READY"
 );
+
 
 // =====================================================
 // 🔴 STEP 44 — ARTIST WATCH PAGE IDENTITY LOCK

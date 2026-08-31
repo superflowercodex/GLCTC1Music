@@ -15776,81 +15776,133 @@ async function createGLCTC1ArtistLiveConnection() {
   }
 }
 
-// =====================================================
+// // =====================================================
 // 🔴 STEP 20 — CREATE GLCTC1 ARTIST LIVE OFFER
 // =====================================================
-
 async function createGLCTC1ArtistLiveOffer() {
-
   try {
 
     /* =================================================
-       🔴 CHECK PEER CONNECTION
+    🔴 CHECK PEER CONNECTION
     ================================================= */
-
     if (!glctc1PeerConnection) {
-
       console.warn(
         "⚠️ GLCTC1 ARTIST CONNECTION NOT READY"
       );
-
       return false;
-
     }
 
-
     /* =================================================
-       🔐 GET AUTHENTICATED ARTIST
+    🔐 GET AUTHENTICATED ARTIST
     ================================================= */
-
     const {
       data,
       error
     } =
       await supabaseClient.auth.getUser();
 
-
     if (
       error ||
       !data?.user
     ) {
-
       console.error(
         "❌ GLCTC1 ARTIST USER ERROR:",
         error
       );
-
       return false;
-
     }
-
 
     const user =
       data.user;
 
+    /* =================================================
+    🔴 ARTIST ICE CANDIDATES
+    ================================================= */
+    glctc1PeerConnection.onicecandidate =
+      async function (event) {
+
+        if (!event.candidate) {
+          return;
+        }
+
+        const {
+          data: room,
+          error: roomError
+        } =
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .select("signaling_data")
+            .eq(
+              "user_id",
+              user.id
+            )
+            .maybeSingle();
+
+        if (roomError) {
+          console.error(
+            "❌ GLCTC1 ARTIST ICE READ ERROR:",
+            roomError
+          );
+          return;
+        }
+
+        const signaling =
+          room?.signaling_data || {};
+
+        const artistIce =
+          signaling.artist_ice || [];
+
+        artistIce.push(
+          event.candidate.toJSON()
+        );
+
+        signaling.artist_ice =
+          artistIce;
+
+        const {
+          error: iceError
+        } =
+          await supabaseClient
+            .from("glctc1_live_rooms")
+            .update({
+              signaling_data:
+                signaling
+            })
+            .eq(
+              "user_id",
+              user.id
+            );
+
+        if (iceError) {
+          console.error(
+            "❌ GLCTC1 ARTIST ICE SAVE ERROR:",
+            iceError
+          );
+          return;
+        }
+
+        console.log(
+          "🔴 GLCTC1 ARTIST ICE CANDIDATE SAVED"
+        );
+      };
 
     /* =================================================
-       🔴 CREATE OFFER
+    🔴 CREATE OFFER
     ================================================= */
-
     const offer =
       await glctc1PeerConnection.createOffer();
-
 
     await glctc1PeerConnection.setLocalDescription(
       offer
     );
 
-
     console.log(
       "🔴 GLCTC1 ARTIST LIVE OFFER CREATED"
     );
 
-
     /* =================================================
-       🔴 SAVE OFFER TO LIVE ROOM
+    🔴 SAVE OFFER TO LIVE ROOM
     ================================================= */
-
     const {
       data: room,
       error: roomReadError
@@ -15864,45 +15916,32 @@ async function createGLCTC1ArtistLiveOffer() {
         )
         .maybeSingle();
 
-
     if (roomReadError) {
-
       console.error(
         "❌ GLCTC1 LIVE ROOM READ ERROR:",
         roomReadError
       );
-
       return false;
-
     }
-
 
     const signaling =
       room?.signaling_data || {};
 
-
     signaling.offer = {
-
       type:
         offer.type,
-
       sdp:
         offer.sdp
-
     };
-
 
     signaling.answer =
       null;
 
-
     signaling.artist_ice =
       signaling.artist_ice || [];
 
-
     signaling.viewer_ice =
       signaling.viewer_ice || [];
-
 
     const {
       error: saveError
@@ -15910,39 +15949,29 @@ async function createGLCTC1ArtistLiveOffer() {
       await supabaseClient
         .from("glctc1_live_rooms")
         .update({
-
           signaling_data:
             signaling,
-
           updated_at:
             new Date().toISOString()
-
         })
         .eq(
           "user_id",
           user.id
         );
 
-
     if (saveError) {
-
       console.error(
         "❌ GLCTC1 ARTIST OFFER SAVE ERROR:",
         saveError
       );
-
       return false;
-
     }
-
 
     console.log(
       "🔴 GLCTC1 ARTIST LIVE OFFER SAVED"
     );
 
-
     return true;
-
 
   } catch (error) {
 
@@ -15952,9 +15981,7 @@ async function createGLCTC1ArtistLiveOffer() {
     );
 
     return false;
-
   }
-
 }
 
 // =====================================================

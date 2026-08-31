@@ -3740,10 +3740,10 @@ filter
    🔴 STORE LIVE STREAM WITH THIS DECK
 ================================================= */
 
-window.glctc1LiveAudioDestination =
+glctc1LiveAudioDestination =
   liveDestination;
 
-window.glctc1AudioStream =
+glctc1AudioStream =
   liveDestination.stream;
 
 
@@ -4193,11 +4193,11 @@ async function loadToDeck(deck, track) {
   ================================================= */
 
   if (
-  window.glctc1LiveAudioDestination
-) {
+    glctc1LiveAudioDestination
+  ) {
 
-  window.glctc1AudioStream =
-    window.glctc1LiveAudioDestination.stream;
+    glctc1AudioStream =
+      glctc1LiveAudioDestination.stream;
 
 
     console.log(
@@ -6400,29 +6400,226 @@ glctc1LiveArtistList.appendChild(
 
 
 /* =======================================================
-   GO LIVE — ARTIST LIVE MODULE ONLY
+   GO LIVE
 ======================================================= */
 
-/*
- * IMPORTANT:
- * The Live Engine already owns the GO LIVE button
- * through wireExistingGoLive().
- *
- * Do NOT attach another click listener here.
- *
- * This block intentionally does nothing.
- *
- * The artist's Live Module GO LIVE button is handled
- * exclusively by the Live Engine.
- */
+if (glctc1GoLiveButton) {
 
-if (
-  glctc1GoLiveButton &&
-  glctc1ArtistPageId
-) {
+  glctc1GoLiveButton.addEventListener(
+    "click",
+    async function () {
 
-  console.log(
-    "🔴 GLCTC1 ARTIST LIVE MODULE — GO LIVE CONTROL DELEGATED TO LIVE ENGINE"
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      if (
+        error ||
+        !data.user
+      ) {
+
+        alert(
+          "Please sign in to go live."
+        );
+
+        return;
+
+      }
+
+
+      const user =
+        data.user;
+
+
+      const {
+        data: profile,
+        error: profileError
+      } =
+        await supabaseClient
+          .from("profiles")
+          .select(
+            "artist_name"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .maybeSingle();
+
+
+      if (profileError) {
+
+        console.error(
+          "❌ GLCTC1 ARTIST PROFILE ERROR:",
+          profileError
+        );
+
+        return;
+
+      }
+
+
+      const {
+        error: liveError
+      } =
+        await supabaseClient
+          .from("live_artists")
+          .upsert(
+            {
+              user_id:
+                user.id,
+
+              artist_name:
+                profile?.artist_name ||
+                "",
+
+              is_live:
+                true,
+
+              updated_at:
+                new Date().toISOString()
+            },
+            {
+              onConflict:
+                "user_id"
+            }
+          );
+
+
+      if (liveError) {
+
+        console.error(
+          "❌ GLCTC1 GO LIVE ERROR:",
+          liveError
+        );
+
+        return;
+
+      }
+
+/* =================================================
+   🔴 STEP 3 — STAGE 2
+   CREATE LIVE AUDIO CONNECTION
+================================================= */
+
+const liveAudioStream =
+  getGLCTC1LiveAudioStream();
+
+if (!liveAudioStream) {
+
+  console.error(
+    "❌ GLCTC1 LIVE AUDIO STREAM NOT READY"
+  );
+
+} else {
+
+  glctc1PeerConnection =
+    new RTCPeerConnection();
+
+  liveAudioStream
+    .getAudioTracks()
+    .forEach(
+      function (track) {
+
+        glctc1PeerConnection.addTrack(
+          track,
+          liveAudioStream
+        );
+
+      }
+    );
+
+}
+      glctc1GoLiveButton.style.display =
+        "none";
+
+
+      if (glctc1EndLiveButton) {
+
+  glctc1EndLiveButton.style.display =
+    "inline-block";
+
+}
+
+
+/* =================================================
+   👁️ OPEN / UPDATE ARTIST LIVE ROOM
+================================================= */
+
+const {
+  error: roomError
+} =
+  await supabaseClient
+    .from("glctc1_live_rooms")
+    .upsert(
+      {
+        user_id:
+          user.id,
+
+        artist_name:
+          profile?.artist_name ||
+          "",
+
+        media_type:
+          "audio",
+
+        is_live:
+          true,
+
+        updated_at:
+          new Date().toISOString()
+      },
+      {
+        onConflict:
+          "user_id"
+      }
+    );
+
+
+if (roomError) {
+
+  console.error(
+    "❌ GLCTC1 LIVE ROOM ERROR:",
+    roomError
+  );
+
+  return;
+
+}
+
+
+await loadGLCTC1LiveArtists();
+
+
+/* =================================================
+   🔴 STEP 22 — START ARTIST LIVE BROADCAST
+================================================= */
+
+const broadcastStarted =
+  await startGLCTC1ArtistLiveBroadcast();
+
+
+if (!broadcastStarted) {
+
+  console.warn(
+    "⚠️ GLCTC1 ARTIST LIVE BROADCAST DID NOT START"
+  );
+
+  return;
+
+}
+
+
+console.log(
+  "🔴 GLCTC1 ARTIST LIVE BROADCAST STARTED"
+);
+
+
+
+    }
   );
 
 }
@@ -7746,8 +7943,8 @@ async function createGLCTC1ViewerConnection(
     // 👁️ STORE VIEWER CONNECTION
     // =================================================
 
-    ENGINE.viewerConnection =
-  viewerConnection;
+    window.glctc1ViewerConnection =
+      viewerConnection;
 
 
     console.log(
@@ -7793,7 +7990,7 @@ async function applyGLCTC1ArtistIceToViewer(
 
 
     const viewerConnection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (!viewerConnection) {
@@ -7919,7 +8116,7 @@ async function completeGLCTC1ViewerConnection(
 
 
     const viewerConnection =
-      ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (!viewerConnection) {
@@ -8309,9 +8506,9 @@ async function startGLCTC1LockedArtistWatch() {
     // =================================================
 
     const connected =
-  await startViewerWatch(
-    glctc1LockedWatchArtistId
-  );
+      await createGLCTC1ViewerConnection(
+        glctc1LockedWatchArtistId
+      );
 
 
     if (!connected) {
@@ -8508,14 +8705,8 @@ function setupGLCTC1ViewerLiveAudioUnlock() {
        👁️ AUDIO ELEMENT SETTINGS
     ================================================= */
 
-    audio.autoplay =
-  true;
-
-audio.muted =
-  false;
-
-audio.volume =
-  1;
+    liveAudio.autoplay =
+      false;
 
     liveAudio.muted =
       false;
@@ -8796,7 +8987,7 @@ function setupGLCTC1ArtistLiveWatchDisplay(
     // =================================================
 
     const viewerConnection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (!viewerConnection) {
@@ -8864,8 +9055,8 @@ function setupGLCTC1ArtistLiveWatchDisplay(
               stream;
 
 
-            video.muted =
-              true;
+            liveVideo.muted =
+              false;
 
 
             liveVideo.autoplay =
@@ -9199,31 +9390,31 @@ async function endGLCTC1ArtistLiveSession() {
 
 
     // =================================================
-// 🔴 RESET LOCAL WATCH STATE
-// =================================================
+    // 🔴 RESET LOCAL WATCH STATE
+    // =================================================
 
-if (
-  ENGINE.viewerConnection
-) {
+    if (
+      window.glctc1ViewerConnection
+    ) {
 
-  try {
+      try {
 
-    ENGINE.viewerConnection.close();
+        window.glctc1ViewerConnection.close();
 
-  } catch (viewerError) {
+      } catch (viewerError) {
 
-    console.warn(
-      "⚠️ GLCTC1 VIEWER CONNECTION CLOSE ERROR:",
-      viewerError
-    );
+        console.warn(
+          "⚠️ GLCTC1 VIEWER CONNECTION CLOSE ERROR:",
+          viewerError
+        );
 
-  }
+      }
 
 
-  ENGINE.viewerConnection =
-    null;
+      window.glctc1ViewerConnection =
+        null;
 
-}
+    }
 
 
     // =================================================
@@ -9350,7 +9541,20 @@ if (
     "click",
     async function () {
 
-      await endArtistLive();
+      const ended =
+        await endGLCTC1ArtistLiveSession();
+
+
+      if (!ended) {
+
+        console.warn(
+          "⚠️ GLCTC1 LIVE SESSION COULD NOT END"
+        );
+
+        return;
+
+      }
+
 
       glctc1EndLiveButton.style.display =
         "none";
@@ -9397,7 +9601,7 @@ function monitorGLCTC1ArtistWatchConnection(
 
 
     const viewerConnection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (!viewerConnection) {
@@ -9597,7 +9801,7 @@ function startGLCTC1ArtistWatchMonitor() {
 
 
           const viewerConnection =
-  ENGINE.viewerConnection;
+            window.glctc1ViewerConnection;
 
 
           // =================================================
@@ -10457,7 +10661,7 @@ function connectGLCTC1ViewerMedia() {
   try {
 
     const viewerConnection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (!viewerConnection) {
@@ -10567,8 +10771,8 @@ function startGLCTC1ViewerMediaHandler() {
 
 
           if (
-  ENGINE.viewerConnection
-) {
+            window.glctc1ViewerConnection
+          ) {
 
             clearInterval(
               mediaTimer
@@ -10732,7 +10936,7 @@ function closeGLCTC1ViewerConnection() {
   try {
 
     const viewerConnection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (viewerConnection) {
@@ -10742,8 +10946,8 @@ function closeGLCTC1ViewerConnection() {
     }
 
 
-    ENGINE.viewerConnection =
-  null;
+    window.glctc1ViewerConnection =
+      null;
 
 
     console.log(
@@ -10777,7 +10981,7 @@ function resetGLCTC1ViewerLiveState() {
 
     stopGLCTC1ViewerMedia();
 
-closeViewerConnection();
+    closeGLCTC1ViewerConnection();
 
 
     console.log(
@@ -10853,7 +11057,7 @@ function handleGLCTC1ArtistOffline() {
 function monitorGLCTC1ViewerConnection() {
 
   const viewerConnection =
-  ENGINE.viewerConnection;
+    window.glctc1ViewerConnection;
 
 
   if (!viewerConnection) {
@@ -11081,68 +11285,100 @@ function startGLCTC1WatchReconnectMonitor(
 
 
           // =========================================
-// CHECK EXISTING VIEWER CONNECTION
-// =========================================
+          // CHECK EXISTING VIEWER CONNECTION
+          // =========================================
 
-const existingConnection =
-  ENGINE.viewerConnection;
+          const existingConnection =
+            window.glctc1ViewerConnection;
 
 
-if (
-  existingConnection &&
-  (
-    existingConnection.connectionState ===
-      "connected" ||
-    existingConnection.connectionState ===
-      "connecting"
-  )
-) {
+          if (
+            existingConnection &&
+            (
+              existingConnection.connectionState ===
+                "connected" ||
+              existingConnection.connectionState ===
+                "connecting"
+            )
+          ) {
 
-  console.log(
-    "👁️ GLCTC1 LIVE ENGINE WATCH CONNECTION ALREADY ACTIVE"
-  );
+            console.log(
+              "👁️ GLCTC1 WATCH CONNECTION ALREADY ACTIVE"
+            );
 
-  return;
+            return;
 
           }
 
 
           // =========================================
-// 👁️ GLCTC1 LIVE ENGINE RECONNECT
-// =========================================
+          // STOP OLD CONNECTION
+          // =========================================
 
-if (
-  ENGINE.viewerConnection
-) {
-
-  await closeViewerConnection(
-    false
-  );
-
-}
+          closeGLCTC1ViewerConnection();
 
 
-const connected =
-  await startViewerWatch(
-    artistUserId,
-    artist.artist_name
-  );
+          // =========================================
+          // CREATE NEW VIEWER CONNECTION
+          // =========================================
+
+          const connected =
+            await createGLCTC1ViewerConnection(
+              artistUserId
+            );
 
 
-if (!connected) {
+          if (!connected) {
 
-  console.warn(
-    "⚠️ GLCTC1 LIVE ENGINE WATCH RECONNECT FAILED"
-  );
+            console.warn(
+              "⚠️ GLCTC1 WATCH RECONNECT CONNECTION FAILED"
+            );
 
-  return;
+            return;
 
-}
+          }
 
 
-console.log(
-  "👁️ GLCTC1 LIVE ENGINE WATCH RECONNECTED"
-);
+          // =========================================
+          // COMPLETE VIEWER CONNECTION
+          // =========================================
+
+          const completed =
+            await completeGLCTC1ViewerConnection(
+              artistUserId
+            );
+
+
+          if (!completed) {
+
+            console.warn(
+              "⚠️ GLCTC1 WATCH RECONNECT COULD NOT COMPLETE"
+            );
+
+            return;
+
+          }
+
+
+          // =========================================
+          // RESET SESSION STATE
+          // =========================================
+
+          glctc1ViewerSessionEnded =
+            false;
+
+
+          // =========================================
+          // ATTACH CONNECTION MONITOR
+          // =========================================
+
+          monitorGLCTC1ViewerConnection();
+
+
+          console.log(
+            "👁️ GLCTC1 WATCH VIEWER RECONNECTED"
+          );
+
 
           // =========================================
           // STOP RECONNECT MONITOR
@@ -11461,7 +11697,7 @@ function lockGLCTC1ViewerSessionToURL() {
 function monitorGLCTC1ViewerConnection() {
 
   const viewerConnection =
-  ENGINE.viewerConnection;
+    window.glctc1ViewerConnection;
 
 
   if (!viewerConnection) {
@@ -11655,7 +11891,7 @@ function monitorGLCTC1ViewerConnection() {
 function checkGLCTC1ViewerConnectionState() {
 
   const viewerConnection =
-  ENGINE.viewerConnection;
+    window.glctc1ViewerConnection;
 
 
   if (!viewerConnection) {
@@ -11833,7 +12069,7 @@ function startGLCTC1WatchEndLiveMonitor(
       ============================================= */
 
       const viewerConnection =
-  ENGINE.viewerConnection;
+        window.glctc1ViewerConnection;
 
 
       if (
@@ -11858,8 +12094,8 @@ function startGLCTC1WatchEndLiveMonitor(
       }
 
 
-      ENGINE.viewerConnection =
-  null;
+      window.glctc1ViewerConnection =
+        null;
 
 
       /* =============================================
@@ -12249,247 +12485,249 @@ async function cleanupGLCTC1ViewerConnection() {
     // =================================================
 
     const viewerConnection =
-      ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     // =================================================
-// 🔴 CLOSE WEBRTC CONNECTION
-// =================================================
+    // 🔴 CLOSE WEBRTC CONNECTION
+    // =================================================
 
-if (
-  viewerConnection
-) {
+    if (
+      viewerConnection
+    ) {
 
-  try {
+      try {
 
-    viewerConnection.ontrack =
-      null;
+        viewerConnection.ontrack =
+          null;
 
-    viewerConnection.onicecandidate =
-      null;
+        viewerConnection.onicecandidate =
+          null;
 
-    viewerConnection.onconnectionstatechange =
-      null;
+        viewerConnection.onconnectionstatechange =
+          null;
 
-    viewerConnection.oniceconnectionstatechange =
-      null;
+        viewerConnection.oniceconnectionstatechange =
+          null;
 
 
-    viewerConnection
-      .getReceivers()
-      .forEach(
-        function (receiver) {
+        viewerConnection
+          .getReceivers()
+          .forEach(
+            function (receiver) {
 
-          try {
+              try {
 
-            if (
-              receiver.track
-            ) {
+                if (
+                  receiver.track
+                ) {
 
-              receiver.track.stop();
+                  receiver.track.stop();
+
+                }
+
+              } catch (
+                receiverError
+              ) {
+
+                console.warn(
+                  "⚠️ GLCTC1 RECEIVER STOP ERROR:",
+                  receiverError
+                );
+
+              }
 
             }
+          );
 
-          } catch (
-            receiverError
-          ) {
 
-            console.warn(
-              "⚠️ GLCTC1 RECEIVER STOP ERROR:",
-              receiverError
-            );
+        viewerConnection.close();
 
-          }
 
-        }
+      } catch (
+        connectionError
+      ) {
+
+        console.warn(
+          "⚠️ GLCTC1 VIEWER CONNECTION CLOSE ERROR:",
+          connectionError
+        );
+
+      }
+
+    }
+
+
+    // =================================================
+    // 🔴 CLEAR STORED CONNECTION
+    // =================================================
+
+    window.glctc1ViewerConnection =
+      null;
+
+
+    // =================================================
+    // 🔊 RELEASE LIVE AUDIO
+    // =================================================
+
+    const liveAudio =
+      document.getElementById(
+        "glctc1LiveAudio"
       );
 
 
-    viewerConnection.close();
+    if (
+      liveAudio
+    ) {
+
+      try {
+
+        liveAudio.pause();
+
+      } catch (
+        audioPauseError
+      ) {
+
+        console.warn(
+          "⚠️ GLCTC1 LIVE AUDIO PAUSE ERROR:",
+          audioPauseError
+        );
+
+      }
 
 
-  } catch (
-    connectionError
-  ) {
+      const stream =
+        liveAudio.srcObject;
 
-    console.warn(
-      "⚠️ GLCTC1 VIEWER CONNECTION CLOSE ERROR:",
-      connectionError
+
+      if (
+        stream &&
+        typeof stream.getTracks ===
+        "function"
+      ) {
+
+        stream
+          .getTracks()
+          .forEach(
+            function (track) {
+
+              try {
+
+                track.stop();
+
+              } catch (
+                trackError
+              ) {
+
+                console.warn(
+                  "⚠️ GLCTC1 LIVE AUDIO TRACK STOP ERROR:",
+                  trackError
+                );
+
+              }
+
+            }
+          );
+
+      }
+
+
+      liveAudio.srcObject =
+        null;
+
+    }
+
+
+    // =================================================
+    // 📹 RELEASE LIVE VIDEO
+    // =================================================
+
+    const liveVideo =
+      document.getElementById(
+        "glctc1VideoFrame"
+      );
+
+
+    if (
+      liveVideo &&
+      liveVideo.srcObject
+    ) {
+
+      const videoStream =
+        liveVideo.srcObject;
+
+
+      if (
+        typeof videoStream.getTracks ===
+        "function"
+      ) {
+
+        videoStream
+          .getTracks()
+          .forEach(
+            function (track) {
+
+              try {
+
+                track.stop();
+
+              } catch (
+                videoTrackError
+              ) {
+
+                console.warn(
+                  "⚠️ GLCTC1 VIDEO TRACK STOP ERROR:",
+                  videoTrackError
+                );
+
+              }
+
+            }
+          );
+
+      }
+
+
+      liveVideo.srcObject =
+        null;
+
+    }
+
+
+    // =================================================
+    // 👁️ CLEAR VIEWER MEDIA STATE
+    // =================================================
+
+    window.glctc1ViewerMediaStream =
+      null;
+
+
+    window.glctc1ViewerStream =
+      null;
+
+
+    // =================================================
+    // 🔴 FINAL CLEANUP
+    // =================================================
+
+    console.log(
+      "👁️ GLCTC1 VIEWER CONNECTION CLEANUP COMPLETE"
     );
 
-  }
 
-}
-
-
-// =================================================
-// 🔴 CLEAR STORED CONNECTION
-// =================================================
-
-ENGINE.viewerConnection =
-  null;
+    return true;
 
 
-// =================================================
-// 🔊 RELEASE LIVE AUDIO
-// =================================================
+  } catch (error) {
 
-const liveAudio =
-  document.getElementById(
-    "glctc1LiveAudio"
-  );
-
-
-if (
-  liveAudio
-) {
-
-  try {
-
-    liveAudio.pause();
-
-  } catch (
-    audioPauseError
-  ) {
-
-    console.warn(
-      "⚠️ GLCTC1 LIVE AUDIO PAUSE ERROR:",
-      audioPauseError
+    console.error(
+      "❌ GLCTC1 VIEWER CLEANUP ERROR:",
+      error
     );
 
-  }
-
-
-  const stream =
-    liveAudio.srcObject;
-
-
-  if (
-    stream &&
-    typeof stream.getTracks ===
-    "function"
-  ) {
-
-    stream
-      .getTracks()
-      .forEach(
-        function (track) {
-
-          try {
-
-            track.stop();
-
-          } catch (
-            trackError
-          ) {
-
-            console.warn(
-              "⚠️ GLCTC1 LIVE AUDIO TRACK STOP ERROR:",
-              trackError
-            );
-
-          }
-
-        }
-      );
+    return false;
 
   }
-
-
-  liveAudio.srcObject =
-    null;
-
-}
-
-
-// =================================================
-// 📹 RELEASE LIVE VIDEO
-// =================================================
-
-const liveVideo =
-  document.getElementById(
-    "glctc1VideoFrame"
-  );
-
-
-if (
-  liveVideo &&
-  liveVideo.srcObject
-) {
-
-  const videoStream =
-    liveVideo.srcObject;
-
-
-  if (
-    typeof videoStream.getTracks ===
-    "function"
-  ) {
-
-    videoStream
-      .getTracks()
-      .forEach(
-        function (track) {
-
-          try {
-
-            track.stop();
-
-          } catch (
-            videoTrackError
-          ) {
-
-            console.warn(
-              "⚠️ GLCTC1 VIDEO TRACK STOP ERROR:",
-              videoTrackError
-            );
-
-          }
-
-        }
-      );
-
-  }
-
-
-  liveVideo.srcObject =
-    null;
-
-}
-
-
-// =================================================
-// 👁️ CLEAR VIEWER MEDIA STATE
-// =================================================
-
-window.glctc1ViewerMediaStream =
-  null;
-
-
-window.glctc1ViewerStream =
-  null;
-
-
-// =================================================
-// 🔴 FINAL CLEANUP
-// =================================================
-
-console.log(
-  "👁️ GLCTC1 VIEWER CONNECTION CLEANUP COMPLETE"
-);
-
-
-return true;
-
-
-} catch (error) {
-
-  console.error(
-    "❌ GLCTC1 VIEWER CLEANUP ERROR:",
-    error
-  );
-
-  return false;
 
 }
 
@@ -12791,23 +13029,19 @@ async function startGLCTC1FinalWatchSystem() {
     );
 
 
-    // =====================================================
-// 👀 GLCTC1 NEW LIVE ENGINE VIEWER
-// =====================================================
+    const viewerStarted =
+      await startGLCTC1ViewerFromArtistURL();
 
-const viewerStarted =
-  await startViewerWatch(
-    artistUserId
-  );
 
-if (!viewerStarted) {
+    if (!viewerStarted) {
 
-  console.warn(
-    "⚠️ GLCTC1 LIVE ENGINE VIEWER COULD NOT START"
-  );
+      console.warn(
+        "⚠️ GLCTC1 LOCKED VIEWER COULD NOT START"
+      );
 
-  return false;
-}
+      return false;
+
+    }
 
 
     setGLCTC1WatchSession(
@@ -12926,13 +13160,11 @@ async function reconnectGLCTC1Viewer() {
     );
 
 
-    await closeViewerConnection(false);
+    await cleanupGLCTC1ViewerConnection();
 
 
     const started =
-  await startViewerWatch(
-    artistUserId
-  );
+      await startGLCTC1ViewerFromArtistURL();
 
 
     if (!started) {
@@ -13008,20 +13240,20 @@ document.addEventListener(
 
 
     const connection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
-if (
-  !connection ||
-  connection.connectionState ===
-  "closed" ||
-  connection.connectionState ===
-  "failed"
-) {
+    if (
+      !connection ||
+      connection.connectionState ===
+      "closed" ||
+      connection.connectionState ===
+      "failed"
+    ) {
 
-  await reconnectGLCTC1Viewer();
+      await reconnectGLCTC1Viewer();
 
-}
+    }
 
   }
 );
@@ -13038,12 +13270,12 @@ window.addEventListener(
     try {
 
       if (
-  ENGINE.viewerConnection
-) {
+        window.glctc1ViewerConnection
+      ) {
 
-  ENGINE.viewerConnection.close();
+        window.glctc1ViewerConnection.close();
 
-}
+      }
 
     } catch (error) {
 
@@ -13196,75 +13428,71 @@ async function openGLCTC1ArtistLiveWatchWindow() {
 
 
     // =================================================
-// 🪟 OPEN NEW WATCH PAGE WINDOW
-// =================================================
+    // 🪟 OPEN NEW WATCH PAGE WINDOW
+    // =================================================
 
-const watchWindow =
-  window.open(
-    "about:blank",
-    "_blank"
-  );
-
-
-if (!watchWindow) {
-
-  console.warn(
-    "⚠️ GLCTC1 WATCH PAGE WINDOW BLOCKED"
-  );
-
-  return false;
-
-}
+    const watchWindow =
+      window.open(
+        watchUrl,
+        "_blank"
+      );
 
 
-watchWindow.location.href =
-  watchUrl;
+    if (!watchWindow) {
+
+      console.warn(
+        "⚠️ GLCTC1 WATCH PAGE WINDOW BLOCKED"
+      );
+
+      return false;
+
+    }
 
 
-// =================================================
-// 🔒 FOCUS NEW WINDOW
-// =================================================
+    // =================================================
+    // 🔒 FOCUS NEW WINDOW
+    // =================================================
 
-try {
+    try {
 
-  watchWindow.focus();
+      watchWindow.focus();
 
-} catch (error) {
+    } catch (error) {
 
-  console.warn(
-    "⚠️ GLCTC1 WATCH WINDOW FOCUS WARNING:",
-    error
-  );
+      console.warn(
+        "⚠️ GLCTC1 WATCH WINDOW FOCUS WARNING:",
+        error
+      );
 
-}
-
-
-console.log(
-  "🔒 GLCTC1 ARTIST WATCH PAGE OPENED:",
-  artistName ||
-  artistUserId
-);
+    }
 
 
-console.log(
-  "👁️ GLCTC1 ARTIST WATCH PAGE LOCKED TO:",
-  artistUserId
-);
+    console.log(
+      "🔒 GLCTC1 ARTIST WATCH PAGE OPENED:",
+      artistName ||
+      artistUserId
+    );
 
 
-return true;
+    console.log(
+      "👁️ GLCTC1 ARTIST WATCH PAGE LOCKED TO:",
+      artistUserId
+    );
 
 
-} catch (error) {
+    return true;
 
-  console.error(
-    "❌ GLCTC1 ARTIST WATCH WINDOW ERROR:",
-    error
-  );
 
-  return false;
+  } catch (error) {
 
-}
+    console.error(
+      "❌ GLCTC1 ARTIST WATCH WINDOW ERROR:",
+      error
+    );
+
+    return false;
+
+  }
 
 }
 
@@ -13279,7 +13507,7 @@ return true;
 //
 // then this is already the artist's Live module.
 //
-// STEP 43 MUST NOT START THE BROADCAST.
+// STEP 43 MUST NOT attach another GO LIVE listener.
 //
 // =====================================================
 
@@ -13292,11 +13520,7 @@ const glctc1ArtistPageId =
 
 
 // =====================================================
-// 👁️ NORMAL PAGE → OPEN ARTIST LIVE MODULE
-// =====================================================
-//
-// GO LIVE is owned by wireExistingGoLive().
-// Do not attach another listener here.
+// 👁️ NORMAL PAGE → OPEN MODULE
 // =====================================================
 
 if (
@@ -13304,8 +13528,54 @@ if (
   !glctc1ArtistPageId
 ) {
 
-  console.log(
-    "👁️ GLCTC1 NORMAL PAGE — GO LIVE CONTROL DELEGATED TO LIVE ENGINE"
+  glctc1GoLiveButton.addEventListener(
+    "click",
+    async function (event) {
+
+      // Prevent another click handler on the
+      // normal page from starting the broadcast.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+
+      try {
+
+        const watchOpened =
+          await openGLCTC1ArtistLiveWatchWindow();
+
+
+        if (!watchOpened) {
+
+          console.warn(
+            "⚠️ GLCTC1 ARTIST WATCH PAGE COULD NOT OPEN"
+          );
+
+          return;
+
+        }
+
+
+        console.log(
+          "👁️ GLCTC1 ARTIST LIVE MODULE OPENED"
+        );
+
+
+        console.log(
+          "⏸️ GLCTC1 BROADCAST NOT STARTED — READY INSIDE MODULE"
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "❌ GLCTC1 STEP 43 ERROR:",
+          error
+        );
+
+      }
+
+    },
+    true
   );
 
 }
@@ -13318,7 +13588,6 @@ if (
 console.log(
   "👁️ GLCTC1 STEP 43 — LIVE MODULE ROUTING READY"
 );
-
 
 // =====================================================
 // 🔴 STEP 44 — ARTIST WATCH PAGE IDENTITY LOCK
@@ -14488,8 +14757,8 @@ console.log(
 // 👁️ VIEWER CONNECTION
 // =====================================================
 
-ENGINE.viewerConnection =
-  ENGINE.viewerConnection ||
+window.glctc1ViewerConnection =
+  window.glctc1ViewerConnection ||
   null;
 
 
@@ -14522,30 +14791,15 @@ function getGLCTC1ViewerAudioElement() {
 
 
     audio.controls =
-  false;
-
-audio.preload =
-  "auto";
+      false;
 
 
     audio.playsInline =
       true;
 
 
-    audio.style.position =
-  "absolute";
-
-audio.style.width =
-  "1px";
-
-audio.style.height =
-  "1px";
-
-audio.style.opacity =
-  "0";
-
-audio.style.pointerEvents =
-  "none";
+    audio.style.display =
+      "none";
 
 
     document.body.appendChild(
@@ -14731,16 +14985,16 @@ async function startGLCTC1ViewerFromArtistURL() {
     );
 
 
-// =================================================
-// 👁️ CREATE VIEWER PEER CONNECTION
-// =================================================
+    // =================================================
+    // 👁️ CREATE VIEWER PEER CONNECTION
+    // =================================================
 
-const viewerConnection =
-  new RTCPeerConnection();
+    const viewerConnection =
+      new RTCPeerConnection();
 
 
-ENGINE.viewerConnection =
-  viewerConnection;
+    window.glctc1ViewerConnection =
+      viewerConnection;
 
 
     // =================================================
@@ -14827,66 +15081,69 @@ ENGINE.viewerConnection =
 
 
         // =================================================
-// 🎥 RECEIVE LIVE VIDEO
-// =================================================
+        // 🎥 RECEIVE LIVE VIDEO
+        // =================================================
 
-if (
-  event.track.kind ===
-  "video"
-) {
+        if (
+          event.track.kind ===
+          "video"
+        ) {
 
-  const video =
-    getGLCTC1ViewerVideoElement();
-
-
-  if (!video) {
-
-    return;
-
-  }
+          const video =
+            getGLCTC1ViewerVideoElement();
 
 
-  const videoStream =
-  new MediaStream();
+          if (!video) {
 
-videoStream.addTrack(
-  event.track
-);
+            return;
 
-video.srcObject =
-  videoStream;
+          }
 
 
-  video.muted =
-    false;
+          if (incomingStream) {
 
-  video.playsInline =
-    true;
+            video.srcObject =
+              incomingStream;
 
-  video.autoplay =
-    true;
+          } else {
 
-
-  video.play()
-    .catch(
-      function (error) {
-
-        console.warn(
-          "⚠️ GLCTC1 VIEWER VIDEO AUTOPLAY BLOCKED:",
-          error
-        );
-
-      }
-    );
+            const stream =
+              video.srcObject ||
+              new MediaStream();
 
 
-  console.log(
-  "🎥 GLCTC1 VIEWER LIVE VIDEO RECEIVED"
-);
+            stream.addTrack(
+              event.track
+            );
 
-}
 
-};
+            video.srcObject =
+              stream;
+
+          }
+
+
+          video.play()
+            .catch(
+              function (error) {
+
+                console.warn(
+                  "⚠️ GLCTC1 VIEWER VIDEO AUTOPLAY BLOCKED:",
+                  error
+                );
+
+              }
+            );
+
+
+          console.log(
+            "🎥 GLCTC1 VIEWER LIVE VIDEO RECEIVED"
+          );
+
+        }
+
+      };
+
 
     // =================================================
     // 🔴 VIEWER ICE CANDIDATES
@@ -15069,8 +15326,8 @@ video.srcObject =
 
       viewerConnection.close();
 
-      ENGINE.viewerConnection =
-  null;
+      window.glctc1ViewerConnection =
+        null;
 
       return false;
 
@@ -15121,8 +15378,8 @@ video.srcObject =
 
       viewerConnection.close();
 
-      ENGINE.viewerConnection =
-  null;
+      window.glctc1ViewerConnection =
+        null;
 
       return false;
 
@@ -15163,7 +15420,7 @@ video.srcObject =
       };
 
 
-  // =================================================
+    // =================================================
     // 🔴 ICE CONNECTION MONITOR
     // =================================================
 
@@ -15195,12 +15452,12 @@ video.srcObject =
 
 
     if (
-      ENGINE.viewerConnection
+      window.glctc1ViewerConnection
     ) {
 
       try {
 
-        ENGINE.viewerConnection.close();
+        window.glctc1ViewerConnection.close();
 
       } catch (cleanupError) {
 
@@ -15214,7 +15471,7 @@ video.srcObject =
     }
 
 
-    ENGINE.viewerConnection =
+    window.glctc1ViewerConnection =
       null;
 
 
@@ -15234,7 +15491,7 @@ async function cleanupGLCTC1ViewerConnection() {
   try {
 
     const connection =
-  ENGINE.viewerConnection;
+      window.glctc1ViewerConnection;
 
 
     if (connection) {
@@ -15267,8 +15524,8 @@ async function cleanupGLCTC1ViewerConnection() {
   }
 
 
-  ENGINE.viewerConnection =
-  null;
+  window.glctc1ViewerConnection =
+    null;
 
 
   // =================================================
@@ -16240,7 +16497,7 @@ supabaseClient
 
     }
   )
-   .subscribe(
+  .subscribe(
     function (status) {
 
       console.log(
@@ -16250,6 +16507,11 @@ supabaseClient
 
     }
   );
+
+
+  }
+
+);
 
 </script>
 
@@ -16386,9 +16648,9 @@ const glctc1ArtistIdField =
 // 🔴 GLCTC1 LIVE AUDIO
 // =====================================================
 
-window.glctc1AudioStream = null;
+let glctc1AudioStream = null;
 
-window.glctc1LiveAudioDestination = null;
+let glctc1LiveAudioDestination = null;
 
 let glctc1PeerConnection = null;
 
@@ -16408,26 +16670,26 @@ function getGLCTC1LiveAudioStream() {
   try {
 
     // =================================================
-// 🔴 USE EXISTING PROCESSED DECK LIVE STREAM
-// =================================================
+    // 🔴 USE EXISTING PROCESSED DECK LIVE STREAM
+    // =================================================
 
-if (
-  window.glctc1LiveAudioDestination &&
-  window.glctc1LiveAudioDestination.stream
-) {
+    if (
+      glctc1LiveAudioDestination &&
+      glctc1LiveAudioDestination.stream
+    ) {
 
-  window.glctc1AudioStream =
-    window.glctc1LiveAudioDestination.stream;
-
-
-  console.log(
-    "🔴 GLCTC1 LIVE AUDIO STREAM READY"
-  );
+      glctc1AudioStream =
+        glctc1LiveAudioDestination.stream;
 
 
-  return window.glctc1AudioStream;
+      console.log(
+        "🔴 GLCTC1 LIVE AUDIO STREAM READY"
+      );
 
-}
+
+      return glctc1AudioStream;
+
+    }
 
 
     // =================================================
@@ -19596,3498 +19858,3 @@ setCrowdEnergy: updateCrowdEnergy
 })();  // close the IIFE
 
 </script>
-
-<script>
-
-/* ============================================================
-   🌌 GLCTC1 LIVE ENGINE — SINGLE ADD-ON MODULE
-   ============================================================
-
-   PURPOSE
-   ------------------------------------------------------------
-   This module takes authoritative ownership of the GLCTC1
-   LIVE AUDIO + LIVE VIDEO + WATCH connection.
-
-   It is designed to be added AFTER the existing GLCTC1 page
-   code.
-
-   IT DOES NOT REBUILD:
-   • Deck A
-   • Deck B
-   • VCI-300 MIDI
-   • EQ
-   • Filter
-   • Reverb
-   • Crossfader
-   • Master Library
-   • Banks
-   • Chat
-   • Artist identity
-   • Supabase authentication
-   • Page locking
-
-   IT OVERRIDES:
-   • Existing Live Watch media receiver
-   • Existing Live Watch peer connection
-   • Existing live media handling
-
-   PRIMARY OBJECTIVE
-   ------------------------------------------------------------
-   EXISTING PROCESSED GLCTC1 DJ AUDIO
-                 +
-             WEBCAM VIDEO
-                 ↓
-        ONE LIVE WEBRTC SESSION
-                 ↓
-          GLCTC1 WATCH WINDOW
-
-   IMPORTANT
-   ------------------------------------------------------------
-   The module will NOT declare the artist LIVE until the
-   broadcast media and signalling system are ready.
-
-   ============================================================ */
-
-
-/* ============================================================
-   🔴 GLCTC1 LIVE ENGINE NAMESPACE
-   ============================================================ */
-
-(function () {
-
-  "use strict";
-
-
-  /* ==========================================================
-     GLOBAL ENGINE
-     ========================================================== */
-
-  const ENGINE = window.glctc1LiveEngine = {
-
-    version: "1.0.0",
-
-    role: null,
-
-    artistUserId: null,
-
-    artistName: "",
-
-    isLive: false,
-
-    isStarting: false,
-
-    isEnding: false,
-
-    viewerSessionId: null,
-
-    viewerArtistId: null,
-
-    viewerConnection: null,
-
-    artistConnections: new Map(),
-
-    artistChannel: null,
-
-    viewerChannel: null,
-
-    audioStream: null,
-
-    videoStream: null,
-
-    broadcastStream: null,
-
-    webcamStream: null,
-
-    watchWindow: null,
-
-    watchAudio: null,
-
-    watchVideo: null,
-
-    reconnectTimer: null,
-
-    heartbeatTimer: null,
-
-    started: false
-
-  };
-
-
-  /* ==========================================================
-     🔧 BASIC HELPERS
-     ========================================================== */
-
-  function log() {
-    console.log(
-      "🌌 GLCTC1 LIVE ENGINE:",
-      ...arguments
-    );
-  }
-
-  function warn() {
-    console.warn(
-      "⚠️ GLCTC1 LIVE ENGINE:",
-      ...arguments
-    );
-  }
-
-  function error() {
-    console.error(
-      "❌ GLCTC1 LIVE ENGINE:",
-      ...arguments
-    );
-  }
-
-  function wait(ms) {
-    return new Promise(function (resolve) {
-      setTimeout(resolve, ms);
-    });
-  }
-
-  function uuid() {
-
-    if (
-      window.crypto &&
-      typeof window.crypto.randomUUID === "function"
-    ) {
-      return window.crypto.randomUUID();
-    }
-
-    return (
-      "glctc1-" +
-      Date.now() +
-      "-" +
-      Math.random()
-        .toString(36)
-        .slice(2)
-    );
-  }
-
-
-  /* ==========================================================
-     🔐 SUPABASE CHECK
-     ========================================================== */
-
-  function getSupabase() {
-
-  if (
-    typeof supabaseClient !==
-    "undefined"
-  ) {
-    return supabaseClient;
-  }
-
-  warn(
-    "Supabase client not found."
-  );
-
-  return null;
-}
-
-
-  /* ==========================================================
-     🔐 CURRENT AUTHENTICATED USER
-     ========================================================== */
-
-  async function getAuthenticatedUser() {
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return null;
-    }
-
-    try {
-
-      const result =
-        await supabase.auth.getUser();
-
-      if (
-        result.error ||
-        !result.data ||
-        !result.data.user
-      ) {
-        return null;
-      }
-
-      return result.data.user;
-
-    } catch (err) {
-
-      error(
-        "AUTH USER ERROR:",
-        err
-      );
-
-      return null;
-    }
-  }
-
-
-  /* ==========================================================
-     🎤 CURRENT ARTIST PROFILE
-     ========================================================== */
-
-  async function getAuthenticatedArtist() {
-
-    const user =
-      await getAuthenticatedUser();
-
-    if (!user) {
-      return null;
-    }
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return null;
-    }
-
-    let artistName = "";
-
-    try {
-
-      const result =
-        await supabase
-          .from("profiles")
-          .select("artist_name")
-          .eq("id", user.id)
-          .maybeSingle();
-
-      if (
-        !result.error &&
-        result.data  console.log(
-    "🎥 GLCTC1 VIEWER LIVE VIDEO RECEIVED"
-  );
-
-}
-
-};
-
-    // =================================================
-    // 🔴 VIEWER ICE CANDIDATES
-      ) {
-        artistName =
-          result.data.artist_name ||
-          "";
-      }
-
-    } catch (err) {
-
-      warn(
-        "PROFILE LOOKUP ERROR:",
-        err
-      );
-    }
-
-    ENGINE.artistUserId =
-      user.id;
-
-    ENGINE.artistName =
-      artistName;
-
-    return {
-      user,
-      artistName
-    };
-  }
-
-
-  /* ==========================================================
-     🎵 MASTER LIVE AUDIO
-     ==========================================================
-
-     Priority:
-
-     1. Existing GLCTC1 live destination
-     2. Existing GLCTC1 audio stream
-     3. Existing deck live destinations
-     4. Existing deck audio elements via captureStream()
-
-     The module deliberately DOES NOT replace the deck audio
-     processing system.
-
-     It only obtains the already-existing live signal.
-     ========================================================== */
-
-  function getExistingLiveAudioStream() {
-
-    /* --------------------------------------------------------
-       EXISTING GLOBAL STREAM
-       -------------------------------------------------------- */
-
-    if (
-      window.glctc1LiveAudioDestination &&
-      window.glctc1LiveAudioDestination.stream
-    ) {
-
-      const stream =
-        window.glctc1LiveAudioDestination.stream;
-
-      if (
-        stream.getAudioTracks().length
-      ) {
-
-        log(
-          "🔊 USING EXISTING GLCTC1 LIVE AUDIO DESTINATION"
-        );
-
-        return stream;
-      }
-    }
-
-
-    /* --------------------------------------------------------
-       EXISTING GLOBAL AUDIO STREAM
-       -------------------------------------------------------- */
-
-    if (
-      window.glctc1AudioStream
-    ) {
-
-      const stream =
-        window.glctc1AudioStream;
-
-      if (
-        stream.getAudioTracks &&
-        stream.getAudioTracks().length
-      ) {
-
-        log(
-          "🔊 USING EXISTING GLCTC1 AUDIO STREAM"
-        );
-
-        return stream;
-      }
-    }
-
-
-    /* --------------------------------------------------------
-       POSSIBLE EXISTING DECK DESTINATIONS
-       -------------------------------------------------------- */
-
-    const possibleDestinations = [
-
-      window.glctc1LiveAudioDestinationA,
-
-      window.glctc1LiveAudioDestinationB,
-
-      window.liveAudioDestinationA,
-
-      window.liveAudioDestinationB,
-
-      window.deckALiveAudioDestination,
-
-      window.deckBLiveAudioDestination
-
-    ];
-
-    for (
-      const destination
-      of possibleDestinations
-    ) {
-
-      if (
-        destination &&
-        destination.stream &&
-        destination.stream.getAudioTracks &&
-        destination.stream
-          .getAudioTracks()
-          .length
-      ) {
-
-        log(
-          "🔊 USING EXISTING DECK LIVE AUDIO DESTINATION"
-        );
-
-        return destination.stream;
-      }
-    }
-
-
-    /* --------------------------------------------------------
-       LAST EXISTING AUDIO ELEMENT FALLBACK
-
-       This is intentionally only a fallback.
-
-       The preferred source remains the existing processed
-       GLCTC1 live destination.
-       -------------------------------------------------------- */
-
-    const audioElements =
-      document.querySelectorAll(
-        "audio"
-      );
-
-    for (
-      const audio
-      of audioElements
-    ) {
-
-      try {
-
-        if (
-          typeof audio.captureStream ===
-          "function"
-        ) {
-
-          const stream =
-            audio.captureStream();
-
-          if (
-            stream &&
-            stream.getAudioTracks().length
-          ) {
-
-            log(
-              "🔊 USING EXISTING AUDIO ELEMENT STREAM FALLBACK"
-            );
-
-            return stream;
-          }
-        }
-
-      } catch (err) {
-
-        warn(
-          "AUDIO ELEMENT STREAM FAILED:",
-          err
-        );
-      }
-    }
-
-    return null;
-  }
-
-
-  /* ==========================================================
-     🔊 WAIT FOR EXISTING LIVE AUDIO
-     ========================================================== */
-
-  async function waitForLiveAudio(
-    timeoutMs = 10000
-  ) {
-
-    const started =
-      Date.now();
-
-    while (
-      Date.now() -
-      started <
-      timeoutMs
-    ) {
-
-      const stream =
-        getExistingLiveAudioStream();
-
-      if (
-        stream &&
-        stream.getAudioTracks &&
-        stream.getAudioTracks().length
-      ) {
-
-        ENGINE.audioStream =
-          stream;
-
-        log(
-          "🔊 MASTER LIVE AUDIO READY"
-        );
-
-        return stream;
-      }
-
-      await wait(250);
-    }
-
-    error(
-      "MASTER LIVE AUDIO WAS NOT FOUND"
-    );
-
-    return null;
-  }
-
-
-  /* ==========================================================
-     🎥 EXISTING WEBCAM
-     ========================================================== */
-
-  function getExistingWebcamStream() {
-
-    if (
-      ENGINE.webcamStream &&
-      ENGINE.webcamStream.getVideoTracks &&
-      ENGINE.webcamStream
-        .getVideoTracks()
-        .length
-    ) {
-
-      return ENGINE.webcamStream;
-    }
-
-
-    /* --------------------------------------------------------
-       EXISTING GLOBAL WEBCAM
-       -------------------------------------------------------- */
-
-    if (
-      window.glctc1WebcamStream &&
-      window.glctc1WebcamStream
-        .getVideoTracks &&
-      window.glctc1WebcamStream
-        .getVideoTracks()
-        .length
-    ) {
-
-      ENGINE.webcamStream =
-        window.glctc1WebcamStream;
-
-      return ENGINE.webcamStream;
-    }
-
-
-    /* --------------------------------------------------------
-       EXISTING VIDEO ELEMENT
-       -------------------------------------------------------- */
-
-    const video =
-      document.getElementById(
-        "glctc1Video"
-      );
-
-    if (
-      video &&
-      video.srcObject &&
-      video.srcObject.getVideoTracks &&
-      video.srcObject
-        .getVideoTracks()
-        .length
-    ) {
-
-      ENGINE.webcamStream =
-        video.srcObject;
-
-      return ENGINE.webcamStream;
-    }
-
-    return null;
-  }
-
-
-  /* ==========================================================
-     🎥 REQUEST WEBCAM
-     ========================================================== */
-
-  async function obtainWebcam() {
-
-    const existing =
-      getExistingWebcamStream();
-
-    if (existing) {
-
-      log(
-        "🎥 USING EXISTING WEBCAM STREAM"
-      );
-
-      ENGINE.videoStream =
-        existing;
-
-      return existing;
-    }
-
-
-    if (
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getUserMedia
-    ) {
-
-      warn(
-        "WEBCAM NOT SUPPORTED"
-      );
-
-      return null;
-    }
-
-
-    try {
-
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
-        });
-
-      ENGINE.webcamStream =
-        stream;
-
-      ENGINE.videoStream =
-        stream;
-
-      const video =
-        document.getElementById(
-          "glctc1Video"
-        );
-
-      if (video) {
-
-        video.srcObject =
-          stream;
-
-        video.muted =
-          true;
-
-        video.autoplay =
-          true;
-
-        video.playsInline =
-          true;
-
-        video.style.display =
-          "block";
-
-        try {
-          await video.play();
-        } catch (_) {}
-      }
-
-      log(
-        "🎥 WEBCAM READY"
-      );
-
-      return stream;
-
-    } catch (err) {
-
-      error(
-        "WEBCAM ERROR:",
-        err
-      );
-
-      return null;
-    }
-  }
-
-
-  /* ==========================================================
-     🎵🎥 CREATE BROADCAST STREAM
-     ========================================================== */
-
-  function createBroadcastStream(
-    audioStream,
-    videoStream
-  ) {
-
-    const combined =
-      new MediaStream();
-
-
-    /* --------------------------------------------------------
-       AUDIO
-       -------------------------------------------------------- */
-
-    if (
-      audioStream &&
-      audioStream.getAudioTracks
-    ) {
-
-      audioStream
-        .getAudioTracks()
-        .forEach(function (track) {
-
-          if (
-            track.readyState !==
-            "ended"
-          ) {
-
-            combined.addTrack(
-              track
-            );
-          }
-
-        });
-    }
-
-
-    /* --------------------------------------------------------
-       VIDEO
-       -------------------------------------------------------- */
-
-    if (
-      videoStream &&
-      videoStream.getVideoTracks
-    ) {
-
-      videoStream
-        .getVideoTracks()
-        .forEach(function (track) {
-
-          if (
-            track.readyState !==
-            "ended"
-          ) {
-
-            combined.addTrack(
-              track
-            );
-          }
-
-        });
-    }
-
-
-    ENGINE.broadcastStream =
-      combined;
-
-    return combined;
-  }
-
-
-  /* ==========================================================
-     🔴 SUPABASE REALTIME CHANNEL
-     ========================================================== */
-
-  function getLiveChannelName(
-    artistUserId
-  ) {
-
-    return (
-      "glctc1-live-" +
-      artistUserId
-    );
-  }
-
-
-  /* ==========================================================
-     📡 CREATE CHANNEL
-     ========================================================== */
-
-  async function createRealtimeChannel(
-    artistUserId
-  ) {
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return null;
-    }
-
-    const channelName =
-      getLiveChannelName(
-        artistUserId
-      );
-
-    log(
-      "📡 CREATING LIVE CHANNEL:",
-      channelName
-    );
-
-    const channel =
-      supabase.channel(
-        channelName,
-        {
-          config: {
-            broadcast: {
-              self: false
-            }
-          }
-        }
-      );
-
-    return channel;
-  }
-
-
-  /* ==========================================================
-     📡 SEND BROADCAST MESSAGE
-     ========================================================== */
-
-  async function sendChannelMessage(
-    channel,
-    event,
-    payload
-  ) {
-
-    if (!channel) {
-      return false;
-    }
-
-    try {
-
-      const result =
-        await channel.send({
-          type: "broadcast",
-          event,
-          payload
-        });
-
-      if (
-        result &&
-        result !== "ok"
-      ) {
-
-        warn(
-          "CHANNEL SEND RESULT:",
-          result
-        );
-      }
-
-      return true;
-
-    } catch (err) {
-
-      error(
-        "CHANNEL SEND ERROR:",
-        err
-      );
-
-      return false;
-    }
-  }
-
-
-  /* ==========================================================
-     👤 ARTIST — CREATE PEER CONNECTION
-     ========================================================== */
-
-  function createArtistPeerConnection(
-    viewerSessionId
-  ) {
-
-    const connection =
-      new RTCPeerConnection({
-        iceServers: [
-
-          {
-            urls:
-              "stun:stun.l.google.com:19302"
-          }
-
-        ]
-      });
-
-
-    /* --------------------------------------------------------
-   ADD AUTHORITATIVE GLCTC1 LIVE MEDIA
-   AUDIO = PARAMOUNT
-   VIDEO = EXISTING WEBCAM
-   -------------------------------------------------------- */
-
-const liveAudioStream =
-  window.glctc1LiveAudioDestination?.stream ||
-  window.glctc1AudioStream ||
-  null;
-
-if (
-  liveAudioStream
-) {
-
-  liveAudioStream
-    .getAudioTracks()
-    .forEach(function (track) {
-
-      connection.addTrack(
-        track,
-        liveAudioStream
-      );
-
-    });
-
-  log(
-    "🔊 GLCTC1 LIVE AUDIO ADDED TO VIEWER CONNECTION"
-  );
-
-} else {
-
-  error(
-    "❌ GLCTC1 LIVE AUDIO STREAM NOT AVAILABLE"
-  );
-
-}
-
-
-/* --------------------------------------------------------
-   ADD EXISTING GLCTC1 WEBCAM
-   -------------------------------------------------------- */
-
-const liveVideoStream =
-  window.glctc1WebcamStream ||
-  ENGINE.webcamStream ||
-  null;
-
-if (
-  liveVideoStream
-) {
-
-  liveVideoStream
-    .getVideoTracks()
-    .forEach(function (track) {
-
-      connection.addTrack(
-        track,
-        liveVideoStream
-      );
-
-    });
-
-  log(
-    "🎥 GLCTC1 LIVE VIDEO ADDED TO VIEWER CONNECTION"
-  );
-
-}
-
-
-    /* --------------------------------------------------------
-       ARTIST ICE
-       -------------------------------------------------------- */
-
-    connection.onicecandidate =
-      async function (event) {
-
-        if (
-          !event.candidate ||
-          !ENGINE.artistChannel
-        ) {
-          return;
-        }
-
-        await sendChannelMessage(
-          ENGINE.artistChannel,
-          "artist-ice",
-          {
-            target:
-              viewerSessionId,
-
-            candidate:
-              event.candidate.toJSON()
-          }
-        );
-      };
-
-
-    /* --------------------------------------------------------
-       CONNECTION STATE
-       -------------------------------------------------------- */
-
-    connection.onconnectionstatechange =
-      function () {
-
-        log(
-          "👤 ARTIST CONNECTION:",
-          viewerSessionId,
-          connection.connectionState
-        );
-
-        if (
-          connection.connectionState ===
-          "failed"
-        ) {
-
-          connection.close();
-
-          ENGINE.artistConnections
-            .delete(
-              viewerSessionId
-            );
-        }
-
-        if (
-          connection.connectionState ===
-          "closed"
-        ) {
-
-          ENGINE.artistConnections
-            .delete(
-              viewerSessionId
-            );
-        }
-      };
-
-
-    ENGINE.artistConnections.set(
-      viewerSessionId,
-      connection
-    );
-
-    return connection;
-  }
-
-
-  /* ==========================================================
-     👤 ARTIST — HANDLE VIEWER OFFER
-     ========================================================== */
-
-  async function handleViewerOffer(
-    payload
-  ) {
-
-    if (
-      !ENGINE.isLive ||
-      ENGINE.role !==
-      "artist"
-    ) {
-      return;
-    }
-
-    const viewerSessionId =
-      payload &&
-      payload.viewerSessionId;
-
-    if (!viewerSessionId) {
-      return;
-    }
-
-    log(
-      "👤 VIEWER REQUEST:",
-      viewerSessionId
-    );
-
-
-    /* --------------------------------------------------------
-       CLOSE EXISTING SESSION IF REUSED
-       -------------------------------------------------------- */
-
-    const existing =
-      ENGINE.artistConnections
-        .get(
-          viewerSessionId
-        );
-
-    if (existing) {
-
-      try {
-        existing.close();
-      } catch (_) {}
-
-      ENGINE.artistConnections
-        .delete(
-          viewerSessionId
-        );
-    }
-
-
-    const connection =
-      createArtistPeerConnection(
-        viewerSessionId
-      );
-
-
-    try {
-
-      await connection.setRemoteDescription(
-        new RTCSessionDescription(
-          payload.offer
-        )
-      );
-
-      const answer =
-        await connection.createAnswer();
-
-      await connection.setLocalDescription(
-        answer
-      );
-
-
-      await sendChannelMessage(
-        ENGINE.artistChannel,
-        "artist-answer",
-        {
-          target:
-            viewerSessionId,
-
-          answer: {
-            type:
-              connection
-                .localDescription
-                .type,
-
-            sdp:
-              connection
-                .localDescription
-                .sdp
-          }
-        }
-      );
-
-
-      log(
-        "🔴 ANSWER SENT TO VIEWER:",
-        viewerSessionId
-      );
-
-    } catch (err) {
-
-      error(
-        "VIEWER OFFER ERROR:",
-        err
-      );
-
-      try {
-        connection.close();
-      } catch (_) {}
-
-      ENGINE.artistConnections
-        .delete(
-          viewerSessionId
-        );
-    }
-  }
-
-
-  /* ==========================================================
-     👤 ARTIST — HANDLE VIEWER ICE
-     ========================================================== */
-
-  async function handleViewerIce(
-    payload
-  ) {
-
-    const viewerSessionId =
-      payload &&
-      payload.viewerSessionId;
-
-    if (!viewerSessionId) {
-      return;
-    }
-
-    const connection =
-      ENGINE.artistConnections
-        .get(
-          viewerSessionId
-        );
-
-    if (!connection) {
-      return;
-    }
-
-    if (
-      !payload.candidate
-    ) {
-      return;
-    }
-
-    try {
-
-  if (
-    connection.remoteDescription
-  ) {
-
-    await connection.addIceCandidate(
-      new RTCIceCandidate(
-        payload.candidate
-      )
-    );
-
-  } else {
-
-    pendingArtistIce.push(
-      payload.candidate
-    );
-
-    log(
-      "📦 ARTIST ICE QUEUED"
-    );
-
-  }
-
-} catch (err) {
-
-  warn(
-    "ARTIST ICE ERROR:",
-    err
-  );
-
-}
-
-}
-
-
-  /* ==========================================================
-     🔴 ARTIST — START REALTIME LISTENER
-     ========================================================== */
-
-  async function startArtistRealtime() {
-
-    if (
-      !ENGINE.artistUserId
-    ) {
-      return false;
-    }
-
-    const channel =
-      await createRealtimeChannel(
-        ENGINE.artistUserId
-      );
-
-    if (!channel) {
-      return false;
-    }
-
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "viewer-offer"
-      },
-      function (message) {
-
-        handleViewerOffer(
-          message.payload
-        );
-
-      }
-    );
-
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "viewer-ice"
-      },
-      function (message) {
-
-        handleViewerIce(
-          message.payload
-        );
-
-      }
-    );
-
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "viewer-leave"
-      },
-      function (message) {
-
-        const sessionId =
-          message.payload &&
-          message.payload.viewerSessionId;
-
-        if (!sessionId) {
-          return;
-        }
-
-        const connection =
-          ENGINE.artistConnections
-            .get(
-              sessionId
-            );
-
-        if (connection) {
-
-          try {
-            connection.close();
-          } catch (_) {}
-
-        }
-
-        ENGINE.artistConnections
-          .delete(
-            sessionId
-          );
-
-      }
-    );
-
-
-    return new Promise(
-      function (resolve) {
-
-        channel.subscribe(
-          function (status) {
-
-            log(
-              "📡 ARTIST CHANNEL:",
-              status
-            );
-
-            if (
-              status ===
-              "SUBSCRIBED"
-            ) {
-
-              ENGINE.artistChannel =
-                channel;
-
-              resolve(true);
-
-            }
-
-            if (
-              status ===
-              "CHANNEL_ERROR" ||
-              status ===
-              "TIMED_OUT"
-            ) {
-
-              resolve(false);
-            }
-
-          }
-        );
-
-      }
-    );
-  }
-
-
-  /* ==========================================================
-     🟢 ARTIST — LIVE DATABASE STATE
-     ========================================================== */
-
-  async function setArtistLiveState(
-    isLive
-  ) {
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return false;
-    }
-
-    if (
-      !ENGINE.artistUserId
-    ) {
-      return false;
-    }
-
-
-    try {
-
-      const profileResult =
-        await supabase
-          .from("profiles")
-          .select("artist_name")
-          .eq(
-            "id",
-            ENGINE.artistUserId
-          )
-          .maybeSingle();
-
-
-      const artistName =
-        profileResult.data?.artist_name ||
-        ENGINE.artistName ||
-        "";
-
-
-      const result =
-        await supabase
-          .from("live_artists")
-          .upsert(
-            {
-              user_id:
-                ENGINE.artistUserId,
-
-              artist_name:
-                artistName,
-
-              is_live:
-                isLive,
-
-              updated_at:
-                new Date().toISOString()
-            },
-            {
-              onConflict:
-                "user_id"
-            }
-          );
-
-
-      if (result.error) {
-
-        error(
-          "LIVE ARTIST STATE ERROR:",
-          result.error
-        );
-
-        return false;
-      }
-
-
-      return true;
-
-    } catch (err) {
-
-      error(
-        "LIVE ARTIST STATE EXCEPTION:",
-        err
-      );
-
-      return false;
-    }
-  }
-
-
-  /* ==========================================================
-     🔴 ARTIST — LIVE ROOM STATE
-     ========================================================== */
-
-  async function setLiveRoomState(
-    isLive
-  ) {
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return false;
-    }
-
-    if (
-      !ENGINE.artistUserId
-    ) {
-      return false;
-    }
-
-
-    try {
-
-      const result =
-        await supabase
-          .from("glctc1_live_rooms")
-          .upsert(
-            {
-              user_id:
-                ENGINE.artistUserId,
-
-              artist_name:
-                ENGINE.artistName ||
-                "",
-
-              media_type:
-                "audio_video",
-
-              is_live:
-                isLive,
-
-              updated_at:
-                new Date().toISOString()
-            },
-            {
-              onConflict:
-                "user_id"
-            }
-          );
-
-
-      if (result.error) {
-
-        error(
-          "LIVE ROOM STATE ERROR:",
-          result.error
-        );
-
-        return false;
-      }
-
-
-      return true;
-
-    } catch (err) {
-
-      error(
-        "LIVE ROOM STATE EXCEPTION:",
-        err
-      );
-
-      return false;
-    }
-  }
-
-
-  /* ==========================================================
-     🔴 ARTIST — BROADCAST START
-     ========================================================== */
-
-  async function startArtistLive() {
-
-    if (
-      ENGINE.isStarting ||
-      ENGINE.isLive
-    ) {
-
-      return false;
-    }
-
-    ENGINE.isStarting =
-      true;
-
-    ENGINE.role =
-      "artist";
-
-
-    try {
-
-      log(
-        "🔴 STARTING GLCTC1 ARTIST LIVE"
-      );
-
-
-      /* ------------------------------------------------------
-         AUTH
-         ------------------------------------------------------ */
-
-      const artist =
-        await getAuthenticatedArtist();
-
-      if (!artist) {
-
-        alert(
-          "Please sign in to GLCTC1 before going LIVE."
-        );
-
-        return false;
-      }
-
-
-      /* ------------------------------------------------------
-         AUDIO IS PARAMOUNT
-         ------------------------------------------------------ */
-
-      const audioStream =
-        await waitForLiveAudio(
-          10000
-        );
-
-      if (
-        !audioStream
-      ) {
-
-        alert(
-          "GLCTC1 LIVE AUDIO is not ready. Start/load the DJ audio first."
-        );
-
-        return false;
-      }
-
-
-      /* ------------------------------------------------------
-         VIDEO
-
-         Use existing webcam if already active.
-
-         If none exists, request one.
-         ------------------------------------------------------ */
-
-      let videoStream =
-        getExistingWebcamStream();
-
-
-      if (!videoStream) {
-
-        videoStream =
-          await obtainWebcam();
-
-      }
-
-
-      /* ------------------------------------------------------
-   VERIFY AUTHORITATIVE LIVE MEDIA
-   AUDIO = PARAMOUNT
-   ------------------------------------------------------ */
-
-const liveAudioStream =
-  window.glctc1LiveAudioDestination?.stream ||
-  window.glctc1AudioStream ||
-  audioStream ||
-  null;
-
-if (
-  !liveAudioStream ||
-  liveAudioStream.getAudioTracks().length === 0
-) {
-
-  alert(
-    "GLCTC1 LIVE AUDIO is not available."
-  );
-
-  return false;
-}
-
-ENGINE.broadcastStream =
-  liveAudioStream;
-
-ENGINE.webcamStream =
-  videoStream || null;
-
-log(
-  "🔊 AUTHORITATIVE LIVE AUDIO TRACKS:",
-  liveAudioStream
-    .getAudioTracks()
-    .length
-);
-
-log(
-  "🎥 EXISTING LIVE VIDEO TRACKS:",
-  videoStream
-    ? videoStream.getVideoTracks().length
-    : 0
-);
-
-
-      /* ------------------------------------------------------
-         REALTIME SIGNALLING
-         ------------------------------------------------------ */
-
-      const realtimeReady =
-        await startArtistRealtime();
-
-      if (!realtimeReady) {
-
-        alert(
-          "GLCTC1 LIVE signalling could not be started."
-        );
-
-        return false;
-      }
-
-
-      /* ------------------------------------------------------
-         ONLY NOW DECLARE LIVE
-         ------------------------------------------------------ */
-
-      const roomReady =
-        await setLiveRoomState(
-          true
-        );
-
-      if (!roomReady) {
-
-        return false;
-      }
-
-
-      const artistStateReady =
-        await setArtistLiveState(
-          true
-        );
-
-      if (!artistStateReady) {
-
-        await setLiveRoomState(
-          false
-        );
-
-        return false;
-      }
-
-
-      ENGINE.isLive =
-        true;
-
-
-      /* ------------------------------------------------------
-         LIVE STATUS MESSAGE
-         ------------------------------------------------------ */
-
-      await sendChannelMessage(
-        ENGINE.artistChannel,
-        "live-state",
-        {
-          artistUserId:
-            ENGINE.artistUserId,
-
-          artistName:
-            ENGINE.artistName,
-
-          isLive:
-            true
-        }
-      );
-
-
-      log(
-        "🔴🔴🔴 GLCTC1 LIVE — AUDIO + VIDEO READY"
-      );
-
-
-      updateArtistLiveControls(
-        true
-      );
-
-
-      return true;
-
-    } catch (err) {
-
-      error(
-        "START LIVE ERROR:",
-        err
-      );
-
-      return false;
-
-    } finally {
-
-      ENGINE.isStarting =
-        false;
-    }
-  }
-
-
-  /* ==========================================================
-     🛑 ARTIST — END LIVE
-     ========================================================== */
-
-  async function endArtistLive() {
-
-    if (
-      ENGINE.isEnding
-    ) {
-      return;
-    }
-
-    ENGINE.isEnding =
-      true;
-
-
-    try {
-
-      log(
-        "🛑 ENDING GLCTC1 LIVE"
-      );
-
-
-      ENGINE.isLive =
-        false;
-
-
-      /* ------------------------------------------------------
-         INFORM VIEWERS FIRST
-         ------------------------------------------------------ */
-
-      if (
-        ENGINE.artistChannel
-      ) {
-
-        await sendChannelMessage(
-          ENGINE.artistChannel,
-          "live-state",
-          {
-            artistUserId:
-              ENGINE.artistUserId,
-
-            artistName:
-              ENGINE.artistName,
-
-            isLive:
-              false
-          }
-        );
-
-      }
-
-
-      /* ------------------------------------------------------
-         CLOSE ALL VIEWER CONNECTIONS
-         ------------------------------------------------------ */
-
-      ENGINE.artistConnections
-        .forEach(
-          function (connection) {
-
-            try {
-              connection.close();
-            } catch (_) {}
-
-          }
-        );
-
-      ENGINE.artistConnections
-        .clear();
-
-
-      /* ------------------------------------------------------
-         CLOSE ARTIST CHANNEL
-         ------------------------------------------------------ */
-
-      if (
-        ENGINE.artistChannel
-      ) {
-
-        try {
-
-          const supabase =
-            getSupabase();
-
-          if (supabase) {
-
-            await supabase.removeChannel(
-              ENGINE.artistChannel
-            );
-
-          }
-
-        } catch (err) {
-
-          warn(
-            "ARTIST CHANNEL CLOSE:",
-            err
-          );
-        }
-
-      }
-
-      ENGINE.artistChannel =
-        null;
-
-
-      /* ------------------------------------------------------
-         DATABASE STATE
-         ------------------------------------------------------ */
-
-      await setLiveRoomState(
-        false
-      );
-
-      await setArtistLiveState(
-        false
-      );
-
-
-      /* ------------------------------------------------------
-         STOP WEBCAM
-
-         Do NOT stop the existing deck audio here.
-         The decks belong to the existing DJ system.
-         ------------------------------------------------------ */
-
-      if (
-        ENGINE.webcamStream
-      ) {
-
-        ENGINE.webcamStream
-          .getTracks()
-          .forEach(
-            function (track) {
-
-              try {
-                track.stop();
-              } catch (_) {}
-
-            }
-          );
-
-      }
-
-      ENGINE.webcamStream =
-        null;
-
-      ENGINE.videoStream =
-        null;
-
-      ENGINE.broadcastStream =
-        null;
-
-
-      updateArtistLiveControls(
-        false
-      );
-
-
-      log(
-        "⚫ GLCTC1 LIVE ENDED"
-      );
-
-    } catch (err) {
-
-      error(
-        "END LIVE ERROR:",
-        err
-
-      );
-
-    } finally {
-
-      ENGINE.isEnding =
-        false;
-    }
-  }
-
-
-  /* ==========================================================
-     🖥️ CREATE / FIND LIVE WATCH WINDOW
-     ========================================================== */
-
-  function createWatchWindow() {
-
-    let windowElement =
-      document.getElementById(
-        "glctc1LiveArtistWindow"
-      );
-
-
-    if (!windowElement) {
-
-      windowElement =
-        document.createElement(
-          "section"
-        );
-
-      windowElement.id =
-        "glctc1LiveArtistWindow";
-
-      document.body.appendChild(
-        windowElement
-      );
-    }
-
-
-    windowElement.innerHTML = "";
-
-
-    windowElement.style.cssText = `
-      width:100%;
-      min-height:360px;
-      box-sizing:border-box;
-      margin-top:14px;
-      position:relative;
-      overflow:hidden;
-      border:1px solid rgba(139,53,255,0.35);
-      border-radius:18px;
-      background:#020207;
-    `;
-
-
-    /* --------------------------------------------------------
-       VIDEO
-       -------------------------------------------------------- */
-
-    const video =
-      document.createElement(
-        "video"
-      );
-
-    video.id =
-      "glctc1LiveWatchVideo";
-
-    video.autoplay =
-      true;
-
-    video.playsInline =
-      true;
-
-    video.controls =
-      true;
-
-    video.muted =
-      false;
-
-    video.style.cssText = `
-      display:block;
-      width:100%;
-      height:100%;
-      min-height:360px;
-      object-fit:contain;
-      background:#000;
-    `;
-
-
-    /* --------------------------------------------------------
-       AUDIO
-       -------------------------------------------------------- */
-
-    const audio =
-      document.createElement(
-        "audio"
-      );
-
-    audio.id =
-      "glctc1LiveWatchAudio";
-
-    audio.autoplay =
-      true;
-
-    audio.controls =
-      false;
-
-    audio.playsInline =
-      true;
-
-    audio.style.display =
-      "none";
-
-
-    /* --------------------------------------------------------
-       OVERLAY
-       -------------------------------------------------------- */
-
-    const overlay =
-      document.createElement(
-        "div"
-      );
-
-    overlay.id =
-      "glctc1LiveWatchOverlay";
-
-    overlay.style.cssText = `
-      position:absolute;
-      inset:0;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:10px;
-      pointer-events:none;
-      background:rgba(0,0,0,0.35);
-      font-family:Arial,Helvetica,sans-serif;
-      text-align:center;
-    `;
-
-
-    const status =
-      document.createElement(
-        "div"
-      );
-
-    status.id =
-      "glctc1LiveWatchStatus";
-
-    status.textContent =
-      "🔴 CONNECTING TO LIVE";
-
-    status.style.cssText = `
-      font-size:12px;
-      font-weight:900;
-      letter-spacing:3px;
-      color:#fff;
-    `;
-
-
-    const artist =
-      document.createElement(
-        "div"
-      );
-
-    artist.id =
-      "glctc1LiveWatchArtist";
-
-    artist.style.cssText = `
-      font-size:18px;
-      font-weight:900;
-      letter-spacing:2px;
-      color:#fff;
-    `;
-
-
-    overlay.appendChild(
-      status
-    );
-
-    overlay.appendChild(
-      artist
-    );
-
-
-    /* --------------------------------------------------------
-       SOUND ACTIVATION BUTTON
-       -------------------------------------------------------- */
-
-    const soundButton =
-      document.createElement(
-        "button"
-      );
-
-    soundButton.id =
-      "glctc1LiveWatchSoundButton";
-
-    soundButton.type =
-      "button";
-
-    soundButton.textContent =
-      "🔊 SOUND ON";
-
-    soundButton.style.cssText = `
-      position:absolute;
-      right:14px;
-      bottom:14px;
-      z-index:10;
-      min-height:40px;
-      padding:0 14px;
-      border:1px solid rgba(139,53,255,0.55);
-      border-radius:9px;
-      background:rgba(10,10,20,0.90);
-      color:#fff;
-      font-size:10px;
-      font-weight:900;
-      letter-spacing:2px;
-      cursor:pointer;
-    `;
-
-
-    soundButton.addEventListener(
-  "click",
-  async function () {
-
-    if (
-      ENGINE.watchAudio
-    ) {
-
-      ENGINE.watchAudio.muted =
-        false;
-
-      ENGINE.watchAudio.volume =
-        1;
-
-      try {
-
-        await ENGINE.watchAudio.play();
-
-      } catch (err) {
-
-        warn(
-          "🔊 GLCTC1 WATCH AUDIO PLAY FAILED:",
-          err
-        );
-
-      }
-
-    }
-
-
-    if (
-      ENGINE.watchVideo
-    ) {
-
-      ENGINE.watchVideo.muted =
-        false;
-
-      ENGINE.watchVideo.volume =
-        1;
-
-      try {
-
-        await ENGINE.watchVideo.play();
-
-      } catch (_) {}
-
-    }
-
-
-    soundButton.textContent =
-      "🔊 SOUND ON";
-
-  }
-);
-
-
-  /* ==========================================================
-     🖥️ WATCH WINDOW STATUS
-     ========================================================== */
-
-  function setWatchStatus(
-    text,
-    artistName
-  ) {
-
-    const status =
-      document.getElementById(
-        "glctc1LiveWatchStatus"
-      );
-
-    const artist =
-      document.getElementById(
-        "glctc1LiveWatchArtist"
-      );
-
-    if (status) {
-      status.textContent =
-        text;
-    }
-
-    if (artist) {
-      artist.textContent =
-        artistName ||
-        "";
-    }
-  }
-
-
-  /* ==========================================================
-     👀 VIEWER — PEER CONNECTION
-     ========================================================== */
-
-  async function createViewerConnection(
-    artistUserId
-  ) {
-
-    ENGINE.viewerSessionId =
-      uuid();
-
-    ENGINE.viewerArtistId =
-      artistUserId;
-
-
-    const channel =
-      await createRealtimeChannel(
-        artistUserId
-      );
-
-    if (!channel) {
-      return false;
-    }
-
-
-    /* --------------------------------------------------------
-       CREATE VIEWER PEER
-       -------------------------------------------------------- */
-
-    const connection =
-      new RTCPeerConnection({
-        iceServers: [
-
-          {
-            urls:
-              "stun:stun.l.google.com:19302"
-          }
-
-        ]
-      });
-
-
-    ENGINE.viewerConnection =
-      connection;
-
-
-    /* --------------------------------------------------------
-       RECEIVE MEDIA
-       -------------------------------------------------------- */
-
-    const incomingStream =
-      new MediaStream();
-
-
-    connection.ontrack =
-      async function (event) {
-
-        log(
-          "🎵🎥 VIEWER RECEIVED:",
-          event.track.kind
-        );
-
-
-        if (
-          !incomingStream
-            .getTracks()
-            .includes(
-              event.track
-            )
-        ) {
-
-          incomingStream.addTrack(
-            event.track
-          );
-        }
-
-
-        /* ----------------------------------------------------
-           AUDIO
-           ---------------------------------------------------- */
-
-        if (
-          event.track.kind ===
-          "audio"
-        ) {
-
-          const audioOnlyStream =
-  new MediaStream();
-
-audioOnlyStream.addTrack(
-  event.track
-);
-
-ENGINE.watchAudio.srcObject =
-  audioOnlyStream;
-
-          ENGINE.watchAudio.muted =
-            false;
-
-          try {
-
-            await ENGINE.watchAudio.play();
-
-          } catch (err) {
-
-            warn(
-              "AUDIO AUTOPLAY:",
-              err
-            );
-          }
-
-
-          log(
-            "🔊 LIVE AUDIO RECEIVED"
-          );
-        }
-
-
-        /* ----------------------------------------------------
-   VIDEO
-   ---------------------------------------------------- */
-
-if (
-  event.track.kind ===
-  "video"
-) {
-
-  const videoOnlyStream =
-    new MediaStream();
-
-  videoOnlyStream.addTrack(
-    event.track
-  );
-
-  ENGINE.watchVideo.srcObject =
-    videoOnlyStream;
-
-  ENGINE.watchVideo.muted =
-    false;
-
-  try {
-
-    await ENGINE.watchVideo.play();
-
-  } catch (err) {
-
-    warn(
-      "VIDEO AUTOPLAY:",
-      err
-    );
-  }
-
-
-  log(
-    "🎥 LIVE VIDEO RECEIVED"
-  );
-}
-
-
-setWatchStatus(
-  "🔴 LIVE",
-  document.getElementById(
-    "glctc1LiveWatchArtist"
-  )?.textContent ||
-  ""
-);
-
-};
-
-/* --------------------------------------------------------
-   VIEWER ICE
-   -------------------------------------------------------- */
-
-connection.onicecandidate =
-  async function (event) {
-
-        if (
-          !event.candidate
-        ) {
-          return;
-        }
-
-        await sendChannelMessage(
-          channel,
-          "viewer-ice",
-          {
-            viewerSessionId:
-              ENGINE.viewerSessionId,
-
-            candidate:
-              event.candidate.toJSON()
-          }
-        );
-      };
-
-
-    /* --------------------------------------------------------
-       CONNECTION STATE
-       -------------------------------------------------------- */
-
-    connection.onconnectionstatechange =
-      function () {
-
-        const state =
-          connection.connectionState;
-
-        log(
-          "👀 VIEWER CONNECTION:",
-          state
-        );
-
-
-        if (
-          state ===
-          "connected"
-        ) {
-
-          setWatchStatus(
-            "🔴 LIVE",
-            document.getElementById(
-              "glctc1LiveWatchArtist"
-            )?.textContent ||
-            ""
-          );
-        }
-
-
-        if (
-          state ===
-          "disconnected"
-        ) {
-
-          setWatchStatus(
-            "🟠 RECONNECTING",
-            document.getElementById(
-              "glctc1LiveWatchArtist"
-            )?.textContent ||
-            ""
-          );
-
-        }
-
-
-        if (
-          state ===
-          "failed"
-        ) {
-
-          setWatchStatus(
-            "🔴 CONNECTION FAILED",
-            document.getElementById(
-              "glctc1LiveWatchArtist"
-            )?.textContent ||
-            ""
-          );
-
-        }
-
-
-        if (
-          state ===
-          "closed"
-        ) {
-
-          setWatchStatus(
-            "⚫ LIVE ENDED",
-            ""
-          );
-        }
-
-      };
-
-
-    /* --------------------------------------------------------
-       ARTIST ANSWER
-       -------------------------------------------------------- */
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "artist-answer"
-      },
-     function (message) {
-  const payload =
-    message.payload;
-
-  if (
-    !payload ||
-    payload.target !==
-    ENGINE.viewerSessionId
-  ) {
-    return;
-  }
-
-  connection.setRemoteDescription(
-    new RTCSessionDescription(
-      payload.answer
-    )
-  )
-  .then(function () {
-
-    function addNextArtistIce() {
-
-      if (
-        !pendingArtistIce.length
-      ) {
-        log(
-          "🔴 ARTIST ANSWER APPLIED"
-        );
-        return;
-      }
-
-      const candidate =
-        pendingArtistIce.shift();
-
-      return connection
-        .addIceCandidate(
-          new RTCIceCandidate(
-            candidate
-          )
-        )
-        .catch(function (err) {
-          warn(
-            "QUEUED ARTIST ICE ERROR:",
-            err
-          );
-        })
-        .then(
-          addNextArtistIce
-        );
-    }
-
-    return addNextArtistIce();
-
-  })
-  .catch(function (err) {
-    error(
-      "ARTIST ANSWER ERROR:",
-      err
-    );
-  });
-  }
-);
-
-
-    /* --------------------------------------------------------
-       ARTIST ICE
-       -------------------------------------------------------- */
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "artist-ice"
-      },
-      async function (message) {
-
-        const payload =
-          message.payload;
-
-        if (
-          !payload ||
-          payload.target !==
-          ENGINE.viewerSessionId
-        ) {
-          return;
-        }
-
-
-        if (
-          !payload.candidate
-        ) {
-          return;
-        }
-
-
-        try {
-
-          await connection.addIceCandidate(
-            new RTCIceCandidate(
-              payload.candidate
-            )
-          );
-
-        } catch (err) {
-
-          warn(
-            "ARTIST ICE ERROR:",
-            err
-          );
-        }
-
-      }
-    );
-
-
-    /* --------------------------------------------------------
-       LIVE STATE
-       -------------------------------------------------------- */
-
-    channel.on(
-      "broadcast",
-      {
-        event:
-          "live-state"
-      },
-      function (message) {
-
-        const payload =
-          message.payload;
-
-        if (
-          !payload
-        ) {
-          return;
-        }
-
-        if (
-          payload.artistUserId !==
-          artistUserId
-        ) {
-          return;
-        }
-
-
-        if (
-          payload.isLive ===
-          false
-        ) {
-
-          setWatchStatus(
-            "⚫ LIVE ENDED",
-            payload.artistName ||
-            ""
-          );
-
-          closeViewerConnection(
-            false
-          );
-        }
-
-      }
-    );
-
-
-    /* --------------------------------------------------------
-       SUBSCRIBE
-       -------------------------------------------------------- */
-
-    const subscribed =
-      await new Promise(
-        function (resolve) {
-
-          channel.subscribe(
-            function (status) {
-
-              log(
-                "📡 VIEWER CHANNEL:",
-                status
-              );
-
-              if (
-                status ===
-                "SUBSCRIBED"
-              ) {
-
-                resolve(true);
-              }
-
-              if (
-                status ===
-                "CHANNEL_ERROR" ||
-                status ===
-                "TIMED_OUT"
-              ) {
-
-                resolve(false);
-              }
-
-            }
-          );
-
-        }
-      );
-
-
-    if (!subscribed) {
-
-      try {
-        connection.close();
-      } catch (_) {}
-
-      return false;
-    }
-
-
-    ENGINE.viewerChannel =
-      channel;
-
-
-    /* --------------------------------------------------------
-       CREATE OFFER
-       -------------------------------------------------------- */
-
-    const offer =
-      await connection.createOffer({
-        offerToReceiveAudio:
-          true,
-
-        offerToReceiveVideo:
-          true
-      });
-
-
-    await connection.setLocalDescription(
-      offer
-    );
-
-
-    /* --------------------------------------------------------
-       SEND OFFER TO ARTIST
-       -------------------------------------------------------- */
-
-    await sendChannelMessage(
-      channel,
-      "viewer-offer",
-      {
-        viewerSessionId:
-          ENGINE.viewerSessionId,
-
-        offer: {
-          type:
-            connection
-              .localDescription
-              .type,
-
-          sdp:
-            connection
-              .localDescription
-              .sdp
-        }
-      }
-    );
-
-
-    log(
-      "📡 VIEWER OFFER SENT"
-    );
-
-
-    return true;
-  }
-
-
- /* ==========================================================
-     👀 VIEWER — START WATCH
-     ========================================================== */
-
-  async function startViewerWatch(
-    artistUserId,
-    artistName = ""
-  ) {
-
-    /* --------------------------------------------------------
-       CLOSE ANY EXISTING VIEWER CONNECTION
-       -------------------------------------------------------- */
-
-    if (
-      ENGINE.viewerConnection
-    ) {
-
-      await closeViewerConnection(
-        false
-      );
-
-    }
-
-
-    if (
-      !artistUserId
-    ) {
-
-      warn(
-        "NO ARTIST ID FOR WATCH"
-      );
-
-      return false;
-    }
-
-
-    ENGINE.role =
-      "viewer";
-
-    ENGINE.viewerArtistId =
-      artistUserId;
-
-
-    createWatchWindow();
-
-
-    setWatchStatus(
-      "🔴 CONNECTING TO LIVE",
-      artistName
-    );
-
-
-    const connected =
-      await createViewerConnection(
-        artistUserId
-      );
-
-
-    if (!connected) {
-
-      setWatchStatus(
-        "⚠️ LIVE CONNECTION FAILED",
-        artistName
-      );
-
-      return false;
-    }
-
-
-    log(
-      "👀 GLCTC1 WATCH CONNECTING"
-    );
-
-
-    return true;
-  }
-
-
-  /* ==========================================================
-     👀 CLOSE VIEWER
-     ========================================================== */
-
-  async function closeViewerConnection(
-    notifyArtist = true
-  ) {
-
-    if (
-      notifyArtist &&
-      ENGINE.viewerChannel &&
-      ENGINE.viewerSessionId
-    ) {
-
-      try {
-
-        await sendChannelMessage(
-          ENGINE.viewerChannel,
-          "viewer-leave",
-          {
-            viewerSessionId:
-              ENGINE.viewerSessionId
-          }
-        );
-
-      } catch (_) {}
-    }
-
-
-    if (
-      ENGINE.viewerConnection
-    ) {
-
-      try {
-        ENGINE.viewerConnection.close();
-      } catch (_) {}
-
-    }
-
-
-    ENGINE.viewerConnection =
-      null;
-
-
-    if (
-      ENGINE.viewerChannel
-    ) {
-
-      try {
-
-        const supabase =
-          getSupabase();
-
-        if (supabase) {
-
-          await supabase.removeChannel(
-            ENGINE.viewerChannel
-          );
-
-        }
-
-      } catch (_) {}
-
-    }
-
-
-    ENGINE.viewerChannel =
-      null;
-
-    ENGINE.viewerSessionId =
-      null;
-
-
-    if (
-      ENGINE.watchAudio
-    ) {
-
-      ENGINE.watchAudio.pause();
-
-      ENGINE.watchAudio.srcObject =
-        null;
-    }
-
-
-    if (
-      ENGINE.watchVideo
-    ) {
-
-      ENGINE.watchVideo.pause();
-
-      ENGINE.watchVideo.srcObject =
-        null;
-    }
-  }
-
-
-  /* ==========================================================
-     🔎 GET ARTIST FROM WATCH URL
-     ========================================================== */
-
-  function getArtistFromURL() {
-
-    const params =
-      new URLSearchParams(
-        window.location.search
-      );
-
-    return (
-      params.get("artist") ||
-      null
-    );
-  }
-
-
-  /* ==========================================================
-     🔎 LOAD ARTIST INFORMATION
-     ========================================================== */
-
-  async function getLiveArtist(
-    artistUserId
-  ) {
-
-    const supabase =
-      getSupabase();
-
-    if (!supabase) {
-      return null;
-    }
-
-
-    try {
-
-      const result =
-        await supabase
-          .from("live_artists")
-          .select(
-            "user_id, artist_name, is_live"
-          )
-          .eq(
-            "user_id",
-            artistUserId
-          )
-          .maybeSingle();
-
-
-      if (
-        result.error ||
-        !result.data
-      ) {
-
-        return null;
-      }
-
-
-      return result.data;
-
-    } catch (err) {
-
-      error(
-        "LIVE ARTIST LOOKUP ERROR:",
-        err
-      );
-
-      return null;
-    }
-  }
-
-
-  /* ==========================================================
-     👀 AUTO WATCH FROM URL
-     ========================================================== */
-
-  async function autoStartViewer() {
-
-    const artistUserId =
-      getArtistFromURL();
-
-    if (
-      !artistUserId
-    ) {
-      return;
-    }
-
-
-    const artist =
-      await getLiveArtist(
-        artistUserId
-      );
-
-
-    if (
-      !artist ||
-      artist.is_live !==
-      true
-    ) {
-
-      createWatchWindow();
-
-      setWatchStatus(
-        "⚫ ARTIST OFFLINE",
-        artist?.artist_name ||
-        ""
-      );
-
-      return;
-    }
-
-
-    await startViewerWatch(
-      artist.user_id,
-      artist.artist_name
-    );
-  }
-
-
-  /* ==========================================================
-   🔴 EXISTING GO LIVE BUTTON
-   ========================================================== */
-
-function wireExistingGoLive() {
-
-  const button =
-    document.getElementById(
-      "glctc1GoLiveButton"
-    );
-
-  if (!button) {
-    return;
-  }
-
-
-  const replacement =
-    button.cloneNode(true);
-
-
-  button.parentNode.replaceChild(
-    replacement,
-    button
-  );
-
-
-  replacement.id =
-    "glctc1GoLiveButton";
-
-
-  replacement.addEventListener(
-    "click",
-    async function (event) {
-
-      event.preventDefault();
-      event.stopImmediatePropagation();
-
-
-      console.log(
-        "🔴 GLCTC1 GO LIVE BUTTON CLICKED"
-      );
-
-
-      const opened =
-        await openGLCTC1ArtistLiveWatchWindow();
-
-
-      if (!opened) {
-
-        console.warn(
-          "⚠️ GLCTC1 ARTIST LIVE MODULE COULD NOT OPEN"
-        );
-
-        return;
-
-      }
-
-
-      console.log(
-        "👁️ GLCTC1 ARTIST LIVE MODULE OPENED"
-      );
-
-
-      console.log(
-        "⏸️ READY FOR ARTIST LIVE"
-      );
-
-    },
-    true
-  );
-
-
-  log(
-    "🔴 GO LIVE → ARTIST LIVE MODULE READY"
-  );
-
-}
-
-
-  /* ==========================================================
-     🛑 EXISTING END LIVE BUTTON
-     ========================================================== */
-
-  function wireExistingEndLive() {
-
-    const button =
-      document.getElementById(
-        "glctc1EndLiveButton"
-      );
-
-    if (!button) {
-      return;
-    }
-
-
-    const replacement =
-      button.cloneNode(true);
-
-    button.parentNode.replaceChild(
-      replacement,
-      button
-    );
-
-
-    replacement.id =
-      "glctc1EndLiveButton";
-
-
-    replacement.addEventListener(
-      "click",
-      async function (event) {
-
-        event.preventDefault();
-        event.stopImmediatePropagation();
-
-        await endArtistLive();
-
-      },
-      true
-    );
-
-
-    log(
-      "🛑 END LIVE OVERRIDE INSTALLED"
-    );
-  }
-
-
-  /* ==========================================================
-     🔴 UPDATE ARTIST CONTROLS
-     ========================================================== */
-
-  function updateArtistLiveControls(
-    isLive
-  ) {
-
-    const go =
-      document.getElementById(
-        "glctc1GoLiveButton"
-      );
-
-    const end =
-      document.getElementById(
-        "glctc1EndLiveButton"
-      );
-
-
-    if (go) {
-
-      go.style.display =
-        isLive
-          ? "none"
-          : "inline-block";
-
-    }
-
-
-    if (end) {
-
-      end.style.display =
-        isLive
-          ? "inline-block"
-          : "none";
-
-    }
-
-
-    if (go) {
-
-      go.disabled =
-        ENGINE.isStarting ||
-        ENGINE.isEnding;
-
-    }
-
-
-    if (end) {
-
-      end.disabled =
-        ENGINE.isStarting ||
-        ENGINE.isEnding;
-
-    }
-  }
-
-
-  /* ==========================================================
-     🔴 WATCH LIVE ARTIST LIST
-     ========================================================== */
-
-  function wireLiveArtistList() {
-
-    const list =
-      document.getElementById(
-        "glctc1LiveArtistList"
-      );
-
-    if (!list) {
-      return;
-    }
-
-
-    list.addEventListener(
-      "click",
-      function (event) {
-
-        const row =
-          event.target.closest(
-            "[data-user-id]"
-          );
-
-        if (!row) {
-          return;
-        }
-
-
-        const artistUserId =
-          row.dataset.userId;
-
-        if (!artistUserId) {
-          return;
-        }
-
-
-        window.open(
-          "social.html?artist=" +
-          encodeURIComponent(
-            artistUserId
-          ),
-          "_blank"
-        );
-
-      },
-      true
-    );
-  }
-
-
-  /* ==========================================================
-     🧹 PAGE CLEANUP
-     ========================================================== */
-
-  async function cleanup() {
-
-    if (
-      ENGINE.role ===
-      "artist"
-    ) {
-
-      if (
-        ENGINE.isLive
-      ) {
-
-        await endArtistLive();
-      }
-
-      return;
-    }
-
-
-    if (
-      ENGINE.role ===
-      "viewer"
-    ) {
-
-      await closeViewerConnection(
-        true
-      );
-    }
-  }
-
-
-  /* ==========================================================
-     🚀 INITIALISE
-     ========================================================== */
-
-  async function initialise() {
-
-    if (
-      ENGINE.started
-    ) {
-      return;
-    }
-
-    ENGINE.started =
-      true;
-
-
-    log(
-      "================================================"
-    );
-
-    log(
-      "🌌 GLCTC1 LIVE ENGINE STARTING"
-    );
-
-    log(
-      "VERSION:",
-      ENGINE.version
-    );
-
-
-    /* --------------------------------------------------------
-   EXISTING ARTIST CONTROLS
-   -------------------------------------------------------- */
-
-wireExistingGoLive();
-
-wireExistingEndLive();
-
-wireLiveArtistList();
-
-
-    /* --------------------------------------------------------
-       URL WATCH MODE
-       -------------------------------------------------------- */
-
-    const artistFromURL =
-      getArtistFromURL();
-
-
-    if (
-      artistFromURL
-    ) {
-
-      await autoStartViewer();
-
-    }
-
-
-    log(
-      "🌌 GLCTC1 LIVE ENGINE READY"
-    );
-
-    log(
-      "🔊 AUDIO = PRIMARY LIVE MEDIA"
-    );
-
-    log(
-      "🎥 VIDEO = SECONDARY LIVE MEDIA"
-    );
-
-    log(
-      "📡 WEBRTC = LIVE TRANSPORT"
-    );
-
-    log(
-      "================================================"
-    );
-  }
-
-
-  /* ==========================================================
-     🌐 PUBLIC API
-     ========================================================== */
-
-  window.GLCTC1Live = {
-
-    start:
-      startArtistLive,
-
-    end:
-      endArtistLive,
-
-    watch:
-      startViewerWatch,
-
-    stopWatching:
-      closeViewerConnection,
-
-    getAudioStream:
-      getExistingLiveAudioStream,
-
-    getWebcamStream:
-      getExistingWebcamStream,
-
-    engine:
-      ENGINE
-
-  };
-
-
-  /* ==========================================================
-     🧹 CLEANUP
-     ========================================================== */
-
-  window.addEventListener(
-    "beforeunload",
-    function () {
-
-      cleanup();
-
-    }
-  );
-
-
-  /* ==========================================================
-     🚀 DOM READY
-     ========================================================== */
-
-  if (
-    document.readyState ===
-    "loading"
-  ) {
-
-    document.addEventListener(
-      "DOMContentLoaded",
-      function () {
-
-        initialise();
-
-      },
-      {
-        once: true
-      }
-    );
-
-  } else {
-
-    initialise();
-
-  }
-
-
-})();
-
-</script>
-
-
-
-

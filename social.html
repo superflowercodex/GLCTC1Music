@@ -5302,33 +5302,69 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ===================================================
 // ☁️ LOAD SHARED MASTER LIBRARY FROM SUPABASE
+// 🔄 PAGINATED — LOADS ALL TRACKS
 // ===================================================
 
 async function loadMasterLibraryFromSupabase() {
 
-  const {
-    data,
-    error
-  } =
-    await supabaseClient
-      .from("master_library")
-      .select("*");
+  const pageSize = 1000;
 
+  let from = 0;
 
-  if (error) {
+  let allRows = [];
 
-    console.error(
-      "❌ GLCTC1 MASTER LIBRARY LOAD ERROR:",
+  while (true) {
+
+    const {
+      data,
       error
+    } = await supabaseClient
+      .from("master_library")
+      .select("*")
+      .range(
+        from,
+        from + pageSize - 1
+      );
+
+    console.log(
+      "GLCTC1 MASTER LIBRARY PAGE:",
+      from,
+      data ? data.length : 0
     );
 
-    return [];
+    if (error) {
 
+      console.error(
+        "❌ GLCTC1 MASTER LIBRARY LOAD ERROR:",
+        error
+      );
+
+      return [];
+
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    allRows =
+      allRows.concat(data);
+
+    if (data.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
   }
 
 
-  return data || [];
+  console.log(
+    "GLCTC1 MASTER LIBRARY TOTAL:",
+    allRows.length
+  );
 
+
+  return allRows;
 }
 
 
@@ -11008,8 +11044,88 @@ function handleGLCTC1ArtistOffline() {
 
 
   console.log(
-  "👁️ GLCTC1 VIEWER READY FOR NEXT LIVE SESSION"
-);
+    "👁️ GLCTC1 VIEWER READY FOR NEXT LIVE SESSION"
+  );
+
+}
+
+
+// =====================================================
+// 👁️ WATCH VIEWER CONNECTION STATE
+// =====================================================
+
+function monitorGLCTC1ViewerConnection() {
+
+  const viewerConnection =
+    window.glctc1ViewerConnection;
+
+
+  if (!viewerConnection) {
+
+    console.warn(
+      "⚠️ GLCTC1 VIEWER CONNECTION NOT FOUND"
+    );
+
+    return;
+
+  }
+
+
+  viewerConnection.onconnectionstatechange =
+    function () {
+
+      const state =
+        viewerConnection.connectionState;
+
+
+      console.log(
+        "👁️ GLCTC1 VIEWER CONNECTION STATE:",
+        state
+      );
+
+
+      if (
+        state === "failed" ||
+        state === "closed"
+      ) {
+
+        handleGLCTC1ArtistOffline();
+
+      }
+
+    };
+
+
+  viewerConnection.oniceconnectionstatechange =
+    function () {
+
+      const iceState =
+        viewerConnection.iceConnectionState;
+
+
+      console.log(
+        "👁️ GLCTC1 VIEWER ICE STATE:",
+        iceState
+      );
+
+
+      if (
+        iceState === "failed" ||
+        iceState === "closed"
+      ) {
+
+        handleGLCTC1ArtistOffline();
+
+      }
+
+    };
+
+
+  console.log(
+    "👁️ GLCTC1 VIEWER CONNECTION MONITOR READY"
+  );
+
+}
 
 
 // =====================================================
@@ -15364,6 +15480,52 @@ async function startGLCTC1ViewerFromArtistURL() {
   }
 
 }
+
+
+// =====================================================
+// 👁️ CLEANUP VIEWER CONNECTION
+// =====================================================
+
+async function cleanupGLCTC1ViewerConnection() {
+
+  try {
+
+    const connection =
+      window.glctc1ViewerConnection;
+
+
+    if (connection) {
+
+      connection.ontrack =
+        null;
+
+      connection.onicecandidate =
+        null;
+
+      connection.onconnectionstatechange =
+        null;
+
+      connection.oniceconnectionstatechange =
+        null;
+
+
+      connection.close();
+
+    }
+
+
+  } catch (error) {
+
+    console.warn(
+      "⚠️ GLCTC1 VIEWER CONNECTION CLEANUP:",
+      error
+    );
+
+  }
+
+
+  window.glctc1ViewerConnection =
+    null;
 
 
   // =================================================

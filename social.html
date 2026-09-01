@@ -13299,35 +13299,7 @@ console.log(
 );
 
 // =====================================================
-// 👁️ STEP 43 — ARTIST GO LIVE → OPEN LOCKED LIVE MODULE
-// =====================================================
-//
-// NORMAL PAGE:
-// GO LIVE → opens the artist's locked Social module.
-//
-// ARTIST MODULE:
-// STEP 43 does NOT attach to GO LIVE.
-// The EXISTING GO LIVE handler controls the button.
-//
-// Therefore:
-//
-// NORMAL PAGE
-//     GO LIVE
-//        ↓
-//     OPEN MODULE
-//
-// MODULE
-//     GO LIVE
-//        ↓
-//     EXISTING LIVE SYSTEM
-//        ↓
-//     END LIVE
-//
-// =====================================================
-
-
-// =====================================================
-// 👁️ OPEN ARTIST LIVE WATCH WINDOW
+// 👁️ STEP 43 — ARTIST GO LIVE → NEW LOCKED WATCH PAGE
 // =====================================================
 
 async function openGLCTC1ArtistLiveWatchWindow() {
@@ -13450,7 +13422,7 @@ async function openGLCTC1ArtistLiveWatchWindow() {
 
 
     // =================================================
-    // 🔒 FOCUS NEW WINDOW
+    // 🔒 LOCK NEW WINDOW TO ARTIST
     // =================================================
 
     try {
@@ -13475,7 +13447,7 @@ async function openGLCTC1ArtistLiveWatchWindow() {
 
 
     console.log(
-      "👁️ GLCTC1 ARTIST WATCH PAGE LOCKED TO:",
+      "🔴 GLCTC1 ARTIST WATCH PAGE LOCKED TO:",
       artistUserId
     );
 
@@ -13498,47 +13470,46 @@ async function openGLCTC1ArtistLiveWatchWindow() {
 
 
 // =====================================================
-// 👁️ STEP 43 — ONLY RUN ON NORMAL PAGE
-// =====================================================
-//
-// If the URL contains:
-//
-// social.html?artist=USER_ID
-//
-// then this is already the artist's Live module.
-//
-// STEP 43 MUST NOT attach another GO LIVE listener.
-//
-// =====================================================
-
-const glctc1ArtistPageId =
-  new URLSearchParams(
-    window.location.search
-  ).get(
-    "artist"
-  );
-
-
-// =====================================================
-// 👁️ NORMAL PAGE → OPEN MODULE
+// 👁️ STEP 43 — CONNECT TO EXISTING GO LIVE BUTTON
 // =====================================================
 
 if (
-  glctc1GoLiveButton &&
-  !glctc1ArtistPageId
+  glctc1GoLiveButton
 ) {
 
   glctc1GoLiveButton.addEventListener(
     "click",
-    async function (event) {
-
-      // Prevent another click handler on the
-      // normal page from starting the broadcast.
-      event.preventDefault();
-      event.stopImmediatePropagation();
-
+    async function () {
 
       try {
+
+        // =================================================
+        // 🔴 START EXISTING ARTIST BROADCAST
+        // =================================================
+
+        const broadcastStarted =
+          await startGLCTC1ArtistLiveBroadcast();
+
+
+        if (!broadcastStarted) {
+
+          console.warn(
+            "⚠️ GLCTC1 ARTIST BROADCAST DID NOT START"
+          );
+
+          return;
+
+        }
+
+
+        console.log(
+          "🔴 GLCTC1 ARTIST BROADCAST STARTED"
+        );
+
+
+        // =================================================
+        // 👁️ OPEN ARTIST WATCH PAGE
+        // =================================================
 
         const watchOpened =
           await openGLCTC1ArtistLiveWatchWindow();
@@ -13556,26 +13527,20 @@ if (
 
 
         console.log(
-          "👁️ GLCTC1 ARTIST LIVE MODULE OPENED"
-        );
-
-
-        console.log(
-          "⏸️ GLCTC1 BROADCAST NOT STARTED — READY INSIDE MODULE"
+          "🔴 GLCTC1 ARTIST LIVE + WATCH PAGE READY"
         );
 
 
       } catch (error) {
 
         console.error(
-          "❌ GLCTC1 STEP 43 ERROR:",
+          "❌ GLCTC1 GO LIVE WATCH PAGE ERROR:",
           error
         );
 
       }
 
-    },
-    true
+    }
   );
 
 }
@@ -13586,7 +13551,7 @@ if (
 // =====================================================
 
 console.log(
-  "👁️ GLCTC1 STEP 43 — LIVE MODULE ROUTING READY"
+  "🔴 GLCTC1 STEP 43 — GO LIVE → ARTIST WATCH PAGE READY"
 );
 
 // =====================================================
@@ -16656,23 +16621,14 @@ let glctc1PeerConnection = null;
 
 
 // =====================================================
-// 🔴 GET GLCTC1 LIVE AUDIO STREAM
-// =====================================================
-// Uses the existing LIVE AUDIO DESTINATION created
-// by the GLCTC1 processed deck audio system.
-//
-// DO NOT create another AudioContext here.
-// DO NOT create another MediaStreamDestination here.
+// 🔴 GET / CREATE GLCTC1 LIVE AUDIO STREAM
 // =====================================================
 
 function getGLCTC1LiveAudioStream() {
 
   try {
 
-    // =================================================
-    // 🔴 USE EXISTING PROCESSED DECK LIVE STREAM
-    // =================================================
-
+    // Already created
     if (
       glctc1LiveAudioDestination &&
       glctc1LiveAudioDestination.stream
@@ -16681,27 +16637,74 @@ function getGLCTC1LiveAudioStream() {
       glctc1AudioStream =
         glctc1LiveAudioDestination.stream;
 
-
-      console.log(
-        "🔴 GLCTC1 LIVE AUDIO STREAM READY"
-      );
-
-
       return glctc1AudioStream;
 
     }
 
 
-    // =================================================
-    // ⚠️ LIVE AUDIO DESTINATION NOT READY
-    // =================================================
+    // -------------------------------------------------
+    // Create a dedicated Web Audio context
+    // -------------------------------------------------
 
-    console.warn(
-      "⚠️ GLCTC1 LIVE AUDIO DESTINATION NOT READY"
+    const AudioContext =
+      window.AudioContext ||
+      window.webkitAudioContext;
+
+
+    if (!AudioContext) {
+
+      console.error(
+        "❌ GLCTC1 WEB AUDIO NOT SUPPORTED"
+      );
+
+      return null;
+
+    }
+
+
+    const liveAudioContext =
+      new AudioContext();
+
+
+    // -------------------------------------------------
+    // Create LIVE MediaStream destination
+    // -------------------------------------------------
+
+    glctc1LiveAudioDestination =
+      liveAudioContext.createMediaStreamDestination();
+
+
+    glctc1AudioStream =
+      glctc1LiveAudioDestination.stream;
+
+
+    console.log(
+      "🔴 GLCTC1 LIVE AUDIO STREAM READY"
     );
 
 
-    return null;
+    // Resume after user interaction if required
+    if (
+      liveAudioContext.state ===
+      "suspended"
+    ) {
+
+      liveAudioContext.resume()
+        .catch(
+          function (error) {
+
+            console.warn(
+              "⚠️ GLCTC1 LIVE AUDIO CONTEXT RESUME ERROR:",
+              error
+            );
+
+          }
+        );
+
+    }
+
+
+    return glctc1AudioStream;
 
 
   } catch (error) {
@@ -16710,7 +16713,6 @@ function getGLCTC1LiveAudioStream() {
       "❌ GLCTC1 LIVE AUDIO STREAM ERROR:",
       error
     );
-
 
     return null;
 
@@ -19858,3 +19860,4 @@ setCrowdEnergy: updateCrowdEnergy
 })();  // close the IIFE
 
 </script>
+

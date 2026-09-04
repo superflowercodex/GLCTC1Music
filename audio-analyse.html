@@ -1751,53 +1751,92 @@ async function initialiseGLCTC1AudioAnalyse() {
 
 }
 
-/* =====================================================
-   LOAD ARTIST PROFILE
-   ===================================================== */
+// -------------------------------------------------
+// LOAD ARTIST PROFILE
+// -------------------------------------------------
 
-async function loadCurrentArtistProfile() {
+// Refresh the authenticated session first.
+// This makes sure the profiles request carries
+// the current Supabase access token.
+const {
+  data: refreshedSession,
+  error: refreshError
+} = await glctc1Supabase.auth.refreshSession();
 
-  const {
-    data,
-    error
-  } =
-    await glctc1Supabase
-      .from("profiles")
-      .select("artist_name")
-      .eq("id", currentUser.id)
-      .maybeSingle();
+if (refreshError) {
 
-  if (error) {
+  console.error(
+    "GLCTC1 SESSION REFRESH ERROR:",
+    refreshError
+  );
 
-    console.error(
-      "GLCTC1 PROFILE ERROR:",
-      error
-    );
-
-    setStatus(
-      "Logged in, but artist profile could not be loaded.",
-      "error"
-    );
-
-    return;
-
-  }
-
-  currentProfile =
-    data || null;
-
-  const artistName =
-    currentProfile?.artist_name ||
-    currentUser.user_metadata?.artist_name ||
-    currentUser.email ||
-    "GLCTC1 ARTIST";
-
-  document.getElementById(
-    "libraryArtist"
-  ).value =
-    artistName;
+  throw new Error(
+    "Your login session could not be refreshed."
+  );
 
 }
+
+const activeUser =
+  refreshedSession?.session?.user;
+
+if (!activeUser) {
+
+  throw new Error(
+    "No authenticated user was found."
+  );
+
+}
+
+
+// Now load the artist profile using the
+// freshly authenticated session.
+
+const {
+  data: profile,
+  error: profileError
+} =
+  await glctc1Supabase
+    .from("profiles")
+    .select("artist_name")
+    .eq("id", activeUser.id)
+    .maybeSingle();
+
+
+if (profileError) {
+
+  console.error(
+    "GLCTC1 PROFILE ERROR:",
+    profileError
+  );
+
+  throw new Error(
+    "Artist profile could not be loaded: " +
+    profileError.message
+  );
+
+}
+
+
+if (!profile) {
+
+  throw new Error(
+    "No artist profile exists for this account."
+  );
+
+}
+
+
+artistName =
+  profile.artist_name || "";
+
+
+// Keep the logged-in artist name available
+// to the rest of the page.
+
+console.log(
+  "GLCTC1 ARTIST PROFILE LOADED:",
+  artistName
+);
 
 /* =====================================================
    FILE SELECTION

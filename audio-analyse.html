@@ -1515,19 +1515,14 @@ body::before {
 <script>
 
 /* =====================================================
-   GLCTC1 SUPABASE CONFIGURATION
+   GLCTC1 SUPABASE CONNECTION
+   MATCHES WORKING GLCTC1 UPLOAD PAGE
    ===================================================== */
 
-const GLCTC1_SUPABASE_URL =
-  "https://zdlaloiruxamxsduxqxw.supabase.co";
-
-const GLCTC1_SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ";
-
-const glctc1Supabase =
+const supabaseClient =
   window.supabase.createClient(
-    GLCTC1_SUPABASE_URL,
-    GLCTC1_SUPABASE_ANON_KEY
+    "https://zdlaloiruxamxsduxqxw.supabase.co",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ"
   );
 
 /* =====================================================
@@ -1692,16 +1687,16 @@ async function initialiseGLCTC1AudioAnalyse() {
   try {
 
     const {
-      data,
-      error
+      data: sessionData,
+      error: sessionError
     } =
-      await glctc1Supabase.auth.getSession();
+      await supabaseClient.auth.getSession();
 
-    if (error) {
+    if (sessionError) {
 
       console.error(
         "GLCTC1 AUTH ERROR:",
-        error
+        sessionError
       );
 
       setStatus(
@@ -1714,7 +1709,7 @@ async function initialiseGLCTC1AudioAnalyse() {
     }
 
     currentUser =
-      data.session?.user || null;
+      sessionData?.session?.user || null;
 
     if (!currentUser) {
 
@@ -1751,9 +1746,9 @@ async function initialiseGLCTC1AudioAnalyse() {
 
 }
 
-// -------------------------------------------------
-// LOAD ARTIST PROFILE
-// -------------------------------------------------
+/* =====================================================
+   LOAD ARTIST PROFILE
+   ===================================================== */
 
 async function loadCurrentArtistProfile() {
 
@@ -1769,7 +1764,7 @@ async function loadCurrentArtistProfile() {
     data: profile,
     error: profileError
   } =
-    await glctc1Supabase
+    await supabaseClient
       .from("profiles")
       .select("artist_name")
       .eq("id", currentUser.id)
@@ -2073,12 +2068,16 @@ async function analyseAudio() {
     if (audioContext) {
 
       try {
+
         await audioContext.close();
+
       } catch (error) {
+
         console.warn(
           "AudioContext close error:",
           error
         );
+
       }
 
     }
@@ -3094,17 +3093,6 @@ async function uploadToMasterLibrary() {
 
   }
 
-  if (!currentUser) {
-
-    setStatus(
-      "Please sign in before uploading to the Master Library.",
-      "error"
-    );
-
-    return;
-
-  }
-
   uploadLibraryButton.disabled =
     true;
 
@@ -3116,34 +3104,46 @@ async function uploadToMasterLibrary() {
     "active"
   );
 
-  let storagePath =
+  let uploadedPath =
     null;
 
   try {
 
     /* =================================================
-       REFRESH AUTH SESSION
+       GET THE ACTUAL LOGGED-IN USER
+
+       MATCHES WORKING GLCTC1 UPLOAD PAGE
        ================================================= */
 
     const {
-      data: sessionData,
-      error: sessionError
+      data: {
+        user
+      },
+      error: userError
     } =
-      await glctc1Supabase.auth.getSession();
+      await supabaseClient.auth.getUser();
 
     if (
-      sessionError ||
-      !sessionData?.session?.user
+      userError ||
+      !user
     ) {
 
       throw new Error(
-        "Your GLCTC1 login session is no longer active."
+        "Please sign in before adding a track."
       );
 
     }
 
     currentUser =
-      sessionData.session.user;
+      user;
+
+    const currentUserId =
+      user.id;
+
+    console.log(
+      "GLCTC1 LOGGED-IN ARTIST ID:",
+      currentUserId
+    );
 
     /* =================================================
        ARTIST PROFILE
@@ -3153,13 +3153,18 @@ async function uploadToMasterLibrary() {
       data: profileData,
       error: profileError
     } =
-      await glctc1Supabase
+      await supabaseClient
         .from("profiles")
         .select("artist_name")
-        .eq("id", currentUser.id)
+        .eq("id", currentUserId)
         .maybeSingle();
 
     if (profileError) {
+
+      console.error(
+        "GLCTC1 PROFILE ERROR:",
+        profileError
+      );
 
       throw new Error(
         "Could not load artist profile: " +
@@ -3173,8 +3178,8 @@ async function uploadToMasterLibrary() {
 
     const artistName =
       currentProfile?.artist_name ||
-      currentUser.user_metadata?.artist_name ||
-      currentUser.email ||
+      user.user_metadata?.artist_name ||
+      user.email ||
       "GLCTC1 ARTIST";
 
     document.getElementById(
@@ -3186,7 +3191,7 @@ async function uploadToMasterLibrary() {
        TRACK METADATA
        ================================================= */
 
-    const trackTitle =
+    const title =
       document.getElementById(
         "libraryTrackTitle"
       ).value.trim();
@@ -3201,24 +3206,20 @@ async function uploadToMasterLibrary() {
         "libraryGenre"
       ).value.trim();
 
-    const bpm =
-      cleanNullableValue(
-        document.getElementById(
-          "libraryBPM"
-        ).value
-      );
+    const bpmValue =
+      document.getElementById(
+        "libraryBPM"
+      ).value.trim();
 
-    const key =
+    const trackKey =
       document.getElementById(
         "libraryKey"
       ).value.trim();
 
-    const frequency =
-      cleanNullableValue(
-        document.getElementById(
-          "libraryFrequency"
-        ).value
-      );
+    const frequencyValue =
+      document.getElementById(
+        "libraryFrequency"
+      ).value.trim();
 
     const chakra =
       document.getElementById(
@@ -3240,7 +3241,7 @@ async function uploadToMasterLibrary() {
         "libraryNotes"
       ).value.trim();
 
-    if (!trackTitle) {
+    if (!title) {
 
       throw new Error(
         "Track title is required."
@@ -3249,12 +3250,26 @@ async function uploadToMasterLibrary() {
     }
 
     /* =================================================
-       SAME STORAGE PATH PATTERN AS GLCTC1 UPLOAD PAGE
+       CLEAN NUMERIC VALUES
+       ================================================= */
+
+    const bpm =
+      cleanNullableValue(
+        bpmValue
+      );
+
+    const frequency =
+      cleanNullableValue(
+        frequencyValue
+      );
+
+    /* =================================================
+       EXACT GLCTC1 WORKING STORAGE PATTERN
 
        masters/${Date.now()}_${file.name}
 
-       The Master Library stores this PATH.
-       It does NOT store a temporary signed URL.
+       ORIGINAL FILE FORMAT IS PRESERVED.
+       NO MP3 CONVERSION.
        ================================================= */
 
     const safeFileName =
@@ -3264,38 +3279,51 @@ async function uploadToMasterLibrary() {
           "_"
         );
 
-    storagePath =
+    const filePath =
       `masters/${Date.now()}_${safeFileName}`;
+
+    console.log(
+      "GLCTC1 UPLOADING FILE:",
+      selectedFile.name
+    );
+
+    console.log(
+      "GLCTC1 STORAGE PATH:",
+      filePath
+    );
 
     /* =================================================
        UPLOAD MASTER AUDIO
+
+       SAME METHOD AS WORKING UPLOAD PAGE
        ================================================= */
 
     const {
       data: uploadData,
       error: uploadError
     } =
-      await glctc1Supabase
+      await supabaseClient
         .storage
         .from("tracks")
         .upload(
-          storagePath,
+          filePath,
           selectedFile,
           {
-            cacheControl:"3600",
-            upsert:false,
-            contentType:
-              selectedFile.type ||
-              "application/octet-stream"
+            upsert:true
           }
         );
 
-    if (uploadError) {
+    console.log(
+      "GLCTC1 UPLOAD DATA:",
+      uploadData
+    );
 
-      console.error(
-        "GLCTC1 MASTER AUDIO STORAGE ERROR:",
-        uploadError
-      );
+    console.log(
+      "GLCTC1 UPLOAD ERROR:",
+      uploadError
+    );
+
+    if (uploadError) {
 
       throw new Error(
         "Audio upload failed: " +
@@ -3304,20 +3332,20 @@ async function uploadToMasterLibrary() {
 
     }
 
-    console.log(
-      "GLCTC1 MASTER AUDIO UPLOADED:",
-      uploadData
-    );
+    uploadedPath =
+      uploadData?.path ||
+      filePath;
 
     uploadedStoragePath =
-      uploadData?.path ||
-      storagePath;
+      uploadedPath;
+
+    console.log(
+      "✅ GLCTC1 MASTER AUDIO UPLOADED:",
+      uploadedPath
+    );
 
     /* =================================================
        GENERATE GLCTC1 CATALOGUE NUMBER
-
-       One ID is generated and used by the Master
-       Library record.
        ================================================= */
 
     const timestamp =
@@ -3327,147 +3355,233 @@ async function uploadToMasterLibrary() {
       `GLCTC1-${timestamp}`;
 
     /* =================================================
-       MASTER LIBRARY RECORD
+       CREATE TRACK OBJECT
 
-       IMPORTANT:
-       These are the SAME Master Library column names
-       used by the working Upload page.
+       MATCHES EXISTING GLCTC1 LIBRARY STRUCTURE
        ================================================= */
 
-    const masterLibraryRecord = {
+    const track = {
 
-      "Master Audio":
-        uploadedStoragePath || null,
+      id:
+        timestamp,
 
-      "Stem 1":
-        null,
-
-      "Stem 2":
-        null,
-
-      "Stem 3":
-        null,
-
-      "Stem 4":
-        null,
-
-      "Artist":
-        artistName || null,
-
-      "Track Title":
-        trackTitle || null,
-
-      "Album":
-        album || null,
-
-      "Genre":
-        genre || null,
-
-      "BPM":
-        bpm,
-
-      "Key":
-        key || null,
-
-      "Frequency (Hz)":
-        frequency,
-
-      "Chakra":
-        chakra || null,
-
-      "Planet":
-        planet || null,
-
-      "Spatial":
-        null,
-
-      "Notes":
-        notes || null,
-
-      "ID Cat No":
+      id_cat_no:
         idCatNo,
 
-      "Copyright":
-        copyright || null,
+      artist_id:
+        currentUserId,
 
-      "Cover Art":
-        null
+      title:
+        title,
+
+      artist:
+        artistName,
+
+      master_audio:
+        uploadedPath,
+
+      stem1:
+        "",
+
+      stem2:
+        "",
+
+      stem3:
+        "",
+
+      stem4:
+        "",
+
+      album:
+        album,
+
+      genre:
+        genre,
+
+      bpm:
+        bpmValue === ""
+          ? ""
+          : Number(bpmValue),
+
+      key:
+        trackKey,
+
+      frequency_hz:
+        frequencyValue === ""
+          ? ""
+          : Number(frequencyValue),
+
+      chakra:
+        chakra,
+
+      planet:
+        planet,
+
+      spatial:
+        "",
+
+      notes:
+        notes,
+
+      copyright:
+        copyright,
+
+      cover_art:
+        ""
 
     };
 
-    console.log(
-      "GLCTC1 MASTER LIBRARY RECORD:",
-      masterLibraryRecord
-    );
-
     /* =================================================
-       INSERT INTO AUTHORITATIVE MASTER LIBRARY
+       SAVE TO AUTHORITATIVE MASTER LIBRARY
+
+       EXACT SAME COLUMN NAMES AS WORKING UPLOAD PAGE
        ================================================= */
 
     const {
       data: insertedTrack,
-      error: libraryError
+      error: masterLibraryError
     } =
-      await glctc1Supabase
+      await supabaseClient
         .from("master_library")
         .insert([
-          masterLibraryRecord
+          {
+
+            "Master Audio":
+              track.master_audio || null,
+
+            "Stem 1":
+              track.stem1 || null,
+
+            "Stem 2":
+              track.stem2 || null,
+
+            "Stem 3":
+              track.stem3 || null,
+
+            "Stem 4":
+              track.stem4 || null,
+
+            "Artist":
+              track.artist || null,
+
+            "Track Title":
+              track.title || null,
+
+            "Album":
+              track.album || null,
+
+            "Genre":
+              track.genre || null,
+
+            "BPM":
+              track.bpm !== ""
+                ? Number(track.bpm)
+                : null,
+
+            "Key":
+              track.key || null,
+
+            "Frequency (Hz)":
+              track.frequency_hz !== ""
+                ? Number(track.frequency_hz)
+                : null,
+
+            "Chakra":
+              track.chakra || null,
+
+            "Planet":
+              track.planet || null,
+
+            "Spatial":
+              track.spatial || null,
+
+            "Notes":
+              track.notes || null,
+
+            "ID Cat No":
+              track.id_cat_no || null,
+
+            "Copyright":
+              track.copyright || null,
+
+            "Cover Art":
+              track.cover_art || null
+
+          }
         ])
         .select()
         .single();
 
-    if (libraryError) {
+    if (masterLibraryError) {
 
       console.error(
-        "GLCTC1 MASTER LIBRARY INSERT ERROR:",
-        libraryError
+        "❌ GLCTC1 MASTER LIBRARY SAVE ERROR:",
+        masterLibraryError
       );
 
-      /* ---------------------------------------------
-         CLEAN UP AUDIO IF DATABASE INSERT FAILS
-         --------------------------------------------- */
+      /* =================================================
+         CLEAN UP STORAGE IF DATABASE INSERT FAILS
+         ================================================= */
 
-      try {
+      if (uploadedPath) {
 
-        const {
-          error: cleanupError
-        } =
-          await glctc1Supabase
-            .storage
-            .from("tracks")
-            .remove([
-              uploadedStoragePath
-            ]);
+        try {
 
-        if (cleanupError) {
+          const {
+            data: cleanupData,
+            error: cleanupError
+          } =
+            await supabaseClient
+              .storage
+              .from("tracks")
+              .remove([
+                uploadedPath
+              ]);
+
+          console.log(
+            "GLCTC1 STORAGE CLEANUP:",
+            cleanupData
+          );
+
+          if (cleanupError) {
+
+            console.error(
+              "GLCTC1 STORAGE CLEANUP ERROR:",
+              cleanupError
+            );
+
+          }
+
+        } catch (cleanupException) {
 
           console.error(
-            "GLCTC1 STORAGE CLEANUP ERROR:",
-            cleanupError
+            "GLCTC1 STORAGE CLEANUP EXCEPTION:",
+            cleanupException
           );
 
         }
 
-      } catch (cleanupException) {
-
-        console.error(
-          "GLCTC1 STORAGE CLEANUP EXCEPTION:",
-          cleanupException
-        );
-
       }
+
+      uploadedStoragePath =
+        null;
 
       throw new Error(
         "Could not save to Master Library: " +
-        libraryError.message
+        masterLibraryError.message
       );
 
     }
 
+    console.log(
+      "✅ GLCTC1 MASTER LIBRARY RECORD SAVED:",
+      insertedTrack
+    );
+
     /* =================================================
        LOCAL SECONDARY COPY
 
-       Supabase Master Library remains authoritative.
+       SUPABASE MASTER LIBRARY REMAINS AUTHORITATIVE
        ================================================= */
 
     const localTrack = {
@@ -3480,28 +3594,28 @@ async function uploadToMasterLibrary() {
         idCatNo,
 
       artist_id:
-        currentUser.id,
+        currentUserId,
 
       title:
-        trackTitle,
+        title,
 
       artist:
         artistName,
 
       master_audio:
-        uploadedStoragePath,
+        uploadedPath,
 
       stem1:
-        null,
+        "",
 
       stem2:
-        null,
+        "",
 
       stem3:
-        null,
+        "",
 
       stem4:
-        null,
+        "",
 
       album:
         album,
@@ -3510,13 +3624,17 @@ async function uploadToMasterLibrary() {
         genre,
 
       bpm:
-        bpm,
+        bpmValue === ""
+          ? ""
+          : Number(bpmValue),
 
       key:
-        key,
+        trackKey,
 
       frequency_hz:
-        frequency,
+        frequencyValue === ""
+          ? ""
+          : Number(frequencyValue),
 
       chakra:
         chakra,
@@ -3525,7 +3643,7 @@ async function uploadToMasterLibrary() {
         planet,
 
       spatial:
-        null,
+        "",
 
       notes:
         notes,
@@ -3534,7 +3652,7 @@ async function uploadToMasterLibrary() {
         copyright,
 
       cover_art:
-        null
+        ""
 
     };
 
@@ -3558,6 +3676,10 @@ async function uploadToMasterLibrary() {
         )
       );
 
+      console.log(
+        "✅ GLCTC1 LOCAL LIBRARY COPY UPDATED"
+      );
+
     } catch (localError) {
 
       console.warn(
@@ -3571,11 +3693,6 @@ async function uploadToMasterLibrary() {
        SUCCESS
        ================================================= */
 
-    console.log(
-      "✅ GLCTC1 TRACK SAVED TO SHARED MASTER LIBRARY:",
-      insertedTrack
-    );
-
     setStatus(
       "✅ UPLOAD COMPLETE — TRACK ADDED TO MASTER LIBRARY.",
       "success"
@@ -3584,10 +3701,23 @@ async function uploadToMasterLibrary() {
     uploadLibraryButton.textContent =
       "✅ UPLOADED TO MASTER LIBRARY";
 
+    uploadLibraryButton.disabled =
+      true;
+
+    console.log(
+      "✅ GLCTC1 TRACK SAVED:",
+      {
+        idCatNo,
+        artistName,
+        uploadedPath,
+        insertedTrack
+      }
+    );
+
   } catch (error) {
 
     console.error(
-      "GLCTC1 MASTER LIBRARY UPLOAD ERROR:",
+      "❌ GLCTC1 MASTER LIBRARY UPLOAD ERROR:",
       error
     );
 

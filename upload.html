@@ -2841,66 +2841,6 @@ button:hover {
 
 <script>
 
-// SAVE TRACK CHANGES
-document.getElementById("saveTrackChanges").addEventListener("click", async () => {
-
-  const trackId = window.currentTrackId; // you already set this when opening the editor
-
-  const updates = {
-    master_audio: document.getElementById("editMasterAudio").files[0] || null,
-    stem1: document.getElementById("editStem1").files[0] || null,
-    stem2: document.getElementById("editStem2").files[0] || null,
-    stem3: document.getElementById("editStem3").files[0] || null,
-    stem4: document.getElementById("editStem4").files[0] || null,
-
-    artist: document.getElementById("editArtist").value,
-    title: document.getElementById("editTitle").value,
-
-    album: document.getElementById("editAlbum").value,
-    genre: document.getElementById("editGenre").value,
-    bpm: document.getElementById("editBpm").value,
-    key: document.getElementById("editKey").value,
-    frequency: document.getElementById("editFrequency").value,
-    chakra: document.getElementById("editChakra").value,
-    planet: document.getElementById("editPlanet").value,
-    spatial: document.getElementById("editSpatial").value,
-    notes: document.getElementById("editNotes").value,
-    id_cat_no: document.getElementById("editIdCatNo").value,
-    copyright: document.getElementById("editCopyright").value,
-    cover_art: document.getElementById("editCover").files[0] || null
-  };
-
-  // Upload any files first
-  async function uploadIfFile(fieldName, file) {
-    if (!file) return null;
-    const { data, error } = await supabase.storage
-      .from("master-library")
-      .upload(`${trackId}/${fieldName}`, file, { upsert: true });
-    return error ? null : data.path;
-  }
-
-  updates.master_audio = await uploadIfFile("master_audio", updates.master_audio);
-  updates.stem1 = await uploadIfFile("stem1", updates.stem1);
-  updates.stem2 = await uploadIfFile("stem2", updates.stem2);
-  updates.stem3 = await uploadIfFile("stem3", updates.stem3);
-  updates.stem4 = await uploadIfFile("stem4", updates.stem4);
-  updates.cover_art = await uploadIfFile("cover_art", updates.cover_art);
-
-  // Save metadata to Supabase
-  const { error } = await supabase
-    .from("master_library")
-    .update(updates)
-    .eq("id", trackId);
-
-  if (error) {
-    alert("❌ Error saving track");
-    console.error(error);
-  } else {
-    alert("✅ Track updated successfully");
-    loadMasterLibrary(); // 🔥 auto-refresh library
-  }
-});
-
 // =====================================================
 // 🔐 GLCTC1 MASTER LIBRARY EDITOR — LOGIN GATE
 // =====================================================
@@ -5513,6 +5453,783 @@ function renderLibraryTable(searchTerm = "") {
 
   });
 }
+
+/* =====================================================
+   💾 GLCTC1 MASTER LIBRARY — UPDATE SELECTED TRACK
+   🔐 LOGIN + ARTIST OWNERSHIP + ADMIN OVERRIDE
+   ☁️ SUPABASE STORAGE: tracks
+   ===================================================== */
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  const updateButton =
+    document.getElementById("saveTrackChanges");
+
+  if (!updateButton) {
+    console.warn(
+      "⚠️ GLCTC1 UPDATE: saveTrackChanges button not found."
+    );
+    return;
+  }
+
+  updateButton.addEventListener("click", async () => {
+
+    try {
+
+      /* =================================================
+         1️⃣ TRACK MUST BE SELECTED
+         ================================================= */
+
+      if (!selectedLibraryTrack) {
+        alert(
+          "Please select a track from the Master Library first."
+        );
+        return;
+      }
+
+      const track = selectedLibraryTrack;
+
+      console.log(
+        "💾 GLCTC1 UPDATE START:",
+        track
+      );
+
+      /* =================================================
+         2️⃣ GET LOGGED-IN USER
+         ================================================= */
+
+      const {
+        data: { user },
+        error: userError
+      } =
+        await supabaseClient.auth.getUser();
+
+      if (userError || !user) {
+        alert(
+          "🔐 Please sign in before updating a track."
+        );
+        return;
+      }
+
+      /* =================================================
+         3️⃣ ADMIN USER
+         ================================================= */
+
+      const ADMIN_USER_ID =
+        "8c70a492-3cf1-4053-b0ee-b5b186529d54";
+
+      const isAdmin =
+        String(user.id) ===
+        String(ADMIN_USER_ID);
+
+      console.log(
+        "GLCTC1 UPDATE PERMISSION:",
+        {
+          loggedInUserId: user.id,
+          isAdmin: isAdmin
+        }
+      );
+
+      /* =================================================
+         4️⃣ LOAD ARTIST PROFILE
+         ================================================= */
+
+      const {
+        data: profile,
+        error: profileError
+      } =
+        await supabaseClient
+          .from("profiles")
+          .select("id, artist_name")
+          .eq("id", user.id)
+          .maybeSingle();
+
+      if (profileError) {
+
+        console.error(
+          "❌ GLCTC1 UPDATE PROFILE ERROR:",
+          profileError
+        );
+
+        alert(
+          "❌ Unable to verify your artist profile."
+        );
+
+        return;
+      }
+
+      /* =================================================
+         5️⃣ NORMAL USER MUST HAVE PROFILE
+         ================================================= */
+
+      if (!profile && !isAdmin) {
+
+        alert(
+          "🔐 No GLCTC1 artist profile was found for this account."
+        );
+
+        return;
+      }
+
+      /* =================================================
+         6️⃣ VERIFY ARTIST OWNERSHIP
+         ================================================= */
+
+      if (!isAdmin) {
+
+        const profileArtist =
+          String(
+            profile.artist_name || ""
+          )
+          .trim()
+          .toLowerCase();
+
+        const trackArtist =
+          String(
+            track.artist || ""
+          )
+          .trim()
+          .toLowerCase();
+
+        if (
+          !profileArtist ||
+          !trackArtist ||
+          profileArtist !== trackArtist
+        ) {
+
+          console.warn(
+            "🔐 GLCTC1 UPDATE BLOCKED — ARTIST MISMATCH:",
+            {
+              profileArtist:
+                profile.artist_name,
+              trackArtist:
+                track.artist,
+              userId:
+                user.id
+            }
+          );
+
+          alert(
+            "🔐 You can only update tracks belonging to your artist account."
+          );
+
+          return;
+        }
+      }
+
+      /* =================================================
+         7️⃣ GET GLCTC1 ID CAT NO
+         ================================================= */
+
+      const catId =
+        String(
+          track.id_cat_no ||
+          track.cat_no ||
+          ""
+        )
+        .trim();
+
+      if (!catId) {
+
+        alert(
+          "❌ This track does not have a GLCTC1 ID Cat No."
+        );
+
+        return;
+      }
+
+      console.log(
+        "GLCTC1 UPDATE CAT ID:",
+        catId
+      );
+
+      /* =================================================
+         8️⃣ LOAD THE EXACT DATABASE ROW
+         ================================================= */
+
+      const {
+        data: masterRow,
+        error: masterLoadError
+      } =
+        await supabaseClient
+          .from("master_library")
+          .select("*")
+          .eq("ID Cat No", catId)
+          .maybeSingle();
+
+      if (masterLoadError) {
+
+        console.error(
+          "❌ GLCTC1 MASTER ROW LOAD ERROR:",
+          masterLoadError
+        );
+
+        throw new Error(
+          masterLoadError.message
+        );
+      }
+
+      if (!masterRow) {
+
+        alert(
+          "❌ The selected track could not be found in the Master Library."
+        );
+
+        return;
+      }
+
+      /* =================================================
+         9️⃣ REQUIRED FIELDS
+         ================================================= */
+
+      const artist =
+        document
+          .getElementById("editArtist")
+          ?.value
+          .trim();
+
+      const title =
+        document
+          .getElementById("editTitle")
+          ?.value
+          .trim();
+
+      const copyright =
+        document
+          .getElementById("editCopyright")
+          ?.value
+          .trim();
+
+      if (!artist || !title || !copyright) {
+
+        alert(
+          "Artist, Track Title, and Copyright are required."
+        );
+
+        return;
+      }
+
+      /* =================================================
+         🔟 FILE INPUTS
+         ================================================= */
+
+      const masterInput =
+        document.getElementById(
+          "editMasterAudio"
+        );
+
+      const stem1Input =
+        document.getElementById(
+          "editStem1"
+        );
+
+      const stem2Input =
+        document.getElementById(
+          "editStem2"
+        );
+
+      const stem3Input =
+        document.getElementById(
+          "editStem3"
+        );
+
+      const stem4Input =
+        document.getElementById(
+          "editStem4"
+        );
+
+      const coverInput =
+        document.getElementById(
+          "editCover"
+        );
+
+      /* =================================================
+         1️⃣1️⃣ UPLOAD HELPER
+         ================================================= */
+
+      async function uploadReplacement(
+        file,
+        folder
+      ) {
+
+        if (
+          !file ||
+          !file.name
+        ) {
+          return null;
+        }
+
+        const safeName =
+          file.name
+            .replace(
+              /[^a-zA-Z0-9._-]/g,
+              "_"
+            );
+
+        const filePath =
+          `${folder}/${Date.now()}_${safeName}`;
+
+        console.log(
+          "☁️ GLCTC1 UPLOADING:",
+          filePath
+        );
+
+        const {
+          data,
+          error
+        } =
+          await supabaseClient
+            .storage
+            .from("tracks")
+            .upload(
+              filePath,
+              file,
+              {
+                upsert: true
+              }
+            );
+
+        if (error) {
+
+          console.error(
+            "❌ GLCTC1 STORAGE UPLOAD ERROR:",
+            error
+          );
+
+          throw new Error(
+            error.message
+          );
+        }
+
+        return data.path;
+      }
+
+      /* =================================================
+         1️⃣2️⃣ KEEP EXISTING FILES UNLESS REPLACED
+         ================================================= */
+
+      let masterAudio =
+        masterRow["Master Audio"] || "";
+
+      let stem1 =
+        masterRow["Stem 1"] || "";
+
+      let stem2 =
+        masterRow["Stem 2"] || "";
+
+      let stem3 =
+        masterRow["Stem 3"] || "";
+
+      let stem4 =
+        masterRow["Stem 4"] || "";
+
+      let coverArt =
+        masterRow["Cover Art"] || "";
+
+      /* =================================================
+         1️⃣3️⃣ UPLOAD NEW MASTER AUDIO
+         ================================================= */
+
+      if (
+        masterInput &&
+        masterInput.files &&
+        masterInput.files.length
+      ) {
+
+        masterAudio =
+          await uploadReplacement(
+            masterInput.files[0],
+            "masters"
+          );
+      }
+
+      /* =================================================
+         1️⃣4️⃣ UPLOAD NEW STEMS
+         ================================================= */
+
+      if (
+        stem1Input &&
+        stem1Input.files &&
+        stem1Input.files.length
+      ) {
+
+        stem1 =
+          await uploadReplacement(
+            stem1Input.files[0],
+            "stems"
+          );
+      }
+
+      if (
+        stem2Input &&
+        stem2Input.files &&
+        stem2Input.files.length
+      ) {
+
+        stem2 =
+          await uploadReplacement(
+            stem2Input.files[0],
+            "stems"
+          );
+      }
+
+      if (
+        stem3Input &&
+        stem3Input.files &&
+        stem3Input.files.length
+      ) {
+
+        stem3 =
+          await uploadReplacement(
+            stem3Input.files[0],
+            "stems"
+          );
+      }
+
+      if (
+        stem4Input &&
+        stem4Input.files &&
+        stem4Input.files.length
+      ) {
+
+        stem4 =
+          await uploadReplacement(
+            stem4Input.files[0],
+            "stems"
+          );
+      }
+
+      /* =================================================
+         1️⃣5️⃣ UPLOAD NEW COVER ART
+         ================================================= */
+
+      if (
+        coverInput &&
+        coverInput.files &&
+        coverInput.files.length
+      ) {
+
+        coverArt =
+          await uploadReplacement(
+            coverInput.files[0],
+            "covers"
+          );
+      }
+
+      /* =================================================
+         1️⃣6️⃣ COLLECT METADATA
+         ================================================= */
+
+      const album =
+        document
+          .getElementById("editAlbum")
+          ?.value
+          .trim() || "";
+
+      const genre =
+        document
+          .getElementById("editGenre")
+          ?.value
+          .trim() || "";
+
+      const bpmValue =
+        document
+          .getElementById("editBpm")
+          ?.value
+          .trim() || "";
+
+      const key =
+        document
+          .getElementById("editKey")
+          ?.value
+          .trim() || "";
+
+      const frequencyValue =
+        document
+          .getElementById("editFrequency")
+          ?.value
+          .trim() || "";
+
+      const chakra =
+        document
+          .getElementById("editChakra")
+          ?.value
+          .trim() || "";
+
+      const planet =
+        document
+          .getElementById("editPlanet")
+          ?.value
+          .trim() || "";
+
+      const spatial =
+        document
+          .getElementById("editSpatial")
+          ?.value
+          .trim() || "";
+
+      const notes =
+        document
+          .getElementById("editNotes")
+          ?.value
+          .trim() || "";
+
+      const idCatNo =
+        document
+          .getElementById("editIdCatNo")
+          ?.value
+          .trim() || catId;
+
+      /* =================================================
+         1️⃣7️⃣ BUILD UPDATE OBJECT
+         ================================================= */
+
+      const updateData = {
+
+        "Master Audio":
+          masterAudio || null,
+
+        "Stem 1":
+          stem1 || null,
+
+        "Stem 2":
+          stem2 || null,
+
+        "Stem 3":
+          stem3 || null,
+
+        "Stem 4":
+          stem4 || null,
+
+        "Artist":
+          artist || null,
+
+        "Track Title":
+          title || null,
+
+        "Album":
+          album || null,
+
+        "Genre":
+          genre || null,
+
+        "BPM":
+          bpmValue !== ""
+            ? Number(bpmValue)
+            : null,
+
+        "Key":
+          key || null,
+
+        "Frequency (Hz)":
+          frequencyValue !== ""
+            ? Number(frequencyValue)
+            : null,
+
+        "Chakra":
+          chakra || null,
+
+        "Planet":
+          planet || null,
+
+        "Spatial":
+          spatial || null,
+
+        "Notes":
+          notes || null,
+
+        "ID Cat No":
+          idCatNo || null,
+
+        "Copyright":
+          copyright || null,
+
+        "Cover Art":
+          coverArt || null
+      };
+
+      console.log(
+        "💾 GLCTC1 MASTER LIBRARY UPDATE DATA:",
+        updateData
+      );
+
+      /* =================================================
+         1️⃣8️⃣ UPDATE MASTER LIBRARY
+         ================================================= */
+
+      const {
+        data: updatedRows,
+        error: updateError
+      } =
+        await supabaseClient
+          .from("master_library")
+          .update(updateData)
+          .eq(
+            "ID Cat No",
+            catId
+          )
+          .select();
+
+      if (updateError) {
+
+        console.error(
+          "❌ GLCTC1 MASTER LIBRARY UPDATE ERROR:",
+          updateError
+        );
+
+        throw new Error(
+          updateError.message
+        );
+      }
+
+      if (
+        !updatedRows ||
+        !updatedRows.length
+      ) {
+
+        throw new Error(
+          "Supabase updated 0 rows. Check the Master Library RLS UPDATE policy."
+        );
+      }
+
+      console.log(
+        "✅ GLCTC1 MASTER LIBRARY UPDATED:",
+        updatedRows[0]
+      );
+
+      /* =================================================
+         1️⃣9️⃣ UPDATE LOCAL SELECTED TRACK
+         ================================================= */
+
+      track.master_audio =
+        masterAudio;
+
+      track.stem1 =
+        stem1;
+
+      track.stem2 =
+        stem2;
+
+      track.stem3 =
+        stem3;
+
+      track.stem4 =
+        stem4;
+
+      track.artist =
+        artist;
+
+      track.title =
+        title;
+
+      track.album =
+        album;
+
+      track.genre =
+        genre;
+
+      track.bpm =
+        bpmValue;
+
+      track.key =
+        key;
+
+      track.frequency_hz =
+        frequencyValue;
+
+      track.chakra =
+        chakra;
+
+      track.planet =
+        planet;
+
+      track.spatial =
+        spatial;
+
+      track.notes =
+        notes;
+
+      track.id_cat_no =
+        idCatNo;
+
+      track.copyright =
+        copyright;
+
+      track.cover_art =
+        coverArt;
+
+      /* =================================================
+         2️⃣0️⃣ UPDATE LOCAL STORAGE
+         ================================================= */
+
+      try {
+
+        localStorage.setItem(
+          "glctc1_library",
+          JSON.stringify(library)
+        );
+
+      } catch (
+        localStorageError
+      ) {
+
+        console.warn(
+          "⚠️ GLCTC1 LOCAL STORAGE UPDATE WARNING:",
+          localStorageError
+        );
+      }
+
+      /* =================================================
+         2️⃣1️⃣ REFRESH MASTER LIBRARY DISPLAY
+         ================================================= */
+
+      renderLibraryTable();
+
+      updateSelectedSlot(
+        track
+      );
+
+      /* =================================================
+         2️⃣2️⃣ SUCCESS
+         ================================================= */
+
+      alert(
+        isAdmin
+          ? "⚡ ADMIN: Master Library track updated successfully."
+          : "✅ Master Library track updated successfully."
+      );
+
+      console.log(
+        "✅ GLCTC1 UPDATE COMPLETE:",
+        {
+          catId: catId,
+          updatedByUserId:
+            user.id,
+          isAdmin: isAdmin
+        }
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 UPDATE FAILED:",
+        error
+      );
+
+      alert(
+        "❌ UPDATE FAILED:\n\n" +
+        error.message
+      );
+    }
+
+  });
+
+  console.log(
+    "✅ GLCTC1 MASTER LIBRARY UPDATE BUTTON READY"
+  );
+
+});
+</script>
   
 // --- BANKS ---  
 function renderBank(bankLetter) {  

@@ -5386,6 +5386,263 @@ showExistingFile(
   });
 }
 
+// =====================================================
+// 🗑️ GLCTC1 MASTER LIBRARY — INDIVIDUAL FILE DELETE
+// =====================================================
+
+async function deleteEditorFile(fieldName, inputId, label) {
+
+  if (!selectedLibraryTrack) {
+    alert("Please select a track first.");
+    return;
+  }
+
+  const confirmed = confirm(
+    "🗑️ Delete " + label + " from this track?\n\n" +
+    "This will permanently remove the stored file."
+  );
+
+  if (!confirmed) return;
+
+  try {
+
+    // -----------------------------------------------
+    // GET CURRENT USER
+    // -----------------------------------------------
+    const {
+      data: { user },
+      error: userError
+    } = await supabaseClient.auth.getUser();
+
+    if (userError || !user) {
+      alert("🔐 Please sign in before deleting a file.");
+      return;
+    }
+
+    // -----------------------------------------------
+    // GET SELECTED TRACK
+    // -----------------------------------------------
+    const track = selectedLibraryTrack;
+
+    const catId = String(
+      track.id_cat_no ||
+      track.cat_no ||
+      ""
+    ).trim();
+
+    if (!catId) {
+      alert("❌ This track has no GLCTC1 ID Cat No.");
+      return;
+    }
+
+    // -----------------------------------------------
+    // LOAD MASTER LIBRARY ROW
+    // -----------------------------------------------
+    const {
+      data: masterRow,
+      error: rowError
+    } = await supabaseClient
+      .from("master_library")
+      .select("*")
+      .eq("ID Cat No", catId)
+      .maybeSingle();
+
+    if (rowError) {
+      throw rowError;
+    }
+
+    if (!masterRow) {
+      alert("❌ Master Library record not found.");
+      return;
+    }
+
+    // -----------------------------------------------
+    // EXISTING FILE PATH
+    // -----------------------------------------------
+    const filePath =
+      masterRow[fieldName] || "";
+
+    if (!filePath) {
+      alert("⚪ No " + label + " is currently stored.");
+      return;
+    }
+
+    // -----------------------------------------------
+    // DELETE FROM STORAGE
+    // -----------------------------------------------
+    if (!filePath.startsWith("http")) {
+
+      const {
+        error: storageError
+      } = await supabaseClient
+        .storage
+        .from("tracks")
+        .remove([filePath]);
+
+      if (storageError) {
+        throw storageError;
+      }
+    }
+
+    // -----------------------------------------------
+    // CLEAR FILE FIELD IN MASTER LIBRARY
+    // -----------------------------------------------
+    const {
+      error: updateError
+    } = await supabaseClient
+      .from("master_library")
+      .update({
+        [fieldName]: null
+      })
+      .eq("ID Cat No", catId);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // -----------------------------------------------
+    // UPDATE SELECTED TRACK LOCALLY
+    // -----------------------------------------------
+    if (fieldName === "Master Audio") {
+      track.master_audio = null;
+      track["Master Audio"] = null;
+    }
+
+    if (fieldName === "Stem 1") {
+      track.stem1 = null;
+      track["Stem 1"] = null;
+    }
+
+    if (fieldName === "Stem 2") {
+      track.stem2 = null;
+      track["Stem 2"] = null;
+    }
+
+    if (fieldName === "Stem 3") {
+      track.stem3 = null;
+      track["Stem 3"] = null;
+    }
+
+    if (fieldName === "Stem 4") {
+      track.stem4 = null;
+      track["Stem 4"] = null;
+    }
+
+    // -----------------------------------------------
+    // CLEAR FILE INPUT
+    // -----------------------------------------------
+    const input =
+      document.getElementById(inputId);
+
+    if (input) {
+      input.value = "";
+    }
+
+    // -----------------------------------------------
+    // REMOVE EXISTING-FILE DISPLAY
+    // -----------------------------------------------
+    const existingDisplay =
+      document.getElementById(
+        inputId + "_existing"
+      );
+
+    if (existingDisplay) {
+      existingDisplay.innerHTML =
+        "⚪ <strong>" +
+        label +
+        ":</strong> No file currently stored";
+    }
+
+    // -----------------------------------------------
+    // REFRESH LIBRARY
+    // -----------------------------------------------
+    renderLibraryTable();
+
+    alert(
+      "✅ " + label + " deleted successfully."
+    );
+
+    console.log(
+      "🗑️ GLCTC1 FILE DELETED:",
+      {
+        fieldName,
+        catId,
+        filePath
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 FILE DELETE ERROR:",
+      error
+    );
+
+    alert(
+      "❌ DELETE FAILED:\n\n" +
+      error.message
+    );
+  }
+}
+
+// =====================================================
+// 🔘 DELETE BUTTONS
+// =====================================================
+
+document
+  .getElementById("deleteMaster")
+  ?.addEventListener("click", () =>
+    deleteEditorFile(
+      "Master Audio",
+      "editMasterAudio",
+      "Master Audio"
+    )
+  );
+
+document
+  .getElementById("deleteStem1")
+  ?.addEventListener("click", () =>
+    deleteEditorFile(
+      "Stem 1",
+      "editStem1",
+      "Stem 1"
+    )
+  );
+
+document
+  .getElementById("deleteStem2")
+  ?.addEventListener("click", () =>
+    deleteEditorFile(
+      "Stem 2",
+      "editStem2",
+      "Stem 2"
+    )
+  );
+
+document
+  .getElementById("deleteStem3")
+  ?.addEventListener("click", () =>
+    deleteEditorFile(
+      "Stem 3",
+      "editStem3",
+      "Stem 3"
+    )
+  );
+
+document
+  .getElementById("deleteStem4")
+  ?.addEventListener("click", () =>
+    deleteEditorFile(
+      "Stem 4",
+      "editStem4",
+      "Stem 4"
+    )
+  );
+
+console.log(
+  "✅ GLCTC1 INDIVIDUAL FILE DELETE BUTTONS READY"
+);
+
 // --- RENDER LIBRARY TABLE ---
 function renderLibraryTable(searchTerm = "") {
 

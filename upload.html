@@ -4001,16 +4001,17 @@ if (masterLibraryEditorModule) {
   </div>
 
 
-  <!-- ===================================================
-       🎧 ONE PLAYLIST PLAYER
-       =================================================== -->
+  <!-- 🎧 ONE PLAYLIST PLAYER -->
+<div class="glctc1-playlist-player">
 
-  <div class="glctc1-playlist-player">
+  <audio
+    id="glctc1PlaylistMasterAudio"
+    preload="metadata"
+    style="display:none;"
+  ></audio>
 
-
-    <!-- CD ARTWORK -->
-
-    <div class="glctc1-playlist-artwork">
+  <!-- CD ARTWORK -->
+  <div class="glctc1-playlist-artwork">
 
       <img
         id="glctc1PlaylistArtwork"
@@ -8360,12 +8361,12 @@ if (libraryPlayer) {
   
 // =====================================================
 // 🎵 GLCTC1 PLAYLIST MASTER
-// ➕ ADD SELECTED MASTER LIBRARY TRACK TO PLAYER
+// ➕ ADD SELECTED MASTER LIBRARY TRACK
 // =====================================================
 
 document
   .getElementById("glctc1AddTrackToPlaylist")
-  .addEventListener("click", () => {
+  .addEventListener("click", async () => {
 
     if (!selectedLibraryTrack) {
       alert("Please select a track from the Master Library first.");
@@ -8417,99 +8418,115 @@ document
       positionEl.textContent = "TRACK 1 / 1";
     }
 
-    console.log(
-      "🎵 PLAYLIST MASTER TRACK LOADED:",
-      track
-    );
+    // =================================================
+    // 🎧 USE THE SAME MASTER LIBRARY AUDIO PATH
+    // =================================================
 
-  });
+    let audioFile =
+      track.master_audio ||
+      track.sample ||
+      track.audio ||
+      track.audio_url;
 
-  // Bank buttons  
-  document.querySelectorAll(".bank-btn").forEach(btn => {  
-    btn.addEventListener("click", () => {  
-      const letter = btn.dataset.bank;  
-      renderBank(letter);  
-    });  
-  });  
-}  
+    if (!audioFile) {
+      console.error(
+        "❌ PLAYLIST MASTER — NO AUDIO:",
+        track
+      );
 
-// =====================================================
-// 🎧 GLCTC1 PLAYLIST MASTER
-// ▶️ STEP 2 — CONNECT PLAYLIST PLAY / PAUSE
-//    TO EXISTING MASTER LIBRARY PLAYER
-// =====================================================
+      alert("No Master Audio found for this track.");
+      return;
+    }
 
-const glctc1PlaylistPlayPause =
-  document.getElementById("glctc1PlaylistPlayPause");
+    if (!audioFile.startsWith("http")) {
 
-const glctc1MasterLibraryPlayer =
-  document.getElementById("libraryPlayer");
+      const {
+        data: signedData,
+        error: signedError
+      } =
+        await supabaseClient
+          .storage
+          .from("tracks")
+          .createSignedUrl(
+            audioFile,
+            60 * 60 * 24
+          );
 
-if (
-  glctc1PlaylistPlayPause &&
-  glctc1MasterLibraryPlayer
-) {
+      if (signedError) {
 
-  glctc1PlaylistPlayPause.addEventListener(
-    "click",
-    () => {
-
-      if (
-        !selectedLibraryTrack ||
-        !glctc1MasterLibraryPlayer.src
-      ) {
-        alert(
-          "Please select a track from the Master Library first."
+        console.error(
+          "❌ PLAYLIST MASTER SIGNED URL ERROR:",
+          signedError
         );
+
+        alert(
+          "Unable to load Playlist Master audio."
+        );
+
         return;
       }
 
-      if (
-        glctc1MasterLibraryPlayer.paused
-      ) {
-
-        glctc1MasterLibraryPlayer
-          .play()
-          .catch(error => {
-            console.error(
-              "❌ GLCTC1 PLAYLIST PLAY ERROR:",
-              error
-            );
-          });
-
-        glctc1PlaylistPlayPause.textContent = "⏸";
-
-      } else {
-
-        glctc1MasterLibraryPlayer.pause();
-
-        glctc1PlaylistPlayPause.textContent = "▶";
-
-      }
-
+      audioFile =
+        signedData.signedUrl;
     }
-  );
 
-  // ---------------------------------------------------
-  // KEEP PLAYLIST BUTTON IN SYNC
-  // WITH THE EXISTING MASTER LIBRARY PLAYER
-  // ---------------------------------------------------
+    // =================================================
+    // 🎵 LOAD INTO PLAYLIST MASTER AUDIO ELEMENT
+    // =================================================
 
-  glctc1MasterLibraryPlayer.addEventListener(
-    "play",
-    () => {
-      glctc1PlaylistPlayPause.textContent = "⏸";
+    const playlistAudio =
+      document.getElementById(
+        "glctc1PlaylistMasterAudio"
+      );
+
+    if (!playlistAudio) {
+
+      console.error(
+        "❌ PLAYLIST MASTER AUDIO ELEMENT NOT FOUND"
+      );
+
+      alert(
+        "Playlist Master audio element is missing."
+      );
+
+      return;
     }
-  );
 
-  glctc1MasterLibraryPlayer.addEventListener(
-    "pause",
-    () => {
-      glctc1PlaylistPlayPause.textContent = "▶";
-    }
-  );
+    playlistAudio.pause();
 
-}
+    playlistAudio.src = audioFile;
+
+    playlistAudio.load();
+
+    // =================================================
+    // 💾 STORE CURRENT PLAYLIST MASTER TRACK
+    // =================================================
+
+    window.glctc1PlaylistMasterTrack =
+      track;
+
+    window.glctc1PlaylistMasterAudio =
+      audioFile;
+
+    console.log(
+      "🎵 GLCTC1 PLAYLIST MASTER TRACK:",
+      track
+    );
+
+    console.log(
+      "🎧 GLCTC1 PLAYLIST MASTER AUDIO:",
+      audioFile
+    );
+
+    console.log(
+      "🔊 GLCTC1 PLAYLIST MASTER AUDIO ELEMENT:",
+      playlistAudio
+    );
+
+    console.log(
+      "✅ GLCTC1 PLAYLIST MASTER TRACK READY"
+    );
+  });
   
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {

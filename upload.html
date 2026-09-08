@@ -8512,31 +8512,31 @@ if (libraryPlayer) {
   });  
   
 // =====================================================
-// 🎵 GLCTC1 PLAYLIST MASTER — COMPLETE SYSTEM
+// 🎵 GLCTC1 PLAYLIST MASTER — COMPLETE ENGINE
 // =====================================================
 
 // -----------------------------------------------------
-// STORAGE
+// 🧠 PLAYLIST STATE
 // -----------------------------------------------------
+
+window.glctc1PlaylistState =
+  window.glctc1PlaylistState || {
+    playlists: [],
+    selectedPlaylistId: null,
+    trackIndex: -1,
+    shuffleOn: false,
+    repeatOn: false,
+    autoPlayOn: false
+  };
+
+const glctc1PlaylistState =
+  window.glctc1PlaylistState;
 
 const GLCTC1_PLAYLIST_STORAGE_KEY =
-  "GLCTC1_PLAYLIST_MASTER_DATA";
-
-let glctc1Playlists = [];
-
-let glctc1SelectedPlaylistId = null;
-
-let glctc1PlaylistTrackIndex = 0;
-
-let glctc1PlaylistShuffleOn = false;
-
-let glctc1PlaylistRepeatOn = false;
-
-let glctc1PlaylistAutoPlayOn = false;
-
+  "glctc1_playlists";
 
 // -----------------------------------------------------
-// LOAD PLAYLISTS
+// 💾 LOAD PLAYLISTS
 // -----------------------------------------------------
 
 function glctc1LoadPlaylists() {
@@ -8548,29 +8548,34 @@ function glctc1LoadPlaylists() {
         GLCTC1_PLAYLIST_STORAGE_KEY
       );
 
-    glctc1Playlists =
-      saved
-        ? JSON.parse(saved)
-        : [];
+    if (!saved) {
+      glctc1PlaylistState.playlists = [];
+      return;
+    }
 
-    if (!Array.isArray(glctc1Playlists)) {
-      glctc1Playlists = [];
+    const parsed =
+      JSON.parse(saved);
+
+    if (Array.isArray(parsed)) {
+      glctc1PlaylistState.playlists =
+        parsed;
+    } else {
+      glctc1PlaylistState.playlists = [];
     }
 
   } catch (error) {
 
-    console.error(
-      "❌ GLCTC1 PLAYLIST LOAD ERROR:",
+    console.warn(
+      "⚠️ GLCTC1 PLAYLIST LOAD WARNING:",
       error
     );
 
-    glctc1Playlists = [];
+    glctc1PlaylistState.playlists = [];
   }
 }
 
-
 // -----------------------------------------------------
-// SAVE PLAYLISTS
+// 💾 SAVE PLAYLISTS
 // -----------------------------------------------------
 
 function glctc1SavePlaylists() {
@@ -8579,7 +8584,9 @@ function glctc1SavePlaylists() {
 
     localStorage.setItem(
       GLCTC1_PLAYLIST_STORAGE_KEY,
-      JSON.stringify(glctc1Playlists)
+      JSON.stringify(
+        glctc1PlaylistState.playlists
+      )
     );
 
   } catch (error) {
@@ -8588,102 +8595,27 @@ function glctc1SavePlaylists() {
       "❌ GLCTC1 PLAYLIST SAVE ERROR:",
       error
     );
-
-    alert(
-      "Unable to save playlist data on this device."
-    );
   }
 }
 
-
 // -----------------------------------------------------
-// GET SELECTED PLAYLIST
-// -----------------------------------------------------
-
-function glctc1GetSelectedPlaylist() {
-
-  if (!glctc1SelectedPlaylistId) {
-    return null;
-  }
-
-  return glctc1Playlists.find(
-    playlist =>
-      playlist.id ===
-      glctc1SelectedPlaylistId
-  ) || null;
-}
-
-
-// -----------------------------------------------------
-// FORMAT TIME
+// 🆔 CREATE PLAYLIST ID
 // -----------------------------------------------------
 
-function formatPlaylistTime(seconds) {
-
-  if (!Number.isFinite(seconds)) {
-    return "00:00";
-  }
-
-  const minutes =
-    Math.floor(seconds / 60);
-
-  const secs =
-    Math.floor(seconds % 60);
+function glctc1CreatePlaylistId() {
 
   return (
-    String(minutes).padStart(2, "0") +
-    ":" +
-    String(secs).padStart(2, "0")
+    "playlist_" +
+    Date.now() +
+    "_" +
+    Math.random()
+      .toString(36)
+      .slice(2, 9)
   );
 }
 
-
 // -----------------------------------------------------
-// UPDATE PLAYLIST COUNT
-// -----------------------------------------------------
-
-function glctc1UpdatePlaylistCount() {
-
-  const countEl =
-    document.getElementById(
-      "glctc1PlaylistCount"
-    );
-
-  if (!countEl) return;
-
-  const count =
-    glctc1Playlists.length;
-
-  countEl.textContent =
-    `${count} PLAYLIST${count === 1 ? "" : "S"}`;
-}
-
-
-// -----------------------------------------------------
-// UPDATE SELECTED PLAYLIST LABEL
-// -----------------------------------------------------
-
-function glctc1UpdateSelectedPlaylistLabel() {
-
-  const label =
-    document.getElementById(
-      "glctc1SelectedPlaylistName"
-    );
-
-  if (!label) return;
-
-  const playlist =
-    glctc1GetSelectedPlaylist();
-
-  label.textContent =
-    playlist
-      ? playlist.name
-      : "No Playlist Selected";
-}
-
-
-// -----------------------------------------------------
-// RENDER PLAYLIST LIBRARY
+// 📚 RENDER PLAYLIST LIBRARY
 // -----------------------------------------------------
 
 function glctc1RenderPlaylistLibrary() {
@@ -8698,128 +8630,96 @@ function glctc1RenderPlaylistLibrary() {
       "glctc1PlaylistEmpty"
     );
 
+  const count =
+    document.getElementById(
+      "glctc1PlaylistCount"
+    );
+
   if (!container) return;
 
-  container
-    .querySelectorAll(
-      ".glctc1-playlist-library-item"
-    )
-    .forEach(item => item.remove());
+  container.innerHTML = "";
 
-  if (!glctc1Playlists.length) {
+  const playlists =
+    glctc1PlaylistState.playlists;
+
+  if (count) {
+
+    count.textContent =
+      `${playlists.length} PLAYLIST${
+        playlists.length === 1 ? "" : "S"
+      }`;
+  }
+
+  if (!playlists.length) {
 
     if (empty) {
-      empty.style.display = "block";
+
+      empty.style.display = "";
+      container.appendChild(empty);
     }
 
-    glctc1UpdatePlaylistCount();
-    glctc1UpdateSelectedPlaylistLabel();
+    const selectedName =
+      document.getElementById(
+        "glctc1SelectedPlaylistName"
+      );
+
+    if (selectedName) {
+      selectedName.textContent =
+        "No Playlist Selected";
+    }
+
+    const position =
+      document.getElementById(
+        "glctc1PlaylistTrackPosition"
+      );
+
+    if (position) {
+      position.textContent =
+        "TRACK 0 / 0";
+    }
 
     return;
   }
 
-  if (empty) {
-    empty.style.display = "none";
-  }
-
-  glctc1Playlists.forEach(playlist => {
+  playlists.forEach(playlist => {
 
     const item =
-      document.createElement("button");
-
-    item.type = "button";
+      document.createElement("div");
 
     item.className =
-      "glctc1-playlist-library-item";
-
-    item.dataset.playlistId =
-      playlist.id;
-
-    const trackCount =
-      Array.isArray(playlist.tracks)
-        ? playlist.tracks.length
-        : 0;
-
-    item.innerHTML = `
-      <span style="
-        display:flex;
-        align-items:center;
-        gap:9px;
-        width:100%;
-        text-align:left;
-      ">
-
-        <span style="
-          width:34px;
-          height:34px;
-          min-width:34px;
-          border-radius:7px;
-          overflow:hidden;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          background:rgba(15,23,42,0.9);
-          border:1px solid rgba(103,232,249,0.22);
-        ">
-
-          ${
-            playlist.artwork
-              ? `
-                <img
-                  src="${playlist.artwork}"
-                  style="
-                    width:100%;
-                    height:100%;
-                    object-fit:cover;
-                  "
-                >
-              `
-              : "🎵"
-          }
-
-        </span>
-
-        <span style="
-          min-width:0;
-          flex:1;
-        ">
-
-          <span style="
-            display:block;
-            font-weight:900;
-            color:#e2e8f0;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-          ">
-            ${glctc1EscapeHtml(playlist.name)}
-          </span>
-
-          <span style="
-            display:block;
-            margin-top:2px;
-            font-size:0.68rem;
-            color:#64748b;
-          ">
-            ${trackCount} TRACK${trackCount === 1 ? "" : "S"}
-          </span>
-
-        </span>
-
-      </span>
-    `;
+      "glctc1-playlist-item";
 
     if (
       playlist.id ===
-      glctc1SelectedPlaylistId
+      glctc1PlaylistState.selectedPlaylistId
     ) {
-
-      item.style.borderColor =
-        "rgba(34,211,238,0.85)";
-
-      item.style.boxShadow =
-        "0 0 12px rgba(34,211,238,0.18)";
+      item.classList.add(
+        "selected"
+      );
     }
+
+    const left =
+      document.createElement("div");
+
+    left.className =
+      "glctc1-playlist-item-name";
+
+    left.textContent =
+      playlist.name;
+
+    const right =
+      document.createElement("div");
+
+    right.className =
+      "glctc1-playlist-item-count";
+
+    right.textContent =
+      `${playlist.tracks.length} TRACK${
+        playlist.tracks.length === 1 ? "" : "S"
+      }`;
+
+    item.appendChild(left);
+    item.appendChild(right);
 
     item.addEventListener(
       "click",
@@ -8833,30 +8733,84 @@ function glctc1RenderPlaylistLibrary() {
 
     container.appendChild(item);
   });
-
-  glctc1UpdatePlaylistCount();
-
-  glctc1UpdateSelectedPlaylistLabel();
 }
 
-
 // -----------------------------------------------------
-// HTML ESCAPE
+// 🎵 GET SELECTED PLAYLIST
 // -----------------------------------------------------
 
-function glctc1EscapeHtml(value) {
+function glctc1GetSelectedPlaylist() {
 
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  return (
+    glctc1PlaylistState.playlists.find(
+      playlist =>
+        playlist.id ===
+        glctc1PlaylistState.selectedPlaylistId
+    ) || null
+  );
 }
 
+// -----------------------------------------------------
+// 🎵 SELECT PLAYLIST
+// -----------------------------------------------------
+
+function glctc1SelectPlaylist(
+  playlistId
+) {
+
+  const playlist =
+    glctc1PlaylistState.playlists.find(
+      item =>
+        item.id === playlistId
+    );
+
+  if (!playlist) return;
+
+  glctc1PlaylistState.selectedPlaylistId =
+    playlist.id;
+
+  glctc1PlaylistState.trackIndex =
+    playlist.tracks.length
+      ? 0
+      : -1;
+
+  const selectedName =
+    document.getElementById(
+      "glctc1SelectedPlaylistName"
+    );
+
+  if (selectedName) {
+
+    selectedName.textContent =
+      playlist.name;
+  }
+
+  glctc1RenderPlaylistLibrary();
+
+  if (playlist.tracks.length) {
+
+    glctc1UpdatePlaylistTrackPosition();
+
+    glctc1DisplayPlaylistTrack(
+      playlist.tracks[
+        glctc1PlaylistState.trackIndex
+      ],
+      false
+    );
+
+  } else {
+
+    glctc1ClearPlaylistTrack();
+  }
+
+  console.log(
+    "🎵 GLCTC1 PLAYLIST SELECTED:",
+    playlist.name
+  );
+}
 
 // -----------------------------------------------------
-// CREATE PLAYLIST
+// ➕ CREATE PLAYLIST
 // -----------------------------------------------------
 
 const glctc1CreatePlaylistButton =
@@ -8876,10 +8830,10 @@ if (glctc1CreatePlaylistButton) {
             "glctc1PlaylistNameInput"
           );
 
-        if (!input) return;
-
         const name =
-          input.value.trim();
+          input
+            ? input.value.trim()
+            : "";
 
         if (!name) {
 
@@ -8887,45 +8841,45 @@ if (glctc1CreatePlaylistButton) {
             "Please enter a playlist name."
           );
 
-          input.focus();
-
           return;
         }
 
         const playlist = {
 
           id:
-            "playlist_" +
-            Date.now() +
-            "_" +
-            Math.random()
-              .toString(36)
-              .slice(2, 9),
+            glctc1CreatePlaylistId(),
 
-          name,
+          name:
 
-          artwork: "",
+            name,
 
-          tracks: []
+          tracks: [],
+
+          createdAt:
+            Date.now()
         };
 
-        glctc1Playlists.push(
+        glctc1PlaylistState.playlists.push(
           playlist
         );
 
-        glctc1SelectedPlaylistId =
+        glctc1PlaylistState.selectedPlaylistId =
           playlist.id;
 
-        glctc1PlaylistTrackIndex =
-          0;
+        glctc1PlaylistState.trackIndex =
+          -1;
 
         glctc1SavePlaylists();
 
+        if (input) {
+          input.value = "";
+        }
+
         glctc1RenderPlaylistLibrary();
 
-        glctc1UpdateSelectedPlaylistLabel();
-
-        input.value = "";
+        glctc1SelectPlaylist(
+          playlist.id
+        );
 
         console.log(
           "✅ GLCTC1 PLAYLIST CREATED:",
@@ -8935,9 +8889,8 @@ if (glctc1CreatePlaylistButton) {
     );
 }
 
-
 // -----------------------------------------------------
-// DELETE PLAYLIST
+// 🗑 DELETE PLAYLIST
 // -----------------------------------------------------
 
 const glctc1DeletePlaylistButton =
@@ -8966,45 +8919,28 @@ if (glctc1DeletePlaylistButton) {
 
         const confirmed =
           confirm(
-            `Delete playlist "${playlist.name}"?`
+            `DELETE PLAYLIST?\n\n${playlist.name}`
           );
 
         if (!confirmed) return;
 
-        glctc1Playlists =
-          glctc1Playlists.filter(
+        glctc1PlaylistState.playlists =
+          glctc1PlaylistState.playlists.filter(
             item =>
-              item.id !==
-              playlist.id
+              item.id !== playlist.id
           );
 
-        glctc1SelectedPlaylistId =
+        glctc1PlaylistState.selectedPlaylistId =
           null;
 
-        glctc1PlaylistTrackIndex =
-          0;
-
-        const audio =
-          document.getElementById(
-            "glctc1PlaylistAudio"
-          );
-
-        if (audio) {
-
-          audio.pause();
-
-          audio.removeAttribute("src");
-
-          audio.load();
-        }
+        glctc1PlaylistState.trackIndex =
+          -1;
 
         glctc1SavePlaylists();
 
+        glctc1ClearPlaylistTrack();
+
         glctc1RenderPlaylistLibrary();
-
-        glctc1UpdateSelectedPlaylistLabel();
-
-        glctc1UpdatePlaylistDisplay();
 
         console.log(
           "🗑️ GLCTC1 PLAYLIST DELETED:",
@@ -9014,57 +8950,209 @@ if (glctc1DeletePlaylistButton) {
     );
 }
 
-
 // -----------------------------------------------------
-// SELECT PLAYLIST
+// 📍 UPDATE TRACK POSITION
 // -----------------------------------------------------
 
-function glctc1SelectPlaylist(
-  playlistId
-) {
+function glctc1UpdatePlaylistTrackPosition() {
+
+  const position =
+    document.getElementById(
+      "glctc1PlaylistTrackPosition"
+    );
 
   const playlist =
-    glctc1Playlists.find(
-      item =>
-        item.id === playlistId
-    );
+    glctc1GetSelectedPlaylist();
 
-  if (!playlist) return;
+  if (!position || !playlist) {
 
-  glctc1SelectedPlaylistId =
-    playlist.id;
+    if (position) {
+      position.textContent =
+        "TRACK 0 / 0";
+    }
 
-  glctc1PlaylistTrackIndex =
-    0;
+    return;
+  }
 
-  glctc1RenderPlaylistLibrary();
-
-  glctc1UpdateSelectedPlaylistLabel();
+  const total =
+    playlist.tracks.length;
 
   if (
-    playlist.tracks &&
-    playlist.tracks.length
+    total === 0 ||
+    glctc1PlaylistState.trackIndex < 0
   ) {
 
-    glctc1LoadPlaylistTrack(
-      0,
-      true
+    position.textContent =
+      "TRACK 0 / 0";
+
+    return;
+  }
+
+  position.textContent =
+    `TRACK ${
+      glctc1PlaylistState.trackIndex + 1
+    } / ${total}`;
+}
+
+// -----------------------------------------------------
+// 🧹 CLEAR PLAYER DISPLAY
+// -----------------------------------------------------
+
+function glctc1ClearPlaylistTrack() {
+
+  const title =
+    document.getElementById(
+      "glctc1PlaylistTitle"
     );
 
-  } else {
+  const artist =
+    document.getElementById(
+      "glctc1PlaylistArtist"
+    );
 
-    glctc1UpdatePlaylistDisplay();
+  const meta =
+    document.getElementById(
+      "glctc1PlaylistMeta"
+    );
 
-    console.log(
-      "🎵 GLCTC1 PLAYLIST SELECTED — EMPTY:",
-      playlist.name
+  const artwork =
+    document.getElementById(
+      "glctc1PlaylistArtwork"
+    );
+
+  const position =
+    document.getElementById(
+      "glctc1PlaylistTrackPosition"
+    );
+
+  if (title) {
+    title.textContent =
+      "No Track Added";
+  }
+
+  if (artist) {
+    artist.textContent =
+      "No Artist";
+  }
+
+  if (meta) {
+    meta.textContent =
+      "Album — Genre — BPM — Key";
+  }
+
+  if (artwork) {
+    artwork.removeAttribute("src");
+  }
+
+  if (position) {
+    position.textContent =
+      "TRACK 0 / 0";
+  }
+}
+
+// -----------------------------------------------------
+// 🎵 DISPLAY PLAYLIST TRACK
+// -----------------------------------------------------
+
+function glctc1DisplayPlaylistTrack(
+  track,
+  shouldPlay = false
+) {
+
+  if (!track) return;
+
+  const title =
+    track.title ||
+    track["Track Title"] ||
+    "Untitled";
+
+  const artist =
+    track.artist ||
+    track["Artist"] ||
+    "Unknown Artist";
+
+  const album =
+    track.album ||
+    track["Album"] ||
+    "Album";
+
+  const genre =
+    track.genre ||
+    track["Genre"] ||
+    "Genre";
+
+  const bpm =
+    track.bpm ||
+    track["BPM"] ||
+    "BPM";
+
+  const key =
+    track.key ||
+    track["Key"] ||
+    "Key";
+
+  const artwork =
+    track.cover_art ||
+    track["Cover Art"] ||
+    "";
+
+  const titleEl =
+    document.getElementById(
+      "glctc1PlaylistTitle"
+    );
+
+  const artistEl =
+    document.getElementById(
+      "glctc1PlaylistArtist"
+    );
+
+  const metaEl =
+    document.getElementById(
+      "glctc1PlaylistMeta"
+    );
+
+  const artworkEl =
+    document.getElementById(
+      "glctc1PlaylistArtwork"
+    );
+
+  if (titleEl) {
+    titleEl.textContent =
+      title;
+  }
+
+  if (artistEl) {
+    artistEl.textContent =
+      artist;
+  }
+
+  if (metaEl) {
+
+    metaEl.textContent =
+      `${album} — ${genre} — ${bpm} — ${key}`;
+  }
+
+  if (artworkEl) {
+
+    if (artwork) {
+      artworkEl.src = artwork;
+    } else {
+      artworkEl.removeAttribute("src");
+    }
+  }
+
+  glctc1UpdatePlaylistTrackPosition();
+
+  if (shouldPlay) {
+
+    playPlaylistMasterTrack(
+      track
     );
   }
 }
 
-
 // -----------------------------------------------------
-// ADD SELECTED MASTER LIBRARY TRACK
+// ➕ ADD SELECTED MASTER LIBRARY TRACK
 // -----------------------------------------------------
 
 const glctc1AddTrackButton =
@@ -9079,6 +9167,15 @@ if (glctc1AddTrackButton) {
       "click",
       () => {
 
+        if (!selectedLibraryTrack) {
+
+          alert(
+            "Please select a track from the Master Library first."
+          );
+
+          return;
+        }
+
         const playlist =
           glctc1GetSelectedPlaylist();
 
@@ -9091,407 +9188,33 @@ if (glctc1AddTrackButton) {
           return;
         }
 
-        if (!selectedLibraryTrack) {
-
-          alert(
-            "Please select a track from the Master Library first."
-          );
-
-          return;
-        }
-
-        if (!Array.isArray(playlist.tracks)) {
-          playlist.tracks = [];
-        }
-
-        const track =
-          selectedLibraryTrack;
-
-        const trackId =
-          String(
-            track.id ||
-            track["ID Cat No"] ||
-            track.title ||
-            track["Track Title"] ||
-            ""
-          );
-
-        const alreadyExists =
-          playlist.tracks.some(
-            existing => {
-
-              const existingId =
-                String(
-                  existing.id ||
-                  existing["ID Cat No"] ||
-                  existing.title ||
-                  existing["Track Title"] ||
-                  ""
-                );
-
-              return (
-                trackId &&
-                existingId &&
-                trackId === existingId
-              );
-            }
-          );
-
-        if (alreadyExists) {
-
-          alert(
-            "That track is already in this playlist."
-          );
-
-          return;
-        }
-
         playlist.tracks.push(
-          track
+          selectedLibraryTrack
         );
 
-        glctc1PlaylistTrackIndex =
+        glctc1PlaylistState.trackIndex =
           playlist.tracks.length - 1;
 
         glctc1SavePlaylists();
 
-        glctc1RenderPlaylistLibrary();
-
-        glctc1UpdateSelectedPlaylistLabel();
-
-        glctc1LoadPlaylistTrack(
-          glctc1PlaylistTrackIndex,
-          true
+        glctc1DisplayPlaylistTrack(
+          selectedLibraryTrack,
+          false
         );
+
+        glctc1RenderPlaylistLibrary();
 
         console.log(
           "✅ GLCTC1 TRACK ADDED TO PLAYLIST:",
           playlist.name,
-          track
+          selectedLibraryTrack
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// ARTWORK UPLOAD SLOT
-// -----------------------------------------------------
-
-function glctc1CreateArtworkUploadSlot() {
-
-  const artwork =
-    document.getElementById(
-      "glctc1PlaylistArtwork"
-    );
-
-  if (!artwork) return;
-
-  if (
-    document.getElementById(
-      "glctc1PlaylistArtworkUpload"
-    )
-  ) {
-    return;
-  }
-
-  const wrapper =
-    document.createElement("div");
-
-  wrapper.id =
-    "glctc1PlaylistArtworkUpload";
-
-  wrapper.style.cssText = `
-    margin-top:10px;
-    display:flex;
-    flex-direction:column;
-    gap:7px;
-    align-items:center;
-  `;
-
-  wrapper.innerHTML = `
-
-    <input
-      id="glctc1PlaylistArtworkFile"
-      type="file"
-      accept="image/*"
-      style="display:none;"
-    >
-
-    <button
-      id="glctc1PlaylistArtworkButton"
-      type="button"
-      style="
-        width:100%;
-        max-width:190px;
-        padding:8px 10px;
-        border-radius:8px;
-        border:1px solid rgba(103,232,249,0.45);
-        background:rgba(15,23,42,0.9);
-        color:#cbd5e1;
-        font-size:0.68rem;
-        font-weight:900;
-        cursor:pointer;
-      "
-    >
-      🖼️ UPLOAD ARTWORK
-    </button>
-
-  `;
-
-  artwork.parentNode.appendChild(
-    wrapper
-  );
-
-  const fileInput =
-    document.getElementById(
-      "glctc1PlaylistArtworkFile"
-    );
-
-  const uploadButton =
-    document.getElementById(
-      "glctc1PlaylistArtworkButton"
-    );
-
-  uploadButton.addEventListener(
-    "click",
-    () => {
-
-      const playlist =
-        glctc1GetSelectedPlaylist();
-
-      if (!playlist) {
-
-        alert(
-          "Please create or select a playlist first."
-        );
-
-        return;
-      }
-
-      fileInput.click();
-    }
-  );
-
-  fileInput.addEventListener(
-    "change",
-    event => {
-
-      const file =
-        event.target.files &&
-        event.target.files[0];
-
-      if (!file) return;
-
-      if (
-        !file.type.startsWith("image/")
-      ) {
-
-        alert(
-          "Please select an image file."
-        );
-
-        fileInput.value = "";
-
-        return;
-      }
-
-      const reader =
-        new FileReader();
-
-      reader.onload = () => {
-
-        const playlist =
-          glctc1GetSelectedPlaylist();
-
-        if (!playlist) return;
-
-        playlist.artwork =
-          reader.result;
-
-        glctc1SavePlaylists();
-
-        glctc1RenderPlaylistLibrary();
-
-        glctc1UpdatePlaylistDisplay();
-
-        console.log(
-          "🖼️ GLCTC1 PLAYLIST ARTWORK SAVED"
-        );
-      };
-
-      reader.readAsDataURL(file);
-
-      fileInput.value = "";
-    }
-  );
-}
-
-
-// -----------------------------------------------------
-// UPDATE PLAYLIST MASTER DISPLAY
-// -----------------------------------------------------
-
-function glctc1UpdatePlaylistDisplay() {
-
-  const playlist =
-    glctc1GetSelectedPlaylist();
-
-  const titleEl =
-    document.getElementById(
-      "glctc1PlaylistTitle"
-    );
-
-  const artistEl =
-    document.getElementById(
-      "glctc1PlaylistArtist"
-    );
-
-  const artworkEl =
-    document.getElementById(
-      "glctc1PlaylistArtwork"
-    );
-
-  const positionEl =
-    document.getElementById(
-      "glctc1PlaylistTrackPosition"
-    );
-
-  if (!playlist) {
-
-    if (titleEl) {
-      titleEl.textContent =
-        "No Track Selected";
-    }
-
-    if (artistEl) {
-      artistEl.textContent =
-        "Playlist Master";
-    }
-
-    if (positionEl) {
-      positionEl.textContent =
-        "TRACK 0 / 0";
-    }
-
-    return;
-  }
-
-  const tracks =
-    Array.isArray(playlist.tracks)
-      ? playlist.tracks
-      : [];
-
-  const total =
-    tracks.length;
-
-  if (!total) {
-
-    if (titleEl) {
-      titleEl.textContent =
-        "Playlist Empty";
-    }
-
-    if (artistEl) {
-      artistEl.textContent =
-        playlist.name;
-    }
-
-    if (artworkEl) {
-
-      artworkEl.src =
-        playlist.artwork || "";
-    }
-
-    if (positionEl) {
-      positionEl.textContent =
-        "TRACK 0 / 0";
-    }
-
-    return;
-  }
-
-  const track =
-    tracks[
-      Math.max(
-        0,
-        Math.min(
-          glctc1PlaylistTrackIndex,
-          total - 1
-        )
-      )
-    ];
-
-  const title =
-    track.title ||
-    track["Track Title"] ||
-    "Untitled";
-
-  const artist =
-    track.artist ||
-    track["Artist"] ||
-    "Unknown Artist";
-
-  const artwork =
-    track.cover_art ||
-    track["Cover Art"] ||
-    playlist.artwork ||
-    "";
-
-  if (titleEl) {
-    titleEl.textContent =
-      title;
-  }
-
-  if (artistEl) {
-    artistEl.textContent =
-      artist;
-  }
-
-  if (artworkEl) {
-
-    artworkEl.src =
-      artwork || "";
-  }
-
-  if (positionEl) {
-
-    positionEl.textContent =
-      `TRACK ${
-        glctc1PlaylistTrackIndex + 1
-      } / ${total}`;
-  }
-
-  const metaEl =
-    document.getElementById(
-      "glctc1PlaylistMeta"
-    );
-
-  if (metaEl) {
-
-    metaEl.textContent =
-      [
-        track.album ||
-        track["Album"] ||
-        "",
-        track.genre ||
-        track["Genre"] ||
-        "",
-        track.bpm ||
-        track["BPM"] ||
-        "",
-        track.key ||
-        track["Key"] ||
-        ""
-      ]
-      .filter(Boolean)
-      .join(" — ");
-  }
-}
-
-
-// -----------------------------------------------------
-// LOAD PLAYLIST TRACK
+// 🎵 LOAD PLAYLIST TRACK
 // -----------------------------------------------------
 
 async function glctc1LoadPlaylistTrack(
@@ -9504,52 +9227,40 @@ async function glctc1LoadPlaylistTrack(
 
   if (!playlist) return;
 
-  const tracks =
-    Array.isArray(playlist.tracks)
-      ? playlist.tracks
-      : [];
+  if (!playlist.tracks.length) return;
 
-  if (!tracks.length) {
-
-    glctc1UpdatePlaylistDisplay();
-
+  if (
+    index < 0 ||
+    index >= playlist.tracks.length
+  ) {
     return;
   }
 
-  if (index < 0) {
-    index = tracks.length - 1;
-  }
-
-  if (index >= tracks.length) {
-    index = 0;
-  }
-
-  glctc1PlaylistTrackIndex =
+  glctc1PlaylistState.trackIndex =
     index;
 
   const track =
-    tracks[index];
+    playlist.tracks[index];
 
-  glctc1UpdatePlaylistDisplay();
-
-  await playPlaylistMasterTrack(
-    track
+  glctc1DisplayPlaylistTrack(
+    track,
+    false
   );
 
-  glctc1UpdatePlaylistDisplay();
+  if (shouldPlay) {
 
-  console.log(
-    "🎵 GLCTC1 PLAYLIST TRACK:",
-    index + 1,
-    "/",
-    tracks.length,
-    track
-  );
+    await playPlaylistMasterTrack(
+      track
+    );
+
+    // Existing loader sets TRACK 1 / 1.
+    // Restore the real playlist position.
+    glctc1UpdatePlaylistTrackPosition();
+  }
 }
 
-
 // -----------------------------------------------------
-// PLAYLIST MASTER AUDIO
+// 🎧 PLAY / PAUSE
 // -----------------------------------------------------
 
 const glctc1PlaylistAudio =
@@ -9597,14 +9308,38 @@ const glctc1PlaylistDuration =
     "glctc1PlaylistDuration"
   );
 
-const glctc1PlaylistAutoPlay =
+const glctc1PlaylistAutoMix =
   document.getElementById(
     "glctc1PlaylistAutoMix"
   );
 
+// -----------------------------------------------------
+// ⏱️ TIME FORMAT
+// -----------------------------------------------------
+
+function formatPlaylistTime(
+  seconds
+) {
+
+  if (!Number.isFinite(seconds)) {
+    return "00:00";
+  }
+
+  const minutes =
+    Math.floor(seconds / 60);
+
+  const secs =
+    Math.floor(seconds % 60);
+
+  return (
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(secs).padStart(2, "0")
+  );
+}
 
 // -----------------------------------------------------
-// PLAY / PAUSE
+// ▶️ PLAY / PAUSE
 // -----------------------------------------------------
 
 if (
@@ -9616,28 +9351,6 @@ if (
     .addEventListener(
       "click",
       () => {
-
-        if (
-          !glctc1PlaylistAudio.src
-        ) {
-
-          const playlist =
-            glctc1GetSelectedPlaylist();
-
-          if (
-            playlist &&
-            playlist.tracks &&
-            playlist.tracks.length
-          ) {
-
-            glctc1LoadPlaylistTrack(
-              glctc1PlaylistTrackIndex,
-              true
-            );
-          }
-
-          return;
-        }
 
         if (
           glctc1PlaylistAudio.paused
@@ -9661,9 +9374,8 @@ if (
     );
 }
 
-
 // -----------------------------------------------------
-// PLAY / PAUSE BUTTON STATE
+// 🔄 PLAY / PAUSE BUTTON STATE
 // -----------------------------------------------------
 
 if (glctc1PlaylistAudio) {
@@ -9673,9 +9385,7 @@ if (glctc1PlaylistAudio) {
       "play",
       () => {
 
-        if (
-          glctc1PlaylistPlayPause
-        ) {
+        if (glctc1PlaylistPlayPause) {
 
           glctc1PlaylistPlayPause
             .textContent = "⏸";
@@ -9688,9 +9398,7 @@ if (glctc1PlaylistAudio) {
       "pause",
       () => {
 
-        if (
-          glctc1PlaylistPlayPause
-        ) {
+        if (glctc1PlaylistPlayPause) {
 
           glctc1PlaylistPlayPause
             .textContent = "▶";
@@ -9699,9 +9407,8 @@ if (glctc1PlaylistAudio) {
     );
 }
 
-
 // -----------------------------------------------------
-// PROGRESS + TIME
+// 📈 PROGRESS + TIME
 // -----------------------------------------------------
 
 if (glctc1PlaylistAudio) {
@@ -9711,20 +9418,16 @@ if (glctc1PlaylistAudio) {
       "loadedmetadata",
       () => {
 
-        if (
-          glctc1PlaylistDuration
-        ) {
+        if (glctc1PlaylistDuration) {
 
           glctc1PlaylistDuration
             .textContent =
-            formatPlaylistTime(
-              glctc1PlaylistAudio.duration
-            );
+              formatPlaylistTime(
+                glctc1PlaylistAudio.duration
+              );
         }
 
-        if (
-          glctc1PlaylistProgress
-        ) {
+        if (glctc1PlaylistProgress) {
 
           glctc1PlaylistProgress.value =
             0;
@@ -9743,15 +9446,13 @@ if (glctc1PlaylistAudio) {
         const current =
           glctc1PlaylistAudio.currentTime;
 
-        if (
-          glctc1PlaylistCurrentTime
-        ) {
+        if (glctc1PlaylistCurrentTime) {
 
           glctc1PlaylistCurrentTime
             .textContent =
-            formatPlaylistTime(
-              current
-            );
+              formatPlaylistTime(
+                current
+              );
         }
 
         if (
@@ -9761,18 +9462,14 @@ if (glctc1PlaylistAudio) {
         ) {
 
           glctc1PlaylistProgress.value =
-            (
-              current /
-              duration
-            ) * 100;
+            (current / duration) * 100;
         }
       }
     );
 }
 
-
 // -----------------------------------------------------
-// SEEK
+// ⏩ SEEK
 // -----------------------------------------------------
 
 if (
@@ -9804,9 +9501,8 @@ if (
     );
 }
 
-
 // -----------------------------------------------------
-// PREVIOUS
+// ⏮ PREVIOUS
 // -----------------------------------------------------
 
 if (glctc1PlaylistPrev) {
@@ -9821,34 +9517,36 @@ if (glctc1PlaylistPrev) {
 
         if (
           !playlist ||
-          !playlist.tracks ||
           !playlist.tracks.length
         ) {
-
           return;
         }
 
-        glctc1PlaylistTrackIndex--;
+        let index =
+          glctc1PlaylistState.trackIndex;
 
-        if (
-          glctc1PlaylistTrackIndex < 0
-        ) {
-
-          glctc1PlaylistTrackIndex =
-            playlist.tracks.length - 1;
+        if (index < 0) {
+          index = 0;
         }
 
+        index =
+          (
+            index -
+            1 +
+            playlist.tracks.length
+          ) %
+          playlist.tracks.length;
+
         glctc1LoadPlaylistTrack(
-          glctc1PlaylistTrackIndex,
+          index,
           true
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// NEXT
+// ⏭ NEXT
 // -----------------------------------------------------
 
 if (glctc1PlaylistNext) {
@@ -9863,58 +9561,34 @@ if (glctc1PlaylistNext) {
 
         if (
           !playlist ||
-          !playlist.tracks ||
           !playlist.tracks.length
         ) {
-
           return;
         }
 
-        const total =
-          playlist.tracks.length;
+        let index =
+          glctc1PlaylistState.trackIndex;
 
-        if (
-          glctc1PlaylistShuffleOn &&
-          total > 1
-        ) {
-
-          let randomIndex;
-
-          do {
-
-            randomIndex =
-              Math.floor(
-                Math.random() * total
-              );
-
-          } while (
-            randomIndex ===
-            glctc1PlaylistTrackIndex
-          );
-
-          glctc1PlaylistTrackIndex =
-            randomIndex;
-
-        } else {
-
-          glctc1PlaylistTrackIndex =
-            (
-              glctc1PlaylistTrackIndex +
-              1
-            ) % total;
+        if (index < 0) {
+          index = 0;
         }
 
+        index =
+          (
+            index + 1
+          ) %
+          playlist.tracks.length;
+
         glctc1LoadPlaylistTrack(
-          glctc1PlaylistTrackIndex,
+          index,
           true
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// SHUFFLE
+// 🔀 SHUFFLE
 // -----------------------------------------------------
 
 if (glctc1PlaylistShuffle) {
@@ -9924,40 +9598,24 @@ if (glctc1PlaylistShuffle) {
       "click",
       () => {
 
-        glctc1PlaylistShuffleOn =
-          !glctc1PlaylistShuffleOn;
+        glctc1PlaylistState.shuffleOn =
+          !glctc1PlaylistState.shuffleOn;
 
-        glctc1PlaylistShuffle
-          .style.opacity =
-          glctc1PlaylistShuffleOn
+        glctc1PlaylistShuffle.style.opacity =
+          glctc1PlaylistState.shuffleOn
             ? "1"
             : "0.65";
 
-        glctc1PlaylistShuffle
-          .setAttribute(
-            "aria-pressed",
-            String(
-              glctc1PlaylistShuffleOn
-            )
-          );
-
-        glctc1PlaylistShuffle
-          .textContent =
-          glctc1PlaylistShuffleOn
-            ? "🔀 ON"
-            : "🔀";
-
         console.log(
           "🔀 GLCTC1 PLAYLIST SHUFFLE:",
-          glctc1PlaylistShuffleOn
+          glctc1PlaylistState.shuffleOn
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// REPEAT
+// 🔁 REPEAT
 // -----------------------------------------------------
 
 if (glctc1PlaylistRepeat) {
@@ -9967,71 +9625,60 @@ if (glctc1PlaylistRepeat) {
       "click",
       () => {
 
-        glctc1PlaylistRepeatOn =
-          !glctc1PlaylistRepeatOn;
+        glctc1PlaylistState.repeatOn =
+          !glctc1PlaylistState.repeatOn;
 
-        glctc1PlaylistRepeat
-          .style.opacity =
-          glctc1PlaylistRepeatOn
+        glctc1PlaylistRepeat.style.opacity =
+          glctc1PlaylistState.repeatOn
             ? "1"
             : "0.65";
 
-        glctc1PlaylistRepeat
-          .setAttribute(
-            "aria-pressed",
-            String(
-              glctc1PlaylistRepeatOn
-            )
-          );
-
         console.log(
           "🔁 GLCTC1 PLAYLIST REPEAT:",
-          glctc1PlaylistRepeatOn
+          glctc1PlaylistState.repeatOn
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// AUTO PLAY
+// ▶️ AUTO PLAY
 // -----------------------------------------------------
 
-if (glctc1PlaylistAutoPlay) {
+if (glctc1PlaylistAutoMix) {
 
-  glctc1PlaylistAutoPlay
+  glctc1PlaylistAutoMix
     .addEventListener(
       "click",
       () => {
 
-        glctc1PlaylistAutoPlayOn =
-          !glctc1PlaylistAutoPlayOn;
+        glctc1PlaylistState.autoPlayOn =
+          !glctc1PlaylistState.autoPlayOn;
 
-        glctc1PlaylistAutoPlay
+        glctc1PlaylistAutoMix
           .textContent =
-          glctc1PlaylistAutoPlayOn
-            ? "ON"
-            : "OFF";
+            glctc1PlaylistState.autoPlayOn
+              ? "ON"
+              : "OFF";
 
-        glctc1PlaylistAutoPlay
+        glctc1PlaylistAutoMix
           .setAttribute(
             "aria-pressed",
             String(
-              glctc1PlaylistAutoPlayOn
+              glctc1PlaylistState.autoPlayOn
             )
           );
 
         console.log(
           "▶️ GLCTC1 PLAYLIST AUTO PLAY:",
-          glctc1PlaylistAutoPlayOn
+          glctc1PlaylistState.autoPlayOn
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// TRACK ENDED
+// 🎵 TRACK FINISHED — AUTO PLAY
 // -----------------------------------------------------
 
 if (glctc1PlaylistAudio) {
@@ -10046,27 +9693,17 @@ if (glctc1PlaylistAudio) {
 
         if (
           !playlist ||
-          !playlist.tracks ||
           !playlist.tracks.length
         ) {
-
-          if (
-            glctc1PlaylistPlayPause
-          ) {
-
-            glctc1PlaylistPlayPause
-              .textContent = "▶";
-          }
-
           return;
         }
 
         // ---------------------------------------------
-        // REPEAT CURRENT TRACK
+        // 🔁 REPEAT CURRENT TRACK
         // ---------------------------------------------
 
         if (
-          glctc1PlaylistRepeatOn
+          glctc1PlaylistState.repeatOn
         ) {
 
           glctc1PlaylistAudio.currentTime =
@@ -10086,16 +9723,14 @@ if (glctc1PlaylistAudio) {
         }
 
         // ---------------------------------------------
-        // AUTO PLAY OFF
+        // ▶️ AUTO PLAY OFF
         // ---------------------------------------------
 
         if (
-          !glctc1PlaylistAutoPlayOn
+          !glctc1PlaylistState.autoPlayOn
         ) {
 
-          if (
-            glctc1PlaylistPlayPause
-          ) {
+          if (glctc1PlaylistPlayPause) {
 
             glctc1PlaylistPlayPause
               .textContent = "▶";
@@ -10105,54 +9740,61 @@ if (glctc1PlaylistAudio) {
         }
 
         // ---------------------------------------------
-        // AUTO PLAY ON
+        // 🔀 SHUFFLE NEXT
         // ---------------------------------------------
 
-        const total =
-          playlist.tracks.length;
+        let nextIndex;
 
         if (
-          glctc1PlaylistShuffleOn &&
-          total > 1
+          glctc1PlaylistState.shuffleOn
         ) {
 
-          let randomIndex;
+          if (
+            playlist.tracks.length === 1
+          ) {
 
-          do {
+            nextIndex = 0;
 
-            randomIndex =
-              Math.floor(
-                Math.random() * total
-              );
+          } else {
 
-          } while (
-            randomIndex ===
-            glctc1PlaylistTrackIndex
-          );
+            do {
 
-          glctc1PlaylistTrackIndex =
-            randomIndex;
+              nextIndex =
+                Math.floor(
+                  Math.random() *
+                  playlist.tracks.length
+                );
+
+            } while (
+              nextIndex ===
+              glctc1PlaylistState.trackIndex
+            );
+          }
 
         } else {
 
-          glctc1PlaylistTrackIndex =
+          // -------------------------------------------
+          // ▶️ NORMAL NEXT
+          // -------------------------------------------
+
+          nextIndex =
             (
-              glctc1PlaylistTrackIndex +
+              glctc1PlaylistState.trackIndex +
               1
-            ) % total;
+            ) %
+            playlist.tracks.length;
         }
 
         glctc1LoadPlaylistTrack(
-          glctc1PlaylistTrackIndex,
+          nextIndex,
           true
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// ADD PLAYLIST TO BANK
+// 🏦 ADD PLAYLIST TO BANK
 // -----------------------------------------------------
 
 const glctc1PlaylistAddToBank =
@@ -10175,6 +9817,11 @@ if (glctc1PlaylistAddToBank) {
         const playlist =
           glctc1GetSelectedPlaylist();
 
+        const bankLetter =
+          glctc1PlaylistBankSelect
+            ? glctc1PlaylistBankSelect.value
+            : "";
+
         if (!playlist) {
 
           alert(
@@ -10184,12 +9831,7 @@ if (glctc1PlaylistAddToBank) {
           return;
         }
 
-        const letter =
-          glctc1PlaylistBankSelect
-            ? glctc1PlaylistBankSelect.value
-            : "";
-
-        if (!letter) {
+        if (!bankLetter) {
 
           alert(
             "Please select a bank (A–Z)."
@@ -10198,7 +9840,7 @@ if (glctc1PlaylistAddToBank) {
           return;
         }
 
-        if (!banks[letter]) {
+        if (!banks[bankLetter]) {
 
           alert(
             "Invalid bank."
@@ -10207,78 +9849,25 @@ if (glctc1PlaylistAddToBank) {
           return;
         }
 
-        if (
-          !playlist.tracks ||
-          !playlist.tracks.length
-        ) {
-
-          alert(
-            "This playlist has no tracks."
-          );
-
-          return;
-        }
-
-        playlist.tracks.forEach(
-          track => {
-
-            const trackId =
-              String(
-                track.id ||
-                track["ID Cat No"] ||
-                track.title ||
-                track["Track Title"] ||
-                ""
-              );
-
-            const exists =
-              banks[letter].some(
-                existing => {
-
-                  const existingId =
-                    String(
-                      existing.id ||
-                      existing["ID Cat No"] ||
-                      existing.title ||
-                      existing["Track Title"] ||
-                      ""
-                    );
-
-                  return (
-                    trackId &&
-                    existingId &&
-                    trackId === existingId
-                  );
-                }
-              );
-
-            if (!exists) {
-
-              banks[letter].push(
-                track
-              );
-            }
-          }
+        banks[bankLetter].push(
+          playlist
         );
 
-        renderBank(letter);
+        renderBank(
+          bankLetter
+        );
 
         console.log(
           "🏦 GLCTC1 PLAYLIST ADDED TO BANK:",
-          playlist.name,
-          letter
-        );
-
-        alert(
-          `"${playlist.name}" added to Bank ${letter}.`
+          bankLetter,
+          playlist.name
         );
       }
     );
 }
 
-
 // -----------------------------------------------------
-// BANK BUTTONS
+// 🏦 EXISTING BANK BUTTONS
 // -----------------------------------------------------
 
 document
@@ -10297,23 +9886,16 @@ document
     );
   });
 
-
 // -----------------------------------------------------
-// INITIALISE PLAYLIST MASTER
+// 🚀 INITIAL PLAYLIST STATE
 // -----------------------------------------------------
 
 glctc1LoadPlaylists();
 
 glctc1RenderPlaylistLibrary();
 
-glctc1UpdateSelectedPlaylistLabel();
-
-glctc1UpdatePlaylistCount();
-
-glctc1CreateArtworkUploadSlot();
-
 console.log(
-  "✅ GLCTC1 PLAYLIST MASTER — COMPLETE SYSTEM READY"
+  "✅ GLCTC1 PLAYLIST MASTER ENGINE READY"
 );
   
 // --- INIT ---

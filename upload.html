@@ -4001,17 +4001,22 @@ if (masterLibraryEditorModule) {
   </div>
 
 
-  <!-- 🎧 ONE PLAYLIST PLAYER -->
-<div class="glctc1-playlist-player">
+  <!-- ===================================================
+       🎧 ONE PLAYLIST PLAYER
+       =================================================== -->
 
-  <audio
-    id="glctc1PlaylistMasterAudio"
-    preload="metadata"
-    style="display:none;"
-  ></audio>
+  <div class="glctc1-playlist-player">
 
-  <!-- CD ARTWORK -->
-  <div class="glctc1-playlist-artwork">
+    <!-- PLAYLIST AUDIO ENGINE -->
+    <audio
+      id="glctc1PlaylistAudio"
+      preload="auto"
+    ></audio>
+
+
+    <!-- CD ARTWORK -->
+
+    <div class="glctc1-playlist-artwork">
 
       <img
         id="glctc1PlaylistArtwork"
@@ -6368,6 +6373,149 @@ player.play().catch(error => {
 
 }
 
+// =====================================================
+// 🎵 GLCTC1 PLAYLIST MASTER — LOAD SELECTED TRACK
+// =====================================================
+
+async function playPlaylistMasterTrack(track) {
+
+  if (!track) return;
+
+  const playlistAudio =
+    document.getElementById("glctc1PlaylistAudio");
+
+  if (!playlistAudio) {
+    console.error(
+      "❌ GLCTC1 PLAYLIST AUDIO ELEMENT NOT FOUND"
+    );
+    return;
+  }
+
+  let audioFile =
+    track.master_audio ||
+    track.sample ||
+    track.audio ||
+    track.audio_url;
+
+  if (!audioFile) {
+    console.error(
+      "❌ GLCTC1 PLAYLIST: NO AUDIO FIELD FOUND"
+    );
+    return;
+  }
+
+  // ---------------------------------------------------
+  // 🔐 SUPABASE SIGNED URL
+  // ---------------------------------------------------
+
+  if (!audioFile.startsWith("http")) {
+
+    const {
+      data: signedData,
+      error: signedError
+    } =
+      await supabaseClient
+        .storage
+        .from("tracks")
+        .createSignedUrl(
+          audioFile,
+          60 * 60 * 24
+        );
+
+    if (signedError) {
+
+      console.error(
+        "❌ GLCTC1 PLAYLIST SIGNED URL ERROR:",
+        signedError
+      );
+
+      return;
+    }
+
+    audioFile =
+      signedData.signedUrl;
+  }
+
+  // ---------------------------------------------------
+  // 🎵 UPDATE PLAYLIST MASTER DISPLAY
+  // ---------------------------------------------------
+
+  const title =
+    track.title ||
+    track["Track Title"] ||
+    "Untitled";
+
+  const artist =
+    track.artist ||
+    track["Artist"] ||
+    "Unknown Artist";
+
+  const artwork =
+    track.cover_art ||
+    track["Cover Art"] ||
+    "";
+
+  const titleEl =
+    document.getElementById(
+      "glctc1PlaylistTitle"
+    );
+
+  if (titleEl) {
+    titleEl.textContent = title;
+  }
+
+  const artistEl =
+    document.getElementById(
+      "glctc1PlaylistArtist"
+    );
+
+  if (artistEl) {
+    artistEl.textContent = artist;
+  }
+
+  const artworkEl =
+    document.getElementById(
+      "glctc1PlaylistArtwork"
+    );
+
+  if (artworkEl && artwork) {
+    artworkEl.src = artwork;
+  }
+
+  const positionEl =
+    document.getElementById(
+      "glctc1PlaylistTrackPosition"
+    );
+
+  if (positionEl) {
+    positionEl.textContent =
+      "TRACK 1 / 1";
+  }
+
+  // ---------------------------------------------------
+  // ▶️ PLAY
+  // ---------------------------------------------------
+
+  playlistAudio.src = audioFile;
+
+  playlistAudio.load();
+
+  playlistAudio.play().catch(error => {
+
+    console.log(
+      "Playlist playback waiting:",
+      error
+    );
+
+  });
+
+  console.log(
+    "🎵 GLCTC1 PLAYLIST MASTER PLAYING:",
+    title,
+    "—",
+    artist
+  );
+}
 
 // =====================================================
 // ▶️ MASTER LIBRARY — AUTO PLAY NEXT TRACK
@@ -7107,51 +7255,55 @@ function renderLibraryTable(searchTerm = "") {
 
 
     // ===================================================
-    // SELECT LIBRARY TRACK
-    // ===================================================
+// SELECT LIBRARY TRACK
+// ===================================================
 
-    row.addEventListener(
-      "click",
-      () => {
+row.addEventListener(
+  "click",
+  () => {
 
-        selectedLibraryTrack =
-          track;
+    selectedLibraryTrack =
+      track;
 
-        // Find its actual position
-        // in the full library
-        libraryIndex =
-          library.indexOf(track);
-
-
-        updateSelectedSlot(
-          track
-        );
-
-        playLibraryTrack(
-          track
-        );
-
-        highlightSelectedRow(
-          row
-        );
+    // Find its actual position
+    // in the full library
+    libraryIndex =
+      library.indexOf(track);
 
 
-        // Populate the
-        // GLCTC1 Master Library Editor
-
-        showDetails(
-          track
-        );
-
-      }
+    updateSelectedSlot(
+      track
     );
 
+    playLibraryTrack(
+      track
+    );
 
-    tbody.appendChild(
+    playPlaylistMasterTrack(
+      track
+    );
+
+    highlightSelectedRow(
       row
     );
 
-  });
+
+    // Populate the
+    // GLCTC1 Master Library Editor
+
+    showDetails(
+      track
+    );
+
+  }
+);
+
+
+tbody.appendChild(
+  row
+);
+
+});
 }
 
 /* =====================================================
@@ -8366,167 +8518,69 @@ if (libraryPlayer) {
 
 document
   .getElementById("glctc1AddTrackToPlaylist")
-  .addEventListener("click", async () => {
+  .addEventListener("click", () => {
 
     if (!selectedLibraryTrack) {
-      alert("Please select a track from the Master Library first.");
+      alert(
+        "Please select a track from the Master Library first."
+      );
       return;
     }
 
     const track = selectedLibraryTrack;
 
-    const title =
-      track.title ||
-      track["Track Title"] ||
-      "Untitled";
-
-    const artist =
-      track.artist ||
-      track["Artist"] ||
-      "Unknown Artist";
-
-    const artwork =
-      track.cover_art ||
-      track["Cover Art"] ||
-      "";
-
-    const titleEl =
-      document.getElementById("glctc1PlaylistTitle");
-
-    if (titleEl) {
-      titleEl.textContent = title;
-    }
-
-    const artistEl =
-      document.getElementById("glctc1PlaylistArtist");
-
-    if (artistEl) {
-      artistEl.textContent = artist;
-    }
-
-    const artworkEl =
-      document.getElementById("glctc1PlaylistArtwork");
-
-    if (artworkEl && artwork) {
-      artworkEl.src = artwork;
-    }
-
-    const positionEl =
-      document.getElementById("glctc1PlaylistTrackPosition");
-
-    if (positionEl) {
-      positionEl.textContent = "TRACK 1 / 1";
-    }
-
-    // =================================================
-    // 🎧 USE THE SAME MASTER LIBRARY AUDIO PATH
-    // =================================================
-
-    let audioFile =
-      track.master_audio ||
-      track.sample ||
-      track.audio ||
-      track.audio_url;
-
-    if (!audioFile) {
-      console.error(
-        "❌ PLAYLIST MASTER — NO AUDIO:",
-        track
-      );
-
-      alert("No Master Audio found for this track.");
-      return;
-    }
-
-    if (!audioFile.startsWith("http")) {
-
-      const {
-        data: signedData,
-        error: signedError
-      } =
-        await supabaseClient
-          .storage
-          .from("tracks")
-          .createSignedUrl(
-            audioFile,
-            60 * 60 * 24
-          );
-
-      if (signedError) {
-
-        console.error(
-          "❌ PLAYLIST MASTER SIGNED URL ERROR:",
-          signedError
-        );
-
-        alert(
-          "Unable to load Playlist Master audio."
-        );
-
-        return;
-      }
-
-      audioFile =
-        signedData.signedUrl;
-    }
-
-    // =================================================
-    // 🎵 LOAD INTO PLAYLIST MASTER AUDIO ELEMENT
-    // =================================================
-
-    const playlistAudio =
-      document.getElementById(
-        "glctc1PlaylistMasterAudio"
-      );
-
-    if (!playlistAudio) {
-
-      console.error(
-        "❌ PLAYLIST MASTER AUDIO ELEMENT NOT FOUND"
-      );
-
-      alert(
-        "Playlist Master audio element is missing."
-      );
-
-      return;
-    }
-
-    playlistAudio.pause();
-
-    playlistAudio.src = audioFile;
-
-    playlistAudio.load();
-
-    // =================================================
-    // 💾 STORE CURRENT PLAYLIST MASTER TRACK
-    // =================================================
-
-    window.glctc1PlaylistMasterTrack =
-      track;
-
-    window.glctc1PlaylistMasterAudio =
-      audioFile;
-
     console.log(
-      "🎵 GLCTC1 PLAYLIST MASTER TRACK:",
+      "🎵 GLCTC1 PLAYLIST MASTER — TRACK SELECTED:",
       track
     );
 
-    console.log(
-      "🎧 GLCTC1 PLAYLIST MASTER AUDIO:",
-      audioFile
-    );
+    // -----------------------------------------------
+    // TRACK DISPLAY
+    // -----------------------------------------------
+
+    const titleEl =
+      document.getElementById(
+        "glctc1PlaylistTitle"
+      );
+
+    const artistEl =
+      document.getElementById(
+        "glctc1PlaylistArtist"
+      );
+
+    const artworkEl =
+      document.getElementById(
+        "glctc1PlaylistArtwork"
+      );
+
+    if (titleEl) {
+      titleEl.textContent =
+        track.title || "Untitled";
+    }
+
+    if (artistEl) {
+      artistEl.textContent =
+        track.artist || "Unknown Artist";
+    }
+
+    if (artworkEl) {
+      artworkEl.src =
+        track.cover_art || "";
+    }
 
     console.log(
-      "🔊 GLCTC1 PLAYLIST MASTER AUDIO ELEMENT:",
-      playlistAudio
-    );
-
-    console.log(
-      "✅ GLCTC1 PLAYLIST MASTER TRACK READY"
+      "✅ GLCTC1 PLAYLIST MASTER — DISPLAY UPDATED"
     );
   });
+
+  // Bank buttons  
+  document.querySelectorAll(".bank-btn").forEach(btn => {  
+    btn.addEventListener("click", () => {  
+      const letter = btn.dataset.bank;  
+      renderBank(letter);  
+    });  
+  });  
+}  
   
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {

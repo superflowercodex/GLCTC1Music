@@ -8512,79 +8512,1043 @@ if (libraryPlayer) {
   });  
   
 // =====================================================
-// 🎵 GLCTC1 PLAYLIST MASTER
-// ➕ ADD SELECTED MASTER LIBRARY TRACK
+// 🎵 GLCTC1 PLAYLIST MASTER — COMPLETE SYSTEM
 // =====================================================
 
-document
-  .getElementById("glctc1AddTrackToPlaylist")
-  .addEventListener("click", () => {
+// -----------------------------------------------------
+// STORAGE
+// -----------------------------------------------------
 
-    if (!selectedLibraryTrack) {
-      alert(
-        "Please select a track from the Master Library first."
+const GLCTC1_PLAYLIST_STORAGE_KEY =
+  "GLCTC1_PLAYLIST_MASTER_DATA";
+
+let glctc1Playlists = [];
+
+let glctc1SelectedPlaylistId = null;
+
+let glctc1PlaylistTrackIndex = 0;
+
+let glctc1PlaylistShuffleOn = false;
+
+let glctc1PlaylistRepeatOn = false;
+
+let glctc1PlaylistAutoMixOn = false;
+
+
+// -----------------------------------------------------
+// LOAD PLAYLISTS
+// -----------------------------------------------------
+
+function glctc1LoadPlaylists() {
+
+  try {
+
+    const saved =
+      localStorage.getItem(
+        GLCTC1_PLAYLIST_STORAGE_KEY
       );
-      return;
+
+    glctc1Playlists =
+      saved
+        ? JSON.parse(saved)
+        : [];
+
+    if (!Array.isArray(glctc1Playlists)) {
+      glctc1Playlists = [];
     }
 
-    const track = selectedLibraryTrack;
+  } catch (error) {
 
-    console.log(
-      "🎵 GLCTC1 PLAYLIST MASTER — TRACK SELECTED:",
-      track
+    console.error(
+      "❌ GLCTC1 PLAYLIST LOAD ERROR:",
+      error
     );
 
-    // -----------------------------------------------
-    // TRACK DISPLAY
-    // -----------------------------------------------
+    glctc1Playlists = [];
+  }
+}
 
-    const titleEl =
-      document.getElementById(
-        "glctc1PlaylistTitle"
-      );
 
-    const artistEl =
-      document.getElementById(
-        "glctc1PlaylistArtist"
-      );
+// -----------------------------------------------------
+// SAVE PLAYLISTS
+// -----------------------------------------------------
 
-    const artworkEl =
-      document.getElementById(
-        "glctc1PlaylistArtwork"
-      );
+function glctc1SavePlaylists() {
+
+  try {
+
+    localStorage.setItem(
+      GLCTC1_PLAYLIST_STORAGE_KEY,
+      JSON.stringify(glctc1Playlists)
+    );
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 PLAYLIST SAVE ERROR:",
+      error
+    );
+
+    alert(
+      "Unable to save playlist data on this device."
+    );
+  }
+}
+
+
+// -----------------------------------------------------
+// GET SELECTED PLAYLIST
+// -----------------------------------------------------
+
+function glctc1GetSelectedPlaylist() {
+
+  if (!glctc1SelectedPlaylistId) {
+    return null;
+  }
+
+  return glctc1Playlists.find(
+    playlist =>
+      playlist.id ===
+      glctc1SelectedPlaylistId
+  ) || null;
+}
+
+
+// -----------------------------------------------------
+// FORMAT TIME
+// -----------------------------------------------------
+
+function formatPlaylistTime(seconds) {
+
+  if (!Number.isFinite(seconds)) {
+    return "00:00";
+  }
+
+  const minutes =
+    Math.floor(seconds / 60);
+
+  const secs =
+    Math.floor(seconds % 60);
+
+  return (
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(secs).padStart(2, "0")
+  );
+}
+
+
+// -----------------------------------------------------
+// UPDATE PLAYLIST COUNT
+// -----------------------------------------------------
+
+function glctc1UpdatePlaylistCount() {
+
+  const countEl =
+    document.getElementById(
+      "glctc1PlaylistCount"
+    );
+
+  if (!countEl) return;
+
+  const count =
+    glctc1Playlists.length;
+
+  countEl.textContent =
+    `${count} PLAYLIST${count === 1 ? "" : "S"}`;
+}
+
+
+// -----------------------------------------------------
+// UPDATE SELECTED PLAYLIST LABEL
+// -----------------------------------------------------
+
+function glctc1UpdateSelectedPlaylistLabel() {
+
+  const label =
+    document.getElementById(
+      "glctc1SelectedPlaylistName"
+    );
+
+  if (!label) return;
+
+  const playlist =
+    glctc1GetSelectedPlaylist();
+
+  label.textContent =
+    playlist
+      ? playlist.name
+      : "No Playlist Selected";
+}
+
+
+// -----------------------------------------------------
+// RENDER PLAYLIST LIBRARY
+// -----------------------------------------------------
+
+function glctc1RenderPlaylistLibrary() {
+
+  const container =
+    document.getElementById(
+      "glctc1PlaylistLibrary"
+    );
+
+  const empty =
+    document.getElementById(
+      "glctc1PlaylistEmpty"
+    );
+
+  if (!container) return;
+
+  container
+    .querySelectorAll(
+      ".glctc1-playlist-library-item"
+    )
+    .forEach(item => item.remove());
+
+  if (!glctc1Playlists.length) {
+
+    if (empty) {
+      empty.style.display = "block";
+    }
+
+    glctc1UpdatePlaylistCount();
+    glctc1UpdateSelectedPlaylistLabel();
+
+    return;
+  }
+
+  if (empty) {
+    empty.style.display = "none";
+  }
+
+  glctc1Playlists.forEach(playlist => {
+
+    const item =
+      document.createElement("button");
+
+    item.type = "button";
+
+    item.className =
+      "glctc1-playlist-library-item";
+
+    item.dataset.playlistId =
+      playlist.id;
+
+    const trackCount =
+      Array.isArray(playlist.tracks)
+        ? playlist.tracks.length
+        : 0;
+
+    item.innerHTML = `
+      <span style="
+        display:flex;
+        align-items:center;
+        gap:9px;
+        width:100%;
+        text-align:left;
+      ">
+
+        <span style="
+          width:34px;
+          height:34px;
+          min-width:34px;
+          border-radius:7px;
+          overflow:hidden;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          background:rgba(15,23,42,0.9);
+          border:1px solid rgba(103,232,249,0.22);
+        ">
+
+          ${
+            playlist.artwork
+              ? `
+                <img
+                  src="${playlist.artwork}"
+                  style="
+                    width:100%;
+                    height:100%;
+                    object-fit:cover;
+                  "
+                >
+              `
+              : "🎵"
+          }
+
+        </span>
+
+        <span style="
+          min-width:0;
+          flex:1;
+        ">
+
+          <span style="
+            display:block;
+            font-weight:900;
+            color:#e2e8f0;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          ">
+            ${glctc1EscapeHtml(playlist.name)}
+          </span>
+
+          <span style="
+            display:block;
+            margin-top:2px;
+            font-size:0.68rem;
+            color:#64748b;
+          ">
+            ${trackCount} TRACK${trackCount === 1 ? "" : "S"}
+          </span>
+
+        </span>
+
+      </span>
+    `;
+
+    if (
+      playlist.id ===
+      glctc1SelectedPlaylistId
+    ) {
+
+      item.style.borderColor =
+        "rgba(34,211,238,0.85)";
+
+      item.style.boxShadow =
+        "0 0 12px rgba(34,211,238,0.18)";
+    }
+
+    item.addEventListener(
+      "click",
+      () => {
+
+        glctc1SelectPlaylist(
+          playlist.id
+        );
+      }
+    );
+
+    container.appendChild(item);
+  });
+
+  glctc1UpdatePlaylistCount();
+
+  glctc1UpdateSelectedPlaylistLabel();
+}
+
+
+// -----------------------------------------------------
+// HTML ESCAPE
+// -----------------------------------------------------
+
+function glctc1EscapeHtml(value) {
+
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+
+// -----------------------------------------------------
+// CREATE PLAYLIST
+// -----------------------------------------------------
+
+const glctc1CreatePlaylistButton =
+  document.getElementById(
+    "glctc1CreatePlaylist"
+  );
+
+if (glctc1CreatePlaylistButton) {
+
+  glctc1CreatePlaylistButton
+    .addEventListener(
+      "click",
+      () => {
+
+        const input =
+          document.getElementById(
+            "glctc1PlaylistNameInput"
+          );
+
+        if (!input) return;
+
+        const name =
+          input.value.trim();
+
+        if (!name) {
+
+          alert(
+            "Please enter a playlist name."
+          );
+
+          input.focus();
+
+          return;
+        }
+
+        const playlist = {
+
+          id:
+            "playlist_" +
+            Date.now() +
+            "_" +
+            Math.random()
+              .toString(36)
+              .slice(2, 9),
+
+          name,
+
+          artwork: "",
+
+          tracks: []
+        };
+
+        glctc1Playlists.push(
+          playlist
+        );
+
+        glctc1SelectedPlaylistId =
+          playlist.id;
+
+        glctc1PlaylistTrackIndex =
+          0;
+
+        glctc1SavePlaylists();
+
+        glctc1RenderPlaylistLibrary();
+
+        glctc1UpdateSelectedPlaylistLabel();
+
+        input.value = "";
+
+        console.log(
+          "✅ GLCTC1 PLAYLIST CREATED:",
+          playlist
+        );
+      }
+    );
+}
+
+
+// -----------------------------------------------------
+// DELETE PLAYLIST
+// -----------------------------------------------------
+
+const glctc1DeletePlaylistButton =
+  document.getElementById(
+    "glctc1DeletePlaylist"
+  );
+
+if (glctc1DeletePlaylistButton) {
+
+  glctc1DeletePlaylistButton
+    .addEventListener(
+      "click",
+      () => {
+
+        const playlist =
+          glctc1GetSelectedPlaylist();
+
+        if (!playlist) {
+
+          alert(
+            "Please select a playlist first."
+          );
+
+          return;
+        }
+
+        const confirmed =
+          confirm(
+            `Delete playlist "${playlist.name}"?`
+          );
+
+        if (!confirmed) return;
+
+        glctc1Playlists =
+          glctc1Playlists.filter(
+            item =>
+              item.id !==
+              playlist.id
+          );
+
+        glctc1SelectedPlaylistId =
+          null;
+
+        glctc1PlaylistTrackIndex =
+          0;
+
+        const audio =
+          document.getElementById(
+            "glctc1PlaylistAudio"
+          );
+
+        if (audio) {
+
+          audio.pause();
+
+          audio.removeAttribute("src");
+
+          audio.load();
+        }
+
+        glctc1SavePlaylists();
+
+        glctc1RenderPlaylistLibrary();
+
+        glctc1UpdateSelectedPlaylistLabel();
+
+        glctc1UpdatePlaylistDisplay();
+
+        console.log(
+          "🗑️ GLCTC1 PLAYLIST DELETED:",
+          playlist.name
+        );
+      }
+    );
+}
+
+
+// -----------------------------------------------------
+// SELECT PLAYLIST
+// -----------------------------------------------------
+
+function glctc1SelectPlaylist(
+  playlistId
+) {
+
+  const playlist =
+    glctc1Playlists.find(
+      item =>
+        item.id === playlistId
+    );
+
+  if (!playlist) return;
+
+  glctc1SelectedPlaylistId =
+    playlist.id;
+
+  glctc1PlaylistTrackIndex =
+    0;
+
+  glctc1RenderPlaylistLibrary();
+
+  glctc1UpdateSelectedPlaylistLabel();
+
+  if (
+    playlist.tracks &&
+    playlist.tracks.length
+  ) {
+
+    glctc1LoadPlaylistTrack(
+      0,
+      true
+    );
+
+  } else {
+
+    glctc1UpdatePlaylistDisplay();
+
+    console.log(
+      "🎵 GLCTC1 PLAYLIST SELECTED — EMPTY:",
+      playlist.name
+    );
+  }
+}
+
+
+// -----------------------------------------------------
+// ADD SELECTED MASTER LIBRARY TRACK
+// -----------------------------------------------------
+
+const glctc1AddTrackButton =
+  document.getElementById(
+    "glctc1AddTrackToPlaylist"
+  );
+
+if (glctc1AddTrackButton) {
+
+  glctc1AddTrackButton
+    .addEventListener(
+      "click",
+      () => {
+
+        const playlist =
+          glctc1GetSelectedPlaylist();
+
+        if (!playlist) {
+
+          alert(
+            "Please create or select a playlist first."
+          );
+
+          return;
+        }
+
+        if (!selectedLibraryTrack) {
+
+          alert(
+            "Please select a track from the Master Library first."
+          );
+
+          return;
+        }
+
+        if (!Array.isArray(playlist.tracks)) {
+          playlist.tracks = [];
+        }
+
+        const track =
+          selectedLibraryTrack;
+
+        const trackId =
+          String(
+            track.id ||
+            track["ID Cat No"] ||
+            track.title ||
+            track["Track Title"] ||
+            ""
+          );
+
+        const alreadyExists =
+          playlist.tracks.some(
+            existing => {
+
+              const existingId =
+                String(
+                  existing.id ||
+                  existing["ID Cat No"] ||
+                  existing.title ||
+                  existing["Track Title"] ||
+                  ""
+                );
+
+              return (
+                trackId &&
+                existingId &&
+                trackId === existingId
+              );
+            }
+          );
+
+        if (alreadyExists) {
+
+          alert(
+            "That track is already in this playlist."
+          );
+
+          return;
+        }
+
+        playlist.tracks.push(
+          track
+        );
+
+        glctc1PlaylistTrackIndex =
+          playlist.tracks.length - 1;
+
+        glctc1SavePlaylists();
+
+        glctc1RenderPlaylistLibrary();
+
+        glctc1UpdateSelectedPlaylistLabel();
+
+        glctc1LoadPlaylistTrack(
+          glctc1PlaylistTrackIndex,
+          true
+        );
+
+        console.log(
+          "✅ GLCTC1 TRACK ADDED TO PLAYLIST:",
+          playlist.name,
+          track
+        );
+      }
+    );
+}
+
+
+// -----------------------------------------------------
+// ARTWORK UPLOAD SLOT
+// -----------------------------------------------------
+
+function glctc1CreateArtworkUploadSlot() {
+
+  const artwork =
+    document.getElementById(
+      "glctc1PlaylistArtwork"
+    );
+
+  if (!artwork) return;
+
+  if (
+    document.getElementById(
+      "glctc1PlaylistArtworkUpload"
+    )
+  ) {
+    return;
+  }
+
+  const wrapper =
+    document.createElement("div");
+
+  wrapper.id =
+    "glctc1PlaylistArtworkUpload";
+
+  wrapper.style.cssText = `
+    margin-top:10px;
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+    align-items:center;
+  `;
+
+  wrapper.innerHTML = `
+
+    <input
+      id="glctc1PlaylistArtworkFile"
+      type="file"
+      accept="image/*"
+      style="display:none;"
+    >
+
+    <button
+      id="glctc1PlaylistArtworkButton"
+      type="button"
+      style="
+        width:100%;
+        max-width:190px;
+        padding:8px 10px;
+        border-radius:8px;
+        border:1px solid rgba(103,232,249,0.45);
+        background:rgba(15,23,42,0.9);
+        color:#cbd5e1;
+        font-size:0.68rem;
+        font-weight:900;
+        cursor:pointer;
+      "
+    >
+      🖼️ UPLOAD ARTWORK
+    </button>
+
+  `;
+
+  artwork.parentNode.appendChild(
+    wrapper
+  );
+
+  const fileInput =
+    document.getElementById(
+      "glctc1PlaylistArtworkFile"
+    );
+
+  const uploadButton =
+    document.getElementById(
+      "glctc1PlaylistArtworkButton"
+    );
+
+  uploadButton.addEventListener(
+    "click",
+    () => {
+
+      const playlist =
+        glctc1GetSelectedPlaylist();
+
+      if (!playlist) {
+
+        alert(
+          "Please create or select a playlist first."
+        );
+
+        return;
+      }
+
+      fileInput.click();
+    }
+  );
+
+  fileInput.addEventListener(
+    "change",
+    event => {
+
+      const file =
+        event.target.files &&
+        event.target.files[0];
+
+      if (!file) return;
+
+      if (
+        !file.type.startsWith("image/")
+      ) {
+
+        alert(
+          "Please select an image file."
+        );
+
+        fileInput.value = "";
+
+        return;
+      }
+
+      const reader =
+        new FileReader();
+
+      reader.onload = () => {
+
+        const playlist =
+          glctc1GetSelectedPlaylist();
+
+        if (!playlist) return;
+
+        playlist.artwork =
+          reader.result;
+
+        glctc1SavePlaylists();
+
+        glctc1RenderPlaylistLibrary();
+
+        glctc1UpdatePlaylistDisplay();
+
+        console.log(
+          "🖼️ GLCTC1 PLAYLIST ARTWORK SAVED"
+        );
+      };
+
+      reader.readAsDataURL(file);
+
+      fileInput.value = "";
+    }
+  );
+}
+
+
+// -----------------------------------------------------
+// UPDATE PLAYLIST MASTER DISPLAY
+// -----------------------------------------------------
+
+function glctc1UpdatePlaylistDisplay() {
+
+  const playlist =
+    glctc1GetSelectedPlaylist();
+
+  const titleEl =
+    document.getElementById(
+      "glctc1PlaylistTitle"
+    );
+
+  const artistEl =
+    document.getElementById(
+      "glctc1PlaylistArtist"
+    );
+
+  const artworkEl =
+    document.getElementById(
+      "glctc1PlaylistArtwork"
+    );
+
+  const positionEl =
+    document.getElementById(
+      "glctc1PlaylistTrackPosition"
+    );
+
+  if (!playlist) {
 
     if (titleEl) {
       titleEl.textContent =
-        track.title || "Untitled";
+        "No Track Selected";
     }
 
     if (artistEl) {
       artistEl.textContent =
-        track.artist || "Unknown Artist";
+        "Playlist Master";
+    }
+
+    if (positionEl) {
+      positionEl.textContent =
+        "TRACK 0 / 0";
+    }
+
+    return;
+  }
+
+  const tracks =
+    Array.isArray(playlist.tracks)
+      ? playlist.tracks
+      : [];
+
+  const total =
+    tracks.length;
+
+  if (!total) {
+
+    if (titleEl) {
+      titleEl.textContent =
+        "Playlist Empty";
+    }
+
+    if (artistEl) {
+      artistEl.textContent =
+        playlist.name;
     }
 
     if (artworkEl) {
+
       artworkEl.src =
-        track.cover_art || "";
+        playlist.artwork || "";
     }
 
-    console.log(
-      "✅ GLCTC1 PLAYLIST MASTER — DISPLAY UPDATED"
+    if (positionEl) {
+      positionEl.textContent =
+        "TRACK 0 / 0";
+    }
+
+    return;
+  }
+
+  const track =
+    tracks[
+      Math.max(
+        0,
+        Math.min(
+          glctc1PlaylistTrackIndex,
+          total - 1
+        )
+      )
+    ];
+
+  const title =
+    track.title ||
+    track["Track Title"] ||
+    "Untitled";
+
+  const artist =
+    track.artist ||
+    track["Artist"] ||
+    "Unknown Artist";
+
+  const artwork =
+    track.cover_art ||
+    track["Cover Art"] ||
+    playlist.artwork ||
+    "";
+
+  if (titleEl) {
+    titleEl.textContent =
+      title;
+  }
+
+  if (artistEl) {
+    artistEl.textContent =
+      artist;
+  }
+
+  if (artworkEl) {
+
+    artworkEl.src =
+      artwork || "";
+  }
+
+  if (positionEl) {
+
+    positionEl.textContent =
+      `TRACK ${
+        glctc1PlaylistTrackIndex + 1
+      } / ${total}`;
+  }
+
+  const metaEl =
+    document.getElementById(
+      "glctc1PlaylistMeta"
     );
-  });
 
-  // Bank buttons  
-  document.querySelectorAll(".bank-btn").forEach(btn => {  
-    btn.addEventListener("click", () => {  
-      const letter = btn.dataset.bank;  
-      renderBank(letter);  
-    });  
-  });  
-}  
+  if (metaEl) {
 
-// =====================================================
-// 🎛️ GLCTC1 PLAYLIST MASTER — COMPLETE TRANSPORT
-// =====================================================
+    metaEl.textContent =
+      [
+        track.album ||
+        track["Album"] ||
+        "",
+        track.genre ||
+        track["Genre"] ||
+        "",
+        track.bpm ||
+        track["BPM"] ||
+        "",
+        track.key ||
+        track["Key"] ||
+        ""
+      ]
+      .filter(Boolean)
+      .join(" — ");
+  }
+}
+
+
+// -----------------------------------------------------
+// LOAD PLAYLIST TRACK
+// -----------------------------------------------------
+
+async function glctc1LoadPlaylistTrack(
+  index,
+  shouldPlay = true
+) {
+
+  const playlist =
+    glctc1GetSelectedPlaylist();
+
+  if (!playlist) return;
+
+  const tracks =
+    Array.isArray(playlist.tracks)
+      ? playlist.tracks
+      : [];
+
+  if (!tracks.length) {
+
+    glctc1UpdatePlaylistDisplay();
+
+    return;
+  }
+
+  if (index < 0) {
+    index = tracks.length - 1;
+  }
+
+  if (index >= tracks.length) {
+    index = 0;
+  }
+
+  glctc1PlaylistTrackIndex =
+    index;
+
+  const track =
+    tracks[index];
+
+  glctc1UpdatePlaylistDisplay();
+
+  await playPlaylistMasterTrack(
+    track
+  );
+
+  console.log(
+    "🎵 GLCTC1 PLAYLIST TRACK:",
+    index + 1,
+    "/",
+    tracks.length,
+    track
+  );
+}
+
+
+// -----------------------------------------------------
+// PLAYLIST MASTER AUDIO
+// -----------------------------------------------------
 
 const glctc1PlaylistAudio =
   document.getElementById(
@@ -8637,34 +9601,9 @@ const glctc1PlaylistAutoMix =
   );
 
 
-// =====================================================
-// ⏱️ TIME FORMAT
-// =====================================================
-
-function formatPlaylistTime(seconds) {
-
-  if (!Number.isFinite(seconds)) {
-    return "00:00";
-  }
-
-  const minutes =
-    Math.floor(seconds / 60);
-
-  const secs =
-    Math.floor(seconds % 60);
-
-  return (
-    String(minutes).padStart(2, "0") +
-    ":" +
-    String(secs).padStart(2, "0")
-  );
-
-}
-
-
-// =====================================================
-// ▶️ PLAY / PAUSE
-// =====================================================
+// -----------------------------------------------------
+// PLAY / PAUSE
+// -----------------------------------------------------
 
 if (
   glctc1PlaylistAudio &&
@@ -8675,6 +9614,28 @@ if (
     .addEventListener(
       "click",
       () => {
+
+        if (
+          !glctc1PlaylistAudio.src
+        ) {
+
+          const playlist =
+            glctc1GetSelectedPlaylist();
+
+          if (
+            playlist &&
+            playlist.tracks &&
+            playlist.tracks.length
+          ) {
+
+            glctc1LoadPlaylistTrack(
+              glctc1PlaylistTrackIndex,
+              true
+            );
+          }
+
+          return;
+        }
 
         if (
           glctc1PlaylistAudio.paused
@@ -8688,24 +9649,20 @@ if (
                 "Playlist playback waiting:",
                 error
               );
-
             });
 
         } else {
 
           glctc1PlaylistAudio.pause();
-
         }
-
       }
     );
-
 }
 
 
-// =====================================================
-// 🔄 PLAY / PAUSE BUTTON STATE
-// =====================================================
+// -----------------------------------------------------
+// PLAY / PAUSE BUTTON STATE
+// -----------------------------------------------------
 
 if (glctc1PlaylistAudio) {
 
@@ -8717,13 +9674,12 @@ if (glctc1PlaylistAudio) {
         if (
           glctc1PlaylistPlayPause
         ) {
+
           glctc1PlaylistPlayPause
             .textContent = "⏸";
         }
-
       }
     );
-
 
   glctc1PlaylistAudio
     .addEventListener(
@@ -8733,19 +9689,18 @@ if (glctc1PlaylistAudio) {
         if (
           glctc1PlaylistPlayPause
         ) {
+
           glctc1PlaylistPlayPause
             .textContent = "▶";
         }
-
       }
     );
-
 }
 
 
-// =====================================================
-// 📈 PROGRESS + TIME
-// =====================================================
+// -----------------------------------------------------
+// PROGRESS + TIME
+// -----------------------------------------------------
 
 if (glctc1PlaylistAudio) {
 
@@ -8760,25 +9715,20 @@ if (glctc1PlaylistAudio) {
 
           glctc1PlaylistDuration
             .textContent =
-              formatPlaylistTime(
-                glctc1PlaylistAudio
-                  .duration
-              );
-
+            formatPlaylistTime(
+              glctc1PlaylistAudio.duration
+            );
         }
 
         if (
           glctc1PlaylistProgress
         ) {
 
-          glctc1PlaylistProgress
-            .value = 0;
-
+          glctc1PlaylistProgress.value =
+            0;
         }
-
       }
     );
-
 
   glctc1PlaylistAudio
     .addEventListener(
@@ -8786,12 +9736,10 @@ if (glctc1PlaylistAudio) {
       () => {
 
         const duration =
-          glctc1PlaylistAudio
-            .duration;
+          glctc1PlaylistAudio.duration;
 
         const current =
-          glctc1PlaylistAudio
-            .currentTime;
+          glctc1PlaylistAudio.currentTime;
 
         if (
           glctc1PlaylistCurrentTime
@@ -8799,10 +9747,9 @@ if (glctc1PlaylistAudio) {
 
           glctc1PlaylistCurrentTime
             .textContent =
-              formatPlaylistTime(
-                current
-              );
-
+            formatPlaylistTime(
+              current
+            );
         }
 
         if (
@@ -8811,21 +9758,20 @@ if (glctc1PlaylistAudio) {
           duration > 0
         ) {
 
-          glctc1PlaylistProgress
-            .value =
-              (current / duration) * 100;
-
+          glctc1PlaylistProgress.value =
+            (
+              current /
+              duration
+            ) * 100;
         }
-
       }
     );
-
 }
 
 
-// =====================================================
-// 🎚️ SEEK
-// =====================================================
+// -----------------------------------------------------
+// SEEK
+// -----------------------------------------------------
 
 if (
   glctc1PlaylistAudio &&
@@ -8838,34 +9784,28 @@ if (
       () => {
 
         const duration =
-          glctc1PlaylistAudio
-            .duration;
+          glctc1PlaylistAudio.duration;
 
         if (
           Number.isFinite(duration) &&
           duration > 0
         ) {
 
-          glctc1PlaylistAudio
-            .currentTime =
-              (
-                Number(
-                  glctc1PlaylistProgress
-                    .value
-                ) / 100
-              ) * duration;
-
+          glctc1PlaylistAudio.currentTime =
+            (
+              Number(
+                glctc1PlaylistProgress.value
+              ) / 100
+            ) * duration;
         }
-
       }
     );
-
 }
 
 
-// =====================================================
-// ⏮ PREVIOUS
-// =====================================================
+// -----------------------------------------------------
+// PREVIOUS
+// -----------------------------------------------------
 
 if (glctc1PlaylistPrev) {
 
@@ -8874,45 +9814,40 @@ if (glctc1PlaylistPrev) {
       "click",
       () => {
 
-        if (!library.length) return;
+        const playlist =
+          glctc1GetSelectedPlaylist();
 
-        libraryIndex =
-          (
-            libraryIndex -
-            1 +
-            library.length
-          ) %
-          library.length;
+        if (
+          !playlist ||
+          !playlist.tracks ||
+          !playlist.tracks.length
+        ) {
 
-        const track =
-          library[libraryIndex];
+          return;
+        }
 
-        if (!track) return;
+        glctc1PlaylistTrackIndex--;
 
-        selectedLibraryTrack =
-          track;
+        if (
+          glctc1PlaylistTrackIndex < 0
+        ) {
 
-        updateSelectedSlot(
-          track
+          glctc1PlaylistTrackIndex =
+            playlist.tracks.length - 1;
+        }
+
+        glctc1LoadPlaylistTrack(
+          glctc1PlaylistTrackIndex,
+          true
         );
-
-        showDetails(
-          track
-        );
-
-        playPlaylistMasterTrack(
-          track
-        );
-
       }
     );
-
 }
 
 
-// =====================================================
-// ⏭ NEXT
-// =====================================================
+// -----------------------------------------------------
+// NEXT
+// -----------------------------------------------------
 
 if (glctc1PlaylistNext) {
 
@@ -8921,47 +9856,64 @@ if (glctc1PlaylistNext) {
       "click",
       () => {
 
-        if (!library.length) return;
+        const playlist =
+          glctc1GetSelectedPlaylist();
 
-        libraryIndex =
-          (
-            libraryIndex +
-            1
-          ) %
-          library.length;
+        if (
+          !playlist ||
+          !playlist.tracks ||
+          !playlist.tracks.length
+        ) {
 
-        const track =
-          library[libraryIndex];
+          return;
+        }
 
-        if (!track) return;
+        const total =
+          playlist.tracks.length;
 
-        selectedLibraryTrack =
-          track;
+        if (
+          glctc1PlaylistShuffleOn &&
+          total > 1
+        ) {
 
-        updateSelectedSlot(
-          track
+          let randomIndex;
+
+          do {
+
+            randomIndex =
+              Math.floor(
+                Math.random() * total
+              );
+
+          } while (
+            randomIndex ===
+            glctc1PlaylistTrackIndex
+          );
+
+          glctc1PlaylistTrackIndex =
+            randomIndex;
+
+        } else {
+
+          glctc1PlaylistTrackIndex =
+            (
+              glctc1PlaylistTrackIndex +
+              1
+            ) % total;
+        }
+
+        glctc1LoadPlaylistTrack(
+          glctc1PlaylistTrackIndex,
+          true
         );
-
-        showDetails(
-          track
-        );
-
-        playPlaylistMasterTrack(
-          track
-        );
-
       }
     );
-
 }
 
 
-// =====================================================
-// 🔀 SHUFFLE
-// =====================================================
-
-let glctc1PlaylistShuffleOn =
-  false;
+// -----------------------------------------------------
+// SHUFFLE
+// -----------------------------------------------------
 
 if (glctc1PlaylistShuffle) {
 
@@ -8975,27 +9927,36 @@ if (glctc1PlaylistShuffle) {
 
         glctc1PlaylistShuffle
           .style.opacity =
-            glctc1PlaylistShuffleOn
-              ? "1"
-              : "0.65";
+          glctc1PlaylistShuffleOn
+            ? "1"
+            : "0.65";
+
+        glctc1PlaylistShuffle
+          .setAttribute(
+            "aria-pressed",
+            String(
+              glctc1PlaylistShuffleOn
+            )
+          );
+
+        glctc1PlaylistShuffle
+          .textContent =
+          glctc1PlaylistShuffleOn
+            ? "🔀 ON"
+            : "🔀";
 
         console.log(
           "🔀 GLCTC1 PLAYLIST SHUFFLE:",
           glctc1PlaylistShuffleOn
         );
-
       }
     );
-
 }
 
 
-// =====================================================
-// 🔁 REPEAT
-// =====================================================
-
-let glctc1PlaylistRepeatOn =
-  false;
+// -----------------------------------------------------
+// REPEAT
+// -----------------------------------------------------
 
 if (glctc1PlaylistRepeat) {
 
@@ -9009,140 +9970,30 @@ if (glctc1PlaylistRepeat) {
 
         glctc1PlaylistRepeat
           .style.opacity =
-            glctc1PlaylistRepeatOn
-              ? "1"
-              : "0.65";
+          glctc1PlaylistRepeatOn
+            ? "1"
+            : "0.65";
+
+        glctc1PlaylistRepeat
+          .setAttribute(
+            "aria-pressed",
+            String(
+              glctc1PlaylistRepeatOn
+            )
+          );
 
         console.log(
           "🔁 GLCTC1 PLAYLIST REPEAT:",
           glctc1PlaylistRepeatOn
         );
-
       }
     );
-
 }
 
 
-// =====================================================
-// 🔀 / ▶️ AUTO NEXT
-// =====================================================
-
-if (glctc1PlaylistAudio) {
-
-  glctc1PlaylistAudio
-    .addEventListener(
-      "ended",
-      () => {
-
-        // ---------------------------------------------
-        // 🔁 REPEAT CURRENT TRACK
-        // ---------------------------------------------
-
-        if (
-          glctc1PlaylistRepeatOn
-        ) {
-
-          glctc1PlaylistAudio
-            .currentTime = 0;
-
-          glctc1PlaylistAudio
-            .play()
-            .catch(error => {
-
-              console.log(
-                "Playlist repeat waiting:",
-                error
-              );
-
-            });
-
-          return;
-
-        }
-
-
-        // ---------------------------------------------
-        // AUTO MIX OFF = STOP
-        // ---------------------------------------------
-
-        if (
-          !glctc1PlaylistAutoMixOn
-        ) {
-
-          if (
-            glctc1PlaylistPlayPause
-          ) {
-            glctc1PlaylistPlayPause
-              .textContent = "▶";
-          }
-
-          return;
-
-        }
-
-
-        // ---------------------------------------------
-        // AUTO MIX ON
-        // ---------------------------------------------
-
-        if (!library.length) return;
-
-
-        if (
-          glctc1PlaylistShuffleOn
-        ) {
-
-          libraryIndex =
-            Math.floor(
-              Math.random() *
-              library.length
-            );
-
-        } else {
-
-          libraryIndex =
-            (
-              libraryIndex +
-              1
-            ) %
-            library.length;
-
-        }
-
-
-        const nextTrack =
-          library[libraryIndex];
-
-        if (!nextTrack) return;
-
-        selectedLibraryTrack =
-          nextTrack;
-
-        updateSelectedSlot(
-          nextTrack
-        );
-
-        showDetails(
-          nextTrack
-        );
-
-        playPlaylistMasterTrack(
-          nextTrack
-        );
-
-      }
-    );
-
-}
-
-
-// =====================================================
-// 🔀 AUTO MIX ON / OFF
-// =====================================================
-
-let glctc1PlaylistAutoMixOn =
-  false;
+// -----------------------------------------------------
+// AUTO MIX
+// -----------------------------------------------------
 
 if (glctc1PlaylistAutoMix) {
 
@@ -9156,9 +10007,9 @@ if (glctc1PlaylistAutoMix) {
 
         glctc1PlaylistAutoMix
           .textContent =
-            glctc1PlaylistAutoMixOn
-              ? "ON"
-              : "OFF";
+          glctc1PlaylistAutoMixOn
+            ? "ON"
+            : "OFF";
 
         glctc1PlaylistAutoMix
           .setAttribute(
@@ -9172,11 +10023,296 @@ if (glctc1PlaylistAutoMix) {
           "🎚️ GLCTC1 PLAYLIST AUTO MIX:",
           glctc1PlaylistAutoMixOn
         );
-
       }
     );
-
 }
+
+
+// -----------------------------------------------------
+// TRACK ENDED
+// -----------------------------------------------------
+
+if (glctc1PlaylistAudio) {
+
+  glctc1PlaylistAudio
+    .addEventListener(
+      "ended",
+      () => {
+
+        const playlist =
+          glctc1GetSelectedPlaylist();
+
+        if (
+          !playlist ||
+          !playlist.tracks ||
+          !playlist.tracks.length
+        ) {
+
+          if (
+            glctc1PlaylistPlayPause
+          ) {
+
+            glctc1PlaylistPlayPause
+              .textContent = "▶";
+          }
+
+          return;
+        }
+
+        // ---------------------------------------------
+        // REPEAT CURRENT TRACK
+        // ---------------------------------------------
+
+        if (
+          glctc1PlaylistRepeatOn
+        ) {
+
+          glctc1PlaylistAudio.currentTime =
+            0;
+
+          glctc1PlaylistAudio
+            .play()
+            .catch(error => {
+
+              console.log(
+                "Playlist repeat waiting:",
+                error
+              );
+            });
+
+          return;
+        }
+
+        // ---------------------------------------------
+        // AUTO MIX OFF
+        // ---------------------------------------------
+
+        if (
+          !glctc1PlaylistAutoMixOn
+        ) {
+
+          if (
+            glctc1PlaylistPlayPause
+          ) {
+
+            glctc1PlaylistPlayPause
+              .textContent = "▶";
+          }
+
+          return;
+        }
+
+        // ---------------------------------------------
+        // AUTO MIX ON
+        // ---------------------------------------------
+
+        const total =
+          playlist.tracks.length;
+
+        if (
+          glctc1PlaylistShuffleOn &&
+          total > 1
+        ) {
+
+          let randomIndex;
+
+          do {
+
+            randomIndex =
+              Math.floor(
+                Math.random() * total
+              );
+
+          } while (
+            randomIndex ===
+            glctc1PlaylistTrackIndex
+          );
+
+          glctc1PlaylistTrackIndex =
+            randomIndex;
+
+        } else {
+
+          glctc1PlaylistTrackIndex =
+            (
+              glctc1PlaylistTrackIndex +
+              1
+            ) % total;
+        }
+
+        glctc1LoadPlaylistTrack(
+          glctc1PlaylistTrackIndex,
+          true
+        );
+      }
+    );
+}
+
+
+// -----------------------------------------------------
+// ADD PLAYLIST TO BANK
+// -----------------------------------------------------
+
+const glctc1PlaylistAddToBank =
+  document.getElementById(
+    "glctc1PlaylistAddToBank"
+  );
+
+const glctc1PlaylistBankSelect =
+  document.getElementById(
+    "glctc1PlaylistBankSelect"
+  );
+
+if (glctc1PlaylistAddToBank) {
+
+  glctc1PlaylistAddToBank
+    .addEventListener(
+      "click",
+      () => {
+
+        const playlist =
+          glctc1GetSelectedPlaylist();
+
+        if (!playlist) {
+
+          alert(
+            "Please select a playlist first."
+          );
+
+          return;
+        }
+
+        const letter =
+          glctc1PlaylistBankSelect
+            ? glctc1PlaylistBankSelect.value
+            : "";
+
+        if (!letter) {
+
+          alert(
+            "Please select a bank (A–Z)."
+          );
+
+          return;
+        }
+
+        if (!banks[letter]) {
+
+          alert(
+            "Invalid bank."
+          );
+
+          return;
+        }
+
+        if (
+          !playlist.tracks ||
+          !playlist.tracks.length
+        ) {
+
+          alert(
+            "This playlist has no tracks."
+          );
+
+          return;
+        }
+
+        playlist.tracks.forEach(
+          track => {
+
+            const trackId =
+              String(
+                track.id ||
+                track["ID Cat No"] ||
+                track.title ||
+                track["Track Title"] ||
+                ""
+              );
+
+            const exists =
+              banks[letter].some(
+                existing => {
+
+                  const existingId =
+                    String(
+                      existing.id ||
+                      existing["ID Cat No"] ||
+                      existing.title ||
+                      existing["Track Title"] ||
+                      ""
+                    );
+
+                  return (
+                    trackId &&
+                    existingId &&
+                    trackId === existingId
+                  );
+                }
+              );
+
+            if (!exists) {
+
+              banks[letter].push(
+                track
+              );
+            }
+          }
+        );
+
+        renderBank(letter);
+
+        console.log(
+          "🏦 GLCTC1 PLAYLIST ADDED TO BANK:",
+          playlist.name,
+          letter
+        );
+
+        alert(
+          `"${playlist.name}" added to Bank ${letter}.`
+        );
+      }
+    );
+}
+
+
+// -----------------------------------------------------
+// BANK BUTTONS
+// -----------------------------------------------------
+
+document
+  .querySelectorAll(".bank-btn")
+  .forEach(btn => {
+
+    btn.addEventListener(
+      "click",
+      () => {
+
+        const letter =
+          btn.dataset.bank;
+
+        renderBank(letter);
+      }
+    );
+  });
+
+
+// -----------------------------------------------------
+// INITIALISE PLAYLIST MASTER
+// -----------------------------------------------------
+
+glctc1LoadPlaylists();
+
+glctc1RenderPlaylistLibrary();
+
+glctc1UpdateSelectedPlaylistLabel();
+
+glctc1UpdatePlaylistCount();
+
+glctc1CreateArtworkUploadSlot();
+
+console.log(
+  "✅ GLCTC1 PLAYLIST MASTER — COMPLETE SYSTEM READY"
+);
   
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {

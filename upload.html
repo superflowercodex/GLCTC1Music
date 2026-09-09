@@ -4120,22 +4120,6 @@ if (masterLibraryEditorModule) {
       </div>
 
 
-      <div class="glctc1-playlist-automix">
-
-        <span class="glctc1-playlist-automix-label">
-          AUTO PLAY
-        </span>
-
-        <button
-          id="glctc1PlaylistAutoMix"
-          type="button"
-          aria-pressed="true"
-        >
-          ON
-        </button>
-
-      </div>
-
     </div>
 
   </div>
@@ -4143,7 +4127,7 @@ if (masterLibraryEditorModule) {
 
   <!-- ===================================================
        ➕ ADD TRACK TO PLAYLIST
-       =================================================== -->
+       ================================================= -->
 
   <div class="glctc1-playlist-actions">
 
@@ -6285,12 +6269,225 @@ function setCrossfader(value) {
   b.volume = value;  
 }
   
-// --- MASTER LIBRARY / BANKS STATE ---  
-const banks = window.banks || (window.banks = {});  
-"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => { if (!banks[l]) banks[l] = []; });  
-  
-let library = [];  
-let libraryIndex = 0;  
+// =====================================================
+// 🏦 GLCTC1 MASTER LIBRARY / BANKS STATE
+// =====================================================
+
+const banks =
+  window.banks ||
+  (window.banks = {});
+
+const GLCTC1_BANK_LETTERS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+// -----------------------------------------------------
+// 🏦 CREATE A–Z BANKS IF THEY DO NOT EXIST
+// -----------------------------------------------------
+
+GLCTC1_BANK_LETTERS.forEach(letter => {
+
+  if (!banks[letter]) {
+    banks[letter] = [];
+  }
+
+});
+
+// -----------------------------------------------------
+// 🏷️ BANK CUSTOM NAMES
+// -----------------------------------------------------
+
+const GLCTC1_BANK_NAMES_KEY =
+  "glctc1_bank_names";
+
+let glctc1BankNames = {};
+
+try {
+
+  glctc1BankNames =
+    JSON.parse(
+      localStorage.getItem(
+        GLCTC1_BANK_NAMES_KEY
+      ) || "{}"
+    );
+
+} catch (error) {
+
+  console.warn(
+    "⚠️ GLCTC1 BANK NAMES LOAD WARNING:",
+    error
+  );
+
+  glctc1BankNames = {};
+
+}
+
+// -----------------------------------------------------
+// 🏷️ GET BANK DISPLAY NAME
+// -----------------------------------------------------
+
+function glctc1GetBankName(letter) {
+
+  const bankLetter =
+    String(letter || "")
+      .toUpperCase();
+
+  return (
+    glctc1BankNames[bankLetter] ||
+    bankLetter
+  );
+
+}
+
+// -----------------------------------------------------
+// 🏷️ SAVE BANK NAME
+// -----------------------------------------------------
+
+function glctc1SaveBankName(
+  letter,
+  name
+) {
+
+  const bankLetter =
+    String(letter || "")
+      .toUpperCase();
+
+  const cleanName =
+    String(name || "")
+      .trim();
+
+  if (!bankLetter) return;
+
+  if (cleanName) {
+
+    glctc1BankNames[bankLetter] =
+      cleanName;
+
+  } else {
+
+    delete glctc1BankNames[bankLetter];
+
+  }
+
+  localStorage.setItem(
+    GLCTC1_BANK_NAMES_KEY,
+    JSON.stringify(
+      glctc1BankNames
+    )
+  );
+
+}
+
+// -----------------------------------------------------
+// 🏷️ UPDATE BANK BUTTON LABELS
+// -----------------------------------------------------
+
+function glctc1UpdateBankButtons() {
+
+  document
+    .querySelectorAll(".bank-btn")
+    .forEach(button => {
+
+      const letter =
+        String(
+          button.dataset.bank || ""
+        ).toUpperCase();
+
+      if (!letter) return;
+
+      button.textContent =
+        glctc1GetBankName(
+          letter
+        );
+
+      button.title =
+        `${letter} — Double-click to rename`;
+
+    });
+
+}
+
+// -----------------------------------------------------
+// 🏷️ RENAME BANK
+// -----------------------------------------------------
+
+function glctc1RenameBank(letter) {
+
+  const bankLetter =
+    String(letter || "")
+      .toUpperCase();
+
+  if (!bankLetter) return;
+
+  const currentName =
+    glctc1GetBankName(
+      bankLetter
+    );
+
+  const newName =
+    prompt(
+      `Name Bank ${bankLetter}:`,
+      currentName === bankLetter
+        ? ""
+        : currentName
+    );
+
+  if (newName === null) {
+    return;
+  }
+
+  glctc1SaveBankName(
+    bankLetter,
+    newName
+  );
+
+  glctc1UpdateBankButtons();
+
+  console.log(
+    "🏷️ GLCTC1 BANK RENAMED:",
+    bankLetter,
+    "→",
+    glctc1GetBankName(bankLetter)
+  );
+
+}
+
+// -----------------------------------------------------
+// 🖱️ BANK BUTTON WIRING
+// -----------------------------------------------------
+
+document
+  .querySelectorAll(".bank-btn")
+  .forEach(button => {
+
+    button.addEventListener(
+      "dblclick",
+      event => {
+
+        event.preventDefault();
+
+        glctc1RenameBank(
+          button.dataset.bank
+        );
+
+      }
+    );
+
+  });
+
+// -----------------------------------------------------
+// 🏷️ RESTORE SAVED BANK NAMES
+// -----------------------------------------------------
+
+glctc1UpdateBankButtons();
+
+// -----------------------------------------------------
+// 📚 MASTER LIBRARY STATE
+// -----------------------------------------------------
+
+let library = [];
+
+let libraryIndex = 0;
+
 let selectedLibraryTrack = null;
 
 
@@ -6588,16 +6785,20 @@ async function playPlaylistMasterTrack(
   playlistAudio.load();
 
   // ---------------------------------------------------
-  // ▶️ AUTOPLAY ONLY WHEN REQUESTED
+  // ▶️ PLAY WHEN REQUESTED
   // ---------------------------------------------------
 
   if (autoPlay) {
-    playlistAudio.play().catch(error => {
-      console.log(
-        "Playlist playback waiting:",
-        error
-      );
-    });
+
+    playlistAudio
+      .play()
+      .catch(error => {
+        console.log(
+          "Playlist playback waiting:",
+          error
+        );
+      });
+
   }
 }
 
@@ -6610,58 +6811,67 @@ const libraryPlayer =
 
 if (libraryPlayer) {
 
-  libraryPlayer.addEventListener("ended", async () => {
+  libraryPlayer.addEventListener(
+    "ended",
+    async () => {
 
-    if (!library.length) return;
+      if (!library.length) return;
 
-    libraryIndex =
-      (libraryIndex + 1) % library.length;
+      libraryIndex =
+        (libraryIndex + 1) % library.length;
 
-    const nextTrack =
-      library[libraryIndex];
+      const nextTrack =
+        library[libraryIndex];
 
-    if (!nextTrack) return;
+      if (!nextTrack) return;
 
-    selectedLibraryTrack =
-      nextTrack;
+      selectedLibraryTrack =
+        nextTrack;
 
-    updateSelectedSlot(
-      nextTrack
-    );
-
-    showDetails(
-      nextTrack
-    );
-
-    const rows =
-      document.querySelectorAll(
-        "#libraryTable tbody tr"
+      updateSelectedSlot(
+        nextTrack
       );
 
-    const row =
-      Array.from(rows).find(row =>
-        row.children[5]?.textContent.trim() ===
-          String(nextTrack.artist || "").trim() &&
-        row.children[6]?.textContent.trim() ===
-          String(nextTrack.title || "").trim()
+      showDetails(
+        nextTrack
       );
 
-    if (row) {
-      highlightSelectedRow(row);
+      const rows =
+        document.querySelectorAll(
+          "#libraryTable tbody tr"
+        );
+
+      const row =
+        Array.from(rows).find(row =>
+          row.children[5]?.textContent.trim() ===
+            String(
+              nextTrack.artist || ""
+            ).trim() &&
+          row.children[6]?.textContent.trim() ===
+            String(
+              nextTrack.title || ""
+            ).trim()
+        );
+
+      if (row) {
+        highlightSelectedRow(
+          row
+        );
+      }
+
+      await playLibraryTrack(
+        nextTrack
+      );
+
+      console.log(
+        "▶️ GLCTC1 AUTO NEXT:",
+        nextTrack.artist,
+        "—",
+        nextTrack.title
+      );
+
     }
-
-    await playLibraryTrack(
-      nextTrack
-    );
-
-    console.log(
-      "▶️ GLCTC1 AUTO NEXT:",
-      nextTrack.artist,
-      "—",
-      nextTrack.title
-    );
-
-  });
+  );
 
 }
 
@@ -8018,35 +8228,145 @@ tbody.appendChild(
 
 })();
 
-// --- BANKS ---
-function renderBank(bankLetter) {  
-  const container = document.getElementById("bankTracks");  
-  const list = banks[bankLetter] || [];  
-  if (!list.length) {  
-    container.textContent = `Bank ${bankLetter}: empty.`;  
-    return;  
-  }  
-  container.innerHTML = "";  
-  list.forEach(item => {  
-    const div = document.createElement("div");  
-    div.className = "bank-track-item";  
-    const labelArtist = item.artist || "Unknown";  
-    const labelTitle = item.title || "Untitled";  
-    div.innerHTML =  
-      `<span>${labelArtist} — ${labelTitle}</span>  
-       <span>  
-         <button class="bankLoadA">Deck A</button>  
-         <button class="bankLoadB">Deck B</button>  
-       </span>`;  
-    div.querySelector(".bankLoadA").addEventListener("click", () => {  
-      loadToDeck("A", item);  
-    });  
-    div.querySelector(".bankLoadB").addEventListener("click", () => {  
-      loadToDeck("B", item);  
-    });  
-    container.appendChild(div);  
-  });  
-}  
+// =====================================================
+// 🏦 GLCTC1 BANK DISPLAY
+// =====================================================
+
+function renderBank(bankLetter) {
+
+  const container =
+    document.getElementById(
+      "bankTracks"
+    );
+
+  if (!container) return;
+
+  const letter =
+    String(
+      bankLetter || ""
+    ).toUpperCase();
+
+  const list =
+    banks[letter] || [];
+
+  const bankName =
+    glctc1GetBankName(
+      letter
+    );
+
+  // ---------------------------------------------------
+  // 🏷️ EMPTY BANK
+  // ---------------------------------------------------
+
+  if (!list.length) {
+
+    container.innerHTML =
+      `<strong>${bankName}</strong>
+       <div style="margin-top:6px;">
+         Bank ${letter}: empty.
+       </div>`;
+
+    return;
+  }
+
+  // ---------------------------------------------------
+  // 🏷️ BANK HEADER
+  // ---------------------------------------------------
+
+  container.innerHTML =
+    `<div style="
+      margin-bottom:8px;
+      font-weight:bold;
+      letter-spacing:0.08em;
+    ">
+      ${bankName}
+      <span style="opacity:0.55;">
+        (${letter})
+      </span>
+    </div>`;
+
+  // ---------------------------------------------------
+  // 🎵 BANK TRACKS
+  // ---------------------------------------------------
+
+  list.forEach(item => {
+
+    const div =
+      document.createElement(
+        "div"
+      );
+
+    div.className =
+      "bank-track-item";
+
+    const labelArtist =
+      item.artist ||
+      "Unknown";
+
+    const labelTitle =
+      item.title ||
+      "Untitled";
+
+    div.innerHTML =
+      `<span>
+        ${labelArtist} — ${labelTitle}
+      </span>
+
+      <span>
+        <button
+          class="bankLoadA"
+          type="button"
+        >
+          Deck A
+        </button>
+
+        <button
+          class="bankLoadB"
+          type="button"
+        >
+          Deck B
+        </button>
+      </span>`;
+
+    div
+      .querySelector(
+        ".bankLoadA"
+      )
+      .addEventListener(
+        "click",
+        () => {
+
+          loadToDeck(
+            "A",
+            item
+          );
+
+        }
+      );
+
+    div
+      .querySelector(
+        ".bankLoadB"
+      )
+      .addEventListener(
+        "click",
+        () => {
+
+          loadToDeck(
+            "B",
+            item
+          );
+
+        }
+      );
+
+    container.appendChild(
+      div
+    );
+
+  });
+
+}
   
 // --- WIRING ---  
 function wireControls() {  

@@ -6269,12 +6269,250 @@ function setCrossfader(value) {
   b.volume = value;  
 }
   
-// --- MASTER LIBRARY / BANKS STATE ---  
-const banks = window.banks || (window.banks = {});  
-"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => { if (!banks[l]) banks[l] = []; });  
-  
-let library = [];  
-let libraryIndex = 0;  
+// =====================================================
+// 🏦 GLCTC1 MASTER LIBRARY / BANKS STATE
+// =====================================================
+
+const banks =
+window.banks ||
+(window.banks = {});
+
+const GLCTC1_BANK_LETTERS =
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+// -----------------------------------------------------
+// 🏦 CREATE A–Z BANKS IF THEY DO NOT EXIST
+// -----------------------------------------------------
+
+GLCTC1_BANK_LETTERS.forEach(letter => {
+
+if (!banks[letter]) {
+banks[letter] = [];
+}
+
+});
+
+// -----------------------------------------------------
+// 🏷️ BANK CUSTOM NAMES
+// -----------------------------------------------------
+
+const GLCTC1_BANK_NAMES_KEY =
+"glctc1_bank_names";
+
+let glctc1BankNames = {};
+
+try {
+
+glctc1BankNames =
+JSON.parse(
+localStorage.getItem(
+GLCTC1_BANK_NAMES_KEY
+) || "{}"
+);
+
+} catch (error) {
+
+console.warn(
+"⚠️ GLCTC1 BANK NAMES LOAD WARNING:",
+error
+);
+
+glctc1BankNames = {};
+
+}
+
+// -----------------------------------------------------
+// 🏷️ GET BANK DISPLAY NAME
+// -----------------------------------------------------
+
+function glctc1GetBankName(letter) {
+
+const bankLetter =
+String(letter || "")
+.toUpperCase();
+
+return (
+glctc1BankNames[bankLetter] ||
+bankLetter
+);
+
+}
+
+// -----------------------------------------------------
+// 💾 SAVE BANK NAME
+// -----------------------------------------------------
+
+function glctc1SaveBankName(
+letter,
+name
+) {
+
+const bankLetter =
+String(letter || "")
+.toUpperCase();
+
+const cleanName =
+String(name || "")
+.trim();
+
+if (!bankLetter) return;
+
+if (cleanName) {
+
+glctc1BankNames[bankLetter] =
+cleanName;
+
+} else {
+
+delete glctc1BankNames[bankLetter];
+
+}
+
+localStorage.setItem(
+GLCTC1_BANK_NAMES_KEY,
+JSON.stringify(
+glctc1BankNames
+)
+);
+
+}
+
+// -----------------------------------------------------
+// 🏷️ UPDATE BANK BUTTON LABELS
+// -----------------------------------------------------
+
+function glctc1UpdateBankButtons() {
+
+document
+.querySelectorAll(".bank-btn")
+.forEach(button => {
+
+const letter =
+String(
+button.dataset.bank || ""
+).toUpperCase();
+
+if (!letter) return;
+
+button.textContent =
+glctc1GetBankName(
+letter
+);
+
+button.title =
+`${letter} — Double-click to rename`;
+
+});
+
+}
+
+// -----------------------------------------------------
+// ✏️ RENAME BANK
+// -----------------------------------------------------
+
+function glctc1RenameBank(letter) {
+
+const bankLetter =
+String(letter || "")
+.toUpperCase();
+
+if (!bankLetter) return;
+
+const currentName =
+glctc1GetBankName(
+bankLetter
+);
+
+const newName =
+prompt(
+`Name Bank ${bankLetter}:`,
+currentName === bankLetter
+? ""
+: currentName
+);
+
+if (newName === null) {
+return;
+}
+
+glctc1SaveBankName(
+bankLetter,
+newName
+);
+
+glctc1UpdateBankButtons();
+
+console.log(
+"✅ GLCTC1 BANK RENAMED:",
+bankLetter,
+"→",
+glctc1GetBankName(bankLetter)
+);
+
+}
+
+// -----------------------------------------------------
+// 🖱️ BANK DOUBLE-CLICK WIRING
+// -----------------------------------------------------
+// Uses event delegation so it works even when the
+// bank buttons are created later in the page.
+// -----------------------------------------------------
+
+document.addEventListener(
+"dblclick",
+event => {
+
+const button =
+event.target.closest(".bank-btn");
+
+if (!button) return;
+
+event.preventDefault();
+event.stopPropagation();
+
+glctc1RenameBank(
+button.dataset.bank
+);
+
+},
+true
+);
+
+// -----------------------------------------------------
+// 🔄 RESTORE SAVED BANK NAMES
+// -----------------------------------------------------
+
+function glctc1RestoreBankNames() {
+
+glctc1UpdateBankButtons();
+
+}
+
+// Restore after the HTML bank buttons exist.
+if (
+document.readyState === "loading"
+) {
+
+document.addEventListener(
+"DOMContentLoaded",
+glctc1RestoreBankNames,
+{
+once: true
+}
+);
+
+} else {
+
+glctc1RestoreBankNames();
+
+}
+
+// -----------------------------------------------------
+// 📚 MASTER LIBRARY STATE
+// -----------------------------------------------------
+
+let library = [];
+let libraryIndex = 0;
 let selectedLibraryTrack = null;
 
 
@@ -7338,46 +7576,54 @@ function renderLibraryTable(searchTerm = "") {
     // ===================================================
 // SELECT LIBRARY TRACK
 // ===================================================
+
 row.addEventListener(
-"click",
-() => {
+  "click",
+  () => {
 
-selectedLibraryTrack =
-track;
+    selectedLibraryTrack =
+      track;
 
-// Find its actual position
-// in the full library
-libraryIndex =
-library.indexOf(track);
+    // Find its actual position
+    // in the full library
+    libraryIndex =
+      library.indexOf(track);
 
-updateSelectedSlot(
-track
+
+    updateSelectedSlot(
+      track
+    );
+
+    playLibraryTrack(
+      track
+    );
+
+    playPlaylistMasterTrack(
+      track
+    );
+
+    highlightSelectedRow(
+      row
+    );
+
+
+    // Populate the
+    // GLCTC1 Master Library Editor
+
+    showDetails(
+      track
+    );
+
+  }
 );
 
-// =================================================
-// 🎵 MASTER LIBRARY ONLY
-// =================================================
-// Clicking a Master Library track plays ONLY
-// the separate Master Library player.
-// It must NOT start Playlist Master.
-// =================================================
 
-playLibraryTrack(
-track
+tbody.appendChild(
+  row
 );
 
-highlightSelectedRow(
-row
-);
-
-// Populate the
-// GLCTC1 Master Library Editor
-showDetails(
-track
-);
-
+});
 }
-);
 
 /* =====================================================
    💾 GLCTC1 MASTER LIBRARY — UPDATE SELECTED TRACK

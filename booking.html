@@ -1821,6 +1821,1725 @@ textarea {
 
 </div>
 
+<!-- ============================================================
+     🌌 GLCTC1 BOOKING SPACE ENGINE
+     STEP 1 — FRONT-END WIRING
+     ============================================================ -->
+
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+(function () {
+
+  "use strict";
+
+  console.log("🌌 GLCTC1 BOOKING SPACE ENGINE — STARTING");
+
+  /* ==========================================================
+     🔐 SUPABASE CONFIGURATION
+     ----------------------------------------------------------
+     USE THE SAME SUPABASE PROJECT AS GLCTC1 MUSIC.
+
+     DO NOT CREATE A NEW PROJECT.
+
+     Replace the two values below with the same values already
+     used by your existing GLCTC1 pages.
+     ========================================================== */
+
+  const GLCTC1_SUPABASE_URL =
+    window.GLCTC1_SUPABASE_URL ||
+    "";
+
+  const GLCTC1_SUPABASE_ANON_KEY =
+    window.GLCTC1_SUPABASE_ANON_KEY ||
+    "";
+
+  let supabaseClient = null;
+
+  if (
+    GLCTC1_SUPABASE_URL &&
+    GLCTC1_SUPABASE_ANON_KEY &&
+    window.supabase
+  ) {
+
+    supabaseClient =
+      window.supabase.createClient(
+        GLCTC1_SUPABASE_URL,
+        GLCTC1_SUPABASE_ANON_KEY
+      );
+
+    console.log(
+      "✅ GLCTC1 BOOKING SPACE — SUPABASE CONNECTED"
+    );
+
+  } else {
+
+    console.warn(
+      "⚠️ GLCTC1 BOOKING DATA NOT CONFIGURED YET"
+    );
+
+  }
+
+
+  /* ==========================================================
+     🌌 GLOBAL BOOKING STATE
+     ========================================================== */
+
+  const BOOKING = {
+
+    currentMonth:
+      new Date(
+        new Date().getFullYear(),
+        new Date().getMonth(),
+        1
+      ),
+
+    selectedArtist: null,
+
+    selectedDate: null,
+
+    availability: {},
+
+    searchResults: [],
+
+    currentUser: null,
+
+    databaseReady: false,
+
+    databaseWarningShown: false
+
+  };
+
+
+  /* ==========================================================
+     🔧 HELPERS
+     ========================================================== */
+
+  function log() {
+
+    console.log(
+      "🌌 GLCTC1 BOOKING:",
+      ...arguments
+    );
+
+  }
+
+
+  function warn() {
+
+    console.warn(
+      "🌌 GLCTC1 BOOKING:",
+      ...arguments
+    );
+
+  }
+
+
+  function escapeHTML(value) {
+
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  }
+
+
+  function formatDate(date) {
+
+    return date
+      .toISOString()
+      .split("T")[0];
+
+  }
+
+
+  function formatDisplayDate(dateString) {
+
+    if (!dateString) {
+      return "";
+    }
+
+    const date =
+      new Date(
+        dateString + "T00:00:00"
+      );
+
+    return date.toLocaleDateString(
+      "en-GB",
+      {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }
+    );
+
+  }
+
+
+  function monthName(date) {
+
+    return date.toLocaleDateString(
+      "en-GB",
+      {
+        month: "long",
+        year: "numeric"
+      }
+    ).toUpperCase();
+
+  }
+
+
+  function showStatus(message) {
+
+    let box =
+      document.getElementById(
+        "glctc1BookingStatus"
+      );
+
+    if (!box) {
+
+      box =
+        document.createElement("div");
+
+      box.id =
+        "glctc1BookingStatus";
+
+      box.style.cssText = `
+        margin:15px 0;
+        padding:12px 15px;
+        border:1px solid rgba(0,255,255,.45);
+        border-radius:8px;
+        background:rgba(0,0,20,.75);
+        color:#0ff;
+        text-align:center;
+        font-size:.78rem;
+        box-shadow:0 0 15px rgba(0,255,255,.18);
+      `;
+
+      const container =
+        document.querySelector(
+          ".booking-container"
+        );
+
+      if (container) {
+        container.prepend(box);
+      }
+
+    }
+
+    box.textContent = message;
+
+  }
+
+
+  /* ==========================================================
+     🛑 DATABASE NOT READY MESSAGE
+     ========================================================== */
+
+  function databaseNotReady() {
+
+    if (BOOKING.databaseWarningShown) {
+      return;
+    }
+
+    BOOKING.databaseWarningShown = true;
+
+    showStatus(
+      "⚠️ SUPABASE BOOKING DATA NOT CONFIGURED — FRONT-END BOOKING SYSTEM READY"
+    );
+
+  }
+
+
+  /* ==========================================================
+     🔐 GET CURRENT USER
+     ========================================================== */
+
+  async function loadCurrentUser() {
+
+    if (!supabaseClient) {
+
+      databaseNotReady();
+
+      return null;
+
+    }
+
+    try {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient.auth.getUser();
+
+      if (error) {
+        throw error;
+      }
+
+      BOOKING.currentUser =
+        data?.user || null;
+
+      return BOOKING.currentUser;
+
+    } catch (error) {
+
+      warn(
+        "AUTH READ ERROR:",
+        error
+      );
+
+      return null;
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     👤 ARTIST SEARCH
+     ========================================================== */
+
+  async function searchArtists() {
+
+    const nameInput =
+      document.getElementById(
+        "artistName"
+      );
+
+    const idInput =
+      document.getElementById(
+        "artistId"
+      );
+
+    if (!nameInput || !idInput) {
+      return;
+    }
+
+    const artistName =
+      nameInput.value.trim();
+
+    const artistId =
+      idInput.value.trim();
+
+    if (!artistName && !artistId) {
+
+      showStatus(
+        "ENTER AN ARTIST NAME OR GLCTC1 ID"
+      );
+
+      return;
+
+    }
+
+    if (!supabaseClient) {
+
+      databaseNotReady();
+
+      return;
+
+    }
+
+    try {
+
+      let query =
+        supabaseClient
+          .from("profiles")
+          .select(
+            "id, artist_name"
+          );
+
+      if (artistId) {
+
+        query =
+          query.eq(
+            "id",
+            artistId
+          );
+
+      } else {
+
+        query =
+          query.ilike(
+            "artist_name",
+            "%" + artistName + "%"
+          );
+
+      }
+
+      const {
+        data,
+        error
+      } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      BOOKING.searchResults =
+        data || [];
+
+      if (!BOOKING.searchResults.length) {
+
+        showStatus(
+          "NO GLCTC1 ARTIST FOUND"
+        );
+
+        BOOKING.selectedArtist =
+          null;
+
+        renderCalendar();
+
+        return;
+
+      }
+
+      if (
+        BOOKING.searchResults.length === 1
+      ) {
+
+        selectArtist(
+          BOOKING.searchResults[0]
+        );
+
+        showStatus(
+          "ARTIST SELECTED: " +
+          BOOKING.searchResults[0].artist_name
+        );
+
+        return;
+
+      }
+
+      renderArtistResults();
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 ARTIST SEARCH ERROR:",
+        error
+      );
+
+      showStatus(
+        "ARTIST SEARCH ERROR — CHECK SUPABASE"
+      );
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     👤 ARTIST SEARCH RESULTS
+     ========================================================== */
+
+  function renderArtistResults() {
+
+    let resultsBox =
+      document.getElementById(
+        "glctc1ArtistSearchResults"
+      );
+
+    if (!resultsBox) {
+
+      resultsBox =
+        document.createElement("div");
+
+      resultsBox.id =
+        "glctc1ArtistSearchResults";
+
+      resultsBox.style.cssText = `
+        margin-top:10px;
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+      `;
+
+      const searchRow =
+        document.querySelector(
+          ".search-row"
+        );
+
+      if (searchRow) {
+        searchRow.after(resultsBox);
+      }
+
+    }
+
+    resultsBox.innerHTML = "";
+
+    BOOKING.searchResults
+      .forEach(function (artist) {
+
+        const button =
+          document.createElement("button");
+
+        button.type =
+          "button";
+
+        button.textContent =
+          artist.artist_name +
+          "  •  GLCTC1 ID: " +
+          artist.id;
+
+        button.style.cssText = `
+          width:100%;
+          margin:0;
+          padding:10px;
+          border:1px solid rgba(0,255,255,.45);
+          border-radius:6px;
+          background:#0a0a1a;
+          color:#0ff;
+          font-family:Orbitron,sans-serif;
+          cursor:pointer;
+        `;
+
+        button.addEventListener(
+          "click",
+          function () {
+
+            selectArtist(
+              artist
+            );
+
+            resultsBox.innerHTML =
+              "";
+
+          }
+        );
+
+        resultsBox.appendChild(
+          button
+        );
+
+      });
+
+  }
+
+
+  /* ==========================================================
+     👤 SELECT ARTIST
+     ========================================================== */
+
+  function selectArtist(artist) {
+
+    if (!artist) {
+      return;
+    }
+
+    BOOKING.selectedArtist = {
+
+      id: artist.id,
+
+      artist_name:
+        artist.artist_name ||
+        "ARTIST"
+
+    };
+
+    BOOKING.selectedDate =
+      null;
+
+    updateSelectedArtistField();
+
+    clearSelectedDateField();
+
+    loadArtistAvailability();
+
+  }
+
+
+  /* ==========================================================
+     📝 SELECTED ARTIST FORM FIELD
+     ========================================================== */
+
+  function updateSelectedArtistField() {
+
+    const form =
+      document.querySelector(
+        ".booking-form"
+      );
+
+    if (!form) {
+      return;
+    }
+
+    const inputs =
+      form.querySelectorAll(
+        "input"
+      );
+
+    if (inputs.length > 0) {
+
+      inputs[0].value =
+        BOOKING.selectedArtist
+          ? BOOKING.selectedArtist.artist_name +
+            " / GLCTC1 ID: " +
+            BOOKING.selectedArtist.id
+          : "";
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     📅 SELECTED DATE FORM FIELD
+     ========================================================== */
+
+  function clearSelectedDateField() {
+
+    const form =
+      document.querySelector(
+        ".booking-form"
+      );
+
+    if (!form) {
+      return;
+    }
+
+    const dateInputs =
+      form.querySelectorAll(
+        'input[type="date"]'
+      );
+
+    if (dateInputs.length) {
+
+      dateInputs[0].value =
+        "";
+
+    }
+
+  }
+
+
+  function updateSelectedDateField() {
+
+    const form =
+      document.querySelector(
+        ".booking-form"
+      );
+
+    if (!form) {
+      return;
+    }
+
+    const dateInputs =
+      form.querySelectorAll(
+        'input[type="date"]'
+      );
+
+    if (dateInputs.length) {
+
+      dateInputs[0].value =
+        BOOKING.selectedDate ||
+        "";
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     📅 LOAD ARTIST AVAILABILITY
+     ========================================================== */
+
+  async function loadArtistAvailability() {
+
+    BOOKING.availability =
+      {};
+
+    if (
+      !BOOKING.selectedArtist
+    ) {
+
+      renderCalendar();
+
+      return;
+
+    }
+
+    if (!supabaseClient) {
+
+      databaseNotReady();
+
+      renderCalendar();
+
+      return;
+
+    }
+
+    try {
+
+      const start =
+        new Date(
+          BOOKING.currentMonth
+        );
+
+      start.setMonth(
+        start.getMonth() - 1
+      );
+
+      const end =
+        new Date(
+          BOOKING.currentMonth
+        );
+
+      end.setMonth(
+        end.getMonth() + 13
+      );
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient
+          .from(
+            "artist_availability"
+          )
+          .select(
+            "artist_id, availability_date, status"
+          )
+          .eq(
+            "artist_id",
+            BOOKING.selectedArtist.id
+          )
+          .gte(
+            "availability_date",
+            formatDate(start)
+          )
+          .lte(
+            "availability_date",
+            formatDate(end)
+          );
+
+      if (error) {
+        throw error;
+      }
+
+      (data || [])
+        .forEach(function (row) {
+
+          BOOKING.availability[
+            row.availability_date
+          ] =
+            row.status;
+
+        });
+
+      BOOKING.databaseReady =
+        true;
+
+      renderCalendar();
+
+    } catch (error) {
+
+      warn(
+        "AVAILABILITY TABLE NOT READY:",
+        error
+      );
+
+      BOOKING.databaseReady =
+        false;
+
+      databaseNotReady();
+
+      renderCalendar();
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     📅 CALENDAR ENGINE
+     ========================================================== */
+
+  function renderCalendar() {
+
+    const calendar =
+      document.querySelector(
+        ".calendar"
+      );
+
+    const header =
+      document.querySelector(
+        ".calendar-header strong"
+      );
+
+    if (!calendar || !header) {
+      return;
+    }
+
+    header.textContent =
+      monthName(
+        BOOKING.currentMonth
+      );
+
+    calendar.innerHTML = "";
+
+    const weekdays = [
+      "MON",
+      "TUE",
+      "WED",
+      "THU",
+      "FRI",
+      "SAT",
+      "SUN"
+    ];
+
+    weekdays.forEach(function (day) {
+
+      const element =
+        document.createElement("div");
+
+      element.className =
+        "day-name";
+
+      element.textContent =
+        day;
+
+      calendar.appendChild(
+        element
+      );
+
+    });
+
+
+    const year =
+      BOOKING.currentMonth
+        .getFullYear();
+
+    const month =
+      BOOKING.currentMonth
+        .getMonth();
+
+    const firstDay =
+      new Date(
+        year,
+        month,
+        1
+      );
+
+    let mondayIndex =
+      firstDay.getDay() - 1;
+
+    if (mondayIndex < 0) {
+      mondayIndex = 6;
+    }
+
+    const daysInMonth =
+      new Date(
+        year,
+        month + 1,
+        0
+      ).getDate();
+
+
+    /* PREVIOUS MONTH TAIL */
+
+    const previousMonthDays =
+      new Date(
+        year,
+        month,
+        0
+      ).getDate();
+
+    for (
+      let i = mondayIndex - 1;
+      i >= 0;
+      i--
+    ) {
+
+      const dayNumber =
+        previousMonthDays - i;
+
+      const cell =
+        document.createElement("div");
+
+      cell.className =
+        "day";
+
+      cell.textContent =
+        dayNumber;
+
+      cell.style.opacity =
+        "0.35";
+
+      calendar.appendChild(
+        cell
+      );
+
+    }
+
+
+    /* CURRENT MONTH */
+
+    for (
+      let dayNumber = 1;
+      dayNumber <= daysInMonth;
+      dayNumber++
+    ) {
+
+      const date =
+        new Date(
+          year,
+          month,
+          dayNumber
+        );
+
+      const dateString =
+        formatDate(date);
+
+      const cell =
+        document.createElement("div");
+
+      cell.className =
+        "day";
+
+      cell.dataset.date =
+        dateString;
+
+      cell.textContent =
+        dayNumber;
+
+
+      const status =
+        BOOKING.availability[
+          dateString
+        ] || "unavailable";
+
+
+      if (
+        status === "available"
+      ) {
+
+        cell.classList.add(
+          "available"
+        );
+
+      }
+
+      if (
+        status === "booked"
+      ) {
+
+        cell.classList.add(
+          "booked"
+        );
+
+      }
+
+      if (
+        status === "pending"
+      ) {
+
+        cell.classList.add(
+          "pending"
+        );
+
+      }
+
+
+      if (
+        BOOKING.selectedDate ===
+        dateString
+      ) {
+
+        cell.classList.add(
+          "selected"
+        );
+
+      }
+
+
+      /* Only available dates can
+         currently be selected. */
+
+      if (
+        status === "available"
+      ) {
+
+        cell.addEventListener(
+          "click",
+          function () {
+
+            selectBookingDate(
+              dateString
+            );
+
+          }
+        );
+
+      }
+
+      calendar.appendChild(
+        cell
+      );
+
+    }
+
+
+    /* NEXT MONTH FILL */
+
+    const totalCells =
+      calendar.children.length - 7;
+
+    const remainder =
+      totalCells % 7;
+
+    if (remainder !== 0) {
+
+      const fill =
+        7 - remainder;
+
+      for (
+        let i = 1;
+        i <= fill;
+        i++
+      ) {
+
+        const cell =
+          document.createElement("div");
+
+        cell.className =
+          "day";
+
+        cell.textContent =
+          i;
+
+        cell.style.opacity =
+          "0.35";
+
+        calendar.appendChild(
+          cell
+        );
+
+      }
+
+    }
+
+
+    updateCalendarNavigation();
+
+  }
+
+
+  /* ==========================================================
+     📅 DATE SELECTION
+     ========================================================== */
+
+  function selectBookingDate(
+    dateString
+  ) {
+
+    if (
+      !BOOKING.selectedArtist
+    ) {
+
+      showStatus(
+        "SELECT AN ARTIST FIRST"
+      );
+
+      return;
+
+    }
+
+    const status =
+      BOOKING.availability[
+        dateString
+      ];
+
+    if (
+      status !== "available"
+    ) {
+
+      showStatus(
+        "THIS DATE IS NOT AVAILABLE"
+      );
+
+      return;
+
+    }
+
+    BOOKING.selectedDate =
+      dateString;
+
+    updateSelectedDateField();
+
+    renderCalendar();
+
+    showStatus(
+      "DATE SELECTED: " +
+      formatDisplayDate(
+        dateString
+      )
+    );
+
+  }
+
+
+  /* ==========================================================
+     ◀ ▶ CALENDAR NAVIGATION
+     ========================================================== */
+
+  function updateCalendarNavigation() {
+
+    const buttons =
+      document.querySelectorAll(
+        ".calendar-header button"
+      );
+
+    if (buttons.length < 2) {
+      return;
+    }
+
+    buttons[0].onclick =
+      function () {
+
+        BOOKING.currentMonth =
+          new Date(
+            BOOKING.currentMonth
+              .getFullYear(),
+            BOOKING.currentMonth
+              .getMonth() - 1,
+            1
+          );
+
+        loadArtistAvailability();
+
+      };
+
+
+    buttons[1].onclick =
+      function () {
+
+        BOOKING.currentMonth =
+          new Date(
+            BOOKING.currentMonth
+              .getFullYear(),
+            BOOKING.currentMonth
+              .getMonth() + 1,
+            1
+          );
+
+        loadArtistAvailability();
+
+      };
+
+  }
+
+
+  /* ==========================================================
+     📝 BOOKING FORM
+     ========================================================== */
+
+  function getBookingFormData() {
+
+    const form =
+      document.querySelector(
+        ".booking-form"
+      );
+
+    if (!form) {
+      return null;
+    }
+
+    const inputs =
+      form.querySelectorAll(
+        "input"
+      );
+
+    const selects =
+      form.querySelectorAll(
+        "select"
+      );
+
+    const textarea =
+      form.querySelector(
+        "textarea"
+      );
+
+
+    return {
+
+      artist_id:
+        BOOKING.selectedArtist?.id ||
+        null,
+
+      artist_name:
+        BOOKING.selectedArtist
+          ?.artist_name ||
+        "",
+
+      booking_date:
+        BOOKING.selectedDate ||
+        inputs[1]?.value ||
+        "",
+
+      event_name:
+        inputs[2]?.value.trim() ||
+        "",
+
+      event_type:
+        selects[0]?.value ||
+        "",
+
+      venue:
+        inputs[3]?.value.trim() ||
+        "",
+
+      town_city:
+        inputs[4]?.value.trim() ||
+        "",
+
+      start_time:
+        inputs[5]?.value ||
+        "",
+
+      end_time:
+        inputs[6]?.value ||
+        "",
+
+      contact_name:
+        inputs[7]?.value.trim() ||
+        "",
+
+      contact_email:
+        inputs[8]?.value.trim() ||
+        "",
+
+      message:
+        textarea?.value.trim() ||
+        ""
+
+    };
+
+  }
+
+
+  /* ==========================================================
+     🚀 SEND BOOKING REQUEST
+     ========================================================== */
+
+  async function submitBookingRequest() {
+
+    const booking =
+      getBookingFormData();
+
+    if (!booking) {
+      return;
+    }
+
+
+    if (
+      !booking.artist_id
+    ) {
+
+      showStatus(
+        "PLEASE SELECT AN ARTIST"
+      );
+
+      return;
+
+    }
+
+
+    if (
+      !booking.booking_date
+    ) {
+
+      showStatus(
+        "PLEASE SELECT AN AVAILABLE DATE"
+      );
+
+      return;
+
+    }
+
+
+    if (
+      !booking.event_name ||
+      !booking.event_type ||
+      !booking.venue ||
+      !booking.town_city ||
+      !booking.start_time ||
+      !booking.end_time ||
+      !booking.contact_name ||
+      !booking.contact_email
+    ) {
+
+      showStatus(
+        "PLEASE COMPLETE ALL REQUIRED BOOKING FIELDS"
+      );
+
+      return;
+
+    }
+
+
+    if (!supabaseClient) {
+
+      databaseNotReady();
+
+      showStatus(
+        "BOOKING FORM READY — SQL TABLES STILL NEED TO BE INSTALLED"
+      );
+
+      console.log(
+        "📦 BOOKING REQUEST READY:",
+        booking
+      );
+
+      return;
+
+    }
+
+
+    try {
+
+      showStatus(
+        "SENDING BOOKING REQUEST..."
+      );
+
+
+      const {
+        data: userData
+      } =
+        await supabaseClient.auth.getUser();
+
+
+      const requester =
+        userData?.user || null;
+
+
+      const payload = {
+
+        artist_id:
+          booking.artist_id,
+
+        requester_id:
+          requester?.id || null,
+
+        booking_date:
+          booking.booking_date,
+
+        event_name:
+          booking.event_name,
+
+        event_type:
+          booking.event_type,
+
+        venue:
+          booking.venue,
+
+        town_city:
+          booking.town_city,
+
+        country:
+          "",
+
+        start_time:
+          booking.start_time,
+
+        end_time:
+          booking.end_time,
+
+        contact_name:
+          booking.contact_name,
+
+        contact_email:
+          booking.contact_email,
+
+        contact_phone:
+          "",
+
+        message:
+          booking.message,
+
+        status:
+          "requested"
+
+      };
+
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient
+          .from(
+            "booking_requests"
+          )
+          .insert(
+            payload
+          )
+          .select()
+          .single();
+
+
+      if (error) {
+        throw error;
+      }
+
+
+      showStatus(
+        "✅ BOOKING REQUEST SENT"
+      );
+
+
+      log(
+        "BOOKING REQUEST CREATED:",
+        data
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "❌ BOOKING REQUEST ERROR:",
+        error
+      );
+
+      showStatus(
+        "BOOKING REQUEST COULD NOT BE SENT — CHECK SUPABASE / SQL"
+      );
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     🔍 FIND SEARCH BUTTON
+     ========================================================== */
+
+  function wireSearchButton() {
+
+    const searchRow =
+      document.querySelector(
+        ".search-row"
+      );
+
+    if (!searchRow) {
+      return;
+    }
+
+    const button =
+      searchRow.querySelector(
+        "button"
+      );
+
+    if (!button) {
+      return;
+    }
+
+    button.addEventListener(
+      "click",
+      searchArtists
+    );
+
+  }
+
+
+  /* ==========================================================
+     🚀 FIND BOOKING BUTTON
+     ========================================================== */
+
+  function wireBookingButton() {
+
+    const form =
+      document.querySelector(
+        ".booking-form"
+      );
+
+    if (!form) {
+      return;
+    }
+
+    const buttons =
+      form.querySelectorAll(
+        "button"
+      );
+
+    if (!buttons.length) {
+      return;
+    }
+
+    buttons[
+      buttons.length - 1
+    ].addEventListener(
+      "click",
+      submitBookingRequest
+    );
+
+  }
+
+
+  /* ==========================================================
+     ⌨️ SEARCH WITH ENTER
+     ========================================================== */
+
+  function wireSearchKeyboard() {
+
+    const nameInput =
+      document.getElementById(
+        "artistName"
+      );
+
+    const idInput =
+      document.getElementById(
+        "artistId"
+      );
+
+
+    [
+      nameInput,
+      idInput
+    ].forEach(function (input) {
+
+      if (!input) {
+        return;
+      }
+
+      input.addEventListener(
+        "keydown",
+        function (event) {
+
+          if (
+            event.key ===
+            "Enter"
+          ) {
+
+            event.preventDefault();
+
+            searchArtists();
+
+          }
+
+        }
+      );
+
+    });
+
+  }
+
+
+  /* ==========================================================
+     📅 TODAY BUTTON SUPPORT
+     ========================================================== */
+
+  function addTodayButton() {
+
+    const header =
+      document.querySelector(
+        ".calendar-header"
+      );
+
+    if (!header) {
+      return;
+    }
+
+    if (
+      document.getElementById(
+        "glctc1BookingToday"
+      )
+    ) {
+      return;
+    }
+
+    const todayButton =
+      document.createElement(
+        "button"
+      );
+
+    todayButton.id =
+      "glctc1BookingToday";
+
+    todayButton.type =
+      "button";
+
+    todayButton.textContent =
+      "TODAY";
+
+    todayButton.addEventListener(
+      "click",
+      function () {
+
+        const now =
+          new Date();
+
+        BOOKING.currentMonth =
+          new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            1
+          );
+
+        loadArtistAvailability();
+
+      }
+    );
+
+
+    header.insertBefore(
+      todayButton,
+      header.lastElementChild
+    );
+
+  }
+
+
+  /* ==========================================================
+     🧭 AUTOMATIC ROLLING CALENDAR
+     ========================================================== */
+
+  function checkRollingCalendar() {
+
+    const now =
+      new Date();
+
+    const currentMonth =
+      new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1
+      );
+
+    const currentStoredMonth =
+      BOOKING.currentMonth;
+
+    if (
+      currentStoredMonth
+        .getFullYear() !==
+      currentMonth.getFullYear() ||
+
+      currentStoredMonth
+        .getMonth() !==
+      currentMonth.getMonth()
+    ) {
+
+      BOOKING.currentMonth =
+        currentMonth;
+
+      loadArtistAvailability();
+
+    }
+
+  }
+
+
+  /* ==========================================================
+     🟢 INITIALISE
+     ========================================================== */
+
+  async function initialiseBookingSpace() {
+
+    log(
+      "INITIALISING..."
+    );
+
+    wireSearchButton();
+
+    wireSearchKeyboard();
+
+    wireBookingButton();
+
+    addTodayButton();
+
+    renderCalendar();
+
+    await loadCurrentUser();
+
+    checkRollingCalendar();
+
+
+    /*
+       Check once every hour.
+
+       This allows the calendar to move into the
+       new month without needing the page itself
+       to be manually edited.
+    */
+
+    setInterval(
+      checkRollingCalendar,
+      60 * 60 * 1000
+    );
+
+
+    if (!supabaseClient) {
+
+      databaseNotReady();
+
+    }
+
+
+    log(
+      "✅ BOOKING SPACE READY"
+    );
+
+  }
+
+
+  /* ==========================================================
+     🌌 PUBLIC API
+     ========================================================== */
+
+  window.GLCTC1Booking =
+    {
+
+      state:
+        BOOKING,
+
+      searchArtists:
+        searchArtists,
+
+      selectArtist:
+        selectArtist,
+
+      selectDate:
+        selectBookingDate,
+
+      renderCalendar:
+        renderCalendar,
+
+      loadAvailability:
+        loadArtistAvailability,
+
+      submitBooking:
+        submitBookingRequest
+
+    };
+
+
+  /* ==========================================================
+     ▶ START
+     ========================================================== */
+
+  if (
+    document.readyState ===
+    "loading"
+  ) {
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      initialiseBookingSpace
+    );
+
+  } else {
+
+    initialiseBookingSpace();
+
+  }
+
+})();
+</script>
 
 </body>
 </html>

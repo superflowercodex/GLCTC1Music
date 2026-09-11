@@ -2434,18 +2434,13 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 2 — CONTINUOUS POSITION MEMORY
+   SWAP 1 — PERSIST CURRENT TRACK + POSITION
 ===================================================== */
 
 const RADIO_STATE_KEY =
   "GLCTC1_RADIO_STATION_STATE_V1";
 
 let radioStationState = null;
-
-
-/* =====================================================
-   RADIO TRACK KEY
-===================================================== */
 
 function radioTrackKey(track){
 
@@ -2463,11 +2458,6 @@ function radioTrackKey(track){
   ).trim();
 
 }
-
-
-/* =====================================================
-   SAVE CURRENT RADIO POSITION
-===================================================== */
 
 function saveRadioStationState(){
 
@@ -2514,11 +2504,6 @@ function saveRadioStationState(){
 
 }
 
-
-/* =====================================================
-   LOAD RADIO STATE
-===================================================== */
-
 function loadRadioStationState(){
 
   try{
@@ -2560,11 +2545,6 @@ function loadRadioStationState(){
 
 }
 
-
-/* =====================================================
-   FIND SAVED RADIO TRACK
-===================================================== */
-
 function findRadioTrack(
   trackKey
 ){
@@ -2581,11 +2561,6 @@ function findRadioTrack(
     ) || null;
 
 }
-
-
-/* =====================================================
-   CALCULATE CONTINUOUS RESUME POSITION
-===================================================== */
 
 function radioResumePosition(
   state
@@ -2621,68 +2596,134 @@ function radioResumePosition(
 
 }
 
-
 /* =====================================================
-   CONTINUOUS POSITION SAVE
+   RANDOM / INITIAL TRACK
+   CONTINUOUS RANDOM RADIO
 ===================================================== */
 
-let radioSaveTimer =
-  null;
+async function chooseRandom(){
 
-function scheduleRadioStateSave(){
+  const list =
+    playableLibrary();
 
-  if(radioSaveTimer)
-    return;
+  if(
+    !list.length
+  )
+    return false;
 
-  radioSaveTimer =
-    setTimeout(
-      () => {
 
-        radioSaveTimer =
-          null;
+  /*
+     Pick a RANDOM playable track.
 
-        saveRadioStationState();
+     This is the station behaviour:
+     every time chooseRandom() runs,
+     a random Master Library track is selected.
+  */
 
-      },
-      1000
+  let nextIndex =
+    Math.floor(
+      Math.random() *
+      list.length
     );
 
-}
 
+  /*
+     Avoid immediately playing the same
+     track again when more than one track
+     is available.
+  */
 
-/* =====================================================
-   SAVE WHILE RADIO IS PLAYING
-===================================================== */
+  if(
+    list.length > 1 &&
+    currentTrack
+  ){
 
-audio.addEventListener(
-  "timeupdate",
-  () => {
+    const currentKey =
+      radioTrackKey(
+        currentTrack
+      );
 
-    if(
-      currentTrack &&
-      !audio.paused
+    let attempts = 0;
+
+    while(
+      radioTrackKey(
+        list[nextIndex]
+      ) === currentKey &&
+      attempts < 20
     ){
 
-      scheduleRadioStateSave();
+      nextIndex =
+        Math.floor(
+          Math.random() *
+          list.length
+        );
+
+      attempts++;
 
     }
 
   }
-);
 
 
-/* =====================================================
-   SAVE WHEN PAGE IS REFRESHED / LEFT
-===================================================== */
+  /*
+     Set the new station track.
+  */
 
-window.addEventListener(
-  "beforeunload",
-  () => {
+  currentTrack =
+    list[nextIndex];
 
-    saveRadioStationState();
+  currentIndex =
+    library.indexOf(
+      currentTrack
+    );
+
+
+  updateTrackUI();
+
+
+  /*
+     Start the selected track.
+
+     playTrack() already handles:
+     - signed Master Audio URL
+     - audio source loading
+     - playback
+     - autoplay attempt
+     - autoplay wake if blocked
+  */
+
+  const result =
+    await playTrack(
+      currentTrack
+    );
+
+
+  /*
+     Only save the station state after
+     the new track has actually been loaded.
+  */
+
+  if(result){
+
+    try{
+
+      saveRadioStationState();
+
+    }catch(error){
+
+      console.warn(
+        "GLCTC1 RADIO STATE SAVE ERROR:",
+        error
+      );
+
+    }
 
   }
-);
+
+
+  return result;
+
+}
 
 /* =====================================================
    UPDATE TRACK DISPLAY
@@ -3060,67 +3101,36 @@ async function playLibraryTrack(
 
 /* =====================================================
    RADIO EVENTS
+   CONTINUOUS RANDOM STATION
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    if(
-      radioAdvanceBusy
-    )
-      return;
-
-    radioAdvanceBusy =
-      true;
-
-    try{
-
-      await chooseRandom();
-
-    }finally{
-
-      setTimeout(
-        () => {
-          radioAdvanceBusy = false;
-        },
-        250
-      );
-
-    }
-
-  }
-);
-
-audio.addEventListener(
-  "error",
-  () => {
-
-    console.error(
-      "GLCTC1 RADIO MEDIA ERROR:",
-      audio.error
+    console.log(
+      "🔄 GLCTC1 TRACK ENDED — SELECTING RANDOM NEXT TRACK"
     );
 
-    if(
-      playableLibrary().length > 1 &&
-      !radioAdvanceBusy
-    ){
+    /*
+       The current track has finished.
 
-      radioAdvanceBusy =
-        true;
+       chooseRandom() now selects a new
+       random playable Master Library track
+       and starts it automatically.
+    */
 
-      setTimeout(
-        async () => {
+    const result =
+      await chooseRandom();
 
-          try{
-            await chooseRandom();
-          }finally{
-            radioAdvanceBusy = false;
-          }
+    if(!result){
 
-        },
-        700
+      console.warn(
+        "GLCTC1 RADIO: RANDOM NEXT TRACK FAILED"
       );
+
+      $("radioStatus").textContent =
+        "● RADIO WAITING";
 
     }
 
@@ -3155,12 +3165,14 @@ function disarmRadioWake(){
 
 }
 
+
 function armRadioWake(){
 
   if(
     radioWakeHandler
   )
     return;
+
 
   radioWakeHandler =
     async () => {
@@ -3171,12 +3183,26 @@ function armRadioWake(){
       )
         return;
 
+
       radioWakeBusy =
         true;
 
+
       try{
 
+        /*
+           IMPORTANT:
+
+           Do NOT choose another track here.
+
+           The station already has its current
+           track. This wake simply gives the
+           browser the user interaction required
+           to start that track.
+        */
+
         await audio.play();
+
 
         $("radioStatus").textContent =
           "● RADIO PLAYING";
@@ -3184,9 +3210,12 @@ function armRadioWake(){
         $("playBtn").textContent =
           "⏸ PAUSE";
 
+
         disarmRadioWake();
 
+
         await ensureAudioEngine();
+
 
       }catch(error){
 
@@ -3194,6 +3223,7 @@ function armRadioWake(){
           "GLCTC1 AUDIO START ERROR:",
           error
         );
+
 
       }finally{
 
@@ -3203,6 +3233,7 @@ function armRadioWake(){
       }
 
     };
+
 
   window.addEventListener(
     "pointerdown",

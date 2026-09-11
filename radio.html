@@ -2434,26 +2434,13 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SHARED STATION CLOCK
+   SWAP 1 — PERSIST CURRENT TRACK + POSITION
 ===================================================== */
 
 const RADIO_STATE_KEY =
   "GLCTC1_RADIO_STATION_STATE_V1";
 
-const RADIO_CHANNEL_NAME =
-  "GLCTC1_SHARED_RADIO_STATION";
-
 let radioStationState = null;
-
-let radioStationChannel = null;
-
-let radioStationReady =
-  false;
-
-
-/* =====================================================
-   RADIO TRACK KEY
-===================================================== */
 
 function radioTrackKey(track){
 
@@ -2472,20 +2459,10 @@ function radioTrackKey(track){
 
 }
 
-
-/* =====================================================
-   SAVE RADIO STATION STATE
-===================================================== */
-
 function saveRadioStationState(){
 
   if(!currentTrack)
     return;
-
-  const position =
-    Number(
-      audio.currentTime || 0
-    );
 
   radioStationState = {
 
@@ -2495,19 +2472,15 @@ function saveRadioStationState(){
       ),
 
     position:
-      position,
+      Number(
+        audio.currentTime || 0
+      ),
 
     playing:
       !audio.paused,
 
     savedAt:
-      Date.now(),
-
-    startedAt:
-      Date.now() -
-      (
-        position * 1000
-      )
+      Date.now()
 
   };
 
@@ -2530,11 +2503,6 @@ function saveRadioStationState(){
   }
 
 }
-
-
-/* =====================================================
-   LOAD RADIO STATION STATE
-===================================================== */
 
 function loadRadioStationState(){
 
@@ -2577,11 +2545,6 @@ function loadRadioStationState(){
 
 }
 
-
-/* =====================================================
-   FIND RADIO TRACK
-===================================================== */
-
 function findRadioTrack(
   trackKey
 ){
@@ -2599,33 +2562,12 @@ function findRadioTrack(
 
 }
 
-
-/* =====================================================
-   RADIO CLOCK POSITION
-===================================================== */
-
 function radioResumePosition(
   state
 ){
 
   if(!state)
     return 0;
-
-  if(
-    state.startedAt
-  ){
-
-    return Math.max(
-      0,
-      (
-        Date.now() -
-        Number(
-          state.startedAt
-        )
-      ) / 1000
-    );
-
-  }
 
   let position =
     Number(
@@ -2654,436 +2596,8 @@ function radioResumePosition(
 
 }
 
-
-/* =====================================================
-   SHARED RADIO CHANNEL
-===================================================== */
-
-async function initialiseSharedRadio(){
-
-  if(
-    radioStationChannel
-  )
-    return radioStationChannel;
-
-  radioStationChannel =
-    supabaseClient
-      .channel(
-        RADIO_CHANNEL_NAME,
-        {
-          config:{
-            presence:{
-              key:
-                currentUser?.id ||
-                (
-                  "listener-" +
-                  Math.random()
-                    .toString(36)
-                    .slice(2)
-                )
-            }
-          }
-        }
-      );
-
-
-  /* ===================================================
-     RECEIVE ADMIN STATION BROADCAST
-  =================================================== */
-
-  radioStationChannel
-    .on(
-      "broadcast",
-      {
-        event:
-          "station_state"
-      },
-      async payload => {
-
-        if(
-          isAdmin
-        )
-          return;
-
-        const state =
-          payload?.payload;
-
-        if(
-          !state?.trackKey
-        )
-          return;
-
-        await applySharedRadioState(
-          state
-        );
-
-      }
-    );
-
-
-  /* ===================================================
-     PRESENCE SYNC
-  =================================================== */
-
-  radioStationChannel
-    .on(
-      "presence",
-      {
-        event:
-          "sync"
-      },
-      async () => {
-
-        if(
-          isAdmin
-        )
-          return;
-
-        const state =
-          readAdminPresenceState();
-
-        if(
-          state
-        ){
-
-          await applySharedRadioState(
-            state
-          );
-
-        }
-
-      }
-    );
-
-
-  await radioStationChannel.subscribe(
-    async status => {
-
-      if(
-        status !==
-        "SUBSCRIBED"
-      )
-        return;
-
-      radioStationReady =
-        true;
-
-
-      /*
-         ADMIN publishes the current
-         station state when connected.
-      */
-
-      if(
-        isAdmin
-      ){
-
-        const saved =
-          loadRadioStationState();
-
-        if(
-          saved?.trackKey
-        ){
-
-          await publishSharedRadioState(
-            saved
-          );
-
-        }
-
-      }else{
-
-        /*
-           PUBLIC LISTENER checks for
-           the current admin station.
-        */
-
-        const state =
-          readAdminPresenceState();
-
-        if(
-          state
-        ){
-
-          await applySharedRadioState(
-            state
-          );
-
-        }
-
-      }
-
-    }
-  );
-
-  return radioStationChannel;
-
-}
-
-
-/* =====================================================
-   READ ADMIN PRESENCE STATE
-===================================================== */
-
-function readAdminPresenceState(){
-
-  if(
-    !radioStationChannel
-  )
-    return null;
-
-  try{
-
-    const presenceState =
-      radioStationChannel
-        .presenceState();
-
-    const keys =
-      Object.keys(
-        presenceState || {}
-      );
-
-    for(
-      const key of keys
-    ){
-
-      const entries =
-        presenceState[key] || [];
-
-      for(
-        const entry of entries
-      ){
-
-        if(
-          entry?.isAdmin &&
-          entry?.trackKey
-        ){
-
-          return {
-
-            trackKey:
-              entry.trackKey,
-
-            startedAt:
-              Number(
-                entry.startedAt ||
-                0
-              ),
-
-            playing:
-              entry.playing !== false
-
-          };
-
-        }
-
-      }
-
-    }
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 PRESENCE READ ERROR:",
-      error
-    );
-
-  }
-
-  return null;
-
-}
-
-
-/* =====================================================
-   PUBLISH ADMIN STATION STATE
-===================================================== */
-
-async function publishSharedRadioState(
-  state
-){
-
-  if(
-    !isAdmin ||
-    !radioStationChannel ||
-    !state?.trackKey
-  )
-    return;
-
-  const sharedState = {
-
-    isAdmin:
-      true,
-
-    trackKey:
-      state.trackKey,
-
-    startedAt:
-      Number(
-        state.startedAt ||
-        (
-          Date.now() -
-          (
-            Number(
-              state.position || 0
-            ) * 1000
-          )
-        )
-      ),
-
-    playing:
-      state.playing !== false
-
-  };
-
-
-  try{
-
-    await radioStationChannel
-      .track(
-        sharedState
-      );
-
-    await radioStationChannel
-      .send({
-
-        type:
-          "broadcast",
-
-        event:
-          "station_state",
-
-        payload:
-          sharedState
-
-      });
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 SHARED RADIO PUBLISH ERROR:",
-      error
-    );
-
-  }
-
-}
-
-
-/* =====================================================
-   APPLY SHARED RADIO STATE
-===================================================== */
-
-async function applySharedRadioState(
-  state
-){
-
-  if(
-    isAdmin ||
-    !state?.trackKey
-  )
-    return false;
-
-  const track =
-    findRadioTrack(
-      state.trackKey
-    );
-
-  if(
-    !track
-  )
-    return false;
-
-  const position =
-    radioResumePosition(
-      state
-    );
-
-
-  /*
-     SAME TRACK ALREADY LOADED
-  */
-
-  if(
-    currentTrack &&
-    radioTrackKey(
-      currentTrack
-    ) ===
-    radioTrackKey(
-      track
-    )
-  ){
-
-    try{
-
-      if(
-        Math.abs(
-          audio.currentTime -
-          position
-        ) > 2
-      ){
-
-        audio.currentTime =
-          position;
-
-      }
-
-    }catch(error){}
-
-    return true;
-
-  }
-
-
-  /*
-     LOAD EXACT ADMIN TRACK
-  */
-
-  currentTrack =
-    track;
-
-  currentIndex =
-    library.indexOf(
-      currentTrack
-    );
-
-  updateTrackUI();
-
-
-  const result =
-    await playTrack(
-      currentTrack
-    );
-
-  if(!result)
-    return false;
-
-
-  try{
-
-    if(
-      Number.isFinite(
-        position
-      )
-    ){
-
-      audio.currentTime =
-        position;
-
-    }
-
-  }catch(error){}
-
-
-  return true;
-
-}
-
-
 /* =====================================================
    RANDOM / INITIAL TRACK
-   ADMIN = STATION SOURCE
-   PUBLIC = STATION LISTENER
 ===================================================== */
 
 async function chooseRandom(){
@@ -3096,60 +2610,23 @@ async function chooseRandom(){
   )
     return false;
 
-
-  await initialiseSharedRadio();
-
-
-  /* ===================================================
-     PUBLIC
-     NEVER CHOOSE A RANDOM TRACK
-  =================================================== */
-
-  if(
-    !isAdmin
-  ){
-
-    const sharedState =
-      readAdminPresenceState();
-
-    if(
-      sharedState
-    ){
-
-      return await applySharedRadioState(
-        sharedState
-      );
-
-    }
-
-    $("radioStatus").textContent =
-      "WAITING FOR RADIO STATION…";
-
-    return false;
-
-  }
-
-
-  /* ===================================================
-     ADMIN
-     RECOVER CURRENT STATION FIRST
-  =================================================== */
+  /*
+     FIRST:
+     Try to recover the station state
+     from the previous session.
+  */
 
   const saved =
     loadRadioStationState();
 
-  if(
-    saved?.trackKey
-  ){
+  if(saved){
 
     const savedTrack =
       findRadioTrack(
         saved.trackKey
       );
 
-    if(
-      savedTrack
-    ){
+    if(savedTrack){
 
       currentTrack =
         savedTrack;
@@ -3161,18 +2638,15 @@ async function chooseRandom(){
 
       updateTrackUI();
 
-
       const position =
         radioResumePosition(
           saved
         );
 
-
       const result =
         await playTrack(
           currentTrack
         );
-
 
       if(result){
 
@@ -3191,12 +2665,7 @@ async function chooseRandom(){
 
         }catch(error){}
 
-
         saveRadioStationState();
-
-        await publishSharedRadioState(
-          radioStationState
-        );
 
       }
 
@@ -3206,10 +2675,11 @@ async function chooseRandom(){
 
   }
 
-
-  /* ===================================================
-     ADMIN FIRST START
-     =================================================== */
+  /*
+     NO PREVIOUS STATION STATE:
+     Choose the first playable track
+     as the initial station track.
+  */
 
   currentTrack =
     list[0];
@@ -3221,23 +2691,13 @@ async function chooseRandom(){
 
   updateTrackUI();
 
-
   const result =
     await playTrack(
       currentTrack
     );
 
-
-  if(result){
-
+  if(result)
     saveRadioStationState();
-
-    await publishSharedRadioState(
-      radioStationState
-    );
-
-  }
-
 
   return result;
 

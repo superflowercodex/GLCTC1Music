@@ -2434,13 +2434,15 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 1 — PERSIST CURRENT TRACK + POSITION
+   SWAP 1 — SINGLE CONTINUOUS RADIO TRACK
 ===================================================== */
 
-const RADIO_STATE_KEY =
-  "GLCTC1_RADIO_STATION_STATE_V1";
-
 let radioStationState = null;
+
+
+/* =====================================================
+   RADIO TRACK KEY
+===================================================== */
 
 function radioTrackKey(track){
 
@@ -2459,142 +2461,6 @@ function radioTrackKey(track){
 
 }
 
-function saveRadioStationState(){
-
-  if(!currentTrack)
-    return;
-
-  radioStationState = {
-
-    trackKey:
-      radioTrackKey(
-        currentTrack
-      ),
-
-    position:
-      Number(
-        audio.currentTime || 0
-      ),
-
-    playing:
-      !audio.paused,
-
-    savedAt:
-      Date.now()
-
-  };
-
-  try{
-
-    localStorage.setItem(
-      RADIO_STATE_KEY,
-      JSON.stringify(
-        radioStationState
-      )
-    );
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 RADIO STATE SAVE ERROR:",
-      error
-    );
-
-  }
-
-}
-
-function loadRadioStationState(){
-
-  try{
-
-    const raw =
-      localStorage.getItem(
-        RADIO_STATE_KEY
-      );
-
-    if(!raw)
-      return null;
-
-    const state =
-      JSON.parse(
-        raw
-      );
-
-    if(
-      !state ||
-      !state.trackKey
-    )
-      return null;
-
-    radioStationState =
-      state;
-
-    return state;
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 RADIO STATE LOAD ERROR:",
-      error
-    );
-
-    return null;
-
-  }
-
-}
-
-function findRadioTrack(
-  trackKey
-){
-
-  if(!trackKey)
-    return null;
-
-  return playableLibrary()
-    .find(
-      track =>
-        radioTrackKey(
-          track
-        ) === trackKey
-    ) || null;
-
-}
-
-function radioResumePosition(
-  state
-){
-
-  if(!state)
-    return 0;
-
-  let position =
-    Number(
-      state.position || 0
-    );
-
-  if(
-    state.playing &&
-    state.savedAt
-  ){
-
-    position +=
-      (
-        Date.now() -
-        Number(
-          state.savedAt
-        )
-      ) / 1000;
-
-  }
-
-  return Math.max(
-    0,
-    position
-  );
-
-}
 
 /* =====================================================
    RANDOM / INITIAL TRACK
@@ -2607,97 +2473,95 @@ async function chooseRandom(){
 
   if(
     !list.length
-  )
+  ){
+
+    console.warn(
+      "GLCTC1 RADIO: NO PLAYABLE TRACKS"
+    );
+
     return false;
-
-  /*
-     FIRST:
-     Try to recover the station state
-     from the previous session.
-  */
-
-  const saved =
-    loadRadioStationState();
-
-  if(saved){
-
-    const savedTrack =
-      findRadioTrack(
-        saved.trackKey
-      );
-
-    if(savedTrack){
-
-      currentTrack =
-        savedTrack;
-
-      currentIndex =
-        library.indexOf(
-          currentTrack
-        );
-
-      updateTrackUI();
-
-      const position =
-        radioResumePosition(
-          saved
-        );
-
-      const result =
-        await playTrack(
-          currentTrack
-        );
-
-      if(result){
-
-        try{
-
-          if(
-            Number.isFinite(
-              position
-            )
-          ){
-
-            audio.currentTime =
-              position;
-
-          }
-
-        }catch(error){}
-
-        saveRadioStationState();
-
-      }
-
-      return result;
-
-    }
 
   }
 
+
   /*
-     NO PREVIOUS STATION STATE:
-     Choose the first playable track
-     as the initial station track.
+     IMPORTANT:
+
+     This chooses the station track ONLY.
+
+     There is NO localStorage resume here.
+
+     There is NO old position restore.
+
+     There is NO second play attempt.
+
+     The audio element itself remains the
+     single source of playback truth.
   */
 
-  currentTrack =
-    list[0];
-
-  currentIndex =
-    library.indexOf(
+  if(
+    !currentTrack ||
+    !list.includes(
       currentTrack
-    );
+    )
+  ){
+
+    currentTrack =
+      list[0];
+
+    currentIndex =
+      library.indexOf(
+        currentTrack
+      );
+
+  }
+
 
   updateTrackUI();
+
+
+  /*
+     Load/play the current station track.
+
+     If the browser allows autoplay,
+     playback starts.
+
+     If the browser blocks autoplay,
+     playTrack() leaves the same track
+     loaded and AUTOPLAY WAKE can resume it
+     after the visitor interacts with the page.
+  */
 
   const result =
     await playTrack(
       currentTrack
     );
 
-  if(result)
-    saveRadioStationState();
+
+  if(result){
+
+    radioStationState = {
+
+      trackKey:
+        radioTrackKey(
+          currentTrack
+        ),
+
+      playing:
+        !audio.paused,
+
+      position:
+        Number(
+          audio.currentTime || 0
+        ),
+
+      savedAt:
+        Date.now()
+
+    };
+
+  }
+
 
   return result;
 
@@ -3195,44 +3059,15 @@ function armRadioWake(){
 
       try{
 
-        /*
-           IMPORTANT:
-
-           DO NOT choose another track.
-           DO NOT call chooseRandom().
-           DO NOT reload the audio source.
-
-           The audio element already contains
-           the current station track.
-
-           We simply RESUME it from its
-           existing currentTime.
-        */
-
         await audio.play();
 
         $("radioStatus").textContent =
           "● RADIO PLAYING";
 
-        /*
-           Only update the admin transport display
-           if that control is actually visible.
-        */
-
-        if(
-          $("playBtn")
-        ){
-
-          $("playBtn").textContent =
-            "⏸ PAUSE";
-
-        }
+        $("playBtn").textContent =
+          "⏸ PAUSE";
 
         disarmRadioWake();
-
-        /*
-           Start Web Audio after the user gesture.
-        */
 
         await ensureAudioEngine();
 
@@ -3251,14 +3086,6 @@ function armRadioWake(){
       }
 
     };
-
-  /*
-     Capture the user's first interaction.
-
-     This happens at window level, so it can wake
-     the audio even if the visible radio controls
-     are not available to the public.
-  */
 
   window.addEventListener(
     "pointerdown",

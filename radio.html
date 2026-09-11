@@ -2433,7 +2433,171 @@ function playableLibrary(){
 }
 
 /* =====================================================
-   RANDOM TRACK
+   RADIO STATION CLOCK
+   SWAP 1 — PERSIST CURRENT TRACK + POSITION
+===================================================== */
+
+const RADIO_STATE_KEY =
+  "GLCTC1_RADIO_STATION_STATE_V1";
+
+let radioStationState = null;
+
+function radioTrackKey(track){
+
+  if(!track)
+    return "";
+
+  return String(
+    track.id_cat_no ||
+    track.master_audio ||
+    (
+      String(track.artist || "") +
+      "::" +
+      String(track.title || "")
+    )
+  ).trim();
+
+}
+
+function saveRadioStationState(){
+
+  if(!currentTrack)
+    return;
+
+  radioStationState = {
+
+    trackKey:
+      radioTrackKey(
+        currentTrack
+      ),
+
+    position:
+      Number(
+        audio.currentTime || 0
+      ),
+
+    playing:
+      !audio.paused,
+
+    savedAt:
+      Date.now()
+
+  };
+
+  try{
+
+    localStorage.setItem(
+      RADIO_STATE_KEY,
+      JSON.stringify(
+        radioStationState
+      )
+    );
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO STATE SAVE ERROR:",
+      error
+    );
+
+  }
+
+}
+
+function loadRadioStationState(){
+
+  try{
+
+    const raw =
+      localStorage.getItem(
+        RADIO_STATE_KEY
+      );
+
+    if(!raw)
+      return null;
+
+    const state =
+      JSON.parse(
+        raw
+      );
+
+    if(
+      !state ||
+      !state.trackKey
+    )
+      return null;
+
+    radioStationState =
+      state;
+
+    return state;
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO STATE LOAD ERROR:",
+      error
+    );
+
+    return null;
+
+  }
+
+}
+
+function findRadioTrack(
+  trackKey
+){
+
+  if(!trackKey)
+    return null;
+
+  return playableLibrary()
+    .find(
+      track =>
+        radioTrackKey(
+          track
+        ) === trackKey
+    ) || null;
+
+}
+
+function radioResumePosition(
+  state
+){
+
+  if(!state)
+    return 0;
+
+  let position =
+    Number(
+      state.position || 0
+    );
+
+  if(
+    state.playing &&
+    state.savedAt
+  ){
+
+    position +=
+      (
+        Date.now() -
+        Number(
+          state.savedAt
+        )
+      ) / 1000;
+
+  }
+
+  return Math.max(
+    0,
+    position
+  );
+
+}
+
+/* =====================================================
+   RANDOM / INITIAL TRACK
 ===================================================== */
 
 async function chooseRandom(){
@@ -2446,23 +2610,79 @@ async function chooseRandom(){
   )
     return false;
 
-  let n;
+  /*
+     FIRST:
+     Try to recover the station state
+     from the previous session.
+  */
 
-  do{
+  const saved =
+    loadRadioStationState();
 
-    n =
-      Math.floor(
-        Math.random() *
-        list.length
+  if(saved){
+
+    const savedTrack =
+      findRadioTrack(
+        saved.trackKey
       );
 
-  }while(
-    list.length > 1 &&
-    list[n] === currentTrack
-  );
+    if(savedTrack){
+
+      currentTrack =
+        savedTrack;
+
+      currentIndex =
+        library.indexOf(
+          currentTrack
+        );
+
+      updateTrackUI();
+
+      const position =
+        radioResumePosition(
+          saved
+        );
+
+      const result =
+        await playTrack(
+          currentTrack
+        );
+
+      if(result){
+
+        try{
+
+          if(
+            Number.isFinite(
+              position
+            )
+          ){
+
+            audio.currentTime =
+              position;
+
+          }
+
+        }catch(error){}
+
+        saveRadioStationState();
+
+      }
+
+      return result;
+
+    }
+
+  }
+
+  /*
+     NO PREVIOUS STATION STATE:
+     Choose the first playable track
+     as the initial station track.
+  */
 
   currentTrack =
-    list[n];
+    list[0];
 
   currentIndex =
     library.indexOf(
@@ -2471,9 +2691,15 @@ async function chooseRandom(){
 
   updateTrackUI();
 
-  return await playTrack(
-    currentTrack
-  );
+  const result =
+    await playTrack(
+      currentTrack
+    );
+
+  if(result)
+    saveRadioStationState();
+
+  return result;
 
 }
 

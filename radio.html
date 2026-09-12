@@ -2490,7 +2490,7 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 3 — CONTINUOUS REFRESH RADIO
+   SWAP 5 — HARD REFRESH RADIO LOCK
 ===================================================== */
 
 let radioStationState = null;
@@ -2499,6 +2499,19 @@ let radioStationTrackKey = null;
 let radioStationStartedAt = 0;
 let radioStationDuration = 0;
 let radioStationPlaying = false;
+
+/*
+   IMPORTANT:
+
+   This tells the radio engine that the initial
+   browser startup has been dealt with.
+
+   Until this becomes true, chooseRandom()
+   is NOT allowed to randomly select a track
+   if a saved station exists.
+*/
+let radioStationStartupComplete = false;
+
 
 const RADIO_STATION_STORAGE =
   "GLCTC1_RADIO_STATION";
@@ -2512,6 +2525,51 @@ function saveRadioStationState(){
 
   if(!currentTrack)
     return;
+
+
+  /*
+     Always rebuild the station start time
+     from the REAL audio position.
+
+     This means the stored clock represents:
+
+     "This track started at X"
+
+     rather than:
+
+     "The page was refreshed at X"
+  */
+
+  if(
+    !audio.paused &&
+    Number.isFinite(
+      audio.currentTime
+    )
+  ){
+
+    radioStationStartedAt =
+      Date.now() -
+      (
+        Number(
+          audio.currentTime || 0
+        ) * 1000
+      );
+
+  }
+
+
+  if(
+    Number.isFinite(
+      audio.duration
+    ) &&
+    audio.duration > 0
+  ){
+
+    radioStationDuration =
+      audio.duration;
+
+  }
+
 
   const state = {
 
@@ -2534,8 +2592,10 @@ function saveRadioStationState(){
 
   };
 
+
   radioStationState =
     state;
+
 
   try{
 
@@ -2543,6 +2603,7 @@ function saveRadioStationState(){
       RADIO_STATION_STORAGE,
       JSON.stringify(state)
     );
+
 
   }catch(error){
 
@@ -2569,13 +2630,16 @@ function loadRadioStationState(){
         RADIO_STATION_STORAGE
       );
 
+
     if(!saved)
       return null;
+
 
     const state =
       JSON.parse(
         saved
       );
+
 
     if(
       !state ||
@@ -2591,7 +2655,9 @@ function loadRadioStationState(){
 
     }
 
+
     return state;
+
 
   }catch(error){
 
@@ -2599,6 +2665,7 @@ function loadRadioStationState(){
       "GLCTC1 RADIO: LOCAL STATION LOAD FAILED",
       error
     );
+
 
     return null;
 
@@ -2618,9 +2685,12 @@ function findRadioStationTrack(
   const list =
     playableLibrary();
 
+
   return list.find(
     track =>
-      radioTrackKey(track) === trackKey
+      radioTrackKey(
+        track
+      ) === trackKey
   ) || null;
 
 }
@@ -2637,10 +2707,12 @@ function getSavedRadioPosition(
   if(!state)
     return -1;
 
+
   const duration =
     Number(
       state.duration
     ) || 0;
+
 
   let elapsed =
     (
@@ -2650,8 +2722,11 @@ function getSavedRadioPosition(
       )
     ) / 1000;
 
+
   if(
-    !Number.isFinite(elapsed) ||
+    !Number.isFinite(
+      elapsed
+    ) ||
     elapsed < 0
   ){
 
@@ -2661,10 +2736,12 @@ function getSavedRadioPosition(
 
 
   /*
-     Saved track has finished.
+     If we know the duration and the
+     track has finished, the saved station
+     is no longer valid.
 
-     Tell the radio engine to move
-     to a new random track.
+     The normal radio engine may then
+     choose the next random track.
   */
 
   if(
@@ -2691,8 +2768,16 @@ async function restoreRadioStation(){
   const state =
     loadRadioStationState();
 
-  if(!state)
+
+  if(!state){
+
+    console.log(
+      "📻 GLCTC1 RADIO: NO SAVED STATION"
+    );
+
     return false;
+
+  }
 
 
   const savedTrack =
@@ -2700,8 +2785,16 @@ async function restoreRadioStation(){
       state.trackKey
     );
 
-  if(!savedTrack)
+
+  if(!savedTrack){
+
+    console.log(
+      "📻 GLCTC1 RADIO: SAVED TRACK NOT FOUND"
+    );
+
     return false;
+
+  }
 
 
   const position =
@@ -2711,21 +2804,33 @@ async function restoreRadioStation(){
 
 
   /*
-     Saved track has already ended.
+     Saved track has finished.
 
-     Let the normal radio engine
-     choose the next random track.
+     Do NOT restore it.
+     The normal radio engine can select
+     the next track.
   */
 
   if(position < 0){
+
+    console.log(
+      "📻 GLCTC1 RADIO: SAVED TRACK FINISHED"
+    );
 
     return false;
 
   }
 
 
+  console.log(
+    "📻 GLCTC1 RADIO: RESTORING SAVED TRACK:",
+    state.trackKey
+  );
+
+
   currentTrack =
     savedTrack;
+
 
   currentIndex =
     library.indexOf(
@@ -2760,19 +2865,30 @@ async function restoreRadioStation(){
   updateTrackUI();
 
 
+  /*
+     Load the SAME track.
+  */
+
   const result =
     await playTrack(
       savedTrack
     );
 
 
-  if(!result)
+  if(!result){
+
+    console.warn(
+      "📻 GLCTC1 RADIO: SAVED TRACK COULD NOT PLAY"
+    );
+
     return false;
+
+  }
 
 
   /*
-     Jump back to the exact point
-     the station should currently be at.
+     Restore the exact position the station
+     should currently be at.
   */
 
   if(
@@ -2791,6 +2907,7 @@ async function restoreRadioStation(){
         )
       );
 
+
   }else{
 
     audio.addEventListener(
@@ -2801,6 +2918,7 @@ async function restoreRadioStation(){
           getSavedRadioPosition(
             state
           );
+
 
         if(
           restoredPosition >= 0 &&
@@ -2830,12 +2948,17 @@ async function restoreRadioStation(){
   }
 
 
-  radioStationDuration =
+  if(
     Number.isFinite(
       audio.duration
-    )
-      ? audio.duration
-      : radioStationDuration;
+    ) &&
+    audio.duration > 0
+  ){
+
+    radioStationDuration =
+      audio.duration;
+
+  }
 
 
   radioStationPlaying =
@@ -2846,11 +2969,16 @@ async function restoreRadioStation(){
 
 
   /*
-     Refresh the saved state so the
-     station clock remains current.
+     Save again using the restored
+     station position.
   */
 
   saveRadioStationState();
+
+
+  console.log(
+    "📻 GLCTC1 RADIO: SAVED STATION RESTORED"
+  );
 
 
   return true;
@@ -2860,10 +2988,57 @@ async function restoreRadioStation(){
 
 /* =====================================================
    RANDOM RADIO TRACK
-   CONTINUOUS RADIO
+   HARD STARTUP PROTECTION
 ===================================================== */
 
-async function chooseRandom(){
+async function chooseRandom(
+  forceRandom = false
+){
+
+  /*
+     ==================================================
+     CRITICAL STARTUP LOCK
+     ==================================================
+
+     If this is the FIRST radio selection after
+     page startup, always check localStorage first.
+
+     This protects us even if another part of the
+     page calls chooseRandom() directly.
+  */
+
+  if(
+    !radioStationStartupComplete &&
+    !forceRandom
+  ){
+
+    console.log(
+      "📻 GLCTC1 RADIO: STARTUP CHECK — LOOKING FOR SAVED STATION"
+    );
+
+
+    const restored =
+      await restoreRadioStation();
+
+
+    /*
+       Saved station successfully restored.
+
+       DO NOT randomise.
+    */
+
+    if(restored){
+
+      radioStationStartupComplete =
+        true;
+
+
+      return true;
+
+    }
+
+  }
+
 
   const list =
     playableLibrary();
@@ -2883,10 +3058,21 @@ async function chooseRandom(){
 
 
   /*
+     Once we reach this point, startup has
+     either found no saved station or the
+     caller explicitly requested a new random
+     track.
+  */
+
+  radioStationStartupComplete =
+    true;
+
+
+  /*
      Choose a genuinely random track.
 
-     Avoid the current track when
-     another track is available.
+     Avoid the current track when another
+     track is available.
   */
 
   let choices =
@@ -2992,11 +3178,17 @@ audio.addEventListener(
       radioStationPlaying =
         true;
 
+
       radioStationTrackKey =
         radioTrackKey(
           currentTrack
         );
 
+
+      /*
+         Continuously maintain the real
+         station start timestamp.
+      */
 
       radioStationStartedAt =
         Date.now() -
@@ -3007,12 +3199,17 @@ audio.addEventListener(
         );
 
 
-      radioStationDuration =
+      if(
         Number.isFinite(
           audio.duration
-        )
-          ? audio.duration
-          : radioStationDuration;
+        ) &&
+        audio.duration > 0
+      ){
+
+        radioStationDuration =
+          audio.duration;
+
+      }
 
 
       saveRadioStationState();

@@ -2332,190 +2332,10 @@ async function loadLibrary(){
       " playable radio tracks";
 
     if(
-  currentTrack === null
-){
+      currentTrack === null
+    ){
 
-  const saved =
-    loadLocalRadioState();
-
-  let restored =
-    false;
-
-
-  if(
-    saved?.trackKey
-  ){
-
-    const savedTrack =
-      playable.find(
-        track =>
-          radioTrackKey(track) ===
-          saved.trackKey
-      );
-
-
-    if(savedTrack){
-
-      currentTrack =
-        savedTrack;
-
-      currentIndex =
-        library.indexOf(
-          savedTrack
-        );
-
-      updateTrackUI();
-
-
-      const result =
-        await playTrack(
-          savedTrack
-        );
-
-
-      if(result){
-
-        const restorePosition =
-          () => {
-
-            if(
-              !Number.isFinite(
-                audio.duration
-              ) ||
-              audio.duration <= 0
-            ){
-
-              return;
-
-            }
-
-
-            const elapsed =
-              (
-                Date.now() -
-                Number(
-                  saved.startedAt ||
-                  Date.now()
-                )
-              ) / 1000;
-
-
-            /*
-               SAVED TRACK HAS FINISHED
-
-               Let the normal radio engine
-               choose the next random track.
-            */
-
-            if(
-              elapsed >= audio.duration
-            ){
-
-              currentTrack =
-                null;
-
-              chooseRandom();
-
-              return;
-
-            }
-
-
-            /*
-               RESUME EXISTING STATION POSITION
-            */
-
-            audio.currentTime =
-              elapsed;
-
-
-            radioStationTrackKey =
-              radioTrackKey(
-                savedTrack
-              );
-
-            radioStationStartedAt =
-              Date.now() -
-              (
-                elapsed *
-                1000
-              );
-
-            radioStationDuration =
-              audio.duration;
-
-            radioStationPlaying =
-              !audio.paused;
-
-            radioStationState = {
-
-              trackKey:
-                radioStationTrackKey,
-
-              playing:
-                radioStationPlaying,
-
-              position:
-                elapsed,
-
-              duration:
-                audio.duration,
-
-              savedAt:
-                Date.now()
-
-            };
-
-
-            saveLocalRadioState();
-
-            restored =
-              true;
-
-          };
-
-
-        if(
-          Number.isFinite(
-            audio.duration
-          ) &&
-          audio.duration > 0
-        ){
-
-          restorePosition();
-
-        }else{
-
-          audio.addEventListener(
-            "loadedmetadata",
-            restorePosition,
-            { once:true }
-          );
-
-        }
-
-      }
-
-    }
-
-  }
-
-
-  /*
-     NO SAVED TRACK
-     → START THE RADIO
-  */
-
-  if(
-    !restored &&
-    currentTrack === null
-  ){
-
-    await chooseRandom();
-
-  }
-
-}
+      await chooseRandom();
 
     }
 
@@ -2625,7 +2445,7 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 1 — BROWSER RADIO ENGINE
+   SWAP 1 — LOCAL PERSISTENT RADIO ENGINE
 ===================================================== */
 
 let radioStationState = null;
@@ -2635,14 +2455,15 @@ let radioStationStartedAt = 0;
 let radioStationDuration = 0;
 let radioStationPlaying = false;
 
+const RADIO_LOCAL_STORAGE_KEY =
+  "GLCTC1_RADIO_STATION_LOCAL_V1";
+
+let radioStationInitialised = false;
+
 
 /* =====================================================
    LOCAL RADIO PERSISTENCE
 ===================================================== */
-
-const RADIO_LOCAL_STORAGE_KEY =
-  "GLCTC1_RADIO_STATION_LOCAL_V1";
-
 
 function saveLocalRadioState(){
 
@@ -2677,7 +2498,15 @@ function saveLocalRadioState(){
       ),
 
     playing:
-      !audio.paused
+      !audio.paused,
+
+    position:
+      Number(
+        audio.currentTime || 0
+      ),
+
+    savedAt:
+      Date.now()
 
   };
 
@@ -2712,7 +2541,9 @@ function loadLocalRadioState(){
     if(!saved)
       return null;
 
-    return JSON.parse(saved);
+    return JSON.parse(
+      saved
+    );
 
   }catch(error){
 
@@ -2752,7 +2583,7 @@ function radioTrackKey(track){
 
 /* =====================================================
    RANDOM / INITIAL TRACK
-   SWAP 2 — CONTINUOUS RANDOM RADIO
+   CONTINUOUS RANDOM RADIO
 ===================================================== */
 
 async function chooseRandom(){
@@ -2772,6 +2603,193 @@ async function chooseRandom(){
 
   }
 
+
+  /* =================================================
+     FIRST RADIO START
+     TRY TO RESTORE THE EXISTING STATION
+  ================================================= */
+
+  if(
+    !radioStationInitialised
+  ){
+
+    radioStationInitialised =
+      true;
+
+    const saved =
+      loadLocalRadioState();
+
+
+    if(
+      saved?.trackKey
+    ){
+
+      const savedTrack =
+        list.find(
+          track =>
+            radioTrackKey(track) ===
+            saved.trackKey
+        );
+
+
+      if(savedTrack){
+
+        currentTrack =
+          savedTrack;
+
+        currentIndex =
+          library.indexOf(
+            savedTrack
+          );
+
+        updateTrackUI();
+
+
+        const result =
+          await playTrack(
+            savedTrack
+          );
+
+
+        if(result){
+
+          /*
+             Wait until the browser knows
+             the real audio duration.
+          */
+
+          if(
+            !Number.isFinite(
+              audio.duration
+            ) ||
+            audio.duration <= 0
+          ){
+
+            await new Promise(
+              resolve => {
+
+                audio.addEventListener(
+                  "loadedmetadata",
+                  resolve,
+                  { once:true }
+                );
+
+              }
+            );
+
+          }
+
+
+          const duration =
+            Number(
+              audio.duration ||
+              saved.duration ||
+              0
+            );
+
+
+          if(
+            Number.isFinite(duration) &&
+            duration > 0
+          ){
+
+            const elapsed =
+              (
+                Date.now() -
+                Number(
+                  saved.startedAt ||
+                  Date.now()
+                )
+              ) / 1000;
+
+
+            /*
+               THE SAVED TRACK IS STILL PLAYING
+
+               Resume at the position where the
+               station should currently be.
+            */
+
+            if(
+              elapsed >= 0 &&
+              elapsed < duration
+            ){
+
+              audio.currentTime =
+                elapsed;
+
+
+              radioStationTrackKey =
+                radioTrackKey(
+                  savedTrack
+                );
+
+              radioStationStartedAt =
+                Date.now() -
+                (
+                  elapsed *
+                  1000
+                );
+
+              radioStationDuration =
+                duration;
+
+              radioStationPlaying =
+                !audio.paused;
+
+
+              radioStationState = {
+
+                trackKey:
+                  radioStationTrackKey,
+
+                playing:
+                  radioStationPlaying,
+
+                position:
+                  elapsed,
+
+                duration:
+                  duration,
+
+                savedAt:
+                  Date.now()
+
+              };
+
+
+              saveLocalRadioState();
+
+
+              return true;
+
+            }
+
+          }
+
+        }
+
+        /*
+           Saved track has finished while
+           the page was away.
+
+           Fall through and select
+           the next random station track.
+        */
+
+        currentTrack =
+          null;
+
+      }
+
+    }
+
+  }
+
+
+  /* =================================================
+     NEW / NEXT RANDOM STATION TRACK
+  ================================================= */
 
   let choices =
     list.filter(

@@ -2450,26 +2450,102 @@ function playableLibrary(){
 
 let radioStationState = null;
 
-/*
-   Browser test station state.
-
-   This is intentionally LOCAL for now.
-   No Supabase table changes.
-   No database writes.
-
-   The browser will:
-   • keep the current track
-   • remember its position
-   • know its duration
-   • advance automatically
-   • allow the engine to be upgraded later
-     to a shared Supabase station clock
-*/
-
 let radioStationTrackKey = null;
 let radioStationStartedAt = 0;
 let radioStationDuration = 0;
 let radioStationPlaying = false;
+
+
+/* =====================================================
+   LOCAL RADIO PERSISTENCE
+===================================================== */
+
+const RADIO_LOCAL_STORAGE_KEY =
+  "GLCTC1_RADIO_STATION_LOCAL_V1";
+
+
+function saveLocalRadioState(){
+
+  if(!currentTrack)
+    return;
+
+  const state = {
+
+    trackKey:
+      radioTrackKey(
+        currentTrack
+      ),
+
+    startedAt:
+      Number(
+        radioStationStartedAt ||
+        (
+          Date.now() -
+          (
+            Number(
+              audio.currentTime || 0
+            ) * 1000
+          )
+        )
+      ),
+
+    duration:
+      Number(
+        radioStationDuration ||
+        audio.duration ||
+        0
+      ),
+
+    playing:
+      !audio.paused
+
+  };
+
+  try{
+
+    localStorage.setItem(
+      RADIO_LOCAL_STORAGE_KEY,
+      JSON.stringify(state)
+    );
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: LOCAL STATE SAVE FAILED",
+      error
+    );
+
+  }
+
+}
+
+
+function loadLocalRadioState(){
+
+  try{
+
+    const saved =
+      localStorage.getItem(
+        RADIO_LOCAL_STORAGE_KEY
+      );
+
+    if(!saved)
+      return null;
+
+    return JSON.parse(saved);
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: LOCAL STATE LOAD FAILED",
+      error
+    );
+
+    return null;
+
+  }
+
+}
 
 
 /* =====================================================
@@ -2517,28 +2593,12 @@ async function chooseRandom(){
   }
 
 
-  /*
-     RADIO TEST ENGINE
-
-     Choose a genuinely random track.
-
-     If more than one track exists,
-     do not immediately select the track
-     that is already playing.
-  */
-
   let choices =
     list.filter(
       track =>
         track !== currentTrack
     );
 
-
-  /*
-     If there is only one playable track,
-     allow it to repeat so the station
-     never stops.
-  */
 
   if(
     !choices.length
@@ -2549,10 +2609,6 @@ async function chooseRandom(){
 
   }
 
-
-  /*
-     RANDOM STATION SELECTION
-  */
 
   const randomIndex =
     Math.floor(
@@ -2574,22 +2630,11 @@ async function chooseRandom(){
   updateTrackUI();
 
 
-  /*
-     PLAY THE SELECTED STATION TRACK
-  */
-
   const result =
     await playTrack(
       currentTrack
     );
 
-
-  /*
-     STORE LOCAL TEST STATE
-
-     No Supabase writes.
-     No table changes.
-  */
 
   if(result){
 
@@ -2640,6 +2685,9 @@ async function chooseRandom(){
         Date.now()
 
     };
+
+
+    saveLocalRadioState();
 
   }
 

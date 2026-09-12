@@ -2589,7 +2589,7 @@ function radioTrackKey(track){
 async function saveSharedRadioState(){
 
   if(
-    typeof supabase === "undefined" ||
+    !supabaseClient ||
     !currentTrack
   )
     return false;
@@ -2597,8 +2597,6 @@ async function saveSharedRadioState(){
   try{
 
     const state = {
-
-      id: 1,
 
       track_key:
         radioTrackKey(
@@ -2626,10 +2624,28 @@ async function saveSharedRadioState(){
 
     };
 
+
+    /*
+       Only the authenticated admin can
+       actually write this row because
+       of the Supabase RLS policy.
+    */
+
+    if(
+      !currentUser ||
+      currentUser.id !==
+        ADMIN_USER_ID
+    ){
+
+      return false;
+
+    }
+
+
     const {
       error
     } =
-      await supabase
+      await supabaseClient
         .from(
           "glctc1_radio_station"
         )
@@ -2641,6 +2657,7 @@ async function saveSharedRadioState(){
           1
         );
 
+
     if(error){
 
       console.warn(
@@ -2651,6 +2668,7 @@ async function saveSharedRadioState(){
       return false;
 
     }
+
 
     return true;
 
@@ -2676,7 +2694,7 @@ async function saveSharedRadioState(){
 async function restoreSharedRadioState(){
 
   if(
-    typeof supabase === "undefined"
+    !supabaseClient
   )
     return false;
 
@@ -2686,7 +2704,7 @@ async function restoreSharedRadioState(){
       data,
       error
     } =
-      await supabase
+      await supabaseClient
         .from(
           "glctc1_radio_station"
         )
@@ -2699,6 +2717,7 @@ async function restoreSharedRadioState(){
         )
         .maybeSingle();
 
+
     if(error){
 
       console.warn(
@@ -2710,6 +2729,7 @@ async function restoreSharedRadioState(){
 
     }
 
+
     if(
       !data ||
       !data.track_key ||
@@ -2720,6 +2740,7 @@ async function restoreSharedRadioState(){
 
     const list =
       playableLibrary();
+
 
     const sharedTrack =
       list.find(
@@ -2738,13 +2759,19 @@ async function restoreSharedRadioState(){
     currentTrack =
       sharedTrack;
 
+
     currentIndex =
       library.indexOf(
         sharedTrack
       );
 
+
     updateTrackUI();
 
+
+    /*
+       Load the SAME station track.
+    */
 
     const result =
       await playTrack(
@@ -2828,8 +2855,24 @@ async function restoreSharedRadioState(){
     }
 
 
-    audio.currentTime =
-      elapsed;
+    /*
+       LOCK THIS BROWSER TO THE
+       LIVE SHARED RADIO POSITION.
+    */
+
+    try{
+
+      audio.currentTime =
+        elapsed;
+
+    }catch(error){
+
+      console.warn(
+        "GLCTC1 RADIO: POSITION SEEK FAILED",
+        error
+      );
+
+    }
 
 
     radioStationTrackKey =
@@ -2837,11 +2880,14 @@ async function restoreSharedRadioState(){
         sharedTrack
       );
 
+
     radioStationStartedAt =
       startedAt;
 
+
     radioStationDuration =
       duration;
+
 
     radioStationPlaying =
       !audio.paused;
@@ -2896,6 +2942,7 @@ async function chooseRandom(){
   const list =
     playableLibrary();
 
+
   if(
     !list.length
   ){
@@ -2911,7 +2958,7 @@ async function chooseRandom(){
 
   /* =================================================
      FIRST RADIO START
-     SHARED CLOCK HAS PRIORITY
+     SHARED STATION HAS PRIORITY
   ================================================= */
 
   if(
@@ -2960,10 +3007,12 @@ async function chooseRandom(){
         currentTrack =
           savedTrack;
 
+
         currentIndex =
           library.indexOf(
             savedTrack
           );
+
 
         updateTrackUI();
 
@@ -3032,6 +3081,7 @@ async function chooseRandom(){
                 savedTrack
               );
 
+
             radioStationStartedAt =
               Date.now() -
               (
@@ -3039,8 +3089,10 @@ async function chooseRandom(){
                 1000
               );
 
+
             radioStationDuration =
               duration;
+
 
             radioStationPlaying =
               !audio.paused;

@@ -2332,10 +2332,190 @@ async function loadLibrary(){
       " playable radio tracks";
 
     if(
-      currentTrack === null
-    ){
+  currentTrack === null
+){
 
-      await chooseRandom();
+  const saved =
+    loadLocalRadioState();
+
+  let restored =
+    false;
+
+
+  if(
+    saved?.trackKey
+  ){
+
+    const savedTrack =
+      playable.find(
+        track =>
+          radioTrackKey(track) ===
+          saved.trackKey
+      );
+
+
+    if(savedTrack){
+
+      currentTrack =
+        savedTrack;
+
+      currentIndex =
+        library.indexOf(
+          savedTrack
+        );
+
+      updateTrackUI();
+
+
+      const result =
+        await playTrack(
+          savedTrack
+        );
+
+
+      if(result){
+
+        const restorePosition =
+          () => {
+
+            if(
+              !Number.isFinite(
+                audio.duration
+              ) ||
+              audio.duration <= 0
+            ){
+
+              return;
+
+            }
+
+
+            const elapsed =
+              (
+                Date.now() -
+                Number(
+                  saved.startedAt ||
+                  Date.now()
+                )
+              ) / 1000;
+
+
+            /*
+               SAVED TRACK HAS FINISHED
+
+               Let the normal radio engine
+               choose the next random track.
+            */
+
+            if(
+              elapsed >= audio.duration
+            ){
+
+              currentTrack =
+                null;
+
+              chooseRandom();
+
+              return;
+
+            }
+
+
+            /*
+               RESUME EXISTING STATION POSITION
+            */
+
+            audio.currentTime =
+              elapsed;
+
+
+            radioStationTrackKey =
+              radioTrackKey(
+                savedTrack
+              );
+
+            radioStationStartedAt =
+              Date.now() -
+              (
+                elapsed *
+                1000
+              );
+
+            radioStationDuration =
+              audio.duration;
+
+            radioStationPlaying =
+              !audio.paused;
+
+            radioStationState = {
+
+              trackKey:
+                radioStationTrackKey,
+
+              playing:
+                radioStationPlaying,
+
+              position:
+                elapsed,
+
+              duration:
+                audio.duration,
+
+              savedAt:
+                Date.now()
+
+            };
+
+
+            saveLocalRadioState();
+
+            restored =
+              true;
+
+          };
+
+
+        if(
+          Number.isFinite(
+            audio.duration
+          ) &&
+          audio.duration > 0
+        ){
+
+          restorePosition();
+
+        }else{
+
+          audio.addEventListener(
+            "loadedmetadata",
+            restorePosition,
+            { once:true }
+          );
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  /*
+     NO SAVED TRACK
+     → START THE RADIO
+  */
+
+  if(
+    !restored &&
+    currentTrack === null
+  ){
+
+    await chooseRandom();
+
+  }
+
+}
 
     }
 

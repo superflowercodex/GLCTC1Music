@@ -5746,6 +5746,271 @@ supabaseClient.auth
       getSession()
   );
 
+// =====================================================
+// 📻 GLCTC1 SHARED RADIO LOCK
+// =====================================================
+// ONE shared station clock.
+// Admin/DJ advances the station.
+// Public browsers follow the same track + position.
+// Existing local "ended" handler is blocked.
+// =====================================================
+
+(function lockGLCTC1RadioToSharedStation(){
+
+  // ---------------------------------------------------
+  // BLOCK THE OLD LOCAL RANDOM ENDED HANDLER
+  // ---------------------------------------------------
+  // This capture listener runs before the existing
+  // bubble "ended" listener, so the old local shuffle
+  // cannot take control of the station.
+  // ---------------------------------------------------
+
+  audio.addEventListener(
+    "ended",
+    async function(e){
+
+      e.stopImmediatePropagation();
+
+      if(radioAdvanceBusy)
+        return;
+
+      radioAdvanceBusy = true;
+
+      try{
+
+        // ---------------------------------------------
+        // ADMIN / DJ = ADVANCE THE SHARED STATION
+        // ---------------------------------------------
+
+        if(isAdmin){
+
+          const list =
+            playableLibrary();
+
+          if(!list.length)
+            return;
+
+          let choices =
+            list.filter(
+              track =>
+                track !== currentTrack
+            );
+
+          if(!choices.length)
+            choices = list;
+
+          const randomIndex =
+            Math.floor(
+              Math.random() *
+              choices.length
+            );
+
+          const nextTrack =
+            choices[randomIndex];
+
+          currentTrack =
+            nextTrack;
+
+          currentIndex =
+            library.indexOf(
+              nextTrack
+            );
+
+          updateTrackUI();
+
+          const played =
+            await playTrack(
+              nextTrack
+            );
+
+          if(!played)
+            return;
+
+          // Wait for the new track duration
+          // before publishing the new station clock.
+          if(
+            !Number.isFinite(
+              audio.duration
+            ) ||
+            audio.duration <= 0
+          ){
+
+            await new Promise(
+              resolve => {
+
+                const waitForMetadata =
+                  () => {
+
+                    audio.removeEventListener(
+                      "loadedmetadata",
+                      waitForMetadata
+                    );
+
+                    resolve();
+
+                  };
+
+                audio.addEventListener(
+                  "loadedmetadata",
+                  waitForMetadata
+                );
+
+              }
+            );
+
+          }
+
+          radioStationTrackKey =
+            radioTrackKey(
+              nextTrack
+            );
+
+          radioStationDuration =
+            Number(
+              audio.duration || 0
+            );
+
+          radioStationStartedAt =
+            Date.now();
+
+          radioStationPlaying =
+            true;
+
+          radioStationState = {
+
+            trackKey:
+              radioStationTrackKey,
+
+            playing:
+              true,
+
+            position:
+              0,
+
+            duration:
+              radioStationDuration,
+
+            startedAt:
+              radioStationStartedAt,
+
+            savedAt:
+              Date.now()
+
+          };
+
+          await writeSharedRadioState({
+
+            trackKey:
+              radioStationTrackKey,
+
+            playing:
+              true,
+
+            position:
+              0,
+
+            duration:
+              radioStationDuration,
+
+            startedAt:
+              radioStationStartedAt,
+
+            savedAt:
+              Date.now()
+
+          });
+
+          console.log(
+            "📻 SHARED RADIO → NEXT TRACK:",
+            nextTrack
+          );
+
+          return;
+
+        }
+
+        // ---------------------------------------------
+        // PUBLIC = NEVER CHOOSE A TRACK
+        // ---------------------------------------------
+        // Public browsers simply reload the station
+        // state and follow whatever the DJ is playing.
+        // ---------------------------------------------
+
+        await restoreSharedRadioState();
+
+      }catch(error){
+
+        console.error(
+          "GLCTC1 SHARED RADIO ADVANCE ERROR:",
+          error
+        );
+
+      }finally{
+
+        setTimeout(
+          () => {
+
+            radioAdvanceBusy =
+              false;
+
+          },
+          500
+        );
+
+      }
+
+    },
+    true
+  );
+
+
+  // ---------------------------------------------------
+  // START SHARED RADIO SYNCHRONISATION
+  // ---------------------------------------------------
+  // This was missing from START.
+  // Every Radio Space browser now watches the same
+  // Supabase station state.
+  // ---------------------------------------------------
+
+  startSharedRadioSync();
+
+
+  // ---------------------------------------------------
+  // IMMEDIATELY RESTORE THE CURRENT SHARED STATION
+  // ---------------------------------------------------
+  // Do not randomly select another track on refresh.
+  // The existing loadLibrary() has already attempted
+  // the initial state load, so this simply makes sure
+  // the shared clock is active immediately.
+  // ---------------------------------------------------
+
+  setTimeout(
+    async () => {
+
+      try{
+
+        await restoreSharedRadioState();
+
+      }catch(error){
+
+        console.error(
+          "GLCTC1 SHARED RADIO START ERROR:",
+          error
+        );
+
+      }
+
+    },
+    100
+  );
+
+
+  console.log(
+    "📻 GLCTC1 RADIO LOCKED TO SHARED STATION"
+  );
+
+})();
+
 /* =====================================================
    START
 ===================================================== */
@@ -5785,3 +6050,4 @@ supabaseClient.auth
 
 </body>
 </html>
+

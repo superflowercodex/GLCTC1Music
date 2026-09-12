@@ -2263,7 +2263,6 @@ function renderLibraryTable(
 
 /* =====================================================
    LOAD LIBRARY
-   STEP 5 — REJOIN CURRENT RADIO TRACK
 ===================================================== */
 
 async function loadLibrary(){
@@ -2282,7 +2281,6 @@ async function loadLibrary(){
     const rows =
       await loadMasterLibraryFromSupabase();
 
-
     library =
       rows
         .map(
@@ -2297,11 +2295,9 @@ async function loadLibrary(){
             t.master_audio
         );
 
-
     renderLibraryTable(
       $("librarySearch").value
     );
-
 
     const playable =
       library.filter(
@@ -2311,7 +2307,6 @@ async function loadLibrary(){
             ""
           ).trim()
       );
-
 
     if(
       !playable.length
@@ -2330,254 +2325,17 @@ async function loadLibrary(){
 
     }
 
-
     $("libraryNotice").textContent =
       library.length +
       " catalogue rows loaded • " +
       playable.length +
       " playable radio tracks";
 
-
-    /*
-       =================================================
-       REJOIN EXISTING RADIO STATION
-       =================================================
-
-       Look for the station state saved by STEP 4.
-
-       If a valid track exists, rejoin that track
-       instead of selecting a new random song.
-    */
-
     if(
       currentTrack === null
     ){
 
-      const savedState =
-        loadRadioStationState();
-
-
-      /*
-         -------------------------------------------------
-         VALID SAVED STATION
-         -------------------------------------------------
-      */
-
-      if(
-        savedState &&
-        !savedState.expired
-      ){
-
-        const savedTrack =
-          findRadioStationTrack(
-            savedState.trackKey
-          );
-
-
-        if(
-          savedTrack
-        ){
-
-          currentTrack =
-            savedTrack;
-
-
-          currentIndex =
-            library.indexOf(
-              savedTrack
-            );
-
-
-          radioStationState =
-            savedState;
-
-
-          radioStationTrackKey =
-            savedState.trackKey;
-
-
-          radioStationDuration =
-            Number(
-              savedState.duration || 0
-            );
-
-
-          radioStationPlaying =
-            Boolean(
-              savedState.playing
-            );
-
-
-          /*
-             Update the station UI before playback.
-          */
-
-          updateTrackUI();
-
-
-          /*
-             Start the exact saved track.
-
-             playTrack() handles the existing
-             signed Master Audio URL system.
-          */
-
-          const resumed =
-            await playTrack(
-              savedTrack
-            );
-
-
-          if(
-            resumed
-          ){
-
-            /*
-               Restore the calculated station
-               position after the audio source
-               has been loaded.
-            */
-
-            const resumePosition =
-              Number(
-                savedState.position || 0
-              );
-
-
-            if(
-              Number.isFinite(
-                resumePosition
-              ) &&
-              resumePosition > 0
-            ){
-
-              try{
-
-                audio.currentTime =
-                  Math.min(
-                    resumePosition,
-                    Number.isFinite(
-                      audio.duration
-                    )
-                      ? Math.max(
-                          0,
-                          audio.duration - 0.25
-                        )
-                      : resumePosition
-                  );
-
-              }catch(error){
-
-                console.warn(
-                  "GLCTC1 RADIO: POSITION RESTORE FAILED",
-                  error
-                );
-
-              }
-
-            }
-
-
-            /*
-               Rebuild the station clock from the
-               restored position.
-            */
-
-            radioStationTrackKey =
-              radioTrackKey(
-                savedTrack
-              );
-
-
-            radioStationDuration =
-              Number.isFinite(
-                audio.duration
-              )
-                ? Number(
-                    audio.duration
-                  )
-                : Number(
-                    savedState.duration || 0
-                  );
-
-
-            radioStationStartedAt =
-              Date.now() -
-              (
-                Number(
-                  audio.currentTime || 0
-                ) * 1000
-              );
-
-
-            radioStationPlaying =
-              !audio.paused;
-
-
-            saveRadioStationState();
-
-
-            $("radioStatus").textContent =
-              "RADIO • REJOINED";
-
-
-            /*
-               Successfully rejoined the station.
-
-               IMPORTANT:
-               Do NOT call chooseRandom().
-            */
-
-            return;
-
-          }
-
-
-          /*
-             If the saved track could not be played,
-             clear the invalid station state and allow
-             the normal random engine to recover.
-          */
-
-          console.warn(
-            "GLCTC1 RADIO: SAVED TRACK COULD NOT PLAY"
-          );
-
-        }
-
-      }
-
-    }
-
-
-    /*
-       =================================================
-       RANDOM INITIAL START
-       =================================================
-
-       No valid saved station track was available.
-
-       Use the existing continuous random radio
-       engine exactly as before.
-    */
-
-    if(
-      currentTrack === null
-    ){
-
-      const started =
-        await chooseRandom();
-
-
-      if(
-        !started
-      ){
-
-        console.warn(
-          "GLCTC1 RADIO: INITIAL TRACK FAILED"
-        );
-
-      }
+      await chooseRandom();
 
     }
 
@@ -2687,29 +2445,25 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   STEP 4 — PERSISTENT BROWSER RADIO STATE
+   SWAP 1 — BROWSER RADIO ENGINE
 ===================================================== */
 
 let radioStationState = null;
 
 /*
-   Browser station state.
+   Browser test station state.
 
-   This remains LOCAL for now.
+   This is intentionally LOCAL for now.
    No Supabase table changes.
    No database writes.
 
-   The browser stores:
-   • current track
-   • track key
-   • station start time
-   • duration
-   • playing state
-   • current position
-   • saved timestamp
-
-   This allows the radio engine to recover the
-   station timeline after a page refresh.
+   The browser will:
+   • keep the current track
+   • remember its position
+   • know its duration
+   • advance automatically
+   • allow the engine to be upgraded later
+     to a shared Supabase station clock
 */
 
 let radioStationTrackKey = null;
@@ -2719,267 +2473,23 @@ let radioStationPlaying = false;
 
 
 /* =====================================================
-   RADIO STATION STORAGE
+   RADIO TRACK KEY
 ===================================================== */
 
-const RADIO_STATION_STORAGE_KEY =
-  "glctc1_radio_station_state";
+function radioTrackKey(track){
 
+  if(!track)
+    return "";
 
-/* =====================================================
-   SAVE RADIO STATION STATE
-===================================================== */
-
-function saveRadioStationState(){
-
-  if(
-    !currentTrack
-  )
-    return;
-
-
-  const position =
-    Number(
-      audio?.currentTime || 0
-    );
-
-
-  const duration =
-    Number.isFinite(
-      audio?.duration
-    )
-      ? Number(
-          audio.duration
-        )
-      : Number(
-          radioStationDuration || 0
-        );
-
-
-  radioStationTrackKey =
-    radioTrackKey(
-      currentTrack
-    );
-
-
-  radioStationDuration =
-    duration;
-
-
-  radioStationPlaying =
-    !audio.paused;
-
-
-  radioStationStartedAt =
-    Date.now() -
+  return String(
+    track.id_cat_no ||
+    track.master_audio ||
     (
-      position *
-      1000
-    );
-
-
-  radioStationState = {
-
-    trackKey:
-      radioStationTrackKey,
-
-    playing:
-      radioStationPlaying,
-
-    position:
-      position,
-
-    duration:
-      radioStationDuration,
-
-    savedAt:
-      Date.now()
-
-  };
-
-
-  try{
-
-    localStorage.setItem(
-      RADIO_STATION_STORAGE_KEY,
-      JSON.stringify(
-        radioStationState
-      )
-    );
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 RADIO: LOCAL STATE SAVE FAILED",
-      error
-    );
-
-  }
-
-}
-
-
-/* =====================================================
-   LOAD RADIO STATION STATE
-===================================================== */
-
-function loadRadioStationState(){
-
-  try{
-
-    const stored =
-      localStorage.getItem(
-        RADIO_STATION_STORAGE_KEY
-      );
-
-
-    if(
-      !stored
+      String(track.artist || "") +
+      "::" +
+      String(track.title || "")
     )
-      return null;
-
-
-    const state =
-      JSON.parse(
-        stored
-      );
-
-
-    if(
-      !state ||
-      !state.trackKey
-    )
-      return null;
-
-
-    /*
-       Calculate where the station should be now.
-
-       If the station was playing when the page
-       was refreshed, elapsed wall-clock time is
-       added to the saved position.
-    */
-
-    let position =
-      Number(
-        state.position || 0
-      );
-
-
-    const duration =
-      Number(
-        state.duration || 0
-      );
-
-
-    if(
-      state.playing &&
-      state.savedAt
-    ){
-
-      const elapsed =
-        (
-          Date.now() -
-          Number(
-            state.savedAt
-          )
-        ) / 1000;
-
-
-      position +=
-        Math.max(
-          0,
-          elapsed
-        );
-
-    }
-
-
-    /*
-       If the saved position has already passed
-       the end of the track, do NOT resume it.
-
-       The normal random radio engine will select
-       the next track instead.
-    */
-
-    if(
-      duration > 0 &&
-      position >= duration
-    ){
-
-      return {
-
-        ...state,
-
-        expired:
-          true,
-
-        position:
-          duration
-
-      };
-
-    }
-
-
-    return {
-
-      ...state,
-
-      position:
-        Math.max(
-          0,
-          position
-        ),
-
-      duration:
-        duration
-
-    };
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 RADIO: LOCAL STATE LOAD FAILED",
-      error
-    );
-
-    return null;
-
-  }
-
-}
-
-
-/* =====================================================
-   FIND SAVED TRACK
-===================================================== */
-
-function findRadioStationTrack(
-  trackKey
-){
-
-  if(
-    !trackKey
-  )
-    return null;
-
-
-  const list =
-    playableLibrary();
-
-
-  return (
-    list.find(
-      track =>
-        radioTrackKey(
-          track
-        ) ===
-        trackKey
-    ) ||
-    null
-  );
+  ).trim();
 
 }
 
@@ -3076,6 +2586,9 @@ async function chooseRandom(){
 
   /*
      STORE LOCAL TEST STATE
+
+     No Supabase writes.
+     No table changes.
   */
 
   if(result){
@@ -3127,30 +2640,6 @@ async function chooseRandom(){
         Date.now()
 
     };
-
-
-    /*
-       Persist the station state so a page
-       refresh can rejoin the same timeline.
-    */
-
-    try{
-
-      localStorage.setItem(
-        RADIO_STATION_STORAGE_KEY,
-        JSON.stringify(
-          radioStationState
-        )
-      );
-
-    }catch(error){
-
-      console.warn(
-        "GLCTC1 RADIO: INITIAL STATE SAVE FAILED",
-        error
-      );
-
-    }
 
   }
 
@@ -3535,7 +3024,7 @@ async function playLibraryTrack(
 
 /* =====================================================
    RADIO EVENTS
-   STEP 6 — PERSIST RADIO CLOCK STATE
+   STEP 3 — CONTINUOUS RADIO + REAL TRACK CLOCK
 ===================================================== */
 
 function formatRadioTime(seconds){
@@ -3547,44 +3036,29 @@ function formatRadioTime(seconds){
     !Number.isFinite(seconds) ||
     seconds < 0
   ){
-
-    seconds =
-      0;
-
+    seconds = 0;
   }
-
 
   const minutes =
     Math.floor(
       seconds / 60
     );
 
-
   const secs =
     Math.floor(
       seconds % 60
     )
     .toString()
-    .padStart(
-      2,
-      "0"
-    );
-
+    .padStart(2, "0");
 
   return `${minutes}:${secs}`;
 
 }
 
 
-/* =====================================================
-   UPDATE RADIO STATION CLOCK
-===================================================== */
-
 function updateRadioStationClock(){
 
-  if(
-    !audio
-  )
+  if(!audio)
     return;
 
 
@@ -3599,10 +3073,6 @@ function updateRadioStationClock(){
       audio.duration || 0
     );
 
-
-  /*
-     Keep the real audio duration.
-  */
 
   if(
     Number.isFinite(duration) &&
@@ -3619,31 +3089,17 @@ function updateRadioStationClock(){
     !audio.paused;
 
 
-  /*
-     Keep the station track key tied
-     to the actual current track.
-  */
-
-  if(
-    currentTrack
-  ){
-
-    radioStationTrackKey =
-      radioTrackKey(
-        currentTrack
-      );
-
-  }
-
-
-  /*
-     Update the in-memory station state.
-  */
-
   radioStationState = {
 
     trackKey:
-      radioStationTrackKey,
+      radioStationTrackKey ||
+      (
+        currentTrack
+          ? radioTrackKey(
+              currentTrack
+            )
+          : null
+      ),
 
     playing:
       radioStationPlaying,
@@ -3661,56 +3117,7 @@ function updateRadioStationClock(){
 
 
   /*
-     Update the station start time.
-
-     This represents the current position
-     of the station timeline.
-  */
-
-  radioStationStartedAt =
-    Date.now() -
-    (
-      position *
-      1000
-    );
-
-
-  /*
-     =================================================
-     PERSIST CURRENT RADIO STATE
-     =================================================
-
-     Save continuously to localStorage.
-
-     This means a refresh can recover the
-     latest known station position rather
-     than the position from when the track
-     originally started.
-  */
-
-  try{
-
-    localStorage.setItem(
-      RADIO_STATION_STORAGE_KEY,
-      JSON.stringify(
-        radioStationState
-      )
-    );
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 RADIO: CLOCK STATE SAVE FAILED",
-      error
-    );
-
-  }
-
-
-  /*
-     =================================================
      REAL RADIO PROGRESS
-     =================================================
   */
 
   const progress =
@@ -3732,8 +3139,7 @@ function updateRadioStationClock(){
           (
             position /
             radioStationDuration
-          ) *
-          100
+          ) * 100
         )
       );
 
@@ -3745,11 +3151,10 @@ function updateRadioStationClock(){
 
 
   /*
-     =================================================
      REAL TRACK TIME
-     =================================================
 
-     Display:
+     If the radioTime element exists,
+     display:
 
      00:00 / 04:32
   */
@@ -3758,9 +3163,7 @@ function updateRadioStationClock(){
     $("radioTime");
 
 
-  if(
-    timeDisplay
-  ){
+  if(timeDisplay){
 
     timeDisplay.textContent =
       `${formatRadioTime(position)} / ${formatRadioTime(radioStationDuration)}`;
@@ -3841,91 +3244,59 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED
-   CONTINUOUS RANDOM RADIO
+   TRACK ENDED — ALWAYS SHUFFLE
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    if(
-      radioAdvanceBusy
-    )
+    if (radioAdvanceBusy)
       return;
 
+    radioAdvanceBusy = true;
 
-    radioAdvanceBusy =
-      true;
+    try {
 
+      const list = playableLibrary();
 
-    try{
-
-      /*
-         CURRENT TRACK HAS FINISHED.
-
-         Select a genuinely random
-         playable track and immediately
-         start playback.
-      */
-
-      const success =
-        await chooseRandom();
-
-
-      /*
-         If the next track could not
-         be started, retry automatically.
-      */
-
-      if(
-        !success
-      ){
-
-        setTimeout(
-          async () => {
-
-            try{
-
-              await chooseRandom();
-
-            }catch(error){
-
-              console.error(
-                "GLCTC1 RADIO RETRY ERROR:",
-                error
-              );
-
-            }finally{
-
-              radioAdvanceBusy =
-                false;
-
-            }
-
-          },
-          1000
-        );
-
+      if (!list.length)
         return;
 
-      }
+      let choices = list.filter(
+        track => track !== currentTrack
+      );
 
-    }catch(error){
+      if (!choices.length)
+        choices = list;
+
+      const randomIndex =
+        Math.floor(
+          Math.random() * choices.length
+        );
+
+      currentTrack =
+        choices[randomIndex];
+
+      currentIndex =
+        library.indexOf(currentTrack);
+
+      updateTrackUI();
+
+      await playTrack(currentTrack);
+
+    } catch (error) {
 
       console.error(
-        "GLCTC1 RADIO AUTO-ADVANCE ERROR:",
+        "GLCTC1 RADIO AUTO-SHUFFLE ERROR:",
         error
       );
 
-    }finally{
+    } finally {
 
       setTimeout(
         () => {
-
-          radioAdvanceBusy =
-            false;
-
+          radioAdvanceBusy = false;
         },
         250
       );
@@ -3938,7 +3309,6 @@ audio.addEventListener(
 
 /* =====================================================
    TRACK ERROR
-   CONTINUOUS RANDOM RADIO RECOVERY
 ===================================================== */
 
 audio.addEventListener(
@@ -3967,13 +3337,6 @@ audio.addEventListener(
 
             await chooseRandom();
 
-          }catch(error){
-
-            console.error(
-              "GLCTC1 RADIO RECOVERY ERROR:",
-              error
-            );
-
           }finally{
 
             radioAdvanceBusy =
@@ -3989,6 +3352,97 @@ audio.addEventListener(
 
   }
 );
+
+/* =====================================================
+   AUTOPLAY WAKE
+===================================================== */
+
+function disarmRadioWake(){
+
+  if(
+    !radioWakeHandler
+  )
+    return;
+
+  window.removeEventListener(
+    "pointerdown",
+    radioWakeHandler,
+    true
+  );
+
+  window.removeEventListener(
+    "keydown",
+    radioWakeHandler,
+    true
+  );
+
+  radioWakeHandler =
+    null;
+
+}
+
+function armRadioWake(){
+
+  if(
+    radioWakeHandler
+  )
+    return;
+
+  radioWakeHandler =
+    async () => {
+
+      if(
+        radioWakeBusy ||
+        !currentTrack
+      )
+        return;
+
+      radioWakeBusy =
+        true;
+
+      try{
+
+        await audio.play();
+
+        $("radioStatus").textContent =
+          "● RADIO PLAYING";
+
+        $("playBtn").textContent =
+          "⏸ PAUSE";
+
+        disarmRadioWake();
+
+        await ensureAudioEngine();
+
+      }catch(error){
+
+        console.warn(
+          "GLCTC1 AUDIO START ERROR:",
+          error
+        );
+
+      }finally{
+
+        radioWakeBusy =
+          false;
+
+      }
+
+    };
+
+  window.addEventListener(
+    "pointerdown",
+    radioWakeHandler,
+    true
+  );
+
+  window.addEventListener(
+    "keydown",
+    radioWakeHandler,
+    true
+  );
+
+}
 
 /* =====================================================
    TRANSPORT

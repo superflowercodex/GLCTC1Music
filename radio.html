@@ -1227,6 +1227,17 @@ tr.playing{
         <i></i>
       </div>
 
+<div id="radioTime"
+     style="
+       text-align:center;
+       margin-top:6px;
+       font-size:12px;
+       letter-spacing:1px;
+       opacity:.8;
+     ">
+  00:00 / 00:00
+</div>
+
     </div>
 
   </div>
@@ -2434,10 +2445,31 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 1 — SINGLE CONTINUOUS RADIO TRACK
+   SWAP 1 — BROWSER RADIO ENGINE
 ===================================================== */
 
 let radioStationState = null;
+
+/*
+   Browser test station state.
+
+   This is intentionally LOCAL for now.
+   No Supabase table changes.
+   No database writes.
+
+   The browser will:
+   • keep the current track
+   • remember its position
+   • know its duration
+   • advance automatically
+   • allow the engine to be upgraded later
+     to a shared Supabase station clock
+*/
+
+let radioStationTrackKey = null;
+let radioStationStartedAt = 0;
+let radioStationDuration = 0;
+let radioStationPlaying = false;
 
 
 /* =====================================================
@@ -2464,6 +2496,7 @@ function radioTrackKey(track){
 
 /* =====================================================
    RANDOM / INITIAL TRACK
+   SWAP 2 — CONTINUOUS RANDOM RADIO
 ===================================================== */
 
 async function chooseRandom(){
@@ -2485,51 +2518,64 @@ async function chooseRandom(){
 
 
   /*
-     IMPORTANT:
+     RADIO TEST ENGINE
 
-     This chooses the station track ONLY.
+     Choose a genuinely random track.
 
-     There is NO localStorage resume here.
+     If more than one track exists,
+     do not immediately select the track
+     that is already playing.
+  */
 
-     There is NO old position restore.
+  let choices =
+    list.filter(
+      track =>
+        track !== currentTrack
+    );
 
-     There is NO second play attempt.
 
-     The audio element itself remains the
-     single source of playback truth.
+  /*
+     If there is only one playable track,
+     allow it to repeat so the station
+     never stops.
   */
 
   if(
-    !currentTrack ||
-    !list.includes(
-      currentTrack
-    )
+    !choices.length
   ){
 
-    currentTrack =
-      list[0];
-
-    currentIndex =
-      library.indexOf(
-        currentTrack
-      );
+    choices =
+      list;
 
   }
+
+
+  /*
+     RANDOM STATION SELECTION
+  */
+
+  const randomIndex =
+    Math.floor(
+      Math.random() *
+      choices.length
+    );
+
+
+  currentTrack =
+    choices[randomIndex];
+
+
+  currentIndex =
+    library.indexOf(
+      currentTrack
+    );
 
 
   updateTrackUI();
 
 
   /*
-     Load/play the current station track.
-
-     If the browser allows autoplay,
-     playback starts.
-
-     If the browser blocks autoplay,
-     playTrack() leaves the same track
-     loaded and AUTOPLAY WAKE can resume it
-     after the visitor interacts with the page.
+     PLAY THE SELECTED STATION TRACK
   */
 
   const result =
@@ -2538,22 +2584,57 @@ async function chooseRandom(){
     );
 
 
+  /*
+     STORE LOCAL TEST STATE
+
+     No Supabase writes.
+     No table changes.
+  */
+
   if(result){
+
+    radioStationTrackKey =
+      radioTrackKey(
+        currentTrack
+      );
+
+
+    radioStationStartedAt =
+      Date.now() -
+      (
+        Number(
+          audio.currentTime || 0
+        ) * 1000
+      );
+
+
+    radioStationDuration =
+      Number.isFinite(
+        audio.duration
+      )
+        ? audio.duration
+        : 0;
+
+
+    radioStationPlaying =
+      !audio.paused;
+
 
     radioStationState = {
 
       trackKey:
-        radioTrackKey(
-          currentTrack
-        ),
+        radioStationTrackKey,
 
       playing:
-        !audio.paused,
+        radioStationPlaying,
 
       position:
         Number(
           audio.currentTime || 0
         ),
+
+      duration:
+        radioStationDuration,
 
       savedAt:
         Date.now()
@@ -2943,6 +3024,227 @@ async function playLibraryTrack(
 
 /* =====================================================
    RADIO EVENTS
+   STEP 3 — CONTINUOUS RADIO + REAL TRACK CLOCK
+===================================================== */
+
+function formatRadioTime(seconds){
+
+  seconds =
+    Number(seconds) || 0;
+
+  if(
+    !Number.isFinite(seconds) ||
+    seconds < 0
+  ){
+    seconds = 0;
+  }
+
+  const minutes =
+    Math.floor(
+      seconds / 60
+    );
+
+  const secs =
+    Math.floor(
+      seconds % 60
+    )
+    .toString()
+    .padStart(2, "0");
+
+  return `${minutes}:${secs}`;
+
+}
+
+
+function updateRadioStationClock(){
+
+  if(!audio)
+    return;
+
+
+  const position =
+    Number(
+      audio.currentTime || 0
+    );
+
+
+  const duration =
+    Number(
+      audio.duration || 0
+    );
+
+
+  if(
+    Number.isFinite(duration) &&
+    duration > 0
+  ){
+
+    radioStationDuration =
+      duration;
+
+  }
+
+
+  radioStationPlaying =
+    !audio.paused;
+
+
+  radioStationState = {
+
+    trackKey:
+      radioStationTrackKey ||
+      (
+        currentTrack
+          ? radioTrackKey(
+              currentTrack
+            )
+          : null
+      ),
+
+    playing:
+      radioStationPlaying,
+
+    position:
+      position,
+
+    duration:
+      radioStationDuration,
+
+    savedAt:
+      Date.now()
+
+  };
+
+
+  /*
+     REAL RADIO PROGRESS
+  */
+
+  const progress =
+    document.querySelector(
+      ".bar i"
+    );
+
+
+  if(
+    progress &&
+    radioStationDuration > 0
+  ){
+
+    const percent =
+      Math.min(
+        100,
+        Math.max(
+          0,
+          (
+            position /
+            radioStationDuration
+          ) * 100
+        )
+      );
+
+
+    progress.style.width =
+      `${percent}%`;
+
+  }
+
+
+  /*
+     REAL TRACK TIME
+
+     If the radioTime element exists,
+     display:
+
+     00:00 / 04:32
+  */
+
+  const timeDisplay =
+    $("radioTime");
+
+
+  if(timeDisplay){
+
+    timeDisplay.textContent =
+      `${formatRadioTime(position)} / ${formatRadioTime(radioStationDuration)}`;
+
+  }
+
+}
+
+
+/* =====================================================
+   AUDIO METADATA
+===================================================== */
+
+audio.addEventListener(
+  "loadedmetadata",
+  () => {
+
+    if(
+      Number.isFinite(
+        audio.duration
+      )
+    ){
+
+      radioStationDuration =
+        audio.duration;
+
+    }
+
+
+    updateRadioStationClock();
+
+  }
+);
+
+
+/* =====================================================
+   AUDIO TIME
+===================================================== */
+
+audio.addEventListener(
+  "timeupdate",
+  () => {
+
+    updateRadioStationClock();
+
+  }
+);
+
+
+/* =====================================================
+   AUDIO PLAY / PAUSE
+===================================================== */
+
+audio.addEventListener(
+  "play",
+  () => {
+
+    radioStationPlaying =
+      true;
+
+    updateRadioStationClock();
+
+  }
+);
+
+
+audio.addEventListener(
+  "pause",
+  () => {
+
+    radioStationPlaying =
+      false;
+
+    updateRadioStationClock();
+
+  }
+);
+
+
+/* =====================================================
+   TRACK ENDED
 ===================================================== */
 
 audio.addEventListener(
@@ -2954,8 +3256,10 @@ audio.addEventListener(
     )
       return;
 
+
     radioAdvanceBusy =
       true;
+
 
     try{
 
@@ -2965,7 +3269,10 @@ audio.addEventListener(
 
       setTimeout(
         () => {
-          radioAdvanceBusy = false;
+
+          radioAdvanceBusy =
+            false;
+
         },
         250
       );
@@ -2974,6 +3281,11 @@ audio.addEventListener(
 
   }
 );
+
+
+/* =====================================================
+   TRACK ERROR
+===================================================== */
 
 audio.addEventListener(
   "error",
@@ -2984,6 +3296,7 @@ audio.addEventListener(
       audio.error
     );
 
+
     if(
       playableLibrary().length > 1 &&
       !radioAdvanceBusy
@@ -2992,13 +3305,19 @@ audio.addEventListener(
       radioAdvanceBusy =
         true;
 
+
       setTimeout(
         async () => {
 
           try{
+
             await chooseRandom();
+
           }finally{
-            radioAdvanceBusy = false;
+
+            radioAdvanceBusy =
+              false;
+
           }
 
         },

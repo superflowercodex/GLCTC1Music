@@ -2145,11 +2145,13 @@ function renderLibraryTable(
           "tr"
         );
 
+
       if(
         track === currentTrack
       )
         tr.className =
           "playing";
+
 
       const cells = [
 
@@ -2184,6 +2186,7 @@ function renderLibraryTable(
 
       ];
 
+
       cells.forEach(
         value => {
 
@@ -2202,21 +2205,35 @@ function renderLibraryTable(
         }
       );
 
+
+      /* =============================================
+         MASTER AUDIO CONTROL
+
+         EVERYONE CAN SEE PLAY
+
+         ADMIN = PLAY WORKS
+         PUBLIC = PLAY VISIBLE BUT DISABLED
+      ============================================= */
+
       const audioTd =
         document.createElement(
           "td"
         );
+
 
       const button =
         document.createElement(
           "button"
         );
 
+
       button.className =
         "btn";
 
+
       button.style.padding =
         "7px 9px";
+
 
       if(
         String(
@@ -2228,11 +2245,24 @@ function renderLibraryTable(
         button.textContent =
           "PLAY";
 
-        button.onclick =
-          () =>
-            playLibraryTrack(
-              track
-            );
+
+        if(isAdmin){
+
+          button.onclick =
+            () =>
+              playLibraryTrack(
+                track
+              );
+
+        }else{
+
+          button.disabled =
+            true;
+
+          button.title =
+            "ADMIN / DJ CONTROL";
+
+        }
 
       }else{
 
@@ -2244,13 +2274,16 @@ function renderLibraryTable(
 
       }
 
+
       audioTd.appendChild(
         button
       );
 
+
       tr.appendChild(
         audioTd
       );
+
 
       tbody.appendChild(
         tr
@@ -2260,6 +2293,7 @@ function renderLibraryTable(
   );
 
 }
+
 
 /* =====================================================
    LOAD LIBRARY
@@ -2276,10 +2310,12 @@ async function loadLibrary(){
   $("trackTitle").textContent =
     "CONNECTING TO MASTER LIBRARY…";
 
+
   try{
 
     const rows =
       await loadMasterLibraryFromSupabase();
+
 
     library =
       rows
@@ -2295,9 +2331,11 @@ async function loadLibrary(){
             t.master_audio
         );
 
+
     renderLibraryTable(
       $("librarySearch").value
     );
+
 
     const playable =
       library.filter(
@@ -2307,6 +2345,7 @@ async function loadLibrary(){
             ""
           ).trim()
       );
+
 
     if(
       !playable.length
@@ -2325,11 +2364,13 @@ async function loadLibrary(){
 
     }
 
+
     $("libraryNotice").textContent =
       library.length +
       " catalogue rows loaded • " +
       playable.length +
       " playable radio tracks";
+
 
     if(
       currentTrack === null
@@ -2339,6 +2380,7 @@ async function loadLibrary(){
 
     }
 
+
   }catch(error){
 
     console.error(
@@ -2346,14 +2388,18 @@ async function loadLibrary(){
       error
     );
 
+
     $("trackTitle").textContent =
       "MASTER LIBRARY ERROR";
+
 
     $("radioStatus").textContent =
       "LIBRARY OFFLINE";
 
+
     $("libraryCount").textContent =
       "LIBRARY ERROR";
+
 
     $("libraryNotice").textContent =
       "Supabase error: " +
@@ -3870,55 +3916,178 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED — ALWAYS SHUFFLE
+   TRACK ENDED — ADMIN DJ ADVANCE
+   PUBLIC LISTENERS DO NOT CHOOSE THE NEXT TRACK
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    if (radioAdvanceBusy)
+    if(radioAdvanceBusy)
       return;
 
     radioAdvanceBusy = true;
 
-    try {
+    try{
 
-      const list = playableLibrary();
+      /*
+         PUBLIC LISTENERS
 
-      if (!list.length)
+         They NEVER choose a new track.
+
+         Their browser simply waits for
+         the shared station clock to update.
+      */
+
+      if(!isAdmin){
+
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              1200
+            )
+        );
+
+        await restoreSharedRadioState();
+
         return;
 
-      let choices = list.filter(
-        track => track !== currentTrack
-      );
+      }
 
-      if (!choices.length)
-        choices = list;
+
+      /*
+         ADMIN / DJ
+
+         The DJ chooses the next random
+         station track and publishes it
+         to Supabase.
+      */
+
+      const list =
+        playableLibrary();
+
+      if(!list.length)
+        return;
+
+
+      let choices =
+        list.filter(
+          track =>
+            track !== currentTrack
+        );
+
+
+      if(!choices.length)
+        choices =
+          list;
+
 
       const randomIndex =
         Math.floor(
-          Math.random() * choices.length
+          Math.random() *
+          choices.length
         );
+
 
       currentTrack =
         choices[randomIndex];
 
+
       currentIndex =
-        library.indexOf(currentTrack);
+        library.indexOf(
+          currentTrack
+        );
+
 
       updateTrackUI();
 
-      await playTrack(currentTrack);
 
-    } catch (error) {
+      const result =
+        await playTrack(
+          currentTrack
+        );
+
+
+      if(!result)
+        return;
+
+
+      /*
+         START THE NEW SHARED
+         RADIO STATION CLOCK
+      */
+
+      radioStationTrackKey =
+        radioTrackKey(
+          currentTrack
+        );
+
+
+      radioStationStartedAt =
+        Date.now();
+
+
+      radioStationDuration =
+        Number.isFinite(
+          audio.duration
+        )
+          ? audio.duration
+          : 0;
+
+
+      radioStationPlaying =
+        !audio.paused;
+
+
+      radioStationState = {
+
+        trackKey:
+          radioStationTrackKey,
+
+        playing:
+          radioStationPlaying,
+
+        position:
+          Number(
+            audio.currentTime || 0
+          ),
+
+        duration:
+          radioStationDuration,
+
+        savedAt:
+          Date.now()
+
+      };
+
+
+      saveLocalRadioState();
+
+
+      /*
+         PUBLISH NEXT TRACK
+         FOR EVERY LISTENER
+      */
+
+      await saveSharedRadioState();
+
+
+      console.log(
+        "🎧 GLCTC1 RADIO: NEXT TRACK PUBLISHED",
+        radioStationTrackKey
+      );
+
+
+    }catch(error){
 
       console.error(
-        "GLCTC1 RADIO AUTO-SHUFFLE ERROR:",
+        "GLCTC1 RADIO AUTO-ADVANCE ERROR:",
         error
       );
 
-    } finally {
+    }finally{
 
       setTimeout(
         () => {
@@ -3935,6 +4104,7 @@ audio.addEventListener(
 
 /* =====================================================
    TRACK ERROR
+   ADMIN DJ RECOVERY / PUBLIC SHARED RECOVERY
 ===================================================== */
 
 audio.addEventListener(
@@ -3947,34 +4117,68 @@ audio.addEventListener(
     );
 
 
-    if(
-      playableLibrary().length > 1 &&
-      !radioAdvanceBusy
-    ){
-
-      radioAdvanceBusy =
-        true;
+    if(radioAdvanceBusy)
+      return;
 
 
-      setTimeout(
-        async () => {
+    radioAdvanceBusy = true;
 
-          try{
+
+    setTimeout(
+      async () => {
+
+        try{
+
+
+          /*
+             =========================================
+             ADMIN / DJ
+
+             If the station audio fails,
+             ADMIN chooses the replacement track.
+             =========================================
+          */
+
+          if(isAdmin){
 
             await chooseRandom();
 
-          }finally{
-
-            radioAdvanceBusy =
-              false;
+            return;
 
           }
 
-        },
-        700
-      );
 
-    }
+          /*
+             =========================================
+             PUBLIC LISTENER
+
+             PUBLIC NEVER chooses a random track.
+
+             Re-read the shared station clock
+             from Supabase instead.
+             =========================================
+          */
+
+          await restoreSharedRadioState();
+
+
+        }catch(error){
+
+          console.error(
+            "GLCTC1 RADIO MEDIA RECOVERY ERROR:",
+            error
+          );
+
+        }finally{
+
+          radioAdvanceBusy =
+            false;
+
+        }
+
+      },
+      700
+    );
 
   }
 );
@@ -4074,266 +4278,282 @@ function armRadioWake(){
    TRANSPORT
 ===================================================== */
 
-$("playBtn").onclick =
-  async () => {
+if(isAdmin){
 
-    if(
-      audio.paused
-    ){
+  $("playBtn").onclick =
+    async () => {
 
-      try{
+      if(
+        audio.paused
+      ){
 
-        await audio.play();
+        try{
+
+          await audio.play();
+
+          $("radioStatus").textContent =
+            "● RADIO PLAYING";
+
+          $("playBtn").textContent =
+            "⏸ PAUSE";
+
+          disarmRadioWake();
+
+          await ensureAudioEngine();
+
+        }catch(error){
+
+          $("radioStatus").textContent =
+            "TAP PLAY TO START RADIO";
+
+          armRadioWake();
+
+        }
+
+      }else{
+
+        audio.pause();
 
         $("radioStatus").textContent =
-          "● RADIO PLAYING";
+          "RADIO PAUSED";
 
         $("playBtn").textContent =
-          "⏸ PAUSE";
-
-        disarmRadioWake();
-
-        await ensureAudioEngine();
-
-      }catch(error){
-
-        $("radioStatus").textContent =
-          "TAP PLAY TO START RADIO";
-
-        armRadioWake();
+          "▶ PLAY";
 
       }
 
-    }else{
+    };
 
-      audio.pause();
 
-      $("radioStatus").textContent =
-        "RADIO PAUSED";
+  $("nextBtn").onclick =
+    () =>
+      chooseRandom();
 
-      $("playBtn").textContent =
-        "▶ PLAY";
 
-    }
+  $("prevBtn").onclick =
+    async () => {
 
-  };
+      const list =
+        playableLibrary();
 
-$("nextBtn").onclick =
-  () =>
-    chooseRandom();
+      if(!list.length)
+        return;
 
-$("prevBtn").onclick =
-  async () => {
-
-    const list =
-      playableLibrary();
-
-    if(!list.length)
-      return;
-
-    let i =
-      list.indexOf(
-        currentTrack
-      );
-
-    if(i < 0)
-      i = 0;
-
-    i =
-      (
-        i - 1 +
-        list.length
-      ) %
-      list.length;
-
-    currentTrack =
-      list[i];
-
-    currentIndex =
-      library.indexOf(
-        currentTrack
-      );
-
-    updateTrackUI();
-
-    await playTrack(
-      currentTrack
-    );
-
-  };
-
-$("shuffleBtn").onclick =
-  () => {
-
-    shuffleEnabled =
-      !shuffleEnabled;
-
-    $("shuffleBtn")
-      .classList
-      .toggle(
-        "active",
-        shuffleEnabled
-      );
-
-    $("shuffleBtn").textContent =
-      shuffleEnabled
-        ? "🔀 SHUFFLE ON"
-        : "🔀 SHUFFLE OFF";
-
-  };
-
-/* =====================================================
-   VOLUME
-===================================================== */
-
-audio.volume =
-  .8;
-
-$("volumeSlider").oninput =
-  e => {
-
-    const value =
-      Number(
-        e.target.value
-      );
-
-    audio.volume =
-      value;
-
-    $("volumeOut").textContent =
-      Math.round(
-        value * 100
-      ) +
-      "%";
-
-  };
-
-/* =====================================================
-   MIXER
-===================================================== */
-
-$("radioMix").oninput =
-  e => {
-
-    $("radioMixOut").textContent =
-      Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
-
-    updateAudioRouting();
-
-  };
-
-$("liveMix").oninput =
-  e => {
-
-    $("liveMixOut").textContent =
-      Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
-
-    updateAudioRouting();
-
-  };
-
-$("masterMix").oninput =
-  e => {
-
-    $("masterMixOut").textContent =
-      Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
-
-    updateAudioRouting();
-
-  };
-
-$("duckAmount").oninput =
-  e => {
-
-    $("duckAmountOut").textContent =
-      Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
-
-  };
-
-$("duckRelease").oninput =
-  e => {
-
-    $("duckReleaseOut").textContent =
-      (
-        Number(
-          e.target.value
-        ) / 1000
-      ).toFixed(1) +
-      "s";
-
-  };
-
-function duckRadio(on){
-
-  if(
-    !audioCtx ||
-    !radioGain
-  )
-    return;
-
-  const amount =
-    Number(
-      $("duckAmount").value
-    );
-
-  const target =
-    on &&
-    $("duckToggle").checked
-      ? 1 - amount
-      : Number(
-          $("radioMix").value
+      let i =
+        list.indexOf(
+          currentTrack
         );
 
-  const release =
-    Number(
-      $("duckRelease").value
-    ) / 1000;
+      if(i < 0)
+        i = 0;
 
-  radioGain.gain
-    .cancelScheduledValues(
-      audioCtx.currentTime
-    );
+      i =
+        (
+          i - 1 +
+          list.length
+        ) %
+        list.length;
 
-  radioGain.gain
-    .setTargetAtTime(
-      target,
-      audioCtx.currentTime,
-      on ? .08 : release
-    );
+      currentTrack =
+        list[i];
 
-  $("duckState").textContent =
-    on &&
-    $("duckToggle").checked
-      ? "🦆 RADIO DUCKED"
-      : "DUCKING READY";
+      currentIndex =
+        library.indexOf(
+          currentTrack
+        );
+
+      updateTrackUI();
+
+      await playTrack(
+        currentTrack
+      );
+
+    };
+
+
+  $("shuffleBtn").onclick =
+    () => {
+
+      shuffleEnabled =
+        !shuffleEnabled;
+
+      $("shuffleBtn")
+        .classList
+        .toggle(
+          "active",
+          shuffleEnabled
+        );
+
+      $("shuffleBtn").textContent =
+        shuffleEnabled
+          ? "🔀 SHUFFLE ON"
+          : "🔀 SHUFFLE OFF";
+
+    };
+
+
+  /* =================================================
+     VOLUME
+  ================================================= */
+
+  audio.volume =
+    .8;
+
+
+  $("volumeSlider").oninput =
+    e => {
+
+      const value =
+        Number(
+          e.target.value
+        );
+
+      audio.volume =
+        value;
+
+      $("volumeOut").textContent =
+        Math.round(
+          value * 100
+        ) +
+        "%";
+
+    };
+
+
+  /* =================================================
+     MIXER
+  ================================================= */
+
+  $("radioMix").oninput =
+    e => {
+
+      $("radioMixOut").textContent =
+        Math.round(
+          Number(
+            e.target.value
+          ) * 100
+        ) +
+        "%";
+
+      updateAudioRouting();
+
+    };
+
+
+  $("liveMix").oninput =
+    e => {
+
+      $("liveMixOut").textContent =
+        Math.round(
+          Number(
+            e.target.value
+          ) * 100
+        ) +
+        "%";
+
+      updateAudioRouting();
+
+    };
+
+
+  $("masterMix").oninput =
+    e => {
+
+      $("masterMixOut").textContent =
+        Math.round(
+          Number(
+            e.target.value
+          ) * 100
+        ) +
+        "%";
+
+      updateAudioRouting();
+
+    };
+
+
+  $("duckAmount").oninput =
+    e => {
+
+      $("duckAmountOut").textContent =
+        Math.round(
+          Number(
+            e.target.value
+          ) * 100
+        ) +
+        "%";
+
+    };
+
+
+  $("duckRelease").oninput =
+    e => {
+
+      $("duckReleaseOut").textContent =
+        (
+          Number(
+            e.target.value
+          ) / 1000
+        ).toFixed(1) +
+        "s";
+
+    };
+
+
+  function duckRadio(on){
+
+    if(
+      !audioCtx ||
+      !radioGain
+    )
+      return;
+
+    const amount =
+      Number(
+        $("duckAmount").value
+      );
+
+    const target =
+      on &&
+      $("duckToggle").checked
+        ? 1 - amount
+        : Number(
+            $("radioMix").value
+          );
+
+    const release =
+      Number(
+        $("duckRelease").value
+      ) / 1000;
+
+    radioGain.gain
+      .cancelScheduledValues(
+        audioCtx.currentTime
+      );
+
+    radioGain.gain
+      .setTargetAtTime(
+        target,
+        audioCtx.currentTime,
+        on ? .08 : release
+      );
+
+    $("duckState").textContent =
+      on &&
+      $("duckToggle").checked
+        ? "🦆 RADIO DUCKED"
+        : "DUCKING READY";
+
+  }
+
+
+  $("duckToggle").onchange =
+    () =>
+      duckRadio(
+        liveMode
+      );
 
 }
-
-$("duckToggle").onchange =
-  () =>
-    duckRadio(
-      liveMode
-    );
 
 /* =====================================================
    VISUALISER
@@ -4706,6 +4926,7 @@ function clearVideo(){
 
 }
 
+
 function youtubeEmbed(url){
 
   try{
@@ -4760,6 +4981,7 @@ function youtubeEmbed(url){
   }
 
 }
+
 
 function loadVideoURL(url){
 
@@ -4850,58 +5072,71 @@ function loadVideoURL(url){
 
 }
 
-$("loadVideoBtn").onclick =
-  () =>
-    loadVideoURL(
-      $("videoUrlInput").value
-    );
 
-$("videoUrlInput")
-  .addEventListener(
-    "keydown",
-    e => {
+/* =====================================================
+   VIDEO CONTROLS — ADMIN ONLY
+===================================================== */
 
-      if(
-        e.key ===
-        "Enter"
-      ){
+if(isAdmin){
 
-        loadVideoURL(
-          e.target.value
-        );
+  $("loadVideoBtn").onclick =
+    () =>
+      loadVideoURL(
+        $("videoUrlInput").value
+      );
+
+
+  $("videoUrlInput")
+    .addEventListener(
+      "keydown",
+      e => {
+
+        if(
+          e.key ===
+          "Enter"
+        ){
+
+          loadVideoURL(
+            e.target.value
+          );
+
+        }
 
       }
-
-    }
-  );
-
-$("clearVideoBtn").onclick =
-  () => {
-
-    $("videoUrlInput").value =
-      "";
-
-    clearVideo();
-
-  };
-
-$("fullscreenBtn").onclick =
-  () => {
-
-    const target =
-      liveVideo.style.display !==
-      "none"
-        ? liveVideo
-        : videoShell;
-
-    (
-      target.requestFullscreen ||
-      target.webkitRequestFullscreen
-    )?.call(
-      target
     );
 
-  };
+
+  $("clearVideoBtn").onclick =
+    () => {
+
+      $("videoUrlInput").value =
+        "";
+
+      clearVideo();
+
+    };
+
+
+  $("fullscreenBtn").onclick =
+    () => {
+
+      const target =
+        liveVideo.style.display !==
+        "none"
+          ? liveVideo
+          : videoShell;
+
+      (
+        target.requestFullscreen ||
+        target.webkitRequestFullscreen
+      )?.call(
+        target
+      );
+
+    };
+
+}
+
 
 /* =====================================================
    LIVE ROOM
@@ -4916,6 +5151,7 @@ function artistFromURL(){
   );
 
 }
+
 
 async function getRoom(
   artistId
@@ -4952,6 +5188,7 @@ async function getRoom(
   return data;
 
 }
+
 
 /* =====================================================
    LIVE UI
@@ -4996,6 +5233,7 @@ function setLiveUI(on){
     duckRadio(on);
 
 }
+
 
 /* =====================================================
    LIVE AUDIO
@@ -5054,6 +5292,7 @@ function setupLiveAudio(stream){
     liveAnalyser;
 
 }
+
 
 /* =====================================================
    CONNECT LIVE ARTIST
@@ -5160,6 +5399,7 @@ async function connectInvitedArtist(
 
       };
 
+
     viewerConnection.onicecandidate =
       async e => {
 
@@ -5205,6 +5445,7 @@ async function connectInvitedArtist(
 
       };
 
+
     await viewerConnection
       .setRemoteDescription(
         signaling.offer
@@ -5246,6 +5487,7 @@ async function connectInvitedArtist(
         "user_id",
         artistId
       );
+
 
     if(
       artistIceTimer
@@ -5294,6 +5536,7 @@ async function connectInvitedArtist(
         1200
       );
 
+
     if(
       roomTimer
     )
@@ -5322,6 +5565,7 @@ async function connectInvitedArtist(
         5000
       );
 
+
     $("videoNotice").textContent =
       "LIVE SESSION CONNECTED";
 
@@ -5338,6 +5582,7 @@ async function connectInvitedArtist(
   }
 
 }
+
 
 /* =====================================================
    STOP LIVE
@@ -5399,113 +5644,116 @@ function stopWatching(){
 
 }
 
+
 /* =====================================================
-   GO LIVE
+   GO LIVE / END LIVE — ADMIN ONLY
 ===================================================== */
 
-$("goLiveBtn").onclick =
-  async () => {
+if(isAdmin){
 
-    const artistId =
-      liveArtistId ||
-      currentUser?.id;
+  $("goLiveBtn").onclick =
+    async () => {
 
-    if(!artistId){
+      const artistId =
+        liveArtistId ||
+        currentUser?.id;
 
-      $("videoNotice").textContent =
-        "SIGN IN AS ARTIST OR OPEN AN ARTIST LIVE LINK";
+      if(!artistId){
 
-      return;
-
-    }
-
-    if(
-      window.GLCTC1Live?.start
-    ){
-
-      try{
-
-        await window.GLCTC1Live
-          .start(
-            artistId
-          );
-
-        setLiveUI(true);
+        $("videoNotice").textContent =
+          "SIGN IN AS ARTIST OR OPEN AN ARTIST LIVE LINK";
 
         return;
 
-      }catch(error){
+      }
 
-        console.error(
-          "GLCTC1 LIVE START ERROR:",
-          error
-        );
+      if(
+        window.GLCTC1Live?.start
+      ){
+
+        try{
+
+          await window.GLCTC1Live
+            .start(
+              artistId
+            );
+
+          setLiveUI(true);
+
+          return;
+
+        }catch(error){
+
+          console.error(
+            "GLCTC1 LIVE START ERROR:",
+            error
+          );
+
+        }
 
       }
 
-    }
+      const target =
+        new URL(
+          "artist.html",
+          window.location.href
+        );
 
-    const target =
-      new URL(
-        "artist.html",
-        window.location.href
+      target.searchParams.set(
+        "live",
+        "1"
       );
 
-    target.searchParams.set(
-      "live",
-      "1"
-    );
+      target.searchParams.set(
+        "artist",
+        artistId
+      );
 
-    target.searchParams.set(
-      "artist",
-      artistId
-    );
+      target.searchParams.set(
+        "return",
+        "radio.html"
+      );
 
-    target.searchParams.set(
-      "return",
-      "radio.html"
-    );
+      window.open(
+        target.toString(),
+        "_blank",
+        "noopener"
+      );
 
-    window.open(
-      target.toString(),
-      "_blank",
-      "noopener"
-    );
+      $("videoNotice").textContent =
+        "ARTIST LIVE MODULE OPENED • START LIVE THERE";
 
-    $("videoNotice").textContent =
-      "ARTIST LIVE MODULE OPENED • START LIVE THERE";
+    };
 
-  };
 
-/* =====================================================
-   END LIVE
-===================================================== */
+  $("endLiveBtn").onclick =
+    async () => {
 
-$("endLiveBtn").onclick =
-  async () => {
+      if(
+        window.GLCTC1Live?.end
+      ){
 
-    if(
-      window.GLCTC1Live?.end
-    ){
+        try{
 
-      try{
+          await window.GLCTC1Live.end();
 
-        await window.GLCTC1Live.end();
+        }catch(error){
 
-      }catch(error){
+          console.error(
+            "GLCTC1 LIVE END ERROR:",
+            error
+          );
 
-        console.error(
-          "GLCTC1 LIVE END ERROR:",
-          error
-        );
+        }
 
       }
 
-    }
+      stopWatching();
 
-    stopWatching();
+    };
 
-  };
+}
+
 
 /* =====================================================
    SEARCH
@@ -5527,9 +5775,62 @@ $("refreshLibrary").onclick =
 
 supabaseClient.auth
   .onAuthStateChange(
-    () =>
-      getSession()
+    async () => {
+
+      await getSession();
+
+      /* =============================================
+         REFRESH RADIO ACCESS STATE
+
+         ADMIN = FULL RADIO CONTROL
+         PUBLIC = LISTENER VIEW
+
+         PUBLIC CONTROLS REMAIN VISIBLE
+         ONLY ADMIN FUNCTIONS OPERATE
+      ============================================= */
+
+      document.body.classList.toggle(
+        "radioAdmin",
+        isAdmin
+      );
+
+
+      document.body.classList.toggle(
+        "radioPublicListener",
+        !isAdmin
+      );
+
+
+      /*
+         IMPORTANT:
+
+         Do NOT hide buttons, inputs,
+         selects or textareas here.
+
+         Public listeners can see the
+         complete Radio Space interface.
+
+         Existing ADMIN checks control
+         whether actions actually work.
+      */
+
+
+      const video =
+        document.getElementById(
+          "liveVideo"
+        );
+
+
+      if(video){
+
+        video.controls =
+          false;
+
+      }
+
+    }
   );
+
 
 /* =====================================================
    START
@@ -5546,6 +5847,73 @@ supabaseClient.auth
 
 
   /* =================================================
+     RADIO ACCESS CONTROL
+
+     ADMIN = FULL RADIO CONTROL
+     PUBLIC = LISTENER ONLY
+
+     PUBLIC CAN SEE ALL CONTROLS
+     ADMIN CONTROLS ACTUALLY WORK
+
+     TOP NAV LINKS REMAIN AVAILABLE
+  ================================================= */
+
+  function applyRadioAccessControl(){
+
+    const publicListener =
+      !isAdmin;
+
+
+    document.body.classList.toggle(
+      "radioAdmin",
+      isAdmin
+    );
+
+
+    document.body.classList.toggle(
+      "radioPublicListener",
+      publicListener
+    );
+
+
+    /*
+       PUBLIC LISTENERS
+
+       Do NOT hide buttons, inputs,
+       selects or textareas.
+
+       The controls remain visible.
+
+       Individual control functions
+       decide whether the action is
+       allowed for ADMIN / DJ.
+    */
+
+
+    const video =
+      document.getElementById(
+        "liveVideo"
+      );
+
+
+    if(video){
+
+      video.controls =
+        false;
+
+    }
+
+  }
+
+
+  /* =================================================
+     APPLY ACCESS CONTROL
+  ================================================= */
+
+  applyRadioAccessControl();
+
+
+  /* =================================================
      LOAD MASTER LIBRARY
   ================================================= */
 
@@ -5554,6 +5922,11 @@ supabaseClient.auth
 
   /* =================================================
      SYNC TO THE LIVE SHARED RADIO STATION
+
+     ALWAYS READ THE SHARED STATION FIRST.
+
+     PUBLIC LISTENERS NEVER SELECT THEIR
+     OWN STARTING TRACK.
   ================================================= */
 
   if(
@@ -5561,7 +5934,27 @@ supabaseClient.auth
     "function"
   ){
 
-    await restoreSharedRadioState();
+    const restored =
+      await restoreSharedRadioState();
+
+
+    /*
+       A fresh browser may be blocked by
+       autoplay policy.
+
+       The correct shared station is still
+       restored/loaded, and the first user
+       interaction can start playback.
+    */
+
+    if(
+      !restored &&
+      !isAdmin
+    ){
+
+      armRadioWake();
+
+    }
 
   }
 
@@ -5572,6 +5965,7 @@ supabaseClient.auth
 
   const artist =
     artistFromURL();
+
 
   if(artist){
 

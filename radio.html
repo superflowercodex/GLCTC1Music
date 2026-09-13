@@ -2533,7 +2533,7 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 1 — LOCAL PERSISTENT RADIO ENGINE
+   SWAP 1 — SUPABASE MASTER STATION CLOCK
 ===================================================== */
 
 let radioStationState = null;
@@ -2544,13 +2544,16 @@ let radioStationDuration = 0;
 let radioStationPlaying = false;
 
 const RADIO_LOCAL_STORAGE_KEY =
-  "GLCTC1_RADIO_STATION_LOCAL_V1";
+  "GLCTC1_RADIO_STATION_LOCAL_V2";
 
 let radioStationInitialised = false;
+let radioStationSyncTimer = null;
+let radioStationSyncBusy = false;
+let radioStationAdvanceBusy = false;
 
 
 /* =====================================================
-   LOCAL RADIO PERSISTENCE
+   LOCAL FALLBACK STATE
 ===================================================== */
 
 function saveLocalRadioState(){
@@ -2670,8 +2673,716 @@ function radioTrackKey(track){
 
 
 /* =====================================================
-   RANDOM / INITIAL TRACK
-   CONTINUOUS RANDOM RADIO
+   SUPABASE RADIO STATION STATE
+===================================================== */
+
+async function loadSupabaseRadioStation(){
+
+  try{
+
+    const { data, error } =
+      await supabaseClient
+        .from("glctc1_radio_station")
+        .select(
+          "id,track_key,started_at,duration,playing,updated_at"
+        )
+        .eq(
+          "id",
+          1
+        )
+        .maybeSingle();
+
+    if(error)
+      throw error;
+
+    if(!data)
+      return null;
+
+    radioStationState =
+      data;
+
+    radioStationTrackKey =
+      String(
+        data.track_key ||
+        ""
+      );
+
+    radioStationStartedAt =
+      Date.parse(
+        data.started_at
+      ) || 0;
+
+    radioStationDuration =
+      Number(
+        data.duration ||
+        0
+      );
+
+    radioStationPlaying =
+      data.playing === true;
+
+    return data;
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: SUPABASE STATION READ FAILED",
+      error
+    );
+
+    return null;
+
+  }
+
+}
+
+
+/* =====================================================
+   FIND TRACK FROM STATION KEY
+===================================================== */
+
+function findRadioStationTrack(){
+
+  if(!radioStationTrackKey)
+    return null;
+
+  return playableLibrary().find(
+    track =>
+      radioTrackKey(track) ===
+      radioStationTrackKey
+  ) || null;
+
+}
+
+
+/* =====================================================
+   CALCULATE CURRENT STATION POSITION
+===================================================== */
+
+function radioStationPosition(){
+
+  if(!radioStationStartedAt)
+    return 0;
+
+  return Math.max(
+    0,
+    (
+      Date.now() -
+      radioStationStartedAt
+    ) / 1000
+  );
+
+}
+
+
+/* =====================================================
+   SYNC BROWSER TO MASTER STATION CLOCK
+===================================================== */
+
+async function syncRadioToStation(){
+
+  if(radioStationSyncBusy)
+    return;
+
+  radioStationSyncBusy =
+    true;
+
+  try{
+
+    const station =
+      await loadSupabaseRadioStation();
+
+    if(!station)
+      return;
+
+
+    const stationTrack =
+      findRadioStationTrack();
+
+
+    /*
+       No valid station track yet.
+
+       Let the existing admin/browser
+       choose the first track.
+    */
+
+    if(!stationTrack){
+
+      if(
+        isAdmin &&
+        playableLibrary().length
+      ){
+
+        await startSupabaseRadioStation();
+
+      }
+
+      return;
+
+    }
+
+
+    const elapsed =
+      radioStationPosition();
+
+
+    /*
+       STATION TRACK HAS FINISHED
+
+       Only the admin is allowed to
+       advance the master station.
+    */
+
+    if(
+      radioStationDuration > 0 &&
+      elapsed >= radioStationDuration
+    ){
+
+      if(isAdmin){
+
+        await advanceSupabaseRadioStation();
+
+      }
+
+      return;
+
+    }
+
+
+    /*
+       Make this browser use the
+       station's current track.
+    */
+
+    const trackChanged =
+      !currentTrack ||
+      radioTrackKey(
+        currentTrack
+      ) !==
+      radioStationTrackKey;
+
+
+    if(trackChanged){
+
+      currentTrack =
+        stationTrack;
+
+      currentIndex =
+        library.indexOf(
+          stationTrack
+        );
+
+      updateTrackUI();
+
+      const result =
+        await playTrack(
+          stationTrack
+        );
+
+      if(!result)
+        return;
+
+    }
+
+
+    /*
+       Wait for browser audio metadata.
+    */
+
+    if(
+      !Number.isFinite(
+        audio.duration
+      ) ||
+      audio.duration <= 0
+    ){
+
+      await new Promise(
+        resolve => {
+
+          audio.addEventListener(
+            "loadedmetadata",
+            resolve,
+            { once:true }
+          );
+
+        }
+      );
+
+    }
+
+
+    const actualDuration =
+      Number(
+        audio.duration ||
+        radioStationDuration ||
+        0
+      );
+
+
+    /*
+       Keep the duration accurate.
+    */
+
+    if(
+      actualDuration > 0
+    ){
+
+      radioStationDuration =
+        actualDuration;
+
+    }
+
+
+    /*
+       SEEK TO THE MASTER CLOCK.
+
+       This is the important part.
+    */
+
+    if(
+      Math.abs(
+        (
+          Number(
+            audio.currentTime ||
+            0
+          )
+        ) -
+        elapsed
+      ) > 2
+    ){
+
+      if(
+        elapsed <
+        actualDuration
+      ){
+
+        audio.currentTime =
+          elapsed;
+
+      }
+
+    }
+
+
+    radioStationPlaying =
+      station.playing === true;
+
+
+    /*
+       If the station is marked playing,
+       make sure this browser is playing.
+    */
+
+    if(
+      radioStationPlaying &&
+      audio.paused
+    ){
+
+      try{
+
+        await audio.play();
+
+      }catch(error){
+
+        console.warn(
+          "GLCTC1 RADIO: AUTOPLAY WAITING FOR USER",
+          error
+        );
+
+      }
+
+    }
+
+
+    /*
+       If station is stopped, pause locally.
+    */
+
+    if(
+      !radioStationPlaying &&
+      !audio.paused
+    ){
+
+      audio.pause();
+
+    }
+
+
+    saveLocalRadioState();
+
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: STATION SYNC FAILED",
+      error
+    );
+
+  }finally{
+
+    radioStationSyncBusy =
+      false;
+
+  }
+
+}
+
+
+/* =====================================================
+   START MASTER SUPABASE RADIO
+===================================================== */
+
+async function startSupabaseRadioStation(){
+
+  if(!isAdmin)
+    return false;
+
+  if(radioStationAdvanceBusy)
+    return false;
+
+  radioStationAdvanceBusy =
+    true;
+
+  try{
+
+    const list =
+      playableLibrary();
+
+    if(!list.length)
+      return false;
+
+
+    let choices =
+      list.filter(
+        track =>
+          track !== currentTrack
+      );
+
+
+    if(!choices.length)
+      choices =
+        list;
+
+
+    const selected =
+      choices[
+        Math.floor(
+          Math.random() *
+          choices.length
+        )
+      ];
+
+
+    const duration =
+      Number(
+        selected.duration ||
+        0
+      );
+
+
+    const now =
+      new Date().toISOString();
+
+
+    const { data, error } =
+      await supabaseClient
+        .from("glctc1_radio_station")
+        .upsert(
+          {
+            id: 1,
+
+            track_key:
+              radioTrackKey(
+                selected
+              ),
+
+            started_at:
+              now,
+
+            duration:
+              duration,
+
+            playing:
+              true,
+
+            updated_at:
+              now
+
+          },
+          {
+            onConflict:
+              "id"
+          }
+        )
+        .select()
+        .single();
+
+
+    if(error)
+      throw error;
+
+
+    radioStationState =
+      data;
+
+    radioStationTrackKey =
+      radioTrackKey(
+        selected
+      );
+
+    radioStationStartedAt =
+      Date.parse(
+        now
+      );
+
+    radioStationDuration =
+      duration;
+
+    radioStationPlaying =
+      true;
+
+    currentTrack =
+      selected;
+
+    currentIndex =
+      library.indexOf(
+        selected
+      );
+
+    updateTrackUI();
+
+    await playTrack(
+      selected
+    );
+
+    saveLocalRadioState();
+
+    return true;
+
+  }catch(error){
+
+    console.error(
+      "GLCTC1 RADIO: MASTER STATION START FAILED",
+      error
+    );
+
+    return false;
+
+  }finally{
+
+    radioStationAdvanceBusy =
+      false;
+
+  }
+
+}
+
+
+/* =====================================================
+   ADVANCE MASTER STATION
+===================================================== */
+
+async function advanceSupabaseRadioStation(){
+
+  if(!isAdmin)
+    return false;
+
+  if(radioStationAdvanceBusy)
+    return false;
+
+  radioStationAdvanceBusy =
+    true;
+
+  try{
+
+    const list =
+      playableLibrary();
+
+    if(!list.length)
+      return false;
+
+
+    let choices =
+      list.filter(
+        track =>
+          radioTrackKey(track) !==
+          radioStationTrackKey
+      );
+
+
+    if(!choices.length)
+      choices =
+        list;
+
+
+    const selected =
+      choices[
+        Math.floor(
+          Math.random() *
+          choices.length
+        )
+      ];
+
+
+    const now =
+      new Date().toISOString();
+
+
+    /*
+       We use the browser-known
+       audio duration whenever available.
+    */
+
+    const duration =
+      Number(
+        audio.duration ||
+        selected.duration ||
+        0
+      );
+
+
+    const { data, error } =
+      await supabaseClient
+        .from("glctc1_radio_station")
+        .upsert(
+          {
+            id: 1,
+
+            track_key:
+              radioTrackKey(
+                selected
+              ),
+
+            started_at:
+              now,
+
+            duration:
+              duration,
+
+            playing:
+              true,
+
+            updated_at:
+              now
+
+          },
+          {
+            onConflict:
+              "id"
+          }
+        )
+        .select()
+        .single();
+
+
+    if(error)
+      throw error;
+
+
+    radioStationState =
+      data;
+
+    radioStationTrackKey =
+      radioTrackKey(
+        selected
+      );
+
+    radioStationStartedAt =
+      Date.parse(
+        now
+      );
+
+    radioStationDuration =
+      duration;
+
+    radioStationPlaying =
+      true;
+
+    currentTrack =
+      selected;
+
+    currentIndex =
+      library.indexOf(
+        selected
+      );
+
+    updateTrackUI();
+
+    await playTrack(
+      selected
+    );
+
+    saveLocalRadioState();
+
+    return true;
+
+  }catch(error){
+
+    console.error(
+      "GLCTC1 RADIO: MASTER STATION ADVANCE FAILED",
+      error
+    );
+
+    return false;
+
+  }finally{
+
+    radioStationAdvanceBusy =
+      false;
+
+  }
+
+}
+
+
+/* =====================================================
+   CONTINUOUS SUPABASE CLOCK
+===================================================== */
+
+function startRadioStationSync(){
+
+  if(
+    radioStationSyncTimer
+  ){
+
+    clearInterval(
+      radioStationSyncTimer
+    );
+
+  }
+
+
+  /*
+     Synchronise every 5 seconds.
+
+     This is NOT restarting the music.
+     It simply keeps every browser
+     aligned to the Supabase master clock.
+  */
+
+  radioStationSyncTimer =
+    setInterval(
+      async()=>{
+
+        await syncRadioToStation();
+
+      },
+      5000
+    );
+
+
+  /*
+     Sync immediately.
+  */
+
+  syncRadioToStation();
+
+}
+
+
+/* =====================================================
+   INITIAL RADIO STATION START
 ===================================================== */
 
 async function chooseRandom(){
@@ -2692,10 +3403,11 @@ async function chooseRandom(){
   }
 
 
-  /* =================================================
-     FIRST RADIO START
-     TRY TO RESTORE THE EXISTING STATION
-  ================================================= */
+  /*
+     First attempt:
+     connect to the shared
+     Supabase station.
+  */
 
   if(
     !radioStationInitialised
@@ -2704,13 +3416,49 @@ async function chooseRandom(){
     radioStationInitialised =
       true;
 
+
+    const station =
+      await loadSupabaseRadioStation();
+
+
+    if(station){
+
+      await syncRadioToStation();
+
+      startRadioStationSync();
+
+      return true;
+
+    }
+
+
+    /*
+       No station exists yet.
+
+       Only the admin creates it.
+    */
+
+    if(isAdmin){
+
+      const started =
+        await startSupabaseRadioStation();
+
+      startRadioStationSync();
+
+      return started;
+
+    }
+
+
+    /*
+       Public visitor with no station
+       yet — try local state only.
+    */
+
     const saved =
       loadLocalRadioState();
 
-
-    if(
-      saved?.trackKey
-    ){
+    if(saved?.trackKey){
 
       const savedTrack =
         list.find(
@@ -2718,7 +3466,6 @@ async function chooseRandom(){
             radioTrackKey(track) ===
             saved.trackKey
         );
-
 
       if(savedTrack){
 
@@ -2732,141 +3479,31 @@ async function chooseRandom(){
 
         updateTrackUI();
 
-
         const result =
           await playTrack(
             savedTrack
           );
 
-
         if(result){
 
-          /*
-             Wait until the browser knows
-             the real audio duration.
-          */
-
           if(
-            !Number.isFinite(
-              audio.duration
-            ) ||
-            audio.duration <= 0
+            Number.isFinite(
+              saved.position
+            )
           ){
 
-            await new Promise(
-              resolve => {
-
-                audio.addEventListener(
-                  "loadedmetadata",
-                  resolve,
-                  { once:true }
-                );
-
-              }
-            );
-
-          }
-
-
-          const duration =
-            Number(
-              audio.duration ||
-              saved.duration ||
-              0
-            );
-
-
-          if(
-            Number.isFinite(duration) &&
-            duration > 0
-          ){
-
-            const elapsed =
-              (
-                Date.now() -
-                Number(
-                  saved.startedAt ||
-                  Date.now()
-                )
-              ) / 1000;
-
-
-            /*
-               THE SAVED TRACK IS STILL PLAYING
-
-               Resume at the position where the
-               station should currently be.
-            */
-
-            if(
-              elapsed >= 0 &&
-              elapsed < duration
-            ){
+            try{
 
               audio.currentTime =
-                elapsed;
+                saved.position;
 
-
-              radioStationTrackKey =
-                radioTrackKey(
-                  savedTrack
-                );
-
-              radioStationStartedAt =
-                Date.now() -
-                (
-                  elapsed *
-                  1000
-                );
-
-              radioStationDuration =
-                duration;
-
-              radioStationPlaying =
-                !audio.paused;
-
-
-              radioStationState = {
-
-                trackKey:
-                  radioStationTrackKey,
-
-                playing:
-                  radioStationPlaying,
-
-                position:
-                  elapsed,
-
-                duration:
-                  duration,
-
-                savedAt:
-                  Date.now()
-
-              };
-
-
-              saveLocalRadioState();
-
-
-              return true;
-
-            }
+            }catch(error){}
 
           }
 
+          return true;
+
         }
-
-        /*
-           Saved track has finished while
-           the page was away.
-
-           Fall through and select
-           the next random station track.
-        */
-
-        currentTrack =
-          null;
 
       }
 
@@ -2875,110 +3512,7 @@ async function chooseRandom(){
   }
 
 
-  /* =================================================
-     NEW / NEXT RANDOM STATION TRACK
-  ================================================= */
-
-  let choices =
-    list.filter(
-      track =>
-        track !== currentTrack
-    );
-
-
-  if(
-    !choices.length
-  ){
-
-    choices =
-      list;
-
-  }
-
-
-  const randomIndex =
-    Math.floor(
-      Math.random() *
-      choices.length
-    );
-
-
-  currentTrack =
-    choices[randomIndex];
-
-
-  currentIndex =
-    library.indexOf(
-      currentTrack
-    );
-
-
-  updateTrackUI();
-
-
-  const result =
-    await playTrack(
-      currentTrack
-    );
-
-
-  if(result){
-
-    radioStationTrackKey =
-      radioTrackKey(
-        currentTrack
-      );
-
-
-    radioStationStartedAt =
-      Date.now() -
-      (
-        Number(
-          audio.currentTime || 0
-        ) * 1000
-      );
-
-
-    radioStationDuration =
-      Number.isFinite(
-        audio.duration
-      )
-        ? audio.duration
-        : 0;
-
-
-    radioStationPlaying =
-      !audio.paused;
-
-
-    radioStationState = {
-
-      trackKey:
-        radioStationTrackKey,
-
-      playing:
-        radioStationPlaying,
-
-      position:
-        Number(
-          audio.currentTime || 0
-        ),
-
-      duration:
-        radioStationDuration,
-
-      savedAt:
-        Date.now()
-
-    };
-
-
-    saveLocalRadioState();
-
-  }
-
-
-  return result;
+  return syncRadioToStation();
 
 }
 

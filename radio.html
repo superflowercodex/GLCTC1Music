@@ -2316,31 +2316,11 @@ function renderLibraryTable(
         button.textContent =
           "PLAY";
 
-        /* =========================================
-           ADMIN / DJ ONLY
-        ========================================= */
-
-        button.disabled =
-          !isAdmin;
-
         button.onclick =
-          () => {
-
-            if(!isAdmin){
-
-              console.log(
-                "GLCTC1 ADMIN OVERRIDE — LIBRARY PLAY BLOCKED"
-              );
-
-              return;
-
-            }
-
+          () =>
             playLibraryTrack(
               track
             );
-
-          };
 
       }else{
 
@@ -2553,7 +2533,7 @@ function playableLibrary(){
 
 /* =====================================================
    RADIO STATION CLOCK
-   SWAP 1 — SHARED SUPABASE LIVE RADIO ENGINE
+   SWAP 1 — LOCAL PERSISTENT RADIO ENGINE
 ===================================================== */
 
 let radioStationState = null;
@@ -2563,11 +2543,108 @@ let radioStationStartedAt = 0;
 let radioStationDuration = 0;
 let radioStationPlaying = false;
 
+const RADIO_LOCAL_STORAGE_KEY =
+  "GLCTC1_RADIO_STATION_LOCAL_V1";
+
 let radioStationInitialised = false;
 
-let radioStationSyncTimer = null;
-let radioStationSyncBusy = false;
-let radioStationWriteBusy = false;
+
+/* =====================================================
+   LOCAL RADIO PERSISTENCE
+===================================================== */
+
+function saveLocalRadioState(){
+
+  if(!currentTrack)
+    return;
+
+  const state = {
+
+    trackKey:
+      radioTrackKey(
+        currentTrack
+      ),
+
+    startedAt:
+      Number(
+        radioStationStartedAt ||
+        (
+          Date.now() -
+          (
+            Number(
+              audio.currentTime || 0
+            ) * 1000
+          )
+        )
+      ),
+
+    duration:
+      Number(
+        radioStationDuration ||
+        audio.duration ||
+        0
+      ),
+
+    playing:
+      !audio.paused,
+
+    position:
+      Number(
+        audio.currentTime || 0
+      ),
+
+    savedAt:
+      Date.now()
+
+  };
+
+  try{
+
+    localStorage.setItem(
+      RADIO_LOCAL_STORAGE_KEY,
+      JSON.stringify(state)
+    );
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: LOCAL STATE SAVE FAILED",
+      error
+    );
+
+  }
+
+}
+
+
+function loadLocalRadioState(){
+
+  try{
+
+    const saved =
+      localStorage.getItem(
+        RADIO_LOCAL_STORAGE_KEY
+      );
+
+    if(!saved)
+      return null;
+
+    return JSON.parse(
+      saved
+    );
+
+  }catch(error){
+
+    console.warn(
+      "GLCTC1 RADIO: LOCAL STATE LOAD FAILED",
+      error
+    );
+
+    return null;
+
+  }
+
+}
 
 
 /* =====================================================
@@ -2593,537 +2670,14 @@ function radioTrackKey(track){
 
 
 /* =====================================================
-   READ SHARED RADIO STATION
-===================================================== */
-
-async function getSharedRadioState(){
-
-  try{
-
-    const { data, error } =
-      await supabaseClient
-        .from("glctc1_radio_station")
-        .select(
-          "id,track_key,started_at,duration,playing,updated_at"
-        )
-        .eq("id",1)
-        .maybeSingle();
-
-
-    if(error){
-
-      console.error(
-        "GLCTC1 SHARED RADIO READ ERROR:",
-        error
-      );
-
-      return null;
-
-    }
-
-
-    return data || null;
-
-  }catch(error){
-
-    console.error(
-      "GLCTC1 SHARED RADIO READ FAILURE:",
-      error
-    );
-
-    return null;
-
-  }
-
-}
-
-
-/* =====================================================
-   WRITE SHARED RADIO STATION
-   ADMIN ONLY
-===================================================== */
-
-async function writeSharedRadioState(
-  track,
-  startedAt,
-  duration,
-  playing = true
-){
-
-  if(!isAdmin)
-    return false;
-
-  if(!track)
-    return false;
-
-  if(radioStationWriteBusy)
-    return false;
-
-
-  radioStationWriteBusy =
-    true;
-
-
-  try{
-
-    const state = {
-
-      track_key:
-        radioTrackKey(
-          track
-        ),
-
-      started_at:
-        new Date(
-          Number(
-            startedAt ||
-            Date.now()
-          )
-        ).toISOString(),
-
-      duration:
-        Number(
-          duration ||
-          0
-        ),
-
-      playing:
-        !!playing,
-
-      updated_at:
-        new Date().toISOString()
-
-    };
-
-
-    const { error } =
-      await supabaseClient
-        .from("glctc1_radio_station")
-        .update(state)
-        .eq("id",1);
-
-
-    if(error){
-
-      console.error(
-        "GLCTC1 SHARED RADIO WRITE ERROR:",
-        error
-      );
-
-      return false;
-
-    }
-
-
-    radioStationState =
-      state;
-
-    radioStationTrackKey =
-      state.track_key;
-
-    radioStationStartedAt =
-      Number(
-        startedAt ||
-        Date.now()
-      );
-
-    radioStationDuration =
-      Number(
-        duration ||
-        0
-      );
-
-    radioStationPlaying =
-      !!playing;
-
-
-    return true;
-
-
-  }catch(error){
-
-    console.error(
-      "GLCTC1 SHARED RADIO WRITE FAILURE:",
-      error
-    );
-
-    return false;
-
-
-  }finally{
-
-    radioStationWriteBusy =
-      false;
-
-  }
-
-}
-
-
-/* =====================================================
-   RESTORE THE LIVE SHARED STATION
-===================================================== */
-
-async function restoreSharedRadioState(){
-
-  if(radioStationSyncBusy)
-    return false;
-
-
-  radioStationSyncBusy =
-    true;
-
-
-  try{
-
-    const state =
-      await getSharedRadioState();
-
-
-    /* -------------------------------------------------
-       NO STATION TRACK YET
-    ------------------------------------------------- */
-
-    if(
-      !state ||
-      !state.track_key
-    ){
-
-      if(isAdmin){
-
-        radioStationSyncBusy =
-          false;
-
-        return await chooseRandom();
-
-      }
-
-
-      const status =
-        document.getElementById(
-          "radioStatus"
-        );
-
-      if(status){
-
-        status.textContent =
-          "WAITING FOR RADIO STATION";
-
-      }
-
-      return false;
-
-    }
-
-
-    const list =
-      playableLibrary();
-
-
-    const track =
-      list.find(
-        item =>
-          radioTrackKey(item) ===
-          String(
-            state.track_key
-          )
-      );
-
-
-    if(!track){
-
-      console.warn(
-        "GLCTC1 RADIO — SHARED TRACK NOT FOUND:",
-        state.track_key
-      );
-
-      return false;
-
-    }
-
-
-    /* -------------------------------------------------
-       JOIN THE CURRENT STATION TRACK
-    ------------------------------------------------- */
-
-    currentTrack =
-      track;
-
-    currentIndex =
-      library.indexOf(
-        track
-      );
-
-
-    radioStationState =
-      state;
-
-    radioStationTrackKey =
-      String(
-        state.track_key
-      );
-
-    radioStationStartedAt =
-      new Date(
-        state.started_at
-      ).getTime();
-
-    radioStationDuration =
-      Number(
-        state.duration ||
-        0
-      );
-
-    radioStationPlaying =
-      !!state.playing;
-
-
-    updateTrackUI();
-
-
-    /* -------------------------------------------------
-       LOAD THE SHARED AUDIO
-    ------------------------------------------------- */
-
-    const result =
-      await playTrack(
-        track
-      );
-
-
-    if(!result)
-      return false;
-
-
-    /* -------------------------------------------------
-       WAIT FOR AUDIO METADATA
-    ------------------------------------------------- */
-
-    if(
-      !Number.isFinite(
-        audio.duration
-      ) ||
-      audio.duration <= 0
-    ){
-
-      await new Promise(
-        resolve => {
-
-          audio.addEventListener(
-            "loadedmetadata",
-            resolve,
-            { once:true }
-          );
-
-        }
-      );
-
-    }
-
-
-    const duration =
-      Number(
-        audio.duration ||
-        state.duration ||
-        0
-      );
-
-
-    if(
-      duration > 0
-    ){
-
-      radioStationDuration =
-        duration;
-
-    }
-
-
-    /* -------------------------------------------------
-       CALCULATE WHERE THE LIVE STATION IS NOW
-    ------------------------------------------------- */
-
-    const elapsed =
-      Math.max(
-        0,
-        (
-          Date.now() -
-          radioStationStartedAt
-        ) / 1000
-      );
-
-
-    /* -------------------------------------------------
-       CURRENT TRACK HAS ALREADY FINISHED
-    ------------------------------------------------- */
-
-    if(
-      radioStationDuration > 0 &&
-      elapsed >=
-        radioStationDuration
-    ){
-
-      if(isAdmin){
-
-        radioStationSyncBusy =
-          false;
-
-        return await chooseRandom();
-
-      }
-
-
-      const status =
-        document.getElementById(
-          "radioStatus"
-        );
-
-      if(status){
-
-        status.textContent =
-          "WAITING FOR NEXT RADIO TRACK";
-
-      }
-
-      return false;
-
-    }
-
-
-    /* -------------------------------------------------
-       JOIN AT THE CURRENT LIVE POSITION
-    ------------------------------------------------- */
-
-    if(
-      radioStationPlaying
-    ){
-
-      audio.currentTime =
-        Math.min(
-          elapsed,
-          Math.max(
-            0,
-            radioStationDuration -
-            0.25
-          )
-        );
-
-
-      const status =
-        document.getElementById(
-          "radioStatus"
-        );
-
-      if(status){
-
-        status.textContent =
-          "● RADIO PLAYING";
-
-      }
-
-
-      const playButton =
-        document.getElementById(
-          "playBtn"
-        );
-
-      if(playButton){
-
-        playButton.textContent =
-          "⏸ PAUSE";
-
-      }
-
-    }
-
-
-    /* -------------------------------------------------
-       STATION IS PAUSED
-    ------------------------------------------------- */
-
-    else{
-
-      audio.pause();
-
-
-      const status =
-        document.getElementById(
-          "radioStatus"
-        );
-
-      if(status){
-
-        status.textContent =
-          "RADIO PAUSED";
-
-      }
-
-
-      const playButton =
-        document.getElementById(
-          "playBtn"
-        );
-
-      if(playButton){
-
-        playButton.textContent =
-          "▶ PLAY";
-
-      }
-
-    }
-
-
-    radioStationInitialised =
-      true;
-
-
-    return true;
-
-
-  }catch(error){
-
-    console.error(
-      "GLCTC1 SHARED RADIO RESTORE ERROR:",
-      error
-    );
-
-    return false;
-
-
-  }finally{
-
-    radioStationSyncBusy =
-      false;
-
-  }
-
-}
-
-
-/* =====================================================
-   RANDOM TRACK
-   ADMIN = CHOOSES
-   PUBLIC = FOLLOWS
+   RANDOM / INITIAL TRACK
+   CONTINUOUS RANDOM RADIO
 ===================================================== */
 
 async function chooseRandom(){
 
-  /* -------------------------------------------------
-     PUBLIC BROWSER
-     NEVER CHOOSES A TRACK
-  ------------------------------------------------- */
-
-  if(!isAdmin){
-
-    return await restoreSharedRadioState();
-
-  }
-
-
   const list =
     playableLibrary();
-
 
   if(
     !list.length
@@ -3137,6 +2691,193 @@ async function chooseRandom(){
 
   }
 
+
+  /* =================================================
+     FIRST RADIO START
+     TRY TO RESTORE THE EXISTING STATION
+  ================================================= */
+
+  if(
+    !radioStationInitialised
+  ){
+
+    radioStationInitialised =
+      true;
+
+    const saved =
+      loadLocalRadioState();
+
+
+    if(
+      saved?.trackKey
+    ){
+
+      const savedTrack =
+        list.find(
+          track =>
+            radioTrackKey(track) ===
+            saved.trackKey
+        );
+
+
+      if(savedTrack){
+
+        currentTrack =
+          savedTrack;
+
+        currentIndex =
+          library.indexOf(
+            savedTrack
+          );
+
+        updateTrackUI();
+
+
+        const result =
+          await playTrack(
+            savedTrack
+          );
+
+
+        if(result){
+
+          /*
+             Wait until the browser knows
+             the real audio duration.
+          */
+
+          if(
+            !Number.isFinite(
+              audio.duration
+            ) ||
+            audio.duration <= 0
+          ){
+
+            await new Promise(
+              resolve => {
+
+                audio.addEventListener(
+                  "loadedmetadata",
+                  resolve,
+                  { once:true }
+                );
+
+              }
+            );
+
+          }
+
+
+          const duration =
+            Number(
+              audio.duration ||
+              saved.duration ||
+              0
+            );
+
+
+          if(
+            Number.isFinite(duration) &&
+            duration > 0
+          ){
+
+            const elapsed =
+              (
+                Date.now() -
+                Number(
+                  saved.startedAt ||
+                  Date.now()
+                )
+              ) / 1000;
+
+
+            /*
+               THE SAVED TRACK IS STILL PLAYING
+
+               Resume at the position where the
+               station should currently be.
+            */
+
+            if(
+              elapsed >= 0 &&
+              elapsed < duration
+            ){
+
+              audio.currentTime =
+                elapsed;
+
+
+              radioStationTrackKey =
+                radioTrackKey(
+                  savedTrack
+                );
+
+              radioStationStartedAt =
+                Date.now() -
+                (
+                  elapsed *
+                  1000
+                );
+
+              radioStationDuration =
+                duration;
+
+              radioStationPlaying =
+                !audio.paused;
+
+
+              radioStationState = {
+
+                trackKey:
+                  radioStationTrackKey,
+
+                playing:
+                  radioStationPlaying,
+
+                position:
+                  elapsed,
+
+                duration:
+                  duration,
+
+                savedAt:
+                  Date.now()
+
+              };
+
+
+              saveLocalRadioState();
+
+
+              return true;
+
+            }
+
+          }
+
+        }
+
+        /*
+           Saved track has finished while
+           the page was away.
+
+           Fall through and select
+           the next random station track.
+        */
+
+        currentTrack =
+          null;
+
+      }
+
+    }
+
+  }
+
+
+  /* =================================================
+     NEW / NEXT RANDOM STATION TRACK
+  ================================================= */
 
   let choices =
     list.filter(
@@ -3163,9 +2904,7 @@ async function chooseRandom(){
 
 
   currentTrack =
-    choices[
-      randomIndex
-    ];
+    choices[randomIndex];
 
 
   currentIndex =
@@ -3177,315 +2916,69 @@ async function chooseRandom(){
   updateTrackUI();
 
 
-  /* -------------------------------------------------
-     START NEW TRACK
-  ------------------------------------------------- */
-
   const result =
     await playTrack(
       currentTrack
     );
 
 
-  if(!result)
-    return false;
+  if(result){
 
-
-  /* -------------------------------------------------
-     WAIT FOR REAL AUDIO DURATION
-  ------------------------------------------------- */
-
-  if(
-    !Number.isFinite(
-      audio.duration
-    ) ||
-    audio.duration <= 0
-  ){
-
-    await new Promise(
-      resolve => {
-
-        audio.addEventListener(
-          "loadedmetadata",
-          resolve,
-          { once:true }
-        );
-
-      }
-    );
-
-  }
-
-
-  const duration =
-    Number(
-      audio.duration ||
-      0
-    );
-
-
-  const startedAt =
-    Date.now();
-
-
-  radioStationTrackKey =
-    radioTrackKey(
-      currentTrack
-    );
-
-  radioStationStartedAt =
-    startedAt;
-
-  radioStationDuration =
-    duration;
-
-  radioStationPlaying =
-    true;
-
-
-  /* -------------------------------------------------
-     PUBLISH THE NEW LIVE TRACK
-  ------------------------------------------------- */
-
-  await writeSharedRadioState(
-    currentTrack,
-    startedAt,
-    duration,
-    true
-  );
-
-
-  radioStationInitialised =
-    true;
-
-
-  return true;
-
-}
-
-
-/* =====================================================
-   RADIO CLOCK
-   ADMIN TRACK POSITION
-===================================================== */
-
-async function updateRadioStationClock(){
-
-  if(
-    !isAdmin ||
-    !currentTrack ||
-    !radioStationInitialised
-  )
-    return;
-
-
-  radioStationDuration =
-    Number(
-      audio.duration ||
-      radioStationDuration ||
-      0
-    );
-
-
-  radioStationPlaying =
-    !audio.paused;
-
-
-  radioStationState = {
-
-    track_key:
+    radioStationTrackKey =
       radioTrackKey(
         currentTrack
-      ),
-
-    started_at:
-      new Date(
-        radioStationStartedAt
-      ).toISOString(),
-
-    duration:
-      radioStationDuration,
-
-    playing:
-      radioStationPlaying
-
-  };
-
-}
-
-
-/* =====================================================
-   SYNC EVERY OTHER BROWSER
-===================================================== */
-
-async function syncSharedRadio(){
-
-  if(
-    radioStationSyncBusy
-  )
-    return;
-
-
-  try{
-
-    const state =
-      await getSharedRadioState();
-
-
-    if(
-      !state ||
-      !state.track_key
-    )
-      return;
-
-
-    const incomingKey =
-      String(
-        state.track_key
       );
-
-
-    /* -------------------------------------------------
-       NEW TRACK HAS BEEN PUBLISHED
-    ------------------------------------------------- */
-
-    if(
-      incomingKey !==
-      radioStationTrackKey
-    ){
-
-      await restoreSharedRadioState();
-
-      return;
-
-    }
 
 
     radioStationStartedAt =
-      new Date(
-        state.started_at
-      ).getTime();
-
-
-    radioStationDuration =
-      Number(
-        state.duration ||
-        radioStationDuration ||
-        0
+      Date.now() -
+      (
+        Number(
+          audio.currentTime || 0
+        ) * 1000
       );
 
 
+    radioStationDuration =
+      Number.isFinite(
+        audio.duration
+      )
+        ? audio.duration
+        : 0;
+
+
     radioStationPlaying =
-      !!state.playing;
+      !audio.paused;
 
 
-    /* -------------------------------------------------
-       KEEP THIS BROWSER LOCKED TO LIVE POSITION
-    ------------------------------------------------- */
+    radioStationState = {
 
-    if(
-      state.playing &&
-      currentTrack &&
-      radioStationDuration > 0
-    ){
+      trackKey:
+        radioStationTrackKey,
 
-      const elapsed =
-        (
-          Date.now() -
-          radioStationStartedAt
-        ) / 1000;
+      playing:
+        radioStationPlaying,
 
+      position:
+        Number(
+          audio.currentTime || 0
+        ),
 
-      if(
-        elapsed >= 0 &&
-        elapsed <
-          radioStationDuration
-      ){
+      duration:
+        radioStationDuration,
 
-        const drift =
-          Math.abs(
-            (
-              audio.currentTime ||
-              0
-            ) -
-            elapsed
-          );
+      savedAt:
+        Date.now()
+
+    };
 
 
-        if(
-          drift > 2
-        ){
-
-          audio.currentTime =
-            elapsed;
-
-        }
-
-      }
-
-    }
-
-
-  }catch(error){
-
-    console.warn(
-      "GLCTC1 SHARED RADIO SYNC ERROR:",
-      error
-    );
-
-  }
-
-}
-
-
-/* =====================================================
-   START LIVE RADIO SYNC
-===================================================== */
-
-function startSharedRadioSync(){
-
-  if(
-    radioStationSyncTimer
-  ){
-
-    clearInterval(
-      radioStationSyncTimer
-    );
+    saveLocalRadioState();
 
   }
 
 
-  radioStationSyncTimer =
-    setInterval(
-      () => {
-
-        syncSharedRadio();
-
-      },
-      3000
-    );
-
-}
-
-
-/* =====================================================
-   STOP LIVE RADIO SYNC
-===================================================== */
-
-function stopSharedRadioSync(){
-
-  if(
-    radioStationSyncTimer
-  ){
-
-    clearInterval(
-      radioStationSyncTimer
-    );
-
-    radioStationSyncTimer =
-      null;
-
-  }
+  return result;
 
 }
 
@@ -5760,48 +5253,6 @@ supabaseClient.auth
 
   await loadLibrary();
 
-  /*
-     PAGE-LOAD RADIO START
-
-     loadLibrary() establishes the current station track.
-     Now explicitly trigger the existing audio transport
-     so RADIO SPACE attempts to begin playing immediately.
-  */
-
-  if(
-    currentTrack &&
-    audio
-  ){
-
-    try{
-
-      await audio.play();
-
-      $("radioStatus").textContent =
-        "● RADIO PLAYING";
-
-      $("playBtn").textContent =
-        "⏸ PAUSE";
-
-      disarmRadioWake();
-
-      await ensureAudioEngine();
-
-    }catch(error){
-
-      console.log(
-        "🔒 Browser autoplay blocked — waiting for user gesture"
-      );
-
-      $("radioStatus").textContent =
-        "TAP PLAY TO START RADIO";
-
-      armRadioWake();
-
-    }
-
-  }
-
   const artist =
     artistFromURL();
 
@@ -5827,4 +5278,3 @@ supabaseClient.auth
 
 </body>
 </html>
-

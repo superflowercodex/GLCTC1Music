@@ -1077,20 +1077,20 @@ tr.playing{
     </button>
 
     <button
-      id="goLiveBtn"
-      class="btn red"
-      type="button"
-    >
-      🔴 GO LIVE
-    </button>
+  id="webcamBtn"
+  class="btn red"
+  type="button"
+>
+  📹 START WEBCAM
+</button>
 
-    <button
-      id="endLiveBtn"
-      class="btn hide"
-      type="button"
-    >
-      ⏹ END LIVE
-    </button>
+<button
+  id="stopWebcamBtn"
+  class="btn hide"
+  type="button"
+>
+  ⏹ STOP WEBCAM
+</button>
 
     <button
       id="fullscreenBtn"
@@ -6195,111 +6195,758 @@ function stopWatching(){
 
 }
 
+
 /* =====================================================
-   GO LIVE
+   GLCTC1 ARTIST WEBCAM BROADCAST
 ===================================================== */
 
-$("goLiveBtn").onclick =
-  async () => {
+let artistBroadcastConnection =
+  null;
 
-    const artistId =
-      liveArtistId ||
-      currentUser?.id;
+let artistBroadcastIce =
+  [];
 
-    if(!artistId){
+let artistAnswerTimer =
+  null;
 
-      $("videoNotice").textContent =
-        "SIGN IN AS ARTIST OR OPEN AN ARTIST LIVE LINK";
 
-      return;
+/* =====================================================
+   START ARTIST WEBCAM BROADCAST
+===================================================== */
+
+async function startGLCTC1WebcamBroadcast(){
+
+  if(!webcamStream){
+
+    $("videoNotice").textContent =
+      "START WEBCAM FIRST";
+
+    return;
+
+  }
+
+  const artistId =
+    currentUser?.id;
+
+  if(!artistId){
+
+    $("videoNotice").textContent =
+      "SIGN IN AS ARTIST TO BROADCAST";
+
+    return;
+
+  }
+
+  try{
+
+    await ensureAudioEngine();
+
+
+    if(artistBroadcastConnection){
+
+      try{
+        artistBroadcastConnection.close();
+      }catch(e){}
+
+      artistBroadcastConnection =
+        null;
 
     }
 
-    if(
-      window.GLCTC1Live?.start
-    ){
 
-      try{
+    if(artistAnswerTimer){
 
-        await window.GLCTC1Live
-          .start(
+      clearInterval(
+        artistAnswerTimer
+      );
+
+      artistAnswerTimer =
+        null;
+
+    }
+
+
+    artistBroadcastIce =
+      [];
+
+
+    artistBroadcastConnection =
+      new RTCPeerConnection(
+        RTC_CONFIG
+      );
+
+
+    /* ---------------------------------------------
+       SEND WEBCAM + MICROPHONE
+    --------------------------------------------- */
+
+    webcamStream
+      .getTracks()
+      .forEach(
+        track => {
+
+          artistBroadcastConnection
+            .addTrack(
+              track,
+              webcamStream
+            );
+
+        }
+      );
+
+
+    /* ---------------------------------------------
+       ARTIST ICE
+    --------------------------------------------- */
+
+    artistBroadcastConnection
+      .onicecandidate =
+      async event => {
+
+        if(!event.candidate)
+          return;
+
+        artistBroadcastIce.push(
+          event.candidate.toJSON()
+        );
+
+        const room =
+          await getRoom(
             artistId
           );
 
-        setLiveUI(true);
+        const signaling =
+          room?.signaling_data ||
+          {};
 
-        return;
+        signaling.artist_ice =
+          artistBroadcastIce;
 
-      }catch(error){
+        await supabaseClient
+          .from(
+            "glctc1_live_rooms"
+          )
+          .update({
+            signaling_data:
+              signaling
+          })
+          .eq(
+            "user_id",
+            artistId
+          );
 
-        console.error(
-          "GLCTC1 LIVE START ERROR:",
-          error
+      };
+
+
+    /* ---------------------------------------------
+       CREATE OFFER
+    --------------------------------------------- */
+
+    const offer =
+      await artistBroadcastConnection
+        .createOffer();
+
+
+    await artistBroadcastConnection
+      .setLocalDescription(
+        offer
+      );
+
+
+    /* ---------------------------------------------
+       SAVE LIVE ROOM
+    --------------------------------------------- */
+
+    const existingRoom =
+      await getRoom(
+        artistId
+      );
+
+
+    const signaling =
+      existingRoom?.signaling_data ||
+      {};
+
+
+    signaling.offer = {
+
+      type:
+        offer.type,
+
+      sdp:
+        offer.sdp
+
+    };
+
+
+    signaling.answer =
+      null;
+
+    signaling.viewer_ice =
+      [];
+
+    signaling.artist_ice =
+      [];
+
+
+    const { error } =
+      await supabaseClient
+        .from(
+          "glctc1_live_rooms"
+        )
+        .upsert({
+
+          user_id:
+            artistId,
+
+          signaling_data:
+            signaling
+
+        },{
+          onConflict:
+            "user_id"
+
+        });
+
+
+    if(error)
+      throw error;
+
+
+    /* ---------------------------------------------
+       WAIT FOR VIEWER ANSWER
+    --------------------------------------------- */
+
+    artistAnswerTimer =
+      setInterval(
+        async () => {
+
+          if(
+            !artistBroadcastConnection
+          )
+            return;
+
+
+          const room =
+            await getRoom(
+              artistId
+            );
+
+
+          const answer =
+            room
+              ?.signaling_data
+              ?.answer;
+
+
+          if(!answer)
+            return;
+
+
+          if(
+            artistBroadcastConnection
+              .currentRemoteDescription
+          )
+            return;
+
+
+          try{
+
+            await artistBroadcastConnection
+              .setRemoteDescription(
+                answer
+              );
+
+
+            clearInterval(
+              artistAnswerTimer
+            );
+
+            artistAnswerTimer =
+              null;
+
+
+            $("videoNotice").textContent =
+              "GLCTC1 LIVE BROADCAST CONNECTED";
+
+
+            console.log(
+              "📡 GLCTC1 ARTIST BROADCAST CONNECTED"
+            );
+
+
+          }catch(error){
+
+            console.error(
+              "GLCTC1 REMOTE ANSWER ERROR:",
+              error
+            );
+
+          }
+
+        },
+        1000
+      );
+
+
+    $("videoNotice").textContent =
+      "GLCTC1 LIVE BROADCAST READY";
+
+
+    console.log(
+      "📡 GLCTC1 ARTIST WEBCAM BROADCAST STARTED"
+    );
+
+
+  }catch(error){
+
+    console.error(
+      "GLCTC1 WEBCAM BROADCAST ERROR:",
+      error
+    );
+
+
+    $("videoNotice").textContent =
+      "WEBCAM BROADCAST ERROR";
+
+  }
+
+}
+
+
+/* =====================================================
+   STOP ARTIST WEBCAM BROADCAST
+===================================================== */
+
+async function stopGLCTC1WebcamBroadcast(){
+
+  const artistId =
+    currentUser?.id;
+
+
+  if(artistAnswerTimer){
+
+    clearInterval(
+      artistAnswerTimer
+    );
+
+    artistAnswerTimer =
+      null;
+
+  }
+
+
+  if(artistBroadcastConnection){
+
+    try{
+
+      artistBroadcastConnection
+        .close();
+
+    }catch(e){}
+
+    artistBroadcastConnection =
+      null;
+
+  }
+
+
+  if(artistId){
+
+    try{
+
+      const room =
+        await getRoom(
+          artistId
         );
 
-      }
+
+      const signaling =
+        room?.signaling_data ||
+        {};
+
+
+      signaling.offer =
+        null;
+
+      signaling.answer =
+        null;
+
+      signaling.artist_ice =
+        [];
+
+      signaling.viewer_ice =
+        [];
+
+
+      await supabaseClient
+        .from(
+          "glctc1_live_rooms"
+        )
+        .update({
+          signaling_data:
+            signaling
+        })
+        .eq(
+          "user_id",
+          artistId
+        );
+
+
+    }catch(error){
+
+      console.error(
+        "GLCTC1 LIVE ROOM CLEANUP ERROR:",
+        error
+      );
 
     }
 
-    const target =
-      new URL(
-        "artist.html",
-        window.location.href
+  }
+
+
+  console.log(
+    "⏹ GLCTC1 ARTIST BROADCAST STOPPED"
+  );
+
+}
+
+/* =====================================================
+   START WEBCAM
+===================================================== */
+
+$("webcamBtn").onclick =
+  async () => {
+
+    if(webcamMode)
+      return;
+
+    try{
+
+      webcamStream =
+        await navigator.mediaDevices
+          .getUserMedia({
+
+            video:{
+              facingMode:"user"
+            },
+
+            audio:true
+
+          });
+
+
+      liveVideo.srcObject =
+        webcamStream;
+
+      liveVideo.muted =
+        true;
+
+      liveVideo.playsInline =
+        true;
+
+      liveVideo.autoplay =
+        true;
+
+
+      liveVideo.style.display =
+        "block";
+
+      videoFrame.style.display =
+        "none";
+
+      videoShell.classList
+        .remove("empty");
+
+      videoMsg.classList
+        .add("hide");
+
+
+      webcamMode =
+        true;
+
+      liveMode =
+        true;
+
+
+      $("webcamBtn")
+        .classList
+        .add("hide");
+
+      $("stopWebcamBtn")
+        .classList
+        .remove("hide");
+
+
+      $("liveStatus").textContent =
+        "● WEBCAM ACTIVE";
+
+      $("videoNotice").textContent =
+        "GLCTC1 WEBCAM + MICROPHONE ACTIVE";
+
+
+      await ensureAudioEngine();
+
+
+      setupLiveAudio(
+        webcamStream
       );
 
-    target.searchParams.set(
-      "live",
-      "1"
-    );
 
-    target.searchParams.set(
-      "artist",
-      artistId
-    );
+      activeAnalyser =
+        liveAnalyser;
 
-    target.searchParams.set(
-      "return",
-      "radio.html"
-    );
 
-    window.open(
-      target.toString(),
-      "_blank",
-      "noopener"
-    );
+      duckRadio(true);
 
-    $("videoNotice").textContent =
-      "ARTIST LIVE MODULE OPENED • START LIVE THERE";
+
+      await liveVideo
+        .play()
+        .catch(()=>{});
+
+
+      /* ---------------------------------------------
+         START GLCTC1 PUBLIC WEBCAM BROADCAST
+      --------------------------------------------- */
+
+      await startGLCTC1WebcamBroadcast();
+
+
+      $("videoNotice").textContent =
+        "GLCTC1 LIVE WEBCAM BROADCASTING";
+
+
+      console.log(
+        "📡 GLCTC1 WEBCAM BROADCASTING"
+      );
+
+
+    }catch(error){
+
+      console.error(
+        "GLCTC1 WEBCAM ERROR:",
+        error
+      );
+
+
+      if(webcamStream){
+
+        webcamStream
+          .getTracks()
+          .forEach(
+            track =>
+              track.stop()
+          );
+
+        webcamStream =
+          null;
+
+      }
+
+
+      webcamMode =
+        false;
+
+      liveMode =
+        false;
+
+
+      $("webcamBtn")
+        .classList
+        .remove("hide");
+
+      $("stopWebcamBtn")
+        .classList
+        .add("hide");
+
+
+      $("videoNotice").textContent =
+        "WEBCAM ACCESS DENIED OR UNAVAILABLE";
+
+      $("liveStatus").textContent =
+        "● RADIO SPACE";
+
+    }
 
   };
 
+
 /* =====================================================
-   END LIVE
+   STOP WEBCAM
 ===================================================== */
 
-$("endLiveBtn").onclick =
+$("stopWebcamBtn").onclick =
   async () => {
 
-    if(
-      window.GLCTC1Live?.end
-    ){
+    /* ---------------------------------------------
+       STOP PUBLIC GLCTC1 BROADCAST FIRST
+    --------------------------------------------- */
 
-      try{
+    try{
 
-        await window.GLCTC1Live.end();
+      await stopGLCTC1WebcamBroadcast();
 
-      }catch(error){
+    }catch(error){
 
-        console.error(
-          "GLCTC1 LIVE END ERROR:",
-          error
-        );
-
-      }
+      console.error(
+        "GLCTC1 WEBCAM BROADCAST STOP ERROR:",
+        error
+      );
 
     }
 
-    stopWatching();
+
+    /* ---------------------------------------------
+       STOP WEBCAM + MICROPHONE
+    --------------------------------------------- */
+
+    if(webcamStream){
+
+      webcamStream
+        .getTracks()
+        .forEach(
+          track =>
+            track.stop()
+        );
+
+    }
+
+
+    webcamStream =
+      null;
+
+    webcamMode =
+      false;
+
+    liveMode =
+      false;
+
+
+    liveVideo.pause();
+
+    liveVideo.srcObject =
+      null;
+
+    liveVideo.style.display =
+      "none";
+
+
+    /* ---------------------------------------------
+       DISCONNECT LIVE AUDIO
+    --------------------------------------------- */
+
+    if(liveAudioSource){
+
+      try{
+
+        liveAudioSource
+          .disconnect();
+
+      }catch(e){}
+
+      liveAudioSource =
+        null;
+
+    }
+
+
+    if(liveGain){
+
+      try{
+
+        liveGain
+          .disconnect();
+
+      }catch(e){}
+
+      liveGain =
+        null;
+
+    }
+
+
+    if(liveAnalyser){
+
+      try{
+
+        liveAnalyser
+          .disconnect();
+
+      }catch(e){}
+
+      liveAnalyser =
+        null;
+
+    }
+
+
+    activeAnalyser =
+      radioAnalyser;
+
+    duckRadio(false);
+
+
+    /* ---------------------------------------------
+       RESTORE BUTTONS
+    --------------------------------------------- */
+
+    $("webcamBtn")
+      .classList
+      .remove("hide");
+
+    $("stopWebcamBtn")
+      .classList
+      .add("hide");
+
+
+    $("liveStatus").textContent =
+      "● RADIO SPACE";
+
+
+    /* ---------------------------------------------
+       RESTORE VIDEO PLAYER
+    --------------------------------------------- */
+
+    $("videoNotice").textContent =
+      videoUrl
+        ? "VIDEO LOADED"
+        : "NO VIDEO LOADED";
+
+
+    if(videoUrl){
+
+      videoFrame.src =
+        videoUrl;
+
+      videoFrame.style.display =
+        "block";
+
+      videoShell.classList
+        .remove("empty");
+
+      videoMsg.classList
+        .add("hide");
+
+    }else{
+
+      videoFrame.src =
+        "";
+
+      videoFrame.style.display =
+        "none";
+
+      videoShell.classList
+        .add("empty");
+
+      videoMsg.classList
+        .remove("hide");
+
+    }
+
+
+    console.log(
+      "⏹ GLCTC1 WEBCAM + LIVE BROADCAST STOPPED"
+    );
 
   };
 
@@ -6390,3 +7037,4 @@ supabaseClient.auth
 
 </body>
 </html>
+

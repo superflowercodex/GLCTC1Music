@@ -4089,6 +4089,13 @@ audio.addEventListener(
   "play",
   () => {
 
+    /*
+       Local browser playback only.
+
+       The Supabase station remains the
+       master source of truth.
+    */
+
     radioStationPlaying =
       true;
 
@@ -4102,8 +4109,15 @@ audio.addEventListener(
   "pause",
   () => {
 
-    radioStationPlaying =
-      false;
+    /*
+       IMPORTANT:
+
+       Do NOT change the master station to
+       paused just because THIS browser paused.
+
+       Public listeners must never alter the
+       shared station state.
+    */
 
     updateRadioStationClock();
 
@@ -4112,180 +4126,111 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED — CONTINUOUS RADIO
-   SAVE EVERY NEW STATION TRACK
+   TRACK ENDED — CONTINUOUS MASTER RADIO
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    if (radioAdvanceBusy)
+    /*
+       Only the admin/DJ advances the
+       master station.
+
+       Every other browser waits for the
+       new Supabase station state.
+    */
+
+    if(!isAdmin){
+
+      console.log(
+        "📻 GLCTC1 RADIO: TRACK ENDED — WAITING FOR MASTER"
+      );
+
       return;
 
-    radioAdvanceBusy = true;
-
-    try {
-
-      const list =
-        playableLibrary();
-
-      if (!list.length)
-        return;
+    }
 
 
-      /* ================================================
-         CHOOSE NEXT RANDOM RADIO TRACK
-      ================================================ */
+    /*
+       Prevent two advance operations
+       happening at the same time.
+    */
 
-      let choices =
-        list.filter(
-          track =>
-            track !== currentTrack
-        );
+    if(
+      radioStationAdvanceBusy ||
+      radioAdvanceBusy
+    ){
 
-      if (!choices.length)
-        choices = list;
+      return;
 
-
-      const randomIndex =
-        Math.floor(
-          Math.random() *
-          choices.length
-        );
+    }
 
 
-      currentTrack =
-        choices[randomIndex];
+    radioStationAdvanceBusy =
+      true;
 
-      currentIndex =
-        library.indexOf(
-          currentTrack
-        );
+    radioAdvanceBusy =
+      true;
 
 
-      updateTrackUI();
+    try{
+
+      console.log(
+        "📻 GLCTC1 RADIO: TRACK ENDED — ADVANCING MASTER"
+      );
 
 
-      /* ================================================
-         START THE NEXT TRACK
-      ================================================ */
+      /*
+         THIS is now the only thing that
+         chooses the next radio track.
 
-      const started =
-        await playTrack(
-          currentTrack
-        );
+         It also writes:
 
+         track_key
+         started_at
+         duration
+         playing
+         updated_at
 
-      if(started){
+         into Supabase.
+      */
 
-        /*
-           Wait for the real duration of the
-           new track before saving the station clock.
-        */
-
-        if(
-          !Number.isFinite(
-            audio.duration
-          ) ||
-          audio.duration <= 0
-        ){
-
-          await new Promise(
-            resolve => {
-
-              audio.addEventListener(
-                "loadedmetadata",
-                resolve,
-                { once:true }
-              );
-
-            }
-          );
-
-        }
+      const advanced =
+        await advanceSupabaseRadioStation();
 
 
-        const duration =
-          Number(
-            audio.duration || 0
-          );
-
-
-        /* ==============================================
-           NEW AUTHORITATIVE RADIO STATE
-        ============================================== */
-
-        radioStationTrackKey =
-          radioTrackKey(
-            currentTrack
-          );
-
-        radioStationStartedAt =
-          Date.now();
-
-        radioStationDuration =
-          duration;
-
-        radioStationPlaying =
-          !audio.paused;
-
-
-        radioStationState = {
-
-          trackKey:
-            radioStationTrackKey,
-
-          playing:
-            radioStationPlaying,
-
-          position:
-            Number(
-              audio.currentTime || 0
-            ),
-
-          duration:
-            radioStationDuration,
-
-          savedAt:
-            Date.now()
-
-        };
-
-
-        /*
-           THIS IS THE IMPORTANT PART:
-
-           Every time the radio advances to a
-           new song, the new station state is
-           permanently saved.
-        */
-
-        saveLocalRadioState();
-
+      if(advanced){
 
         console.log(
-          "📻 GLCTC1 RADIO ADVANCED:",
-          currentTrack.title
+          "📻 GLCTC1 RADIO: NEW MASTER TRACK:",
+          currentTrack?.title ||
+          currentTrack?.id_cat_no ||
+          "UNKNOWN"
+        );
+
+      }else{
+
+        console.warn(
+          "📻 GLCTC1 RADIO: MASTER ADVANCE FAILED"
         );
 
       }
 
-    } catch (error) {
+    }catch(error){
 
       console.error(
-        "GLCTC1 RADIO AUTO-SHUFFLE ERROR:",
+        "GLCTC1 RADIO MASTER END ERROR:",
         error
       );
 
-    } finally {
+    }finally{
 
-      setTimeout(
-        () => {
-          radioAdvanceBusy = false;
-        },
-        250
-      );
+      radioAdvanceBusy =
+        false;
+
+      radioStationAdvanceBusy =
+        false;
 
     }
 
@@ -4294,12 +4239,12 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ERROR
+   TRACK ERROR — MASTER RADIO RECOVERY
 ===================================================== */
 
 audio.addEventListener(
   "error",
-  () => {
+  async () => {
 
     console.error(
       "GLCTC1 RADIO MEDIA ERROR:",
@@ -4307,32 +4252,66 @@ audio.addEventListener(
     );
 
 
+    /*
+       Public browsers NEVER choose
+       their own replacement track.
+
+       They remain followers of the
+       Supabase master station.
+    */
+
+    if(!isAdmin)
+      return;
+
+
+    const list =
+      playableLibrary();
+
+
     if(
-      playableLibrary().length > 1 &&
-      !radioAdvanceBusy
-    ){
+      list.length <= 1
+    )
+      return;
+
+
+    if(
+      radioStationAdvanceBusy ||
+      radioAdvanceBusy
+    )
+      return;
+
+
+    radioStationAdvanceBusy =
+      true;
+
+    radioAdvanceBusy =
+      true;
+
+
+    try{
+
+      console.log(
+        "📻 GLCTC1 RADIO: MEDIA ERROR — ADVANCING MASTER"
+      );
+
+
+      await advanceSupabaseRadioStation();
+
+
+    }catch(error){
+
+      console.error(
+        "GLCTC1 RADIO MASTER MEDIA ERROR:",
+        error
+      );
+
+    }finally{
 
       radioAdvanceBusy =
-        true;
+        false;
 
-
-      setTimeout(
-        async () => {
-
-          try{
-
-            await chooseRandom();
-
-          }finally{
-
-            radioAdvanceBusy =
-              false;
-
-          }
-
-        },
-        700
-      );
+      radioStationAdvanceBusy =
+        false;
 
     }
 
@@ -4431,38 +4410,66 @@ function armRadioWake(){
 }
 
 /* =====================================================
-   TRANSPORT
+   TRANSPORT — ADMIN / DJ MASTER CONTROLS
 ===================================================== */
 
-$("playBtn").onclick =
-  async () => {
 
-    if(
-      audio.paused
-    ){
+/* =====================================================
+   SET MASTER RADIO PLAY / PAUSE
+===================================================== */
 
-      try{
+async function setSupabaseRadioPlaying(
+  playing
+){
 
-        await audio.play();
+  if(!isAdmin)
+    return false;
 
-        $("radioStatus").textContent =
-          "● RADIO PLAYING";
+  try{
 
-        $("playBtn").textContent =
-          "⏸ PAUSE";
+    const now =
+      new Date().toISOString();
 
-        disarmRadioWake();
 
-        await ensureAudioEngine();
+    const { data, error } =
+      await supabaseClient
+        .from("glctc1_radio_station")
+        .update({
 
-      }catch(error){
+          playing:
+            playing,
 
-        $("radioStatus").textContent =
-          "TAP PLAY TO START RADIO";
+          updated_at:
+            now
 
-        armRadioWake();
+        })
+        .eq(
+          "id",
+          1
+        )
+        .select()
+        .single();
 
-      }
+
+    if(error)
+      throw error;
+
+
+    radioStationState =
+      data;
+
+    radioStationPlaying =
+      playing;
+
+
+    if(playing){
+
+      /*
+         Resume from the existing
+         master station timestamp.
+      */
+
+      await syncRadioToStation();
 
     }else{
 
@@ -4476,57 +4483,373 @@ $("playBtn").onclick =
 
     }
 
+
+    return true;
+
+  }catch(error){
+
+    console.error(
+      "GLCTC1 RADIO PLAY/PAUSE ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+/* =====================================================
+   MASTER TRACK SELECTOR
+   USED BY NEXT / PREVIOUS
+===================================================== */
+
+async function setSupabaseRadioTrack(
+  track
+){
+
+  if(!isAdmin)
+    return false;
+
+  if(!track)
+    return false;
+
+
+  try{
+
+    /*
+       Make sure the browser has loaded
+       the actual audio before committing
+       the new station timestamp.
+    */
+
+    currentTrack =
+      track;
+
+    currentIndex =
+      library.indexOf(
+        track
+      );
+
+    updateTrackUI();
+
+
+    const started =
+      await playTrack(
+        track
+      );
+
+
+    if(!started)
+      return false;
+
+
+    /*
+       Wait for real audio duration.
+    */
+
+    if(
+      !Number.isFinite(
+        audio.duration
+      ) ||
+      audio.duration <= 0
+    ){
+
+      await new Promise(
+        resolve => {
+
+          audio.addEventListener(
+            "loadedmetadata",
+            resolve,
+            { once:true }
+          );
+
+        }
+      );
+
+    }
+
+
+    const duration =
+      Number(
+        audio.duration ||
+        0
+      );
+
+
+    /*
+       IMPORTANT:
+
+       The timestamp is written AFTER
+       the new track is ready.
+
+       Therefore this becomes the
+       authoritative beginning of the
+       new station track.
+    */
+
+    const now =
+      new Date().toISOString();
+
+
+    const { data, error } =
+      await supabaseClient
+        .from("glctc1_radio_station")
+        .update({
+
+          track_key:
+            radioTrackKey(
+              track
+            ),
+
+          started_at:
+            now,
+
+          duration:
+            duration,
+
+          playing:
+            true,
+
+          updated_at:
+            now
+
+        })
+        .eq(
+          "id",
+          1
+        )
+        .select()
+        .single();
+
+
+    if(error)
+      throw error;
+
+
+    radioStationState =
+      data;
+
+    radioStationTrackKey =
+      radioTrackKey(
+        track
+      );
+
+    radioStationStartedAt =
+      Date.parse(
+        now
+      );
+
+    radioStationDuration =
+      duration;
+
+    radioStationPlaying =
+      true;
+
+
+    saveLocalRadioState();
+
+
+    $("radioStatus").textContent =
+      "● RADIO PLAYING";
+
+    $("playBtn").textContent =
+      "⏸ PAUSE";
+
+
+    console.log(
+      "📻 GLCTC1 MASTER TRACK:",
+      track.title ||
+      track.id_cat_no ||
+      "UNKNOWN"
+    );
+
+
+    return true;
+
+  }catch(error){
+
+    console.error(
+      "GLCTC1 RADIO MASTER TRACK ERROR:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+/* =====================================================
+   PLAY / PAUSE
+===================================================== */
+
+$("playBtn").onclick =
+  async () => {
+
+    /*
+       ADMIN / DJ ONLY
+    */
+
+    if(!isAdmin)
+      return;
+
+
+    if(
+      audio.paused
+    ){
+
+      const result =
+        await setSupabaseRadioPlaying(
+          true
+        );
+
+
+      if(result){
+
+        $("radioStatus").textContent =
+          "● RADIO PLAYING";
+
+        $("playBtn").textContent =
+          "⏸ PAUSE";
+
+        disarmRadioWake();
+
+        await ensureAudioEngine();
+
+      }else{
+
+        $("radioStatus").textContent =
+          "RADIO ERROR";
+
+      }
+
+    }else{
+
+      await setSupabaseRadioPlaying(
+        false
+      );
+
+    }
+
   };
 
+
+/* =====================================================
+   NEXT — MASTER STATION
+===================================================== */
+
 $("nextBtn").onclick =
-  () =>
-    chooseRandom();
+  async () => {
+
+    /*
+       ADMIN / DJ ONLY
+    */
+
+    if(!isAdmin)
+      return;
+
+
+    if(
+      radioStationAdvanceBusy
+    )
+      return;
+
+
+    radioStationAdvanceBusy =
+      true;
+
+
+    try{
+
+      await advanceSupabaseRadioStation();
+
+    }catch(error){
+
+      console.error(
+        "GLCTC1 RADIO NEXT ERROR:",
+        error
+      );
+
+    }finally{
+
+      radioStationAdvanceBusy =
+        false;
+
+    }
+
+  };
+
+
+/* =====================================================
+   PREVIOUS — MASTER STATION
+===================================================== */
 
 $("prevBtn").onclick =
   async () => {
 
+    /*
+       ADMIN / DJ ONLY
+    */
+
+    if(!isAdmin)
+      return;
+
+
     const list =
       playableLibrary();
 
+
     if(!list.length)
       return;
+
 
     let i =
       list.indexOf(
         currentTrack
       );
 
+
     if(i < 0)
       i = 0;
 
+
     i =
       (
-        i - 1 +
+        i -
+        1 +
         list.length
       ) %
       list.length;
 
-    currentTrack =
+
+    const previousTrack =
       list[i];
 
-    currentIndex =
-      library.indexOf(
-        currentTrack
-      );
 
-    updateTrackUI();
-
-    await playTrack(
-      currentTrack
+    await setSupabaseRadioTrack(
+      previousTrack
     );
 
   };
 
+
+/* =====================================================
+   SHUFFLE — ADMIN / DJ ONLY
+===================================================== */
+
 $("shuffleBtn").onclick =
-  () => {
+  async () => {
+
+    if(!isAdmin)
+      return;
+
 
     shuffleEnabled =
       !shuffleEnabled;
+
 
     $("shuffleBtn")
       .classList
@@ -4535,12 +4858,31 @@ $("shuffleBtn").onclick =
         shuffleEnabled
       );
 
+
     $("shuffleBtn").textContent =
       shuffleEnabled
         ? "🔀 SHUFFLE ON"
         : "🔀 SHUFFLE OFF";
 
+
+    /*
+       Shuffle ON controls what happens
+       when the station advances.
+
+       We do NOT immediately change the
+       current song just by switching the
+       setting.
+    */
+
+    console.log(
+      "📻 GLCTC1 SHUFFLE:",
+      shuffleEnabled
+        ? "ON"
+        : "OFF"
+    );
+
   };
+
 
 /* =====================================================
    VOLUME
@@ -4549,16 +4891,27 @@ $("shuffleBtn").onclick =
 audio.volume =
   .8;
 
+
 $("volumeSlider").oninput =
   e => {
+
+    /*
+       ADMIN / DJ ONLY
+    */
+
+    if(!isAdmin)
+      return;
+
 
     const value =
       Number(
         e.target.value
       );
 
+
     audio.volume =
       value;
+
 
     $("volumeOut").textContent =
       Math.round(
@@ -4568,12 +4921,17 @@ $("volumeSlider").oninput =
 
   };
 
+
 /* =====================================================
    MIXER
 ===================================================== */
 
 $("radioMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
+
 
     $("radioMixOut").textContent =
       Math.round(
@@ -4583,12 +4941,18 @@ $("radioMix").oninput =
       ) +
       "%";
 
+
     updateAudioRouting();
 
   };
 
+
 $("liveMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
+
 
     $("liveMixOut").textContent =
       Math.round(
@@ -4598,12 +4962,18 @@ $("liveMix").oninput =
       ) +
       "%";
 
+
     updateAudioRouting();
 
   };
 
+
 $("masterMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
+
 
     $("masterMixOut").textContent =
       Math.round(
@@ -4613,12 +4983,18 @@ $("masterMix").oninput =
       ) +
       "%";
 
+
     updateAudioRouting();
 
   };
 
+
 $("duckAmount").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
+
 
     $("duckAmountOut").textContent =
       Math.round(
@@ -4630,8 +5006,13 @@ $("duckAmount").oninput =
 
   };
 
+
 $("duckRelease").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
+
 
     $("duckReleaseOut").textContent =
       (
@@ -4643,6 +5024,11 @@ $("duckRelease").oninput =
 
   };
 
+
+/* =====================================================
+   RADIO DUCKING
+===================================================== */
+
 function duckRadio(on){
 
   if(
@@ -4651,10 +5037,12 @@ function duckRadio(on){
   )
     return;
 
+
   const amount =
     Number(
       $("duckAmount").value
     );
+
 
   const target =
     on &&
@@ -4664,15 +5052,18 @@ function duckRadio(on){
           $("radioMix").value
         );
 
+
   const release =
     Number(
       $("duckRelease").value
     ) / 1000;
 
+
   radioGain.gain
     .cancelScheduledValues(
       audioCtx.currentTime
     );
+
 
   radioGain.gain
     .setTargetAtTime(
@@ -4680,6 +5071,7 @@ function duckRadio(on){
       audioCtx.currentTime,
       on ? .08 : release
     );
+
 
   $("duckState").textContent =
     on &&
@@ -4689,11 +5081,19 @@ function duckRadio(on){
 
 }
 
+
 $("duckToggle").onchange =
-  () =>
+  () => {
+
+    if(!isAdmin)
+      return;
+
+
     duckRadio(
       liveMode
     );
+
+  };
 
 /* =====================================================
    VISUALISER
@@ -5930,3 +6330,4 @@ supabaseClient.auth
 
 </body>
 </html>
+

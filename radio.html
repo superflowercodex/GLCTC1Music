@@ -4153,12 +4153,18 @@ audio.addEventListener(
 
 
     /*
-       Prevent two advance operations
-       happening at the same time.
+       Prevent another advance operation
+       from being started here.
+
+       IMPORTANT:
+       advanceSupabaseRadioStation()
+       manages radioStationAdvanceBusy
+       itself.
+
+       DO NOT set that flag here.
     */
 
     if(
-      radioStationAdvanceBusy ||
       radioAdvanceBusy
     ){
 
@@ -4166,9 +4172,6 @@ audio.addEventListener(
 
     }
 
-
-    radioStationAdvanceBusy =
-      true;
 
     radioAdvanceBusy =
       true;
@@ -4182,18 +4185,9 @@ audio.addEventListener(
 
 
       /*
-         THIS is now the only thing that
-         chooses the next radio track.
-
-         It also writes:
-
-         track_key
-         started_at
-         duration
-         playing
-         updated_at
-
-         into Supabase.
+         advanceSupabaseRadioStation()
+         chooses the next track and writes
+         the new master state to Supabase.
       */
 
       const advanced =
@@ -4226,10 +4220,15 @@ audio.addEventListener(
 
     }finally{
 
-      radioAdvanceBusy =
-        false;
+      /*
+         Only release the local ended-event
+         lock here.
 
-      radioStationAdvanceBusy =
+         radioStationAdvanceBusy is released
+         inside advanceSupabaseRadioStation().
+      */
+
+      radioAdvanceBusy =
         false;
 
     }
@@ -4752,19 +4751,47 @@ $("nextBtn").onclick =
       return;
 
 
+    /*
+       Only use the separate local
+       NEXT-operation lock here.
+
+       IMPORTANT:
+       advanceSupabaseRadioStation()
+       manages radioStationAdvanceBusy
+       itself.
+
+       DO NOT set radioStationAdvanceBusy
+       before calling it.
+    */
+
     if(
-      radioStationAdvanceBusy
+      radioAdvanceBusy
     )
       return;
 
 
-    radioStationAdvanceBusy =
+    radioAdvanceBusy =
       true;
 
 
     try{
 
-      await advanceSupabaseRadioStation();
+      console.log(
+        "📻 GLCTC1 RADIO: NEXT — ADVANCING MASTER"
+      );
+
+
+      const advanced =
+        await advanceSupabaseRadioStation();
+
+
+      if(!advanced){
+
+        console.warn(
+          "📻 GLCTC1 RADIO: NEXT — MASTER ADVANCE FAILED"
+        );
+
+      }
 
     }catch(error){
 
@@ -4775,7 +4802,7 @@ $("nextBtn").onclick =
 
     }finally{
 
-      radioStationAdvanceBusy =
+      radioAdvanceBusy =
         false;
 
     }
@@ -4866,12 +4893,11 @@ $("shuffleBtn").onclick =
 
 
     /*
-       Shuffle ON controls what happens
-       when the station advances.
+       Shuffle setting only changes
+       the future station behaviour.
 
-       We do NOT immediately change the
-       current song just by switching the
-       setting.
+       It does NOT immediately change
+       the current song.
     */
 
     console.log(

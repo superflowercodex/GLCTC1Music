@@ -2419,19 +2419,13 @@ async function loadLibrary(){
       playable.length +
       " playable radio tracks";
 
-    /* =====================================================
-   RADIO STATION — RESTORE EXISTING LIVE STATE
-===================================================== */
+    if(
+      currentTrack === null
+    ){
 
-if(currentTrack === null){
+      await chooseRandom();
 
-  console.log(
-    "📻 RESTORING EXISTING GLCTC1 RADIO STATION STATE"
-  );
-
-  await restoreSharedRadioState();
-
-}
+    }
 
   }catch(error){
 
@@ -3584,7 +3578,8 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED — ALWAYS SHUFFLE
+   TRACK ENDED — CONTINUOUS RADIO
+   SAVE EVERY NEW STATION TRACK
 ===================================================== */
 
 audio.addEventListener(
@@ -3598,32 +3593,149 @@ audio.addEventListener(
 
     try {
 
-      const list = playableLibrary();
+      const list =
+        playableLibrary();
 
       if (!list.length)
         return;
 
-      let choices = list.filter(
-        track => track !== currentTrack
-      );
+
+      /* ================================================
+         CHOOSE NEXT RANDOM RADIO TRACK
+      ================================================ */
+
+      let choices =
+        list.filter(
+          track =>
+            track !== currentTrack
+        );
 
       if (!choices.length)
         choices = list;
 
+
       const randomIndex =
         Math.floor(
-          Math.random() * choices.length
+          Math.random() *
+          choices.length
         );
+
 
       currentTrack =
         choices[randomIndex];
 
       currentIndex =
-        library.indexOf(currentTrack);
+        library.indexOf(
+          currentTrack
+        );
+
 
       updateTrackUI();
 
-      await playTrack(currentTrack);
+
+      /* ================================================
+         START THE NEXT TRACK
+      ================================================ */
+
+      const started =
+        await playTrack(
+          currentTrack
+        );
+
+
+      if(started){
+
+        /*
+           Wait for the real duration of the
+           new track before saving the station clock.
+        */
+
+        if(
+          !Number.isFinite(
+            audio.duration
+          ) ||
+          audio.duration <= 0
+        ){
+
+          await new Promise(
+            resolve => {
+
+              audio.addEventListener(
+                "loadedmetadata",
+                resolve,
+                { once:true }
+              );
+
+            }
+          );
+
+        }
+
+
+        const duration =
+          Number(
+            audio.duration || 0
+          );
+
+
+        /* ==============================================
+           NEW AUTHORITATIVE RADIO STATE
+        ============================================== */
+
+        radioStationTrackKey =
+          radioTrackKey(
+            currentTrack
+          );
+
+        radioStationStartedAt =
+          Date.now();
+
+        radioStationDuration =
+          duration;
+
+        radioStationPlaying =
+          !audio.paused;
+
+
+        radioStationState = {
+
+          trackKey:
+            radioStationTrackKey,
+
+          playing:
+            radioStationPlaying,
+
+          position:
+            Number(
+              audio.currentTime || 0
+            ),
+
+          duration:
+            radioStationDuration,
+
+          savedAt:
+            Date.now()
+
+        };
+
+
+        /*
+           THIS IS THE IMPORTANT PART:
+
+           Every time the radio advances to a
+           new song, the new station state is
+           permanently saved.
+        */
+
+        saveLocalRadioState();
+
+
+        console.log(
+          "📻 GLCTC1 RADIO ADVANCED:",
+          currentTrack.title
+        );
+
+      }
 
     } catch (error) {
 

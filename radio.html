@@ -4240,15 +4240,55 @@ function updateAudioRouting(){
   )
     return;
 
-  const radioLevel =
+
+  /* =================================================
+     RADIO BASE LEVEL
+  ================================================= */
+
+  const baseRadioLevel =
     Number(
       $("radioMix").value
     );
 
-  const liveLevel =
+
+  /* =================================================
+     DUCKING
+  ================================================= */
+
+  const duckActive =
+    liveMode &&
+    $("duckToggle").checked;
+
+
+  const duckAmount =
     Number(
-      $("liveMix").value
+      $("duckAmount").value
     );
+
+
+  /*
+     NORMAL:
+     Radio Mix stays exactly as set.
+
+     DUCKED:
+     Radio Mix is reduced by Duck Amount.
+
+     Example:
+     Radio = 80%
+     Duck = 65%
+
+     80 × 0.35 = 28%
+  */
+
+  const radioLevel =
+    duckActive
+      ? baseRadioLevel * (1 - duckAmount)
+      : baseRadioLevel;
+
+
+  /* =================================================
+     RADIO GAIN
+  ================================================= */
 
   radioGain.gain.setTargetAtTime(
     radioLevel,
@@ -4256,13 +4296,16 @@ function updateAudioRouting(){
     .03
   );
 
-  masterGain.gain.setTargetAtTime(
+
+  /* =================================================
+     LIVE ARTIST GAIN
+  ================================================= */
+
+  const liveLevel =
     Number(
-      $("masterMix").value
-    ),
-    audioCtx.currentTime,
-    .03
-  );
+      $("liveMix").value
+    );
+
 
   if(liveGain){
 
@@ -4273,6 +4316,19 @@ function updateAudioRouting(){
     );
 
   }
+
+
+  /* =================================================
+     MASTER GAIN
+  ================================================= */
+
+  masterGain.gain.setTargetAtTime(
+    Number(
+      $("masterMix").value
+    ),
+    audioCtx.currentTime,
+    .03
+  );
 
 }
 
@@ -5094,26 +5150,10 @@ $("radioMix").oninput =
 
     $("radioMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        Number(e.target.value) * 100
+      ) + "%";
 
-    /*
-       RADIO LEVEL ONLY AFFECTS THE
-       ACTUAL RADIO GAIN WHILE DUCKING
-       IS ACTIVE.
-    */
-
-    if(
-      liveMode &&
-      $("duckToggle").checked
-    ){
-
-      duckRadio(true);
-
-    }
+    updateAudioRouting();
 
   };
 
@@ -5123,11 +5163,8 @@ $("liveMix").oninput =
 
     $("liveMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        Number(e.target.value) * 100
+      ) + "%";
 
     updateAudioRouting();
 
@@ -5139,11 +5176,8 @@ $("masterMix").oninput =
 
     $("masterMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        Number(e.target.value) * 100
+      ) + "%";
 
     updateAudioRouting();
 
@@ -5155,11 +5189,17 @@ $("duckAmount").oninput =
 
     $("duckAmountOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        Number(e.target.value) * 100
+      ) + "%";
+
+    if(
+      liveMode &&
+      $("duckToggle").checked
+    ){
+
+      updateAudioRouting();
+
+    }
 
   };
 
@@ -5169,11 +5209,8 @@ $("duckRelease").oninput =
 
     $("duckReleaseOut").textContent =
       (
-        Number(
-          e.target.value
-        ) / 1000
-      ).toFixed(1) +
-      "s";
+        Number(e.target.value) / 1000
+      ).toFixed(1) + "s";
 
   };
 
@@ -5187,28 +5224,27 @@ function duckRadio(on){
     return;
 
 
+  const baseRadioLevel =
+    Number(
+      $("radioMix").value
+    );
+
+
   const amount =
     Number(
       $("duckAmount").value
     );
 
 
-  /*
-     KEEP ORIGINAL DUCKING AMOUNT.
+  const duckActive =
+    on &&
+    $("duckToggle").checked;
 
-     DUCKING ACTIVE:
-     Radio is reduced by Duck Amount.
-
-     DUCKING INACTIVE:
-     Radio returns to NORMAL level.
-     Radio Level slider is ignored.
-  */
 
   const target =
-    on &&
-    $("duckToggle").checked
-      ? 1 - amount
-      : 1;
+    duckActive
+      ? baseRadioLevel * (1 - amount)
+      : baseRadioLevel;
 
 
   const release =
@@ -5227,13 +5263,12 @@ function duckRadio(on){
     .setTargetAtTime(
       target,
       audioCtx.currentTime,
-      on ? .08 : release
+      duckActive ? .08 : release
     );
 
 
   $("duckState").textContent =
-    on &&
-    $("duckToggle").checked
+    duckActive
       ? "🦆 RADIO DUCKED"
       : "DUCKING READY";
 

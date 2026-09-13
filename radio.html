@@ -1527,14 +1527,6 @@ tr.playing{
         ↻ REFRESH
       </button>
 
-      <button
-        id="cleanDeleteTracksBtn"
-        class="btn"
-        type="button"
-      >
-        🧹 CLEAN & DELETE
-      </button>
-
     </div>
 
     <div class="tableWrap">
@@ -1920,16 +1912,9 @@ function applyAdminOverride(){
     "endLiveBtn",
     "fullscreenBtn",
 
-    "refreshLibrary",
-
-    /*
-       MASTER LIBRARY CLEAN-UP
-       ADMIN ONLY
-    */
-    "cleanDeleteTracksBtn"
+    "refreshLibrary"
 
   ];
-
 
   controls.forEach(
     id => {
@@ -2014,13 +1999,6 @@ function normaliseRow(r){
     };
 
   return{
-
-    /* DATABASE PRIMARY KEY */
-    db_id:
-      pick(
-        "id",
-        "ID"
-      ),
 
     master_audio:
       pick(
@@ -2345,10 +2323,6 @@ function renderLibraryTable(
       );
 
 
-      /* =================================================
-         AUDIO
-      ================================================= */
-
       const audioTd =
         document.createElement(
           "td"
@@ -2379,6 +2353,14 @@ function renderLibraryTable(
         button.textContent =
           "PLAY";
 
+
+        /*
+           PUBLIC USERS CAN SEE THE
+           PLAY BUTTON BUT CANNOT USE IT.
+
+           ADMIN = ENABLED
+           PUBLIC = DISABLED
+        */
 
         button.disabled =
           !isAdmin;
@@ -2427,6 +2409,18 @@ function renderLibraryTable(
 
 async function loadLibrary(){
 
+  /*
+     IMPORTANT:
+
+     THE MASTER LIBRARY MUST LOAD FOR
+     EVERYONE.
+
+     PUBLIC USERS CAN VIEW AND SEARCH
+     THE LIBRARY.
+
+     ADMIN USERS CAN ALSO CONTROL IT.
+  */
+
   $("libraryNotice").textContent =
     "LOADING MASTER LIBRARY…";
 
@@ -2456,10 +2450,7 @@ async function loadLibrary(){
               t.id_cat_no ||
               ""
             ).trim() ||
-            String(
-              t.master_audio ||
-              ""
-            ).trim()
+            t.master_audio
         );
 
 
@@ -2543,373 +2534,6 @@ async function loadLibrary(){
       );
 
   }
-
-}
-
-
-/* =====================================================
-   🧹 CLEAN & DELETE DEAD MASTER TRACKS
-   ADMIN ONLY
-===================================================== */
-
-async function cleanAndDeleteDeadTracks(){
-
-  if(!isAdmin){
-
-    alert(
-      "ADMIN ONLY"
-    );
-
-    return;
-
-  }
-
-
-  const button =
-    $("cleanDeleteTracksBtn");
-
-
-  if(button){
-
-    button.disabled =
-      true;
-
-    button.textContent =
-      "⏳ CHECKING...";
-
-  }
-
-
-  try{
-
-    const rows =
-      await loadMasterLibraryFromSupabase();
-
-
-    const deadRows =
-      [];
-
-
-    /*
-       CHECK EVERY MASTER LIBRARY ROW
-       AGAINST THE REAL STORAGE OBJECT.
-    */
-
-    for(
-      const row of rows
-    ){
-
-      const track =
-        normaliseRow(
-          row
-        );
-
-
-      const audioPath =
-        String(
-          track.master_audio ||
-          ""
-        ).trim();
-
-
-      /*
-         NO AUDIO PATH = DEAD CATALOGUE ROW
-      */
-
-      if(!audioPath){
-
-        deadRows.push(
-          row
-        );
-
-        continue;
-
-      }
-
-
-      /*
-         CLEAN STORAGE PATH
-      */
-
-      let cleanPath =
-        audioPath;
-
-
-      /*
-         IF A FULL SUPABASE STORAGE URL
-         WAS SAVED, EXTRACT THE OBJECT PATH.
-      */
-
-      const marker =
-        "/storage/v1/object/";
-
-
-      const markerIndex =
-        cleanPath.indexOf(
-          marker
-        );
-
-
-      if(
-        markerIndex !== -1
-      ){
-
-        cleanPath =
-          cleanPath.substring(
-            markerIndex +
-            marker.length
-          );
-
-
-        /*
-           REMOVE PUBLIC / SIGNED
-           BUCKET PREFIX.
-        */
-
-        cleanPath =
-          cleanPath.replace(
-            /^\/?(public|sign|authenticated)\//,
-            ""
-          );
-
-        /*
-           REMOVE BUCKET NAME IF PRESENT.
-        */
-
-        cleanPath =
-          cleanPath.replace(
-            /^tracks\//,
-            ""
-          );
-
-      }
-
-
-      cleanPath =
-        cleanPath.replace(
-          /^\/+/,
-          ""
-        );
-
-
-      /*
-         ASK SUPABASE STORAGE WHETHER
-         THE OBJECT REALLY EXISTS.
-      */
-
-      const {
-        data,
-        error
-      } =
-        await supabaseClient
-          .storage
-          .from(
-            "tracks"
-          )
-          .createSignedUrl(
-            cleanPath,
-            60
-          );
-
-
-      if(
-        error ||
-        !data ||
-        !data.signedUrl
-      ){
-
-        deadRows.push(
-          row
-        );
-
-      }
-
-    }
-
-
-    /* =================================================
-       NOTHING TO DELETE
-    ================================================= */
-
-    if(
-      !deadRows.length
-    ){
-
-      alert(
-        "CLEAN & DELETE\n\n" +
-        "No dead tracks found."
-      );
-
-      return;
-
-    }
-
-
-    /* =================================================
-       CONFIRM DELETION
-    ================================================= */
-
-    const confirmed =
-      confirm(
-        "CLEAN & DELETE\n\n" +
-        "Found " +
-        deadRows.length +
-        " dead Master Library track(s).\n\n" +
-        "These catalogue records point to audio " +
-        "that no longer exists in Supabase Storage.\n\n" +
-        "Delete them from the Master Library?"
-      );
-
-
-    if(!confirmed)
-      return;
-
-
-    let deleted =
-      0;
-
-    let failed =
-      0;
-
-
-    /* =================================================
-       DELETE DEAD DATABASE ROWS
-    ================================================= */
-
-    for(
-      const row of deadRows
-    ){
-
-      /*
-         SAFETY:
-         ONLY DELETE WHEN THE REAL DATABASE
-         PRIMARY KEY "id" EXISTS.
-      */
-
-      if(
-        row.id === undefined ||
-        row.id === null ||
-        String(
-          row.id
-        ).trim() === ""
-      ){
-
-        console.warn(
-          "CLEAN & DELETE SKIPPED — NO DATABASE ID:",
-          row
-        );
-
-        failed++;
-
-        continue;
-
-      }
-
-
-      const {
-        error
-      } =
-        await supabaseClient
-          .from(
-            "master_library"
-          )
-          .delete()
-          .eq(
-            "id",
-            row.id
-          );
-
-
-      if(error){
-
-        console.error(
-          "CLEAN & DELETE FAILED:",
-          row,
-          error
-        );
-
-        failed++;
-
-        continue;
-
-      }
-
-
-      deleted++;
-
-    }
-
-
-    /* =================================================
-       REFRESH LIBRARY
-    ================================================= */
-
-    await loadLibrary();
-
-
-    alert(
-      "CLEAN & DELETE COMPLETE\n\n" +
-      "Dead tracks found: " +
-      deadRows.length +
-      "\n" +
-      "Deleted: " +
-      deleted +
-      "\n" +
-      "Skipped / failed: " +
-      failed
-    );
-
-
-  }catch(error){
-
-    console.error(
-      "GLCTC1 CLEAN & DELETE ERROR:",
-      error
-    );
-
-
-    alert(
-      "CLEAN & DELETE ERROR\n\n" +
-      (
-        error?.message ||
-        String(error)
-      )
-    );
-
-
-  }finally{
-
-    if(button){
-
-      button.disabled =
-        !isAdmin;
-
-      button.textContent =
-        "🧹 CLEAN & DELETE";
-
-    }
-
-  }
-
-}
-
-
-/* =====================================================
-   CLEAN & DELETE BUTTON
-===================================================== */
-
-const cleanDeleteTracksBtn =
-  $("cleanDeleteTracksBtn");
-
-
-if(
-  cleanDeleteTracksBtn
-){
-
-  cleanDeleteTracksBtn.addEventListener(
-    "click",
-    cleanAndDeleteDeadTracks
-  );
 
 }
 

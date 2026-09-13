@@ -5989,13 +5989,52 @@ function setupDeckEQ(deck) {
   }
 
   const ctx =
-  window.glctc1SharedAudioContext ||
-  (window.glctc1SharedAudioContext = new AudioContext());
+    window.glctc1SharedAudioContext ||
+    (window.glctc1SharedAudioContext = new AudioContext());
+
+  // ===================================================
+  // 🎧 SHARED 4-CHANNEL OUTPUT BUS
+  // MASTER = 1/2
+  // HEADPHONE CUE = 3/4
+  // ===================================================
+
+  if (!deckEQ.outputMerger) {
+
+    deckEQ.outputMerger =
+      ctx.createChannelMerger(4);
+
+    deckEQ.outputMerger.channelCount = 4;
+    deckEQ.outputMerger.channelCountMode = "explicit";
+    deckEQ.outputMerger.channelInterpretation = "discrete";
+
+    deckEQ.cueMasterGain =
+      ctx.createGain();
+
+    deckEQ.cueMasterGain.gain.value = 1;
+
+    deckEQ.outputMerger.connect(
+      ctx.destination
+    );
+
+    try {
+      ctx.destination.channelCount = 4;
+      ctx.destination.channelCountMode = "explicit";
+      ctx.destination.channelInterpretation = "discrete";
+    } catch (error) {
+      console.log(
+        "GLCTC1 4-channel output not available:",
+        error
+      );
+    }
+  }
 
   const source =
     ctx.createMediaElementSource(a);
 
+  // ===================================================
   // LOW EQ
+  // ===================================================
+
   const low =
     ctx.createBiquadFilter();
 
@@ -6003,141 +6042,222 @@ function setupDeckEQ(deck) {
   low.frequency.value = 200;
   low.gain.value = 0;
 
- // HIGH EQ
-const high =
-  ctx.createBiquadFilter();
+  // ===================================================
+  // HIGH EQ
+  // ===================================================
 
-high.type = "highshelf";
-high.frequency.value = 5000;
-high.gain.value = 0;
+  const high =
+    ctx.createBiquadFilter();
 
+  high.type = "highshelf";
+  high.frequency.value = 5000;
+  high.gain.value = 0;
 
-// ===================================================
-// 🎛️ PAN NODE
-// ===================================================
+  // ===================================================
+  // PAN NODE
+  // ===================================================
 
-const pan =
-  ctx.createStereoPanner();
+  const pan =
+    ctx.createStereoPanner();
 
-pan.pan.value = 0;
+  pan.pan.value = 0;
 
+  // ===================================================
+  // FILTER NODE
+  // ===================================================
 
-// ===================================================
-// 🎛️ FILTER NODE
-// ===================================================
+  const filter =
+    ctx.createBiquadFilter();
 
-const filter =
-  ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 20000;
+  filter.Q.value = 0.7;
 
-filter.type = "lowpass";
-filter.frequency.value = 20000;
-filter.Q.value = 0.7;
+  // ===================================================
+  // REVERB NODE — MASSIVE HALL
+  // ===================================================
 
+  const reverb =
+    ctx.createConvolver();
 
-// ===================================================
-// 🎛️ REVERB NODE — MASSIVE HALL
-// ===================================================
+  const reverbGain =
+    ctx.createGain();
 
-const reverb =
-  ctx.createConvolver();
+  reverbGain.gain.value = 0;
 
-const reverbGain =
-  ctx.createGain();
+  // ===================================================
+  // CREATE HALL IMPULSE
+  // ===================================================
 
-reverbGain.gain.value = 0;
+  const hallLength = 4;
 
+  const hallBuffer =
+    ctx.createBuffer(
+      2,
+      ctx.sampleRate * hallLength,
+      ctx.sampleRate
+    );
 
-// ===================================================
-// 🎛️ CREATE HALL IMPULSE
-// ===================================================
+  for (let channel = 0; channel < 2; channel++) {
 
-const hallLength = 4;
+    const data =
+      hallBuffer.getChannelData(channel);
 
-const hallBuffer =
-  ctx.createBuffer(
-    2,
-    ctx.sampleRate * hallLength,
-    ctx.sampleRate
+    for (let i = 0; i < data.length; i++) {
+
+      const decay =
+        Math.pow(
+          1 - i / data.length,
+          2.5
+        );
+
+      data[i] =
+        (Math.random() * 2 - 1) * decay;
+    }
+  }
+
+  reverb.buffer = hallBuffer;
+
+  // ===================================================
+  // 🎛️ MASTER OUTPUT
+  // ===================================================
+
+  const output =
+    ctx.createGain();
+
+  output.gain.value = 1;
+
+  // ===================================================
+  // 🎧 HEADPHONE CUE OUTPUT
+  // ===================================================
+
+  const headphoneSend =
+    ctx.createGain();
+
+  headphoneSend.gain.value = 1;
+
+  // ===================================================
+  // 🎚️ MASTER + CUE GAINS
+  // ===================================================
+
+  const masterGain =
+    ctx.createGain();
+
+  masterGain.gain.value = 1;
+
+  const cueGain =
+    ctx.createGain();
+
+  cueGain.gain.value = 0;
+
+  // ===================================================
+  // 🎛️ AUDIO CHAIN
+  // ===================================================
+
+  source
+    .connect(low)
+    .connect(high)
+    .connect(pan)
+    .connect(filter)
+    .connect(output);
+
+  filter
+    .connect(reverb)
+    .connect(reverbGain)
+    .connect(output);
+
+  // ===================================================
+  // 🎛️ MASTER BUS → OUTPUT 1/2
+  // ===================================================
+
+  output
+    .connect(masterGain);
+
+  masterGain.connect(
+    deckEQ.outputMerger,
+    0,
+    0
   );
 
-for (let channel = 0; channel < 2; channel++) {
+  masterGain.connect(
+    deckEQ.outputMerger,
+    0,
+    1
+  );
 
-  const data =
-    hallBuffer.getChannelData(channel);
+  // ===================================================
+  // 🎧 CUE BUS → OUTPUT 3/4
+  // ===================================================
 
-  for (let i = 0; i < data.length; i++) {
+  output
+    .connect(cueGain);
 
-    const decay =
-      Math.pow(1 - i / data.length, 2.5);
+  cueGain.connect(
+    deckEQ.cueMasterGain
+  );
 
-    data[i] =
-      (Math.random() * 2 - 1) * decay;
-  }
-}
+  deckEQ.cueMasterGain.connect(
+    deckEQ.outputMerger,
+    0,
+    2
+  );
 
-reverb.buffer = hallBuffer;
+  deckEQ.cueMasterGain.connect(
+    deckEQ.outputMerger,
+    0,
+    3
+  );
 
+  // ===================================================
+  // 🔒 REMOVE HTML AUDIO VOLUME FROM THE MIX BUS
+  // ===================================================
 
-// FINAL OUTPUT
-const output =
-  ctx.createGain();
+  a.volume = 1;
 
-output.gain.value = 1;
+  // ===================================================
+  // 🎧 INITIAL CUE STATE
+  // ===================================================
 
-// ===================================================
-// 🎧 HEADPHONE CUE SEND
-// ===================================================
+  const cueMix =
+    parseFloat(
+      document.getElementById(
+        "glctc1CueMix"
+      )?.value || 0.5
+    );
 
-const headphoneSend =
-  ctx.createGain();
+  const headphoneGain =
+    parseFloat(
+      document.getElementById(
+        deck === "A"
+          ? "glctc1HeadphoneGainA"
+          : "glctc1HeadphoneGainB"
+      )?.value || 1
+    );
 
-headphoneSend.gain.value = 1;
+  cueGain.gain.value = 0;
 
+  // ===================================================
+  // 🎛️ STORE DECK AUDIO NODES
+  // ===================================================
 
-// ===================================================
-// ===================================================
-// 🎛️ AUDIO CHAIN
-// =====================================================
+  deckEQ[deck] = {
+    context: ctx,
+    source: source,
+    low: low,
+    high: high,
+    pan: pan,
+    filter: filter,
+    reverb: reverb,
+    reverbGain: reverbGain,
+    output: output,
+    headphoneSend: headphoneSend,
+    masterGain: masterGain,
+    cueGain: cueGain,
+    cueMix: cueMix,
+    headphoneGain: headphoneGain
+  };
 
-source
-  .connect(low)
-  .connect(high)
-  .connect(pan)
-  .connect(filter)
-  .connect(output)
-  .connect(ctx.destination);
-
-filter
-  .connect(reverb)
-  .connect(reverbGain)
-  .connect(output);
-
-
-// ===================================================
-// 🎧 HEADPHONE SEND
-// ===================================================
-
-output.connect(headphoneSend);
-
-
-// ===================================================
-// 🎛️ STORE DECK AUDIO NODES
-// ===================================================
-
-deckEQ[deck] = {
-  context: ctx,
-  source: source,
-  low: low,
-  high: high,
-  pan: pan,
-  filter: filter,
-  reverb: reverb,
-  reverbGain: reverbGain,
-  output: output,
-  headphoneSend: headphoneSend
-};
-
-return deckEQ[deck];
+  return deckEQ[deck];
 }
 
 
@@ -6417,17 +6537,11 @@ async function loadToDeck(deck, track) {
   a.src = audioFile;
   a.load();
 
+  setupDeckEQ(deck);
+
   drawWaveform(deck);
   updateBpmMeter(deck, track.bpm || 120);
 }
-  
-function loadStemToDeck(deck, fileUrl, bpm) {  
-  if (!fileUrl) return;  
-  const a = audio(deck);  
-  a.src = fileUrl;  
-  drawWaveform(deck);  
-  updateBpmMeter(deck, bpm || 120);  
-}  
   
 // --- SELECTED SLOT + PLAYER ---  
 function updateSelectedSlot(track) {  

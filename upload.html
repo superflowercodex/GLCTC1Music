@@ -3415,9 +3415,8 @@ button:hover {
   type="button"
   style="background:#ff0033;"
 >
-  🗑 DELETE INCOMPLETE TRACKS
+  🗑 DELETE ALL TRACK DATA
 </button>
-
 
     </div> <!-- END detailsPanel -->
 
@@ -12748,28 +12747,50 @@ wireControls();
 
 
 // =====================================================
-// 🗑️ GLCTC1 DELETE TRACK / CLEAN INCOMPLETE TRACKS
-// 🔐 SELECTED TRACK = EXISTING OWNERSHIP DELETE
-// 🧹 NO TRACK SELECTED = REMOVE INCOMPLETE RECORDS
+// 🗑 GLCTC1 DELETE SELECTED MASTER LIBRARY TRACK
+// 🔐 ARTIST OWNERSHIP + ADMIN OVERRIDE + CAT ID CHECK
 // =====================================================
 
 document
   .getElementById("deleteAllTrack")
-  ?.addEventListener("click", async () => {
+  .addEventListener("click", async () => {
+
+
+  // ===================================================
+  // CHECK TRACK SELECTION
+  // ===================================================
+
+  if (!selectedLibraryTrack) {
+
+    alert(
+      "Please select a track from the Master Library first."
+    );
+
+    return;
+  }
+
+
+  const track =
+    selectedLibraryTrack;
+
 
   // ===================================================
   // 🔐 GET CURRENT LOGGED-IN USER
   // ===================================================
 
   const {
-    data: { user },
+    data: {
+      user
+    },
     error: userError
-  } = await supabaseClient.auth.getUser();
+  } =
+    await supabaseClient.auth.getUser();
+
 
   if (userError || !user) {
 
     alert(
-      "🔐 Please sign in before deleting tracks."
+      "🔐 Please sign in before deleting a track."
     );
 
     return;
@@ -12784,344 +12805,22 @@ document
     "8c70a492-3cf1-4053-b0ee-b5b186529d54";
 
 
+  // ===================================================
+  // 🔐 CHECK ADMIN STATUS
+  // ===================================================
+
   const isAdmin =
     String(user.id) ===
     String(ADMIN_USER_ID);
 
 
-  // ===================================================
-  // ===================================================
-  // 🧹 MODE 1 — NO TRACK SELECTED
-  // DELETE INCOMPLETE MASTER LIBRARY RECORDS
-  // ===================================================
-  // ===================================================
-
-  if (!selectedLibraryTrack) {
-
-    const confirmed = confirm(
-      "🧹 CLEAN INCOMPLETE MASTER LIBRARY?\n\n" +
-
-      "This will permanently delete EVERY Master Library " +
-      "track where ANY of these fields are empty:\n\n" +
-
-      "• Master Audio\n" +
-      "• Artist\n" +
-      "• Track Title\n" +
-      "• ID Cat No\n\n" +
-
-      "The database records and stored files will be removed.\n\n" +
-
-      "Tracks with ALL FOUR fields populated will NOT be deleted.\n\n" +
-
-      "Continue?"
-    );
-
-    if (!confirmed) return;
-
-
-    try {
-
-      // -----------------------------------------------
-      // LOAD ALL MASTER LIBRARY RECORDS
-      // -----------------------------------------------
-
-      const {
-        data: rows,
-        error: loadError
-      } = await supabaseClient
-        .from("master_library")
-        .select("*");
-
-      if (loadError) {
-        throw loadError;
-      }
-
-
-      if (!rows || !rows.length) {
-
-        alert(
-          "⚪ Master Library is already empty."
-        );
-
-        return;
-      }
-
-
-      // -----------------------------------------------
-      // FIND INCOMPLETE RECORDS
-      // -----------------------------------------------
-
-      const incompleteRows =
-        rows.filter(row => {
-
-          const masterAudio =
-            String(
-              row["Master Audio"] ??
-              row.master_audio ??
-              ""
-            ).trim();
-
-          const artist =
-            String(
-              row["Artist"] ??
-              row.artist ??
-              ""
-            ).trim();
-
-          const trackTitle =
-            String(
-              row["Track Title"] ??
-              row.track_title ??
-              row.title ??
-              ""
-            ).trim();
-
-          const idCatNo =
-            String(
-              row["ID Cat No"] ??
-              row.id_cat_no ??
-              row.cat_no ??
-              ""
-            ).trim();
-
-
-          return (
-            !masterAudio ||
-            !artist ||
-            !trackTitle ||
-            !idCatNo
-          );
-
-        });
-
-
-      // -----------------------------------------------
-      // NOTHING TO CLEAN
-      // -----------------------------------------------
-
-      if (!incompleteRows.length) {
-
-        alert(
-          "✅ No incomplete tracks found.\n\n" +
-          "Every Master Library track has:\n" +
-          "• Master Audio\n" +
-          "• Artist\n" +
-          "• Track Title\n" +
-          "• ID Cat No"
-        );
-
-        return;
-      }
-
-
-      // -----------------------------------------------
-      // FINAL CONFIRMATION
-      // -----------------------------------------------
-
-      const finalConfirmed = confirm(
-        "⚠️ " +
-        incompleteRows.length +
-        " incomplete track(s) found.\n\n" +
-
-        "These records will be permanently deleted " +
-        "from Supabase and their stored files will be removed.\n\n" +
-
-        "Continue?"
-      );
-
-      if (!finalConfirmed) return;
-
-
-      // -----------------------------------------------
-      // DELETE EACH INCOMPLETE RECORD
-      // -----------------------------------------------
-
-      let deletedCount = 0;
-
-      for (const row of incompleteRows) {
-
-        const catId =
-          String(
-            row["ID Cat No"] ??
-            row.id_cat_no ??
-            row.cat_no ??
-            ""
-          ).trim();
-
-
-        // ---------------------------------------------
-        // COLLECT STORED FILES
-        // ---------------------------------------------
-
-        const fileFields = [
-          "Master Audio",
-          "Stem 1",
-          "Stem 2",
-          "Stem 3",
-          "Stem 4",
-          "Cover Art"
-        ];
-
-        const storagePaths = [];
-
-
-        for (const field of fileFields) {
-
-          const value =
-            row[field];
-
-          if (
-            value &&
-            typeof value === "string" &&
-            !value.startsWith("http")
-          ) {
-
-            storagePaths.push(value);
-
-          }
-
-        }
-
-
-        // ---------------------------------------------
-        // DELETE STORED FILES
-        // ---------------------------------------------
-
-        if (storagePaths.length) {
-
-          const {
-            error: storageError
-          } = await supabaseClient
-            .storage
-            .from("tracks")
-            .remove(storagePaths);
-
-
-          if (storageError) {
-
-            console.warn(
-              "⚠️ Storage cleanup warning:",
-              storageError
-            );
-
-          }
-
-        }
-
-
-        // ---------------------------------------------
-        // DELETE DATABASE ROW
-        //
-        // Prefer the real Supabase row ID if present.
-        // Otherwise use ID Cat No.
-        // ---------------------------------------------
-
-        let deleteQuery =
-          supabaseClient
-            .from("master_library")
-            .delete();
-
-
-        if (row.id) {
-
-          deleteQuery =
-            deleteQuery.eq(
-              "id",
-              row.id
-            );
-
-        } else if (catId) {
-
-          deleteQuery =
-            deleteQuery.eq(
-              "ID Cat No",
-              catId
-            );
-
-        } else {
-
-          console.warn(
-            "⚠️ Could not identify row for deletion:",
-            row
-          );
-
-          continue;
-        }
-
-
-        const {
-          error: deleteError
-        } = await deleteQuery;
-
-
-        if (deleteError) {
-          throw deleteError;
-        }
-
-
-        deletedCount++;
-
-      }
-
-
-      // -----------------------------------------------
-      // CLEAR LOCAL SELECTION
-      // -----------------------------------------------
-
-      selectedLibraryTrack = null;
-
-
-      // -----------------------------------------------
-      // REFRESH MASTER LIBRARY ON SITE
-      // -----------------------------------------------
-
-      renderLibraryTable();
-
-
-      alert(
-        "✅ CLEANUP COMPLETE\n\n" +
-        deletedCount +
-        " incomplete track(s) deleted."
-      );
-
-
-      console.log(
-        "🧹 GLCTC1 INCOMPLETE TRACK CLEANUP COMPLETE:",
-        {
-          deletedCount
-        }
-      );
-
-
-      return;
-
-    } catch (error) {
-
-      console.error(
-        "❌ GLCTC1 INCOMPLETE TRACK CLEANUP ERROR:",
-        error
-      );
-
-      alert(
-        "❌ CLEANUP FAILED:\n\n" +
-        error.message
-      );
-
-      return;
+  console.log(
+    "GLCTC1 DELETE PERMISSION CHECK:",
+    {
+      loggedInUserId: user.id,
+      isAdmin: isAdmin
     }
-
-  }
-
-
-  // ===================================================
-  // ===================================================
-  // 🗑️ MODE 2 — TRACK IS SELECTED
-  // EXISTING SELECTED-TRACK DELETE
-  // ===================================================
-  // ===================================================
-
-  const track =
-    selectedLibraryTrack;
+  );
 
 
   // ===================================================
@@ -13170,7 +12869,7 @@ document
 
 
   // ===================================================
-  // 🔐 VERIFY USER ID
+  // 🔐 VERIFY USER ID FOR NORMAL ARTIST
   // ===================================================
 
   if (
@@ -13188,25 +12887,21 @@ document
 
 
   // ===================================================
-  // 🔐 VERIFY ARTIST
+  // 🔐 VERIFY ARTIST FOR NORMAL USER
   // ===================================================
 
   if (!isAdmin) {
 
     const profileArtist =
-      String(
-        profile.artist_name || ""
-      )
-      .trim()
-      .toLowerCase();
+      String(profile.artist_name || "")
+        .trim()
+        .toLowerCase();
 
 
     const trackArtist =
-      String(
-        track.artist || ""
-      )
-      .trim()
-      .toLowerCase();
+      String(track.artist || "")
+        .trim()
+        .toLowerCase();
 
 
     if (
@@ -13240,199 +12935,6 @@ document
     }
 
   }
-
-
-  // ===================================================
-  // GET CAT ID
-  // ===================================================
-
-  const catId =
-    String(
-      track.id_cat_no ||
-      track.cat_no ||
-      ""
-    ).trim();
-
-
-  if (!catId) {
-
-    alert(
-      "❌ This selected track has no GLCTC1 ID Cat No."
-    );
-
-    return;
-  }
-
-
-  // ===================================================
-  // CONFIRM SELECTED TRACK DELETE
-  // ===================================================
-
-  const confirmed = confirm(
-    "🗑️ DELETE THIS MASTER LIBRARY TRACK?\n\n" +
-
-    "Artist: " +
-    (track.artist || "Unknown") +
-    "\n" +
-
-    "Track: " +
-    (track.track_title ||
-     track.title ||
-     "Unknown") +
-    "\n\n" +
-
-    "This will permanently delete the track data and stored files."
-  );
-
-
-  if (!confirmed) return;
-
-
-  try {
-
-    // -----------------------------------------------
-    // LOAD MASTER LIBRARY ROW
-    // -----------------------------------------------
-
-    const {
-      data: masterRow,
-      error: rowError
-    } =
-      await supabaseClient
-        .from("master_library")
-        .select("*")
-        .eq("ID Cat No", catId)
-        .maybeSingle();
-
-
-    if (rowError) {
-      throw rowError;
-    }
-
-
-    if (!masterRow) {
-
-      alert(
-        "❌ Master Library record not found."
-      );
-
-      return;
-    }
-
-
-    // -----------------------------------------------
-    // DELETE STORED FILES
-    // -----------------------------------------------
-
-    const fileFields = [
-      "Master Audio",
-      "Stem 1",
-      "Stem 2",
-      "Stem 3",
-      "Stem 4",
-      "Cover Art"
-    ];
-
-    const storagePaths = [];
-
-
-    for (const field of fileFields) {
-
-      const value =
-        masterRow[field];
-
-      if (
-        value &&
-        typeof value === "string" &&
-        !value.startsWith("http")
-      ) {
-
-        storagePaths.push(value);
-
-      }
-
-    }
-
-
-    if (storagePaths.length) {
-
-      const {
-        error: storageError
-      } =
-        await supabaseClient
-          .storage
-          .from("tracks")
-          .remove(storagePaths);
-
-
-      if (storageError) {
-        throw storageError;
-      }
-
-    }
-
-
-    // -----------------------------------------------
-    // DELETE DATABASE RECORD
-    // -----------------------------------------------
-
-    const {
-      error: deleteError
-    } =
-      await supabaseClient
-        .from("master_library")
-        .delete()
-        .eq("ID Cat No", catId);
-
-
-    if (deleteError) {
-      throw deleteError;
-    }
-
-
-    // -----------------------------------------------
-    // CLEAR LOCAL SELECTION
-    // -----------------------------------------------
-
-    selectedLibraryTrack = null;
-
-
-    // -----------------------------------------------
-    // REFRESH LIBRARY
-    // -----------------------------------------------
-
-    renderLibraryTable();
-
-
-    alert(
-      "✅ Master Library track deleted successfully."
-    );
-
-
-    console.log(
-      "🗑️ GLCTC1 SELECTED TRACK DELETED:",
-      {
-        catId
-      }
-    );
-
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 SELECTED TRACK DELETE ERROR:",
-      error
-    );
-
-    alert(
-      "❌ DELETE FAILED:\n\n" +
-      error.message
-    );
-
-  }
-
-});
-
 
 
   // ===================================================

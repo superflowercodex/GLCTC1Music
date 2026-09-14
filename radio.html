@@ -7168,6 +7168,296 @@ $("stopWebcamBtn").onclick =
   };
 
 /* =====================================================
+   GLCTC1 RADIO SPACE CHAT — START
+===================================================== */
+
+let glctc1ChatChannel = null;
+
+function escapeGLCTC1ChatText(text){
+
+  const div = document.createElement("div");
+
+  div.textContent = text ?? "";
+
+  return div.innerHTML;
+}
+
+function renderGLCTC1ChatMessage(row){
+
+  const container =
+    document.getElementById("glctc1ChatMessages");
+
+  if(!container) return;
+
+  const message =
+    escapeGLCTC1ChatText(row.message);
+
+  const name =
+    escapeGLCTC1ChatText(
+      row.display_name || "GLCTC1 USER"
+    );
+
+  const time =
+    row.created_at
+      ? new Date(row.created_at).toLocaleTimeString([], {
+          hour:"2-digit",
+          minute:"2-digit"
+        })
+      : "";
+
+  const item =
+    document.createElement("div");
+
+  item.style.marginBottom = "10px";
+
+  item.innerHTML = `
+    <div
+      style="
+        color:#00ffff;
+        font-size:9px;
+        margin-bottom:3px;
+      "
+    >
+      ${name}
+      <span
+        style="
+          color:#777;
+          margin-left:6px;
+        "
+      >
+        ${time}
+      </span>
+    </div>
+
+    <div
+      style="
+        color:#fff;
+        line-height:1.5;
+        word-break:break-word;
+      "
+    >
+      ${message}
+    </div>
+  `;
+
+  container.appendChild(item);
+
+  container.scrollTop =
+    container.scrollHeight;
+}
+
+async function loadGLCTC1Chat(){
+
+  const container =
+    document.getElementById("glctc1ChatMessages");
+
+  if(!container) return;
+
+  container.innerHTML = "";
+
+  const { data, error } =
+    await supabaseClient
+      .from("crowd_chat")
+      .select("*")
+      .order("created_at", {
+        ascending:true
+      })
+      .limit(100);
+
+  if(error){
+
+    console.error(
+      "❌ GLCTC1 CHAT LOAD ERROR:",
+      error
+    );
+
+    return;
+  }
+
+  (data || []).forEach(row => {
+
+    renderGLCTC1ChatMessage(row);
+
+  });
+}
+
+function initialiseGLCTC1ChatRealtime(){
+
+  if(glctc1ChatChannel){
+
+    supabaseClient
+      .removeChannel(glctc1ChatChannel);
+
+  }
+
+  glctc1ChatChannel =
+    supabaseClient
+      .channel("glctc1-crowd-chat")
+
+      .on(
+        "postgres_changes",
+        {
+          event:"INSERT",
+          schema:"public",
+          table:"crowd_chat"
+        },
+        payload => {
+
+          renderGLCTC1ChatMessage(
+            payload.new
+          );
+
+        }
+      )
+
+      .subscribe(status => {
+
+        console.log(
+          "💬 GLCTC1 CHAT REALTIME:",
+          status
+        );
+
+      });
+}
+
+async function sendGLCTC1ChatMessage(){
+
+  const input =
+    document.getElementById("glctc1ChatInput");
+
+  const button =
+    document.getElementById("glctc1ChatSend");
+
+  if(!input || !button) return;
+
+  const message =
+    input.value.trim();
+
+  if(!message) return;
+
+  if(!currentUser){
+
+    alert(
+      "Please sign in to join GLCTC1 CHAT."
+    );
+
+    return;
+  }
+
+  button.disabled = true;
+
+  try{
+
+    const displayName =
+      currentUser.user_metadata?.artist_name ||
+      currentUser.user_metadata?.display_name ||
+      currentUser.email?.split("@")[0] ||
+      "GLCTC1 USER";
+
+    const { error } =
+      await supabaseClient
+        .from("crowd_chat")
+        .insert({
+          user_id: currentUser.id,
+          display_name: displayName,
+          message: message,
+          created_at: new Date().toISOString()
+        });
+
+    if(error){
+
+      console.error(
+        "❌ GLCTC1 CHAT SEND ERROR:",
+        error
+      );
+
+      alert(
+        "Unable to send chat message."
+      );
+
+      return;
+    }
+
+    input.value = "";
+
+    input.focus();
+
+  }
+  finally{
+
+    button.disabled = false;
+
+  }
+}
+
+function initialiseGLCTC1Chat(){
+
+  const input =
+    document.getElementById("glctc1ChatInput");
+
+  const button =
+    document.getElementById("glctc1ChatSend");
+
+  if(!input || !button) return;
+
+  button.addEventListener(
+    "click",
+    sendGLCTC1ChatMessage
+  );
+
+  input.addEventListener(
+    "keydown",
+    event => {
+
+      if(
+        event.key === "Enter" &&
+        !event.shiftKey
+      ){
+
+        event.preventDefault();
+
+        sendGLCTC1ChatMessage();
+
+      }
+
+    }
+  );
+
+  if(!currentUser){
+
+    input.placeholder =
+      "SIGN IN TO CHAT...";
+
+  }
+
+}
+
+function updateGLCTC1ChatAuthState(){
+
+  const input =
+    document.getElementById("glctc1ChatInput");
+
+  if(!input) return;
+
+  if(currentUser){
+
+    input.placeholder =
+      "TYPE YOUR MESSAGE...";
+
+  }else{
+
+    input.placeholder =
+      "SIGN IN TO CHAT...";
+
+  }
+
+}
+
+/* =====================================================
+   GLCTC1 RADIO SPACE CHAT — END
+===================================================== */
+
+/* =====================================================
    SEARCH
 ===================================================== */
 
@@ -7203,6 +7493,12 @@ supabaseClient.auth
 
 
   await getSession();
+
+
+  initialiseGLCTC1Chat();
+  updateGLCTC1ChatAuthState();
+  await loadGLCTC1Chat();
+  initialiseGLCTC1ChatRealtime();
 
 
   await loadLibrary();

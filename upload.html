@@ -6614,179 +6614,305 @@ document.getElementById("snapRightB").addEventListener("click", () =>
 
 
 // =====================================================
-// CREATE EQ FOR DECK
+// 🎚️ CREATE EQ + METER FOR DECK
 // =====================================================
 
 function setupDeckEQ(deck) {
 
-  const a = audio(deck);
+  const a =
+    audio(deck);
 
   if (!a) return null;
 
-  // Already created
+
+  // ---------------------------------------------------
+  // ALREADY CREATED
+  // ---------------------------------------------------
+
   if (deckEQ[deck]) {
     return deckEQ[deck];
   }
+
+
+  // ---------------------------------------------------
+  // AUDIO CONTEXT
+  // ---------------------------------------------------
 
   const AudioContext =
     window.AudioContext ||
     window.webkitAudioContext;
 
   if (!AudioContext) {
-    console.log("Web Audio EQ not supported.");
+
+    console.log(
+      "Web Audio EQ not supported."
+    );
+
     return null;
   }
 
+
   const ctx =
-  window.glctc1SharedAudioContext ||
-  (window.glctc1SharedAudioContext = new AudioContext());
+    window.glctc1SharedAudioContext ||
+    (
+      window.glctc1SharedAudioContext =
+        new AudioContext()
+    );
+
+
+  // ---------------------------------------------------
+  // MEDIA ELEMENT SOURCE
+  // ---------------------------------------------------
 
   const source =
     ctx.createMediaElementSource(a);
 
-  // LOW EQ
+
+  // ===================================================
+  // 🎚️ LOW EQ
+  // ===================================================
+
   const low =
     ctx.createBiquadFilter();
 
-  low.type = "lowshelf";
-  low.frequency.value = 200;
-  low.gain.value = 0;
+  low.type =
+    "lowshelf";
 
- // HIGH EQ
-const high =
-  ctx.createBiquadFilter();
+  low.frequency.value =
+    200;
 
-high.type = "highshelf";
-high.frequency.value = 5000;
-high.gain.value = 0;
+  low.gain.value =
+    0;
 
 
-// ===================================================
-// 🎛️ PAN NODE
-// ===================================================
+  // ===================================================
+  // 🎚️ HIGH EQ
+  // ===================================================
 
-const pan =
-  ctx.createStereoPanner();
+  const high =
+    ctx.createBiquadFilter();
 
-pan.pan.value = 0;
+  high.type =
+    "highshelf";
 
+  high.frequency.value =
+    5000;
 
-// ===================================================
-// 🎛️ FILTER NODE
-// ===================================================
-
-const filter =
-  ctx.createBiquadFilter();
-
-filter.type = "lowpass";
-filter.frequency.value = 20000;
-filter.Q.value = 0.7;
+  high.gain.value =
+    0;
 
 
-// ===================================================
-// 🎛️ REVERB NODE — MASSIVE HALL
-// ===================================================
+  // ===================================================
+  // 🎛️ PAN
+  // ===================================================
 
-const reverb =
-  ctx.createConvolver();
+  const pan =
+    ctx.createStereoPanner();
 
-const reverbGain =
-  ctx.createGain();
-
-reverbGain.gain.value = 0;
+  pan.pan.value =
+    0;
 
 
-// ===================================================
-// 🎛️ CREATE HALL IMPULSE
-// ===================================================
+  // ===================================================
+  // 🎛️ FILTER
+  // ===================================================
 
-const hallLength = 4;
+  const filter =
+    ctx.createBiquadFilter();
 
-const hallBuffer =
-  ctx.createBuffer(
-    2,
-    ctx.sampleRate * hallLength,
-    ctx.sampleRate
+  filter.type =
+    "lowpass";
+
+  filter.frequency.value =
+    20000;
+
+  filter.Q.value =
+    0.7;
+
+
+  // ===================================================
+  // 🎛️ REVERB — MASSIVE HALL
+  // ===================================================
+
+  const reverb =
+    ctx.createConvolver();
+
+  const reverbGain =
+    ctx.createGain();
+
+  reverbGain.gain.value =
+    0;
+
+
+  // ===================================================
+  // 🎛️ CREATE HALL IMPULSE
+  // ===================================================
+
+  const hallLength =
+    4;
+
+  const hallBuffer =
+    ctx.createBuffer(
+      2,
+      ctx.sampleRate * hallLength,
+      ctx.sampleRate
+    );
+
+
+  for (
+    let channel = 0;
+    channel < 2;
+    channel++
+  ) {
+
+    const data =
+      hallBuffer.getChannelData(
+        channel
+      );
+
+    for (
+      let i = 0;
+      i < data.length;
+      i++
+    ) {
+
+      const decay =
+        Math.pow(
+          1 - i / data.length,
+          2.5
+        );
+
+      data[i] =
+        (
+          Math.random() * 2 - 1
+        ) * decay;
+
+    }
+  }
+
+
+  reverb.buffer =
+    hallBuffer;
+
+
+  // ===================================================
+  // 🎚️ CHANNEL OUTPUT / VOLUME
+  // ===================================================
+
+  const output =
+    ctx.createGain();
+
+  output.gain.value =
+    1;
+
+
+  // ===================================================
+  // 📊 CHANNEL ANALYSER
+  // ===================================================
+
+  const analyser =
+    ctx.createAnalyser();
+
+  analyser.fftSize =
+    256;
+
+  analyser.smoothingTimeConstant =
+    0.8;
+
+  analyser.minDecibels =
+    -60;
+
+  analyser.maxDecibels =
+    0;
+
+
+  // ===================================================
+  // 🎧 HEADPHONE CUE SEND
+  // ===================================================
+
+  const headphoneSend =
+    ctx.createGain();
+
+  headphoneSend.gain.value =
+    1;
+
+
+  // ===================================================
+  // 🎛️ MAIN AUDIO CHAIN
+  // ===================================================
+
+  source
+    .connect(low)
+    .connect(high)
+    .connect(pan)
+    .connect(filter)
+    .connect(output)
+    .connect(analyser)
+    .connect(ctx.destination);
+
+
+  // ===================================================
+  // 🎛️ REVERB PATH
+  // ===================================================
+
+  filter
+    .connect(reverb)
+    .connect(reverbGain)
+    .connect(output);
+
+
+  // ===================================================
+  // 🎧 HEADPHONE SEND
+  // ===================================================
+
+  output.connect(
+    headphoneSend
   );
 
-for (let channel = 0; channel < 2; channel++) {
 
-  const data =
-    hallBuffer.getChannelData(channel);
+  // ===================================================
+  // 🎛️ STORE DECK AUDIO NODES
+  // ===================================================
 
-  for (let i = 0; i < data.length; i++) {
+  deckEQ[deck] = {
 
-    const decay =
-      Math.pow(1 - i / data.length, 2.5);
+    context:
+      ctx,
 
-    data[i] =
-      (Math.random() * 2 - 1) * decay;
-  }
-}
+    source:
+      source,
 
-reverb.buffer = hallBuffer;
+    low:
+      low,
 
+    high:
+      high,
 
-// FINAL OUTPUT
-const output =
-  ctx.createGain();
+    pan:
+      pan,
 
-output.gain.value = 1;
+    filter:
+      filter,
 
-// ===================================================
-// 🎧 HEADPHONE CUE SEND
-// ===================================================
+    reverb:
+      reverb,
 
-const headphoneSend =
-  ctx.createGain();
+    reverbGain:
+      reverbGain,
 
-headphoneSend.gain.value = 1;
+    output:
+      output,
 
+    analyser:
+      analyser,
 
-// ===================================================
-// ===================================================
-// 🎛️ AUDIO CHAIN
-// =====================================================
+    headphoneSend:
+      headphoneSend
 
-source
-  .connect(low)
-  .connect(high)
-  .connect(pan)
-  .connect(filter)
-  .connect(output)
-  .connect(ctx.destination);
-
-filter
-  .connect(reverb)
-  .connect(reverbGain)
-  .connect(output);
+  };
 
 
-// ===================================================
-// 🎧 HEADPHONE SEND
-// ===================================================
-
-output.connect(headphoneSend);
-
-
-// ===================================================
-// 🎛️ STORE DECK AUDIO NODES
-// ===================================================
-
-deckEQ[deck] = {
-  context: ctx,
-  source: source,
-  low: low,
-  high: high,
-  pan: pan,
-  filter: filter,
-  reverb: reverb,
-  reverbGain: reverbGain,
-  output: output,
-  headphoneSend: headphoneSend
-};
-
-return deckEQ[deck];
+  return deckEQ[deck];
 }
 
 

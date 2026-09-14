@@ -6915,6 +6915,254 @@ function setupDeckEQ(deck) {
   return deckEQ[deck];
 }
 
+// =====================================================
+// 📊 GLCTC1 — LIVE CHANNEL LEVEL METERS
+// =====================================================
+
+function startGLCTC1ChannelMeters() {
+
+  const meterA =
+    document.querySelectorAll(
+      ".channel-a .glctc1-meter-segment"
+    );
+
+  const meterB =
+    document.querySelectorAll(
+      ".channel-b .glctc1-meter-segment"
+    );
+
+  const clipA =
+    document.getElementById(
+      "glctc1ClipA"
+    );
+
+  const clipB =
+    document.getElementById(
+      "glctc1ClipB"
+    );
+
+
+  function updateMeter(
+    deck,
+    segments,
+    clipLight
+  ) {
+
+    const eq =
+      deckEQ[deck];
+
+    if (
+      !eq ||
+      !eq.analyser
+    ) {
+      return;
+    }
+
+
+    // -------------------------------------------------
+    // READ AUDIO LEVEL
+    // -------------------------------------------------
+
+    const analyser =
+      eq.analyser;
+
+    const buffer =
+      new Uint8Array(
+        analyser.fftSize
+      );
+
+    analyser.getByteTimeDomainData(
+      buffer
+    );
+
+
+    // -------------------------------------------------
+    // CALCULATE RMS LEVEL
+    // -------------------------------------------------
+
+    let sum = 0;
+
+    for (
+      let i = 0;
+      i < buffer.length;
+      i++
+    ) {
+
+      const sample =
+        (buffer[i] - 128) / 128;
+
+      sum +=
+        sample * sample;
+    }
+
+
+    const rms =
+      Math.sqrt(
+        sum / buffer.length
+      );
+
+
+    // -------------------------------------------------
+    // CONVERT TO DECIBELS
+    // -------------------------------------------------
+
+    let db =
+      20 *
+      Math.log10(
+        Math.max(
+          rms,
+          0.00001
+        )
+      );
+
+
+    // -------------------------------------------------
+    // METER RANGE
+    // -60 dB = OFF
+    //   0 dB = FULL
+    // -------------------------------------------------
+
+    db =
+      Math.max(
+        -60,
+        Math.min(
+          0,
+          db
+        )
+      );
+
+
+    const level =
+      (
+        db + 60
+      ) / 60;
+
+
+    // -------------------------------------------------
+    // NUMBER OF ACTIVE SEGMENTS
+    // -------------------------------------------------
+
+    const activeCount =
+      Math.round(
+        level *
+        segments.length
+      );
+
+
+    // -------------------------------------------------
+    // LIGHT THE SEGMENTS
+    // -------------------------------------------------
+
+    segments.forEach(
+      (segment, index) => {
+
+        if (
+          index <
+          activeCount
+        ) {
+
+          segment.style.opacity =
+            "1";
+
+          segment.style.filter =
+            "brightness(1.25)";
+
+        } else {
+
+          segment.style.opacity =
+            "0.12";
+
+          segment.style.filter =
+            "brightness(0.55)";
+        }
+      }
+    );
+
+
+    // -------------------------------------------------
+    // CLIP DETECTION
+    // -------------------------------------------------
+
+    if (
+      clipLight
+    ) {
+
+      if (
+        db >= -3
+      ) {
+
+        clipLight.style.background =
+          "#ff2020";
+
+        clipLight.style.boxShadow =
+          "0 0 10px rgba(255,32,32,1)";
+
+      } else {
+
+        clipLight.style.background =
+          "#3f1118";
+
+        clipLight.style.boxShadow =
+          "inset 0 0 5px rgba(0,0,0,0.8)";
+      }
+    }
+  }
+
+
+  // ===================================================
+  // 🔄 CONTINUOUS METER LOOP
+  // ===================================================
+
+  function animate() {
+
+    const eqA =
+      deckEQ.A;
+
+    const eqB =
+      deckEQ.B;
+
+
+    if (
+      eqA &&
+      eqA.analyser
+    ) {
+
+      updateMeter(
+        "A",
+        meterA,
+        clipA
+      );
+    }
+
+
+    if (
+      eqB &&
+      eqB.analyser
+    ) {
+
+      updateMeter(
+        "B",
+        meterB,
+        clipB
+      );
+    }
+
+
+    requestAnimationFrame(
+      animate
+    );
+  }
+
+
+  animate();
+}
+
+
+// =====================================================
+// 🚀 START GLCTC1 METERS
+// =====================================================
+
+startGLCTC1ChannelMeters();
 
 // =====================================================
 // 🎚️ HIGH EQ
@@ -13377,145 +13625,294 @@ console.log(
   }
 
 
-  // ===================================================
-  // 🎚️ VCI-300 CONTROLS
-  // ===================================================
+  // =====================================================
+// 🎚️ VCI-300 CONTROLS
+// =====================================================
 
-  const controls = {
-
-    // DECK A
-
-    0x0C: "delayA",
-    0x0D: "pitchA",
-    0x0E: "gainA",
-    0x0F: "highA",
-    0x10: "filterA",
-    0x11: "lowA",
-
-
-    // DECK B
-
-    0x12: "delayB",
-    0x13: "pitchB",
-    0x14: "gainB",
-    0x15: "highB",
-    0x16: "filterB",
-    0x17: "lowB",
-
-
-    // CROSSFADER
-
-    0x18: "crossfader"
-
-  };
-
+const controls = {
 
   // ===================================================
-  // 🔘 VCI-300 BUTTONS
+  // DECK A
   // ===================================================
 
-  const buttons = {
+  0x0C: "glctc1ChannelVolumeA",
+  0x0D: "pitchA",
+  0x0E: "gainA",
+  0x0F: "highA",
+  0x10: "filterA",
+  0x11: "lowA",
 
-    // DECK A
+  // ===================================================
+  // DECK B
+  // ===================================================
 
-    0x24: "cueA",
-    0x25: "playA",
-    0x29: "syncA",
-    0x2D: "slowMoA",
-    0x32: "slowMoA",
-    0x33: "loopA",
+  0x12: "glctc1ChannelVolumeB",
+  0x13: "pitchB",
+  0x14: "gainB",
+  0x15: "highB",
+  0x16: "filterB",
+  0x17: "lowB",
+
+  // ===================================================
+  // MIXER
+  // ===================================================
+
+  0x18: "crossfader",
+  0x19: "glctc1CueMix"
+};
 
 
-    // DECK B
+// =====================================================
+// 🎛️ VCI-300 BUTTONS
+// =====================================================
 
-    0x37: "cueB",
-    0x38: "playB",
-    0x3C: "syncB",
-    0x40: "slowMoB",
-    0x45: "slowMoB",
-    0x46: "loopB"
+const buttons = {
 
-  };
+  // ===================================================
+  // DECK A
+  // ===================================================
+
+  0x24: "cueA",
+  0x25: "playA",
+  0x29: "syncA",
+
+  // SlowMo A
+  0x2D: "slowMoA",
+
+  // TAP TEMPO A
+  0x32: "syncA",
+
+  0x33: "loopA",
 
 
   // ===================================================
-  // 🎛️ GLCTC1 MIDI MESSAGE
+  // DECK B
   // ===================================================
 
-  function handleMIDI(event) {
+  0x37: "cueB",
+  0x38: "playB",
+  0x3C: "syncB",
 
-    const [
-      status,
-      control,
-      value
-    ] = event.data;
+  // SlowMo B
+  0x40: "slowMoB",
+
+  // TAP TEMPO B
+  0x45: "syncB",
+
+  0x46: "loopB"
+};
 
 
-    // =================================================
-    // JOG FIRST
-    // =================================================
+// =====================================================
+// 🎯 ACTIVE DECK
+// =====================================================
 
-    if (
-      handleJog(
-        status,
-        control,
-        value
+let glctc1ActiveDeck = "A";
+
+
+// =====================================================
+// 🔊 CENTRE NAVIGATION → REVERB
+// =====================================================
+
+function adjustGLCTC1ActiveReverb(direction) {
+
+  const sliderId =
+    glctc1ActiveDeck === "A"
+      ? "delayA"
+      : "delayB";
+
+  const slider =
+    document.getElementById(sliderId);
+
+  if (!slider) return;
+
+  const min =
+    Number(slider.min || 0);
+
+  const max =
+    Number(slider.max || 100);
+
+  const current =
+    Number(slider.value || 0);
+
+  const step =
+    (max - min) * 0.05;
+
+  const next =
+    Math.max(
+      min,
+      Math.min(
+        max,
+        current + (direction * step)
       )
-    ) {
+    );
 
-      return;
-    }
+  slider.value = next;
 
-
-    // =================================================
-    // CHANNEL 1 CC
-    // =================================================
-
-    if (
-      status === 0xB0
-    ) {
-
-      const id =
-        controls[control];
-
-      if (id) {
-
-        setGLCTC1Control(
-          id,
-          value
-        );
-
-      }
-
-      return;
-    }
+  slider.dispatchEvent(
+    new Event("input", {
+      bubbles: true
+    })
+  );
+}
 
 
-    // =================================================
-    // CHANNEL 1 NOTE ON
-    // =================================================
+// =====================================================
+// 🎛️ GLCTC1 MIDI HANDLER
+// =====================================================
 
-    if (
-      status === 0x90 &&
-      value > 0
-    ) {
+function handleMIDI(event) {
 
-      const id =
-        buttons[control];
+  const data =
+    event.data;
 
-      if (id) {
-
-        setGLCTC1Control(
-          id,
-          value
-        );
-
-      }
-
-      return;
-    }
-
+  if (!data || data.length < 2) {
+    return;
   }
+
+  const status =
+    data[0] & 0xF0;
+
+  const control =
+    data[1];
+
+  const value =
+    data[2] || 0;
+
+
+  // ===================================================
+  // 🎚️ CENTRE NAVIGATION
+  // ===================================================
+
+  if (
+    status === 0x90 &&
+    value > 0
+  ) {
+
+    // UP → REVERB +
+    if (control === 0x4D) {
+
+      adjustGLCTC1ActiveReverb(1);
+      return;
+    }
+
+    // DOWN → REVERB -
+    if (control === 0x4E) {
+
+      adjustGLCTC1ActiveReverb(-1);
+      return;
+    }
+
+    // BACK → REVERB -
+    if (control === 0x4F) {
+
+      adjustGLCTC1ActiveReverb(-1);
+      return;
+    }
+
+    // FORWARD → REVERB +
+    if (control === 0x50) {
+
+      adjustGLCTC1ActiveReverb(1);
+      return;
+    }
+  }
+
+
+  // ===================================================
+  // 🎚️ CONTINUOUS CONTROLLERS
+  // ===================================================
+
+  if (status === 0xB0) {
+
+    const target =
+      controls[control];
+
+    if (!target) {
+      return;
+    }
+
+    const element =
+      document.getElementById(target);
+
+    if (!element) {
+      return;
+    }
+
+    const normalised =
+      value / 127;
+
+    element.value =
+      normalised;
+
+    element.dispatchEvent(
+      new Event("input", {
+        bubbles: true
+      })
+    );
+
+
+    // -----------------------------------------------
+    // ACTIVE DECK TRACKING
+    // -----------------------------------------------
+
+    if (target.endsWith("A")) {
+      glctc1ActiveDeck = "A";
+    }
+
+    if (target.endsWith("B")) {
+      glctc1ActiveDeck = "B";
+    }
+
+    return;
+  }
+
+
+  // ===================================================
+  // 🔘 BUTTONS
+  // ===================================================
+
+  if (
+    status === 0x90 &&
+    value > 0
+  ) {
+
+    const target =
+      buttons[control];
+
+    if (!target) {
+      return;
+    }
+
+
+    // -----------------------------------------------
+    // ACTIVE DECK TRACKING
+    // -----------------------------------------------
+
+    if (target.endsWith("A")) {
+      glctc1ActiveDeck = "A";
+    }
+
+    if (target.endsWith("B")) {
+      glctc1ActiveDeck = "B";
+    }
+
+
+    const element =
+      document.getElementById(target);
+
+    if (!element) {
+      return;
+    }
+
+
+    // -----------------------------------------------
+    // TRIGGER EXISTING CONTROL
+    // -----------------------------------------------
+
+    element.click();
+  }
+}
 
 
   // ===================================================

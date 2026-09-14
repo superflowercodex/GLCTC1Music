@@ -6728,699 +6728,178 @@ document.getElementById("snapRightB").addEventListener("click", () =>
 // =====================================================
 // CREATE EQ FOR DECK
 // =====================================================
-// 🎚️ GLCTC1 STEP 3
-// REAL CHANNEL METERS + CLIP DETECTION
-// =====================================================
 
 function setupDeckEQ(deck) {
 
-  const a =
-    audio(deck);
+  const a = audio(deck);
 
-  if (!a) {
-    return null;
-  }
+  if (!a) return null;
 
-
-  // ===================================================
-  // ALREADY CREATED
-  // ===================================================
-
+  // Already created
   if (deckEQ[deck]) {
     return deckEQ[deck];
   }
-
-
-  // ===================================================
-  // AUDIO CONTEXT
-  // ===================================================
 
   const AudioContext =
     window.AudioContext ||
     window.webkitAudioContext;
 
   if (!AudioContext) {
-
-    console.log(
-      "Web Audio EQ not supported."
-    );
-
+    console.log("Web Audio EQ not supported.");
     return null;
   }
 
-
   const ctx =
-    window.glctc1SharedAudioContext ||
-    (
-      window.glctc1SharedAudioContext =
-        new AudioContext()
-    );
-
-
-  // ===================================================
-  // MEDIA ELEMENT SOURCE
-  // ===================================================
+  window.glctc1SharedAudioContext ||
+  (window.glctc1SharedAudioContext = new AudioContext());
 
   const source =
     ctx.createMediaElementSource(a);
 
-
-  // ===================================================
   // LOW EQ
-  // ===================================================
-
   const low =
     ctx.createBiquadFilter();
 
-  low.type =
-    "lowshelf";
+  low.type = "lowshelf";
+  low.frequency.value = 200;
+  low.gain.value = 0;
 
-  low.frequency.value =
-    200;
+ // HIGH EQ
+const high =
+  ctx.createBiquadFilter();
 
-  low.gain.value =
-    0;
-
-
-  // ===================================================
-  // HIGH EQ
-  // ===================================================
-
-  const high =
-    ctx.createBiquadFilter();
-
-  high.type =
-    "highshelf";
-
-  high.frequency.value =
-    5000;
-
-  high.gain.value =
-    0;
+high.type = "highshelf";
+high.frequency.value = 5000;
+high.gain.value = 0;
 
 
-  // ===================================================
-  // PAN NODE
-  // ===================================================
+// ===================================================
+// 🎛️ PAN NODE
+// ===================================================
 
-  const pan =
-    ctx.createStereoPanner();
+const pan =
+  ctx.createStereoPanner();
 
-  pan.pan.value =
-    0;
-
-
-  // ===================================================
-  // FILTER NODE
-  // ===================================================
-
-  const filter =
-    ctx.createBiquadFilter();
-
-  filter.type =
-    "lowpass";
-
-  filter.frequency.value =
-    20000;
-
-  filter.Q.value =
-    0.7;
+pan.pan.value = 0;
 
 
-  // ===================================================
-  // REVERB NODE
-  // ===================================================
+// ===================================================
+// 🎛️ FILTER NODE
+// ===================================================
 
-  const reverb =
-    ctx.createConvolver();
+const filter =
+  ctx.createBiquadFilter();
 
-
-  const reverbGain =
-    ctx.createGain();
-
-  reverbGain.gain.value =
-    0;
+filter.type = "lowpass";
+filter.frequency.value = 20000;
+filter.Q.value = 0.7;
 
 
-  // ===================================================
-  // CREATE HALL IMPULSE
-  // ===================================================
+// ===================================================
+// 🎛️ REVERB NODE — MASSIVE HALL
+// ===================================================
 
-  const hallLength =
-    4;
+const reverb =
+  ctx.createConvolver();
 
-  const hallBuffer =
-    ctx.createBuffer(
-      2,
-      ctx.sampleRate *
-        hallLength,
-      ctx.sampleRate
-    );
+const reverbGain =
+  ctx.createGain();
+
+reverbGain.gain.value = 0;
 
 
-  for (
-    let channel = 0;
-    channel < 2;
-    channel++
-  ) {
+// ===================================================
+// 🎛️ CREATE HALL IMPULSE
+// ===================================================
 
-    const data =
-      hallBuffer.getChannelData(
-        channel
-      );
+const hallLength = 4;
 
-    for (
-      let i = 0;
-      i < data.length;
-      i++
-    ) {
+const hallBuffer =
+  ctx.createBuffer(
+    2,
+    ctx.sampleRate * hallLength,
+    ctx.sampleRate
+  );
 
-      const decay =
-        Math.pow(
-          1 -
-            i /
-              data.length,
-          2.5
-        );
+for (let channel = 0; channel < 2; channel++) {
 
-      data[i] =
-        (
-          Math.random() *
-            2 -
-          1
-        ) *
-        decay;
-    }
+  const data =
+    hallBuffer.getChannelData(channel);
+
+  for (let i = 0; i < data.length; i++) {
+
+    const decay =
+      Math.pow(1 - i / data.length, 2.5);
+
+    data[i] =
+      (Math.random() * 2 - 1) * decay;
   }
-
-
-  reverb.buffer =
-    hallBuffer;
-
-
-  // ===================================================
-  // CHANNEL OUTPUT
-  // ===================================================
-
-  const output =
-    ctx.createGain();
-
-  output.gain.value =
-    1;
-
-
-  // ===================================================
-  // 🎧 HEADPHONE CUE SEND
-  // ===================================================
-
-  const headphoneSend =
-    ctx.createGain();
-
-  headphoneSend.gain.value =
-    1;
-
-
-  // ===================================================
-  // 📊 REAL CHANNEL LEVEL ANALYSER
-  // ===================================================
-
-  const analyser =
-    ctx.createAnalyser();
-
-  analyser.fftSize =
-    1024;
-
-  analyser.smoothingTimeConstant =
-    0.72;
-
-  analyser.minDecibels =
-    -60;
-
-  analyser.maxDecibels =
-    0;
-
-
-  // ===================================================
-  // 🎛️ AUDIO CHAIN
-  // ===================================================
-
-  source
-    .connect(low)
-    .connect(high)
-    .connect(pan)
-    .connect(filter)
-    .connect(output);
-
-
-  // ===================================================
-  // REVERB RETURN
-  // ===================================================
-
-  filter
-    .connect(reverb)
-    .connect(reverbGain)
-    .connect(output);
-
-
-  // ===================================================
-  // 📊 OUTPUT → ANALYSER → MASTER OUTPUT
-  // ===================================================
-
-  output
-    .connect(analyser)
-    .connect(ctx.destination);
-
-
-  // ===================================================
-  // 🎧 HEADPHONE SEND
-  // ===================================================
-
-  output
-    .connect(headphoneSend);
-
-
-  // ===================================================
-  // 🎛️ STORE DECK AUDIO NODES
-  // ===================================================
-
-  deckEQ[deck] = {
-
-    context:
-      ctx,
-
-    source:
-      source,
-
-    low:
-      low,
-
-    high:
-      high,
-
-    pan:
-      pan,
-
-    filter:
-      filter,
-
-    reverb:
-      reverb,
-
-    reverbGain:
-      reverbGain,
-
-    output:
-      output,
-
-    headphoneSend:
-      headphoneSend,
-
-    analyser:
-      analyser
-
-  };
-
-
-  return deckEQ[deck];
-
 }
 
+reverb.buffer = hallBuffer;
 
+
+// FINAL OUTPUT
+const output =
+  ctx.createGain();
+
+output.gain.value = 1;
+
+// ===================================================
+// 🎧 HEADPHONE CUE SEND
+// ===================================================
+
+const headphoneSend =
+  ctx.createGain();
+
+headphoneSend.gain.value = 1;
+
+
+// ===================================================
+// ===================================================
+// 🎛️ AUDIO CHAIN
 // =====================================================
-// 📊 GLCTC1 CHANNEL METER ENGINE
-// =====================================================
 
-const glctc1MeterData = {
+source
+  .connect(low)
+  .connect(high)
+  .connect(pan)
+  .connect(filter)
+  .connect(output)
+  .connect(ctx.destination);
 
-  A: {
-    values:
-      new Float32Array(1024),
-    peak:
-      0,
-    clip:
-      false,
-    clipTimer:
-      null
-  },
+filter
+  .connect(reverb)
+  .connect(reverbGain)
+  .connect(output);
 
-  B: {
-    values:
-      new Float32Array(1024),
-    peak:
-      0,
-    clip:
-      false,
-    clipTimer:
-      null
-  }
 
+// ===================================================
+// 🎧 HEADPHONE SEND
+// ===================================================
+
+output.connect(headphoneSend);
+
+
+// ===================================================
+// 🎛️ STORE DECK AUDIO NODES
+// ===================================================
+
+deckEQ[deck] = {
+  context: ctx,
+  source: source,
+  low: low,
+  high: high,
+  pan: pan,
+  filter: filter,
+  reverb: reverb,
+  reverbGain: reverbGain,
+  output: output,
+  headphoneSend: headphoneSend
 };
 
-
-// =====================================================
-// 📊 GET CHANNEL METER ELEMENT
-// =====================================================
-
-function glctc1GetMeter(deck) {
-
-  return document.getElementById(
-    deck === "A"
-      ? "glctc1MeterA"
-      : "glctc1MeterB"
-  );
-
+return deckEQ[deck];
 }
-
-
-// =====================================================
-// 🚨 GET CHANNEL CLIP LIGHT
-// =====================================================
-
-function glctc1GetClip(deck) {
-
-  return document.getElementById(
-    deck === "A"
-      ? "glctc1ClipA"
-      : "glctc1ClipB"
-  );
-
-}
-
-
-// =====================================================
-// 📊 DRAW CHANNEL METER
-// =====================================================
-
-function glctc1DrawChannelMeter(
-  deck,
-  level
-) {
-
-  const meter =
-    glctc1GetMeter(deck);
-
-  if (!meter) {
-    return;
-  }
-
-
-  // ---------------------------------------------------
-  // LIMIT
-  // ---------------------------------------------------
-
-  const safeLevel =
-    Math.max(
-      0,
-      Math.min(
-        1,
-        level
-      )
-    );
-
-
-  // ---------------------------------------------------
-  // CREATE / GET METER SEGMENTS
-  // ---------------------------------------------------
-
-  let segments =
-    meter.querySelectorAll(
-      ".glctc1-meter-segment"
-    );
-
-
-  if (!segments.length) {
-
-    meter.innerHTML = "";
-
-    for (
-      let i = 0;
-      i < 16;
-      i++
-    ) {
-
-      const segment =
-        document.createElement(
-          "div"
-        );
-
-      segment.className =
-        "glctc1-meter-segment";
-
-      segment.style.height =
-        "7px";
-
-      segment.style.width =
-        "100%";
-
-      segment.style.margin =
-        "2px 0";
-
-      segment.style.borderRadius =
-        "2px";
-
-      segment.style.background =
-        "rgba(255,255,255,0.10)";
-
-      segment.style.boxShadow =
-        "inset 0 0 3px rgba(0,0,0,0.8)";
-
-      meter.appendChild(
-        segment
-      );
-    }
-
-
-    segments =
-      meter.querySelectorAll(
-        ".glctc1-meter-segment"
-      );
-  }
-
-
-  // ---------------------------------------------------
-  // NUMBER OF ACTIVE SEGMENTS
-  // ---------------------------------------------------
-
-  const activeCount =
-    Math.round(
-      safeLevel *
-        segments.length
-    );
-
-
-  // ---------------------------------------------------
-  // UPDATE SEGMENTS
-  // ---------------------------------------------------
-
-  segments.forEach(
-    (segment, index) => {
-
-      const active =
-        index <
-        activeCount;
-
-      if (active) {
-
-        segment.style.background =
-          "linear-gradient(90deg,#00ff66,#00ffff)";
-
-        segment.style.boxShadow =
-          "0 0 7px rgba(0,255,255,0.8)";
-
-      } else {
-
-        segment.style.background =
-          "rgba(255,255,255,0.10)";
-
-        segment.style.boxShadow =
-          "inset 0 0 3px rgba(0,0,0,0.8)";
-      }
-
-    }
-  );
-
-}
-
-
-// =====================================================
-// 🚨 CLIP LIGHT
-// =====================================================
-
-function glctc1TriggerClip(
-  deck
-) {
-
-  const clip =
-    glctc1GetClip(deck);
-
-  if (!clip) {
-    return;
-  }
-
-
-  clip.classList.add(
-    "active"
-  );
-
-
-  clip.style.background =
-    "#ff0033";
-
-  clip.style.boxShadow =
-    "0 0 8px #ff0033, 0 0 18px #ff0033";
-
-
-  clearTimeout(
-    glctc1MeterData[
-      deck
-    ].clipTimer
-  );
-
-
-  glctc1MeterData[
-    deck
-  ].clipTimer =
-    setTimeout(
-      () => {
-
-        clip.classList.remove(
-          "active"
-        );
-
-        clip.style.background =
-          "rgba(255,255,255,0.10)";
-
-        clip.style.boxShadow =
-          "none";
-
-      },
-      700
-    );
-
-}
-
-
-// =====================================================
-// 📊 UPDATE BOTH CHANNEL METERS
-// =====================================================
-
-function glctc1UpdateChannelMeters() {
-
-  ["A","B"].forEach(
-    deck => {
-
-      const eq =
-        setupDeckEQ(deck);
-
-      if (
-        !eq ||
-        !eq.analyser
-      ) {
-        return;
-      }
-
-
-      const state =
-        glctc1MeterData[
-          deck
-        ];
-
-
-      eq.analyser.getFloatTimeDomainData(
-        state.values
-      );
-
-
-      let peak =
-        0;
-
-
-      for (
-        let i = 0;
-        i <
-        state.values.length;
-        i++
-      ) {
-
-        const sample =
-          Math.abs(
-            state.values[i]
-          );
-
-        if (
-          sample >
-          peak
-        ) {
-
-          peak =
-            sample;
-        }
-
-      }
-
-
-      // -------------------------------------------------
-      // PEAK HOLD / SMOOTHING
-      // -------------------------------------------------
-
-      state.peak =
-        Math.max(
-          peak,
-          state.peak *
-            0.88
-        );
-
-
-      // -------------------------------------------------
-      // CONVERT TO METER RANGE
-      // -------------------------------------------------
-
-      const level =
-        Math.min(
-          1,
-          state.peak
-        );
-
-
-      glctc1DrawChannelMeter(
-        deck,
-        level
-      );
-
-
-      // -------------------------------------------------
-      // 🚨 DIGITAL CLIP
-      // -------------------------------------------------
-
-      if (
-        peak >=
-        0.98
-      ) {
-
-        glctc1TriggerClip(
-          deck
-        );
-
-      }
-
-    }
-  );
-
-
-  requestAnimationFrame(
-    glctc1UpdateChannelMeters
-  );
-
-}
-
-
-// =====================================================
-// ▶️ START CHANNEL METERS
-// =====================================================
-
-requestAnimationFrame(
-  glctc1UpdateChannelMeters
-);
 
 
 // =====================================================

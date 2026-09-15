@@ -6069,47 +6069,7 @@ function setupLiveAudio(stream){
 }
 
 /* =====================================================
-   GLCTC1 RADIO SPACE
-   ADMIN / DJ → ALL VIEWERS LIVE WEBCAM
-===================================================== */
-
-
-/* =====================================================
-   MULTI-VIEWER LIVE STATE
-===================================================== */
-
-let viewerConnection =
-  null;
-
-let liveViewerId =
-  null;
-
-let liveArtistId =
-  null;
-
-let artistIceTimer =
-  null;
-
-let roomTimer =
-  null;
-
-
-/* =====================================================
-   ADMIN / DJ BROADCAST STATE
-===================================================== */
-
-let artistBroadcastConnections =
-  {};
-
-let artistBroadcastIce =
-  {};
-
-let artistViewerTimer =
-  null;
-
-
-/* =====================================================
-   CONNECT LIVE ADMIN / DJ
+   CONNECT LIVE ARTIST
 ===================================================== */
 
 async function connectInvitedArtist(
@@ -6119,103 +6079,38 @@ async function connectInvitedArtist(
   if(!artistId)
     return;
 
-
   liveArtistId =
     artistId;
 
+  const room =
+    await getRoom(
+      artistId
+    );
 
-  /*
-     EVERY VIEWER GETS A UNIQUE ID.
+  if(
+    !room?.signaling_data?.offer
+  ){
 
-     This is critical because every viewer
-     needs their own WebRTC connection.
-  */
+    $("videoNotice").textContent =
+      "WAITING FOR LIVE ARTIST SESSION";
 
-  liveViewerId =
-    crypto.randomUUID();
+    return;
 
+  }
+
+  const signaling =
+    room.signaling_data;
 
   try{
 
     await ensureAudioEngine();
 
-
-    /*
-       REGISTER THIS VIEWER WITH THE
-       ADMIN / DJ LIVE ROOM.
-    */
-
-    const room =
-      await getRoom(
-        artistId
-      );
-
-
-    if(!room){
-
-      $("videoNotice").textContent =
-        "WAITING FOR LIVE ADMIN / DJ";
-
-      return;
-
-    }
-
-
-    const signaling =
-      room.signaling_data ||
-      {};
-
-
-    signaling.viewers =
-      signaling.viewers || {};
-
-
-    signaling.viewers[
-      liveViewerId
-    ] = {
-
-      request:true,
-
-      offer:null,
-
-      answer:null,
-
-      viewer_ice:[],
-
-      artist_ice:[]
-
-    };
-
-
-    await supabaseClient
-      .from(
-        "glctc1_live_rooms"
-      )
-      .update({
-
-        signaling_data:
-          signaling
-
-      })
-      .eq(
-        "user_id",
-        artistId
-      );
-
-
-    /*
-       CREATE VIEWER CONNECTION
-    */
+    viewerConnection?.close();
 
     viewerConnection =
       new RTCPeerConnection(
         RTC_CONFIG
       );
-
-
-    /* ---------------------------------------------
-       RECEIVE ADMIN / DJ VIDEO + AUDIO
-    --------------------------------------------- */
 
     viewerConnection.ontrack =
       e => {
@@ -6225,7 +6120,6 @@ async function connectInvitedArtist(
           new MediaStream(
             [e.track]
           );
-
 
         if(
           stream.getVideoTracks()
@@ -6260,7 +6154,6 @@ async function connectInvitedArtist(
 
         }
 
-
         if(
           stream.getAudioTracks()
             .length
@@ -6276,84 +6169,47 @@ async function connectInvitedArtist(
 
         }
 
-
-        liveMode =
-          true;
-
-
-        $("liveStatus").textContent =
-          "● ADMIN / DJ LIVE";
-
-
-        $("videoNotice").textContent =
-          "GLCTC1 ADMIN / DJ LIVE";
-
+        setLiveUI(true);
 
       };
-
-
-    /* ---------------------------------------------
-       VIEWER ICE
-    --------------------------------------------- */
 
     viewerConnection.onicecandidate =
       async e => {
 
-        if(!e.candidate)
+        if(
+          !e.candidate
+        )
           return;
-
 
         const latest =
           await getRoom(
             artistId
           );
 
-
         if(!latest)
           return;
-
 
         const s =
           latest.signaling_data ||
           {};
 
+        s.viewer_ice =
+          Array.isArray(
+            s.viewer_ice
+          )
+            ? s.viewer_ice
+            : [];
 
-        s.viewers =
-          s.viewers || {};
-
-
-        if(
-          !s.viewers[
-            liveViewerId
-          ]
-        )
-          return;
-
-
-        s.viewers[
-          liveViewerId
-        ].viewer_ice =
-          s.viewers[
-            liveViewerId
-          ].viewer_ice || [];
-
-
-        s.viewers[
-          liveViewerId
-        ].viewer_ice.push(
+        s.viewer_ice.push(
           e.candidate.toJSON()
         );
-
 
         await supabaseClient
           .from(
             "glctc1_live_rooms"
           )
           .update({
-
-            signaling_data:
-              s
-
+            signaling_data:s
           })
           .eq(
             "user_id",
@@ -6362,166 +6218,73 @@ async function connectInvitedArtist(
 
       };
 
+    await viewerConnection
+      .setRemoteDescription(
+        signaling.offer
+      );
 
-    /*
-       WAIT FOR ADMIN / DJ TO CREATE
-       THIS VIEWER'S OFFER.
-    */
+    const answer =
+      await viewerConnection
+        .createAnswer();
 
-    if(artistIceTimer)
+    await viewerConnection
+      .setLocalDescription(
+        answer
+      );
+
+    const latest =
+      await getRoom(
+        artistId
+      );
+
+    const s =
+      latest?.signaling_data ||
+      signaling;
+
+    s.answer = {
+      type:answer.type,
+      sdp:answer.sdp
+    };
+
+    s.viewer_ice = [];
+
+    await supabaseClient
+      .from(
+        "glctc1_live_rooms"
+      )
+      .update({
+        signaling_data:s
+      })
+      .eq(
+        "user_id",
+        artistId
+      );
+
+    if(
+      artistIceTimer
+    )
       clearInterval(
         artistIceTimer
       );
 
-
-    let appliedArtistIce =
-      0;
-
+    let applied = 0;
 
     artistIceTimer =
       setInterval(
         async () => {
-
-          if(
-            !viewerConnection ||
-            !liveViewerId
-          )
-            return;
-
 
           const r =
             await getRoom(
               artistId
             );
 
-
-          const viewer =
-            r
-              ?.signaling_data
-              ?.viewers
-              ?.[
-                liveViewerId
-              ];
-
-
-          if(!viewer)
-            return;
-
-
-          /* ---------------------------------------
-             ADMIN / DJ OFFER
-          --------------------------------------- */
-
-          if(
-            viewer.offer &&
-            !viewerConnection
-              .currentRemoteDescription
-          ){
-
-            try{
-
-              await viewerConnection
-                .setRemoteDescription(
-                  viewer.offer
-                );
-
-
-              const answer =
-                await viewerConnection
-                  .createAnswer();
-
-
-              await viewerConnection
-                .setLocalDescription(
-                  answer
-                );
-
-
-              const latest =
-                await getRoom(
-                  artistId
-                );
-
-
-              const s =
-                latest?.signaling_data ||
-                {};
-
-
-              s.viewers =
-                s.viewers || {};
-
-
-              if(
-                s.viewers[
-                  liveViewerId
-                ]
-              ){
-
-                s.viewers[
-                  liveViewerId
-                ].answer = {
-
-                  type:
-                    answer.type,
-
-                  sdp:
-                    answer.sdp
-
-                };
-
-
-                s.viewers[
-                  liveViewerId
-                ].request =
-                  false;
-
-
-                await supabaseClient
-                  .from(
-                    "glctc1_live_rooms"
-                  )
-                  .update({
-
-                    signaling_data:
-                      s
-
-                  })
-                  .eq(
-                    "user_id",
-                    artistId
-                  );
-
-              }
-
-
-              $("videoNotice").textContent =
-                "LIVE SESSION CONNECTED";
-
-
-            }catch(error){
-
-              console.error(
-                "GLCTC1 VIEWER ANSWER ERROR:",
-                error
-              );
-
-            }
-
-          }
-
-
-          /* ---------------------------------------
-             ADMIN / DJ ICE
-          --------------------------------------- */
-
           const list =
-            viewer.artist_ice ||
+            r?.signaling_data
+              ?.artist_ice ||
             [];
 
-
           while(
-            appliedArtistIce <
+            applied <
             list.length
           ){
 
@@ -6530,31 +6293,26 @@ async function connectInvitedArtist(
               await viewerConnection
                 .addIceCandidate(
                   list[
-                    appliedArtistIce
+                    applied
                   ]
                 );
 
             }catch(e){}
 
-
-            appliedArtistIce++;
+            applied++;
 
           }
 
         },
-        1000
+        1200
       );
 
-
-    /* =================================================
-       WATCH LIVE ROOM
-    ================================================= */
-
-    if(roomTimer)
+    if(
+      roomTimer
+    )
       clearInterval(
         roomTimer
       );
-
 
     roomTimer =
       setInterval(
@@ -6565,12 +6323,8 @@ async function connectInvitedArtist(
               artistId
             );
 
-
           if(
-            !r?.signaling_data?.viewers
-              ?.[
-                liveViewerId
-              ]
+            !r?.signaling_data?.offer
           ){
 
             stopWatching();
@@ -6581,10 +6335,8 @@ async function connectInvitedArtist(
         5000
       );
 
-
     $("videoNotice").textContent =
-      "WAITING FOR ADMIN / DJ LIVE";
-
+      "LIVE SESSION CONNECTED";
 
   }catch(error){
 
@@ -6593,7 +6345,6 @@ async function connectInvitedArtist(
       error
     );
 
-
     $("videoNotice").textContent =
       "LIVE CONNECTION ERROR";
 
@@ -6601,12 +6352,11 @@ async function connectInvitedArtist(
 
 }
 
-
 /* =====================================================
-   STOP LIVE VIEWING
+   STOP LIVE
 ===================================================== */
 
-async function stopWatching(){
+function stopWatching(){
 
   if(
     artistIceTimer
@@ -6615,7 +6365,6 @@ async function stopWatching(){
       artistIceTimer
     );
 
-
   if(
     roomTimer
   )
@@ -6623,85 +6372,16 @@ async function stopWatching(){
       roomTimer
     );
 
-
   artistIceTimer =
     null;
 
   roomTimer =
     null;
 
-
-  /*
-     REMOVE THIS VIEWER FROM
-     THE LIVE ROOM.
-  */
-
-  if(
-    liveArtistId &&
-    liveViewerId
-  ){
-
-    try{
-
-      const room =
-        await getRoom(
-          liveArtistId
-        );
-
-
-      const signaling =
-        room?.signaling_data ||
-        {};
-
-
-      if(
-        signaling.viewers
-      ){
-
-        delete signaling
-          .viewers[
-            liveViewerId
-          ];
-
-      }
-
-
-      await supabaseClient
-        .from(
-          "glctc1_live_rooms"
-        )
-        .update({
-
-          signaling_data:
-            signaling
-
-        })
-        .eq(
-          "user_id",
-          liveArtistId
-        );
-
-    }catch(error){
-
-      console.error(
-        "GLCTC1 VIEWER CLEANUP ERROR:",
-        error
-      );
-
-    }
-
-  }
-
-
   viewerConnection?.close();
 
   viewerConnection =
     null;
-
-
-  liveViewerId =
-    null;
-
 
   liveVideo.srcObject =
     null;
@@ -6709,49 +6389,7 @@ async function stopWatching(){
   liveVideo.style.display =
     "none";
 
-
-  liveMode =
-    false;
-
-
-  if(
-    liveGain
-  ){
-
-    try{
-      liveGain.disconnect();
-    }catch(e){}
-
-    liveGain =
-      null;
-
-  }
-
-
-  if(
-    liveAudioSource
-  ){
-
-    try{
-      liveAudioSource.disconnect();
-    }catch(e){}
-
-    liveAudioSource =
-      null;
-
-  }
-
-
-  activeAnalyser =
-    radioAnalyser;
-
-
-  duckRadio(false);
-
-
-  $("liveStatus").textContent =
-    "● RADIO SPACE";
-
+  setLiveUI(false);
 
   if(videoUrl){
 
@@ -6776,7 +6414,21 @@ async function stopWatching(){
 
 
 /* =====================================================
-   ADMIN / DJ WEBCAM BROADCAST
+   GLCTC1 ARTIST WEBCAM BROADCAST
+===================================================== */
+
+let artistBroadcastConnection =
+  null;
+
+let artistBroadcastIce =
+  [];
+
+let artistAnswerTimer =
+  null;
+
+
+/* =====================================================
+   START ARTIST WEBCAM BROADCAST
 ===================================================== */
 
 async function startGLCTC1WebcamBroadcast(){
@@ -6790,56 +6442,137 @@ async function startGLCTC1WebcamBroadcast(){
 
   }
 
-
   const artistId =
     currentUser?.id;
-
 
   if(!artistId){
 
     $("videoNotice").textContent =
-      "SIGN IN AS ADMIN / DJ TO BROADCAST";
+      "SIGN IN AS ARTIST TO BROADCAST";
 
     return;
 
   }
-
 
   try{
 
     await ensureAudioEngine();
 
 
-    /*
-       CLOSE ANY OLD VIEWER CONNECTIONS
-       OWNED BY THIS BROADCAST.
-    */
+    if(artistBroadcastConnection){
 
-    Object
-      .values(
-        artistBroadcastConnections
-      )
+      try{
+        artistBroadcastConnection.close();
+      }catch(e){}
+
+      artistBroadcastConnection =
+        null;
+
+    }
+
+
+    if(artistAnswerTimer){
+
+      clearInterval(
+        artistAnswerTimer
+      );
+
+      artistAnswerTimer =
+        null;
+
+    }
+
+
+    artistBroadcastIce =
+      [];
+
+
+    artistBroadcastConnection =
+      new RTCPeerConnection(
+        RTC_CONFIG
+      );
+
+
+    /* ---------------------------------------------
+       SEND WEBCAM + MICROPHONE
+    --------------------------------------------- */
+
+    webcamStream
+      .getTracks()
       .forEach(
-        connection => {
+        track => {
 
-          try{
-            connection.close();
-          }catch(e){}
+          artistBroadcastConnection
+            .addTrack(
+              track,
+              webcamStream
+            );
 
         }
       );
 
 
-    artistBroadcastConnections =
-      {};
+    /* ---------------------------------------------
+       ARTIST ICE
+    --------------------------------------------- */
 
-    artistBroadcastIce =
-      {};
+    artistBroadcastConnection
+      .onicecandidate =
+      async event => {
+
+        if(!event.candidate)
+          return;
+
+        artistBroadcastIce.push(
+          event.candidate.toJSON()
+        );
+
+        const room =
+          await getRoom(
+            artistId
+          );
+
+        const signaling =
+          room?.signaling_data ||
+          {};
+
+        signaling.artist_ice =
+          artistBroadcastIce;
+
+        await supabaseClient
+          .from(
+            "glctc1_live_rooms"
+          )
+          .update({
+            signaling_data:
+              signaling
+          })
+          .eq(
+            "user_id",
+            artistId
+          );
+
+      };
 
 
-    /*
-       CREATE / RESET LIVE ROOM
-    */
+    /* ---------------------------------------------
+       CREATE OFFER
+    --------------------------------------------- */
+
+    const offer =
+      await artistBroadcastConnection
+        .createOffer();
+
+
+    await artistBroadcastConnection
+      .setLocalDescription(
+        offer
+      );
+
+
+    /* ---------------------------------------------
+       SAVE LIVE ROOM
+    --------------------------------------------- */
 
     const existingRoom =
       await getRoom(
@@ -6852,25 +6585,25 @@ async function startGLCTC1WebcamBroadcast(){
       {};
 
 
-    signaling.offer =
-      null;
+    signaling.offer = {
+
+      type:
+        offer.type,
+
+      sdp:
+        offer.sdp
+
+    };
+
 
     signaling.answer =
       null;
 
-    signaling.artist_ice =
-      [];
-
     signaling.viewer_ice =
       [];
 
-
-    /*
-       MULTI-VIEWER SIGNALLING
-    */
-
-    signaling.viewers =
-      {};
+    signaling.artist_ice =
+      [];
 
 
     const { error } =
@@ -6889,6 +6622,7 @@ async function startGLCTC1WebcamBroadcast(){
         },{
           onConflict:
             "user_id"
+
         });
 
 
@@ -6896,291 +6630,72 @@ async function startGLCTC1WebcamBroadcast(){
       throw error;
 
 
-    /*
-       WATCH FOR NEW VIEWERS
-    */
+    /* ---------------------------------------------
+       WAIT FOR VIEWER ANSWER
+    --------------------------------------------- */
 
-    if(artistViewerTimer)
-      clearInterval(
-        artistViewerTimer
-      );
-
-
-    artistViewerTimer =
+    artistAnswerTimer =
       setInterval(
         async () => {
 
+          if(
+            !artistBroadcastConnection
+          )
+            return;
+
+
+          const room =
+            await getRoom(
+              artistId
+            );
+
+
+          const answer =
+            room
+              ?.signaling_data
+              ?.answer;
+
+
+          if(!answer)
+            return;
+
+
+          if(
+            artistBroadcastConnection
+              .currentRemoteDescription
+          )
+            return;
+
+
           try{
 
-            const room =
-              await getRoom(
-                artistId
+            await artistBroadcastConnection
+              .setRemoteDescription(
+                answer
               );
 
 
-            const currentSignaling =
-              room?.signaling_data ||
-              {};
+            clearInterval(
+              artistAnswerTimer
+            );
 
+            artistAnswerTimer =
+              null;
 
-            const viewers =
-              currentSignaling
-                .viewers ||
-              {};
 
+            $("videoNotice").textContent =
+              "GLCTC1 LIVE BROADCAST CONNECTED";
 
-            for(
-              const viewerId
-              of Object.keys(viewers)
-            ){
 
-              const viewer =
-                viewers[
-                  viewerId
-                ];
+            console.log(
+              "📡 GLCTC1 ARTIST BROADCAST CONNECTED"
+            );
 
-
-              /*
-                 Already connected?
-              */
-
-              if(
-                artistBroadcastConnections[
-                  viewerId
-                ]
-              )
-                continue;
-
-
-              /*
-                 Viewer has requested
-                 a connection.
-              */
-
-              if(
-                !viewer?.request
-              )
-                continue;
-
-
-              console.log(
-                "📡 NEW GLCTC1 VIEWER:",
-                viewerId
-              );
-
-
-              /*
-                 CREATE A UNIQUE PEER
-                 CONNECTION FOR THIS VIEWER.
-              */
-
-              const connection =
-                new RTCPeerConnection(
-                  RTC_CONFIG
-                );
-
-
-              artistBroadcastConnections[
-                viewerId
-              ] =
-                connection;
-
-
-              artistBroadcastIce[
-                viewerId
-              ] =
-                [];
-
-
-              /*
-                 SEND THE SAME WEBCAM +
-                 MICROPHONE TO THIS VIEWER.
-              */
-
-              webcamStream
-                .getTracks()
-                .forEach(
-                  track => {
-
-                    connection
-                      .addTrack(
-                        track,
-                        webcamStream
-                      );
-
-                  }
-                );
-
-
-              /*
-                 ICE FOR THIS VIEWER ONLY
-              */
-
-              connection.onicecandidate =
-                async event => {
-
-                  if(
-                    !event.candidate
-                  )
-                    return;
-
-
-                  artistBroadcastIce[
-                    viewerId
-                  ].push(
-                    event.candidate.toJSON()
-                  );
-
-
-                  const latest =
-                    await getRoom(
-                      artistId
-                    );
-
-
-                  if(!latest)
-                    return;
-
-
-                  const s =
-                    latest.signaling_data ||
-                    {};
-
-
-                  s.viewers =
-                    s.viewers || {};
-
-
-                  if(
-                    !s.viewers[
-                      viewerId
-                    ]
-                  )
-                    return;
-
-
-                  s.viewers[
-                    viewerId
-                  ].artist_ice =
-                    artistBroadcastIce[
-                      viewerId
-                    ];
-
-
-                  await supabaseClient
-                    .from(
-                      "glctc1_live_rooms"
-                    )
-                    .update({
-
-                      signaling_data:
-                        s
-
-                    })
-                    .eq(
-                      "user_id",
-                      artistId
-                    );
-
-                };
-
-
-              /*
-                 CREATE UNIQUE OFFER
-                 FOR THIS VIEWER.
-              */
-
-              const offer =
-                await connection
-                  .createOffer();
-
-
-              await connection
-                .setLocalDescription(
-                  offer
-                );
-
-
-              /*
-                 SAVE OFFER FOR
-                 THIS VIEWER ONLY.
-              */
-
-              const latest =
-                await getRoom(
-                  artistId
-                );
-
-
-              const s =
-                latest?.signaling_data ||
-                {};
-
-
-              s.viewers =
-                s.viewers || {};
-
-
-              if(
-                s.viewers[
-                  viewerId
-                ]
-              ){
-
-                s.viewers[
-                  viewerId
-                ].offer = {
-
-                  type:
-                    offer.type,
-
-                  sdp:
-                    offer.sdp
-
-                };
-
-
-                s.viewers[
-                  viewerId
-                ].artist_ice =
-                  [];
-
-
-                await supabaseClient
-                  .from(
-                    "glctc1_live_rooms"
-                  )
-                  .update({
-
-                    signaling_data:
-                      s
-
-                  })
-                  .eq(
-                    "user_id",
-                    artistId
-                  );
-
-              }
-
-
-              /*
-                 WAIT FOR THIS VIEWER'S
-                 ANSWER.
-              */
-
-              waitForViewerAnswer(
-                artistId,
-                viewerId,
-                connection
-              );
-
-            }
 
           }catch(error){
 
             console.error(
-              "GLCTC1 VIEWER DISCOVERY ERROR:",
+              "GLCTC1 REMOTE ANSWER ERROR:",
               error
             );
 
@@ -7192,11 +6707,11 @@ async function startGLCTC1WebcamBroadcast(){
 
 
     $("videoNotice").textContent =
-      "GLCTC1 ADMIN / DJ LIVE READY";
+      "GLCTC1 LIVE BROADCAST READY";
 
 
     console.log(
-      "📡 GLCTC1 ADMIN / DJ BROADCAST READY"
+      "📡 GLCTC1 ARTIST WEBCAM BROADCAST STARTED"
     );
 
 
@@ -7217,159 +6732,7 @@ async function startGLCTC1WebcamBroadcast(){
 
 
 /* =====================================================
-   WAIT FOR INDIVIDUAL VIEWER ANSWER
-===================================================== */
-
-async function waitForViewerAnswer(
-  artistId,
-  viewerId,
-  connection
-){
-
-  let attempts =
-    0;
-
-
-  const timer =
-    setInterval(
-      async () => {
-
-        attempts++;
-
-
-        if(
-          !connection ||
-          connection.connectionState ===
-            "closed"
-        ){
-
-          clearInterval(
-            timer
-          );
-
-          return;
-
-        }
-
-
-        try{
-
-          const room =
-            await getRoom(
-              artistId
-            );
-
-
-          const viewer =
-            room
-              ?.signaling_data
-              ?.viewers
-              ?.[
-                viewerId
-              ];
-
-
-          if(
-            viewer?.answer &&
-            !connection
-              .currentRemoteDescription
-          ){
-
-            await connection
-              .setRemoteDescription(
-                viewer.answer
-              );
-
-
-            clearInterval(
-              timer
-            );
-
-
-            console.log(
-              "📡 GLCTC1 VIEWER CONNECTED:",
-              viewerId
-            );
-
-          }
-
-
-          /*
-             REMOVE DEAD VIEWERS
-          */
-
-          if(
-            !viewer
-          ){
-
-            clearInterval(
-              timer
-            );
-
-
-            try{
-              connection.close();
-            }catch(e){}
-
-
-            delete
-              artistBroadcastConnections[
-                viewerId
-              ];
-
-
-            delete
-              artistBroadcastIce[
-                viewerId
-              ];
-
-          }
-
-
-        }catch(error){
-
-          console.error(
-            "GLCTC1 VIEWER ANSWER ERROR:",
-            error
-          );
-
-        }
-
-
-        /*
-           Safety timeout.
-        */
-
-        if(
-          attempts > 60
-        ){
-
-          clearInterval(
-            timer
-          );
-
-
-          try{
-            connection.close();
-          }catch(e){}
-
-
-          delete
-            artistBroadcastConnections[
-              viewerId
-            ];
-
-        }
-
-      },
-      1000
-    );
-
-}
-
-
-/* =====================================================
-   STOP ADMIN / DJ BROADCAST
+   STOP ARTIST WEBCAM BROADCAST
 ===================================================== */
 
 async function stopGLCTC1WebcamBroadcast(){
@@ -7378,47 +6741,32 @@ async function stopGLCTC1WebcamBroadcast(){
     currentUser?.id;
 
 
-  if(artistViewerTimer){
+  if(artistAnswerTimer){
 
     clearInterval(
-      artistViewerTimer
+      artistAnswerTimer
     );
 
-    artistViewerTimer =
+    artistAnswerTimer =
       null;
 
   }
 
 
-  /*
-     CLOSE EVERY VIEWER CONNECTION
-    */
+  if(artistBroadcastConnection){
 
-  Object
-    .values(
-      artistBroadcastConnections
-    )
-    .forEach(
-      connection => {
+    try{
 
-        try{
-          connection.close();
-        }catch(e){}
+      artistBroadcastConnection
+        .close();
 
-      }
-    );
+    }catch(e){}
 
+    artistBroadcastConnection =
+      null;
 
-  artistBroadcastConnections =
-    {};
+  }
 
-  artistBroadcastIce =
-    {};
-
-
-  /*
-     CLEAR LIVE ROOM
-  */
 
   if(artistId){
 
@@ -7447,19 +6795,14 @@ async function stopGLCTC1WebcamBroadcast(){
       signaling.viewer_ice =
         [];
 
-      signaling.viewers =
-        {};
-
 
       await supabaseClient
         .from(
           "glctc1_live_rooms"
         )
         .update({
-
           signaling_data:
             signaling
-
         })
         .eq(
           "user_id",
@@ -7480,11 +6823,10 @@ async function stopGLCTC1WebcamBroadcast(){
 
 
   console.log(
-    "⏹ GLCTC1 ADMIN / DJ BROADCAST STOPPED"
+    "⏹ GLCTC1 ARTIST BROADCAST STOPPED"
   );
 
 }
-
 
 /* =====================================================
    START WEBCAM
@@ -7495,7 +6837,6 @@ $("webcamBtn").onclick =
 
     if(webcamMode)
       return;
-
 
     try{
 
@@ -7511,10 +6852,6 @@ $("webcamBtn").onclick =
 
           });
 
-
-      /*
-         LOCAL ADMIN / DJ PREVIEW
-      */
 
       liveVideo.srcObject =
         webcamStream;
@@ -7535,12 +6872,10 @@ $("webcamBtn").onclick =
       videoFrame.style.display =
         "none";
 
-      videoShell
-        .classList
+      videoShell.classList
         .remove("empty");
 
-      videoMsg
-        .classList
+      videoMsg.classList
         .add("hide");
 
 
@@ -7561,11 +6896,10 @@ $("webcamBtn").onclick =
 
 
       $("liveStatus").textContent =
-        "● ADMIN / DJ LIVE";
-
+        "● WEBCAM ACTIVE";
 
       $("videoNotice").textContent =
-        "GLCTC1 ADMIN / DJ WEBCAM ACTIVE";
+        "GLCTC1 WEBCAM + MICROPHONE ACTIVE";
 
 
       await ensureAudioEngine();
@@ -7585,25 +6919,22 @@ $("webcamBtn").onclick =
 
       await liveVideo
         .play()
-        .catch(
-          () => {}
-        );
+        .catch(()=>{});
 
 
-      /*
-         START PUBLIC
-         ADMIN / DJ BROADCAST
-      */
+      /* ---------------------------------------------
+         START GLCTC1 PUBLIC WEBCAM BROADCAST
+      --------------------------------------------- */
 
       await startGLCTC1WebcamBroadcast();
 
 
       $("videoNotice").textContent =
-        "GLCTC1 ADMIN / DJ LIVE BROADCASTING";
+        "GLCTC1 LIVE WEBCAM BROADCASTING";
 
 
       console.log(
-        "📡 GLCTC1 ADMIN / DJ WEBCAM LIVE"
+        "📡 GLCTC1 WEBCAM BROADCASTING"
       );
 
 
@@ -7649,7 +6980,6 @@ $("webcamBtn").onclick =
       $("videoNotice").textContent =
         "WEBCAM ACCESS DENIED OR UNAVAILABLE";
 
-
       $("liveStatus").textContent =
         "● RADIO SPACE";
 
@@ -7665,9 +6995,9 @@ $("webcamBtn").onclick =
 $("stopWebcamBtn").onclick =
   async () => {
 
-    /*
-       STOP PUBLIC BROADCAST FIRST
-    */
+    /* ---------------------------------------------
+       STOP PUBLIC GLCTC1 BROADCAST FIRST
+    --------------------------------------------- */
 
     try{
 
@@ -7683,9 +7013,9 @@ $("stopWebcamBtn").onclick =
     }
 
 
-    /*
-       STOP CAMERA + MICROPHONE
-    */
+    /* ---------------------------------------------
+       STOP WEBCAM + MICROPHONE
+    --------------------------------------------- */
 
     if(webcamStream){
 
@@ -7718,14 +7048,17 @@ $("stopWebcamBtn").onclick =
       "none";
 
 
-    /*
+    /* ---------------------------------------------
        DISCONNECT LIVE AUDIO
-    */
+    --------------------------------------------- */
 
     if(liveAudioSource){
 
       try{
-        liveAudioSource.disconnect();
+
+        liveAudioSource
+          .disconnect();
+
       }catch(e){}
 
       liveAudioSource =
@@ -7737,7 +7070,10 @@ $("stopWebcamBtn").onclick =
     if(liveGain){
 
       try{
-        liveGain.disconnect();
+
+        liveGain
+          .disconnect();
+
       }catch(e){}
 
       liveGain =
@@ -7749,7 +7085,10 @@ $("stopWebcamBtn").onclick =
     if(liveAnalyser){
 
       try{
-        liveAnalyser.disconnect();
+
+        liveAnalyser
+          .disconnect();
+
       }catch(e){}
 
       liveAnalyser =
@@ -7761,13 +7100,12 @@ $("stopWebcamBtn").onclick =
     activeAnalyser =
       radioAnalyser;
 
-
     duckRadio(false);
 
 
-    /*
+    /* ---------------------------------------------
        RESTORE BUTTONS
-    */
+    --------------------------------------------- */
 
     $("webcamBtn")
       .classList
@@ -7782,9 +7120,9 @@ $("stopWebcamBtn").onclick =
       "● RADIO SPACE";
 
 
-    /*
+    /* ---------------------------------------------
        RESTORE VIDEO PLAYER
-    */
+    --------------------------------------------- */
 
     $("videoNotice").textContent =
       videoUrl
@@ -7800,12 +7138,10 @@ $("stopWebcamBtn").onclick =
       videoFrame.style.display =
         "block";
 
-      videoShell
-        .classList
+      videoShell.classList
         .remove("empty");
 
-      videoMsg
-        .classList
+      videoMsg.classList
         .add("hide");
 
     }else{
@@ -7816,19 +7152,17 @@ $("stopWebcamBtn").onclick =
       videoFrame.style.display =
         "none";
 
-      videoShell
-        .classList
+      videoShell.classList
         .add("empty");
 
-      videoMsg
-        .classList
+      videoMsg.classList
         .remove("hide");
 
     }
 
 
     console.log(
-      "⏹ GLCTC1 ADMIN / DJ WEBCAM + LIVE BROADCAST STOPPED"
+      "⏹ GLCTC1 WEBCAM + LIVE BROADCAST STOPPED"
     );
 
   };

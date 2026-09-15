@@ -14,6 +14,12 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+<!-- =====================================================
+     GLCTC1 BROWSER-SIDE MP3 ENCODER
+     ===================================================== -->
+
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.all.min.js"></script>
+
 <style>
 
 /* =====================================================
@@ -441,6 +447,7 @@ body::before {
   margin-top:8px;
   color:#9e91ac;
   font-size:12px;
+  line-height:1.6;
 }
 
 #audioFile {
@@ -525,6 +532,29 @@ body::before {
 }
 
 /* =====================================================
+   MP3 UPLOAD EXPLANATION
+   ===================================================== */
+
+.upload-explanation {
+  margin-top:14px;
+  padding:13px 15px;
+  border:1px solid rgba(34,197,94,0.28);
+  border-radius:10px;
+  background:
+    rgba(5,35,20,0.35);
+  color:#9fdab4;
+  text-align:center;
+  font-size:10px;
+  line-height:1.7;
+  letter-spacing:0.7px;
+}
+
+.upload-explanation strong {
+  color:#6effa3;
+  font-weight:900;
+}
+
+/* =====================================================
    STATUS
    ===================================================== */
 
@@ -535,6 +565,7 @@ body::before {
   color:#a992b7;
   font-size:12px;
   letter-spacing:1px;
+  line-height:1.6;
 }
 
 .status.active {
@@ -816,6 +847,7 @@ body::before {
    ===================================================== */
 
 @keyframes glctc1NavNeon {
+
   0% {
     background-position:0% 50%;
   }
@@ -827,9 +859,11 @@ body::before {
   100% {
     background-position:0% 50%;
   }
+
 }
 
 @keyframes glctc1ShopBorder {
+
   0% {
     background-position:0% 50%;
   }
@@ -841,9 +875,11 @@ body::before {
   100% {
     background-position:0% 50%;
   }
+
 }
 
 @keyframes scan {
+
   0% {
     transform:translateX(-110%);
   }
@@ -855,6 +891,7 @@ body::before {
   100% {
     transform:translateX(-110%);
   }
+
 }
 
 /* =====================================================
@@ -939,7 +976,11 @@ body::before {
 
 |
 
-    <a href="index.html">
+    <a
+      href="https://www.glctc1music.com/index.html"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
       MUSIC
     </a>
 
@@ -947,6 +988,18 @@ body::before {
 
     <a href="social.html">
       LIVE
+    </a>
+
+|
+
+    <a href="radio-space.html">
+      RADIO
+    </a>
+
+|
+
+    <a href="booking-space.html">
+      BOOKING
     </a>
 
 |
@@ -1441,6 +1494,18 @@ body::before {
 >
   🚀 UPLOAD TO MASTER LIBRARY
 </button>
+
+<div class="upload-explanation">
+
+  <strong>GLCTC1 MASTER LIBRARY AUDIO</strong><br>
+
+  Your original audio is analysed in its original format.
+  When you upload it, GLCTC1 converts it in your browser
+  to a high-quality 320 kbps MP3 before sending it to
+  Supabase. This reduces the file size so large tracks can
+  stay within the current website storage limit.
+
+</div>
 
 <!-- =====================================================
      FREQUENCY MAP
@@ -2047,7 +2112,7 @@ async function analyseAudio() {
 
     setStatus(
       currentUser
-        ? "ANALYSIS COMPLETE — READY FOR MASTER LIBRARY."
+        ? "ANALYSIS COMPLETE — READY FOR MP3 MASTER LIBRARY UPLOAD."
         : "ANALYSIS COMPLETE — SIGN IN TO UPLOAD.",
       currentUser
         ? "success"
@@ -3071,6 +3136,300 @@ function resetLibraryFields() {
 }
 
 /* =====================================================
+   BROWSER-SIDE MP3 CONVERSION
+   ===================================================== */
+
+async function convertAudioToMP3(
+  file
+) {
+
+  if (
+    typeof lamejs === "undefined"
+  ) {
+
+    throw new Error(
+      "MP3 encoder could not be loaded. Please refresh the page and try again."
+    );
+
+  }
+
+  setStatus(
+    "CONVERTING AUDIO TO 320 KBPS MP3 IN YOUR BROWSER...",
+    "active"
+  );
+
+  const arrayBuffer =
+    await file.arrayBuffer();
+
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+  if (!AudioContext) {
+
+    throw new Error(
+      "Web Audio API is not supported."
+    );
+
+  }
+
+  const audioContext =
+    new AudioContext();
+
+  try {
+
+    const audioBuffer =
+      await audioContext.decodeAudioData(
+        arrayBuffer.slice(0)
+      );
+
+    const channels =
+      Math.min(
+        2,
+        audioBuffer.numberOfChannels
+      );
+
+    const sampleRate =
+      audioBuffer.sampleRate;
+
+    const encoder =
+      new lamejs.Mp3Encoder(
+        channels,
+        sampleRate,
+        320
+      );
+
+    const mp3Data =
+      [];
+
+    const sampleBlockSize =
+      1152;
+
+    const left =
+      audioBuffer.getChannelData(
+        0
+      );
+
+    const right =
+      channels === 2
+        ? audioBuffer.getChannelData(1)
+        : null;
+
+    const totalSamples =
+      audioBuffer.length;
+
+    for (
+      let i = 0;
+      i < totalSamples;
+      i += sampleBlockSize
+    ) {
+
+      const end =
+        Math.min(
+          i + sampleBlockSize,
+          totalSamples
+        );
+
+      const leftBuffer =
+        new Int16Array(
+          end - i
+        );
+
+      let rightBuffer =
+        null;
+
+      if (channels === 2) {
+
+        rightBuffer =
+          new Int16Array(
+            end - i
+          );
+
+      }
+
+      for (
+        let j = i;
+        j < end;
+        j++
+      ) {
+
+        const localIndex =
+          j - i;
+
+        let leftSample =
+          left[j];
+
+        leftSample =
+          Math.max(
+            -1,
+            Math.min(
+              1,
+              leftSample
+            )
+          );
+
+        leftBuffer[
+          localIndex
+        ] =
+          leftSample < 0
+            ? leftSample * 32768
+            : leftSample * 32767;
+
+        if (
+          channels === 2
+        ) {
+
+          let rightSample =
+            right[j];
+
+          rightSample =
+            Math.max(
+              -1,
+              Math.min(
+                1,
+                rightSample
+              )
+            );
+
+          rightBuffer[
+            localIndex
+          ] =
+            rightSample < 0
+              ? rightSample * 32768
+              : rightSample * 32767;
+
+        }
+
+      }
+
+      const encoded =
+        channels === 2
+          ? encoder.encodeBuffer(
+              leftBuffer,
+              rightBuffer
+            )
+          : encoder.encodeBuffer(
+              leftBuffer
+            );
+
+      if (
+        encoded.length > 0
+      ) {
+
+        mp3Data.push(
+          new Int8Array(
+            encoded
+          )
+        );
+
+      }
+
+      if (
+        i % (
+          sampleBlockSize * 100
+        ) === 0
+      ) {
+
+        const percent =
+          Math.round(
+            (
+              i /
+              totalSamples
+            ) *
+            100
+          );
+
+        setStatus(
+          "CONVERTING AUDIO TO 320 KBPS MP3... " +
+          percent +
+          "%",
+          "active"
+        );
+
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
+      }
+
+    }
+
+    const finalBuffer =
+      encoder.flush();
+
+    if (
+      finalBuffer.length > 0
+    ) {
+
+      mp3Data.push(
+        new Int8Array(
+          finalBuffer
+        )
+      );
+
+    }
+
+    const mp3Blob =
+      new Blob(
+        mp3Data,
+        {
+          type:"audio/mpeg"
+        }
+      );
+
+    console.log(
+      "GLCTC1 ORIGINAL AUDIO SIZE:",
+      file.size,
+      "bytes"
+    );
+
+    console.log(
+      "GLCTC1 MP3 SIZE:",
+      mp3Blob.size,
+      "bytes"
+    );
+
+    console.log(
+      "GLCTC1 MP3 REDUCTION:",
+      Math.round(
+        (
+          1 -
+          (
+            mp3Blob.size /
+            file.size
+          )
+        ) *
+        100
+      ) +
+      "%"
+    );
+
+    return mp3Blob;
+
+  } finally {
+
+    try {
+
+      await audioContext.close();
+
+    } catch (error) {
+
+      console.warn(
+        "GLCTC1 MP3 AudioContext close error:",
+        error
+      );
+
+    }
+
+  }
+
+}
+
+/* =====================================================
    MASTER LIBRARY UPLOAD
    ===================================================== */
 
@@ -3110,7 +3469,7 @@ async function uploadToMasterLibrary() {
     true;
 
   setStatus(
-    "UPLOADING AUDIO TO GLCTC1 MASTER LIBRARY...",
+    "PREPARING AUDIO FOR GLCTC1 MASTER LIBRARY...",
     "active"
   );
 
@@ -3274,39 +3633,87 @@ async function uploadToMasterLibrary() {
       );
 
     /* =================================================
-       EXACT GLCTC1 WORKING STORAGE PATTERN
+       CONVERT ORIGINAL AUDIO TO MP3
 
-       masters/${Date.now()}_${file.name}
+       IMPORTANT:
+       THE ORIGINAL FILE IS NEVER UPLOADED.
 
-       ORIGINAL FILE FORMAT IS PRESERVED.
-       NO MP3 CONVERSION.
+       IT IS ANALYSED AS-IS ABOVE.
+
+       ONLY THE UPLOAD COPY IS CONVERTED.
+       ================================================= */
+
+    const mp3Blob =
+      await convertAudioToMP3(
+        selectedFile
+      );
+
+    if (
+      !mp3Blob ||
+      mp3Blob.size === 0
+    ) {
+
+      throw new Error(
+        "MP3 conversion produced an empty audio file."
+      );
+
+    }
+
+    console.log(
+      "✅ GLCTC1 MP3 CONVERSION COMPLETE"
+    );
+
+    console.log(
+      "ORIGINAL:",
+      selectedFile.name
+    );
+
+    console.log(
+      "ORIGINAL SIZE:",
+      selectedFile.size
+    );
+
+    console.log(
+      "MP3 SIZE:",
+      mp3Blob.size
+    );
+
+    /* =================================================
+       CREATE MP3 STORAGE NAME
+
+       SAME GLCTC1 MASTERS PATH
+       BUT ALWAYS .mp3
        ================================================= */
 
     const safeFileName =
       selectedFile.name
+        .replace(
+          /\.[^/.]+$/,
+          ""
+        )
         .replace(
           /[^a-zA-Z0-9._-]+/g,
           "_"
         );
 
     const filePath =
-      `masters/${Date.now()}_${safeFileName}`;
+      `masters/${Date.now()}_${safeFileName}.mp3`;
 
     console.log(
-      "GLCTC1 UPLOADING FILE:",
-      selectedFile.name
-    );
-
-    console.log(
-      "GLCTC1 STORAGE PATH:",
+      "GLCTC1 UPLOADING MP3:",
       filePath
     );
 
     /* =================================================
-       UPLOAD MASTER AUDIO
+       UPLOAD MP3 TO SUPABASE
 
-       SAME METHOD AS WORKING UPLOAD PAGE
+       ORIGINAL AUDIO IS NOT UPLOADED.
        ================================================= */
+
+    setStatus(
+      "UPLOADING CONVERTED MP3 TO GLCTC1 MASTER LIBRARY...",
+      "active"
+    );
 
     const {
       data: uploadData,
@@ -3317,9 +3724,10 @@ async function uploadToMasterLibrary() {
         .from("tracks")
         .upload(
           filePath,
-          selectedFile,
+          mp3Blob,
           {
-            upsert:true
+            upsert:true,
+            contentType:"audio/mpeg"
           }
         );
 
@@ -3336,7 +3744,7 @@ async function uploadToMasterLibrary() {
     if (uploadError) {
 
       throw new Error(
-        "Audio upload failed: " +
+        "MP3 audio upload failed: " +
         uploadError.message
       );
 
@@ -3350,7 +3758,7 @@ async function uploadToMasterLibrary() {
       uploadedPath;
 
     console.log(
-      "✅ GLCTC1 MASTER AUDIO UPLOADED:",
+      "✅ GLCTC1 MP3 MASTER AUDIO UPLOADED:",
       uploadedPath
     );
 
@@ -3530,7 +3938,7 @@ async function uploadToMasterLibrary() {
       );
 
       /* =================================================
-         CLEAN UP STORAGE IF DATABASE INSERT FAILS
+         CLEAN UP MP3 IF DATABASE INSERT FAILS
          ================================================= */
 
       if (uploadedPath) {
@@ -3704,7 +4112,7 @@ async function uploadToMasterLibrary() {
        ================================================= */
 
     setStatus(
-      "✅ UPLOAD COMPLETE — TRACK ADDED TO MASTER LIBRARY.",
+      "✅ UPLOAD COMPLETE — MP3 CONVERTED AND TRACK ADDED TO MASTER LIBRARY.",
       "success"
     );
 

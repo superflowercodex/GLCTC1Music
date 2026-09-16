@@ -4337,60 +4337,179 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED — SUPABASE MASTER CLOCK
-   ADMIN ADVANCES • PUBLIC FOLLOWS
+   TRACK ENDED — CONTINUOUS RADIO
+   SAVE EVERY NEW STATION TRACK
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    /*
-       PUBLIC BROWSERS NEVER ADVANCE THE RADIO.
-
-       They wait for the Admin to update
-       glctc1_radio_station in Supabase.
-    */
-
-    if(!isAdmin)
+    if (radioAdvanceBusy)
       return;
 
+    radioAdvanceBusy = true;
 
-    /*
-       The Supabase master-clock function already
-       protects against duplicate advances.
-    */
+    try {
 
-    if(radioStationAdvanceBusy)
-      return;
+      const list =
+        playableLibrary();
 
-
-    try{
-
-      /*
-         ADMIN ONLY:
-         choose the next random track and write
-         the new station state to Supabase.
-      */
-
-      const advanced =
-        await advanceSupabaseRadioStation();
+      if (!list.length)
+        return;
 
 
-      if(advanced){
+      /* ================================================
+         CHOOSE NEXT RANDOM RADIO TRACK
+      ================================================ */
+
+      let choices =
+        list.filter(
+          track =>
+            track !== currentTrack
+        );
+
+      if (!choices.length)
+        choices = list;
+
+
+      const randomIndex =
+        Math.floor(
+          Math.random() *
+          choices.length
+        );
+
+
+      currentTrack =
+        choices[randomIndex];
+
+      currentIndex =
+        library.indexOf(
+          currentTrack
+        );
+
+
+      updateTrackUI();
+
+
+      /* ================================================
+         START THE NEXT TRACK
+      ================================================ */
+
+      const started =
+        await playTrack(
+          currentTrack
+        );
+
+
+      if(started){
+
+        /*
+           Wait for the real duration of the
+           new track before saving the station clock.
+        */
+
+        if(
+          !Number.isFinite(
+            audio.duration
+          ) ||
+          audio.duration <= 0
+        ){
+
+          await new Promise(
+            resolve => {
+
+              audio.addEventListener(
+                "loadedmetadata",
+                resolve,
+                { once:true }
+              );
+
+            }
+          );
+
+        }
+
+
+        const duration =
+          Number(
+            audio.duration || 0
+          );
+
+
+        /* ==============================================
+           NEW AUTHORITATIVE RADIO STATE
+        ============================================== */
+
+        radioStationTrackKey =
+          radioTrackKey(
+            currentTrack
+          );
+
+        radioStationStartedAt =
+          Date.now();
+
+        radioStationDuration =
+          duration;
+
+        radioStationPlaying =
+          !audio.paused;
+
+
+        radioStationState = {
+
+          trackKey:
+            radioStationTrackKey,
+
+          playing:
+            radioStationPlaying,
+
+          position:
+            Number(
+              audio.currentTime || 0
+            ),
+
+          duration:
+            radioStationDuration,
+
+          savedAt:
+            Date.now()
+
+        };
+
+
+        /*
+           THIS IS THE IMPORTANT PART:
+
+           Every time the radio advances to a
+           new song, the new station state is
+           permanently saved.
+        */
+
+        saveLocalRadioState();
+
 
         console.log(
-          "📻 GLCTC1 RADIO MASTER ADVANCED:",
-          currentTrack?.title || "NEXT TRACK"
+          "📻 GLCTC1 RADIO ADVANCED:",
+          currentTrack.title
         );
 
       }
 
-    }catch(error){
+    } catch (error) {
 
       console.error(
-        "GLCTC1 RADIO MASTER ADVANCE ERROR:",
+        "GLCTC1 RADIO AUTO-SHUFFLE ERROR:",
         error
+      );
+
+    } finally {
+
+      setTimeout(
+        () => {
+          radioAdvanceBusy = false;
+        },
+        250
       );
 
     }

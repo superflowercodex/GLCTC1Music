@@ -1497,12 +1497,12 @@ tr.playing{
   <div class="mixerBody">
 
     <div class="mixerTitle">
-      PUBLIC AUDIO MIXER
+      ADMIN AUDIO MIXER
     </div>
 
 
     <!-- =================================================
-         PUBLIC CHANNELS
+         ADMIN CHANNELS
     ================================================== -->
 
     <div class="mixerGrid">
@@ -1574,7 +1574,7 @@ tr.playing{
 
 
     <!-- =================================================
-         DUCKING
+         RADIO DUCKING
     ================================================== -->
 
     <div class="duckBox">
@@ -2228,11 +2228,17 @@ function applyAdminOverride(){
     "radioMix",
     "liveMix",
     "masterMix",
+
     "duckToggle",
     "duckAmount",
     "duckRelease",
 
-       "videoUrlInput",
+    "radioCueToggle",
+    "liveCueToggle",
+    "cueMix",
+    "cueLevel",
+
+    "videoUrlInput",
     "loadVideoBtn",
     "clearVideoBtn",
     "webcamBtn",
@@ -4717,6 +4723,9 @@ $("nextBtn").onclick =
 $("prevBtn").onclick =
   async () => {
 
+    if(!isAdmin)
+      return;
+
     const list =
       playableLibrary();
 
@@ -4801,14 +4810,15 @@ $("volumeSlider").oninput =
   };
 
 /* =====================================================
-   GLCTC1 MIXER
-   PUBLIC CHANNEL MIX
-   MASTER OUTPUT
-   RADIO DUCKING
+   GLCTC1 ADMIN AUDIO MIXER
+   RADIO • LIVE • MASTER • DUCKING
 ===================================================== */
 
 $("radioMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
 
     const value =
       Number(
@@ -4820,6 +4830,15 @@ $("radioMix").oninput =
         value * 100
       ) + "%";
 
+    /*
+       Always recalculate from the
+       current mixer settings.
+
+       If ducking is active,
+       the new Radio level becomes
+       the new ducking baseline.
+    */
+
     updateAudioRouting();
 
   };
@@ -4827,6 +4846,9 @@ $("radioMix").oninput =
 
 $("liveMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
 
     const value =
       Number(
@@ -4845,6 +4867,9 @@ $("liveMix").oninput =
 
 $("masterMix").oninput =
   e => {
+
+    if(!isAdmin)
+      return;
 
     const value =
       Number(
@@ -4868,17 +4893,24 @@ $("masterMix").oninput =
 $("duckAmount").oninput =
   e => {
 
+    if(!isAdmin)
+      return;
+
+    const amount =
+      Number(
+        e.target.value
+      );
+
     $("duckAmountOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
+        amount * 100
       ) + "%";
 
     /*
-       If ducking is already active,
-       immediately recalculate the
-       radio target.
+       Changing Duck Amount while
+       ducking is active immediately
+       recalculates the current Radio
+       level.
     */
 
     if(
@@ -4896,6 +4928,9 @@ $("duckAmount").oninput =
 $("duckRelease").oninput =
   e => {
 
+    if(!isAdmin)
+      return;
+
     $("duckReleaseOut").textContent =
       (
         Number(
@@ -4909,11 +4944,19 @@ $("duckRelease").oninput =
 
 /* =====================================================
    DUCKING SWITCH
-   OFF BY DEFAULT
 ===================================================== */
 
 $("duckToggle").onchange =
   () => {
+
+    if(!isAdmin){
+
+      $("duckToggle").checked =
+        false;
+
+      return;
+
+    }
 
     if(
       $("duckToggle").checked
@@ -4922,12 +4965,31 @@ $("duckToggle").onchange =
       $("duckState").textContent =
         "🦆 DUCKING ON";
 
-      applyRadioDucking();
+      /*
+         Duck immediately using the
+         Radio level currently selected.
+      */
+
+      if(liveMode){
+
+        applyRadioDucking();
+
+      }else{
+
+        updateAudioRouting();
+
+      }
 
     }else{
 
       $("duckState").textContent =
         "MIXER ON";
+
+      /*
+         Restore the CURRENT Radio
+         mixer level using the selected
+         recovery time.
+      */
 
       releaseRadioDucking();
 
@@ -4949,16 +5011,6 @@ function applyRadioDucking(){
     return;
 
 
-  /*
-     Ducking only modifies the
-     RADIO CHANNEL.
-
-     It does NOT modify:
-       - Live Artist level
-       - Master level
-       - mixer controls
-  */
-
   const radioLevel =
     Number(
       $("radioMix").value
@@ -4971,9 +5023,26 @@ function applyRadioDucking(){
     );
 
 
+  /*
+     Ducking is a percentage reduction
+     of the CURRENT Radio mixer level.
+
+     Example:
+
+     Radio = 80%
+     Duck = 65%
+
+     Effective Radio =
+     80% × 35%
+     = 28%
+  */
+
   const target =
     radioLevel *
-    (1 - duckAmount);
+    (
+      1 -
+      duckAmount
+    );
 
 
   radioGain.gain
@@ -5068,8 +5137,11 @@ function updateAudioRouting(){
   /*
      RADIO CHANNEL
 
-     Ducking is a modifier of the
-     radio channel — never the mixer.
+     Ducking modifies ONLY the
+     effective Radio channel level.
+
+     The mixer slider itself is never
+     changed.
   */
 
   if(
@@ -5077,7 +5149,26 @@ function updateAudioRouting(){
     liveMode
   ){
 
-    applyRadioDucking();
+    const duckAmount =
+      Number(
+        $("duckAmount").value
+      );
+
+
+    const effectiveRadio =
+      radioLevel *
+      (
+        1 -
+        duckAmount
+      );
+
+
+    radioGain.gain
+      .setTargetAtTime(
+        effectiveRadio,
+        audioCtx.currentTime,
+        .08
+      );
 
   }else{
 
@@ -5093,6 +5184,9 @@ function updateAudioRouting(){
 
   /*
      LIVE ARTIST CHANNEL
+
+     Completely independent from
+     Radio ducking.
   */
 
   if(liveGain){
@@ -5110,7 +5204,8 @@ function updateAudioRouting(){
   /*
      MASTER OUTPUT
 
-     Public control.
+     Completely independent from
+     Radio ducking.
   */
 
   masterGain.gain

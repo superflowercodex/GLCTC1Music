@@ -2010,6 +2010,13 @@ let videoType = "";
 
 
 /* =====================================================
+   RADIO DUCKING LOCK
+===================================================== */
+
+let duckLockedTrackVolume = null;
+
+
+/* =====================================================
    WEBCAM STATE
 ===================================================== */
 
@@ -4216,11 +4223,38 @@ async function playTrack(track){
 
     }
 
-    audio.volume =
+    /*
+   Track Volume normally follows the
+   Track Volume control.
+
+   While DUCK is active, the locked
+   Track Volume remains the reference
+   and must not be overwritten.
+*/
+
+if(
+  $("duckToggle").checked &&
+  duckLockedTrackVolume !== null
+){
+
+  audio.volume =
+    duckLockedTrackVolume *
+    (
+      1 -
       Number(
-        $("volumeSlider").value ||
-        .8
-      );
+        $("duckAmount").value
+      )
+    );
+
+}else{
+
+  audio.volume =
+    Number(
+      $("volumeSlider").value ||
+      .8
+    );
+
+}
 
     try{
 
@@ -4787,19 +4821,73 @@ $("shuffleBtn").onclick =
    VOLUME
 ===================================================== */
 
-audio.volume =
-  .8;
+/*
+   Track Volume normally follows the
+   Track Volume control.
+
+   While DUCK is active, the locked
+   Track Volume remains the reference
+   and must not be overwritten.
+*/
+
+if(
+  $("duckToggle").checked &&
+  duckLockedTrackVolume !== null
+){
+
+  audio.volume =
+    duckLockedTrackVolume *
+    (
+      1 -
+      Number(
+        $("duckAmount").value
+      )
+    );
+
+}else{
+
+  audio.volume =
+    Number(
+      $("volumeSlider").value ||
+      .8
+    );
+
+}
+
 
 $("volumeSlider").oninput =
   e => {
+
+    /*
+       While DUCK is active the Track Volume
+       is locked.
+
+       The Duck controls temporarily change
+       the actual audio volume instead.
+    */
+
+    if(
+      $("duckToggle").checked
+    ){
+
+      e.target.value =
+        duckLockedTrackVolume ??
+        Number(e.target.value);
+
+      return;
+
+    }
+
 
     const value =
       Number(
         e.target.value
       );
 
+
     audio.volume =
       value;
+
 
     $("volumeOut").textContent =
       Math.round(
@@ -4831,12 +4919,11 @@ $("radioMix").oninput =
       ) + "%";
 
     /*
-       Always recalculate from the
-       current mixer settings.
+       RADIO MIXER ONLY controls the
+       Radio Web Audio channel.
 
-       If ducking is active,
-       the new Radio level becomes
-       the new ducking baseline.
+       It does NOT change the locked
+       Track Volume while DUCK is active.
     */
 
     updateAudioRouting();
@@ -4881,6 +4968,14 @@ $("masterMix").oninput =
         value * 100
       ) + "%";
 
+    /*
+       MASTER remains the final
+       overall output control.
+
+       It is completely independent
+       of the temporary DUCK level.
+    */
+
     updateAudioRouting();
 
   };
@@ -4896,26 +4991,31 @@ $("duckAmount").oninput =
     if(!isAdmin)
       return;
 
+
     const amount =
       Number(
         e.target.value
       );
 
+
     $("duckAmountOut").textContent =
       Math.round(
         amount * 100
-      ) + "%";
+      ) +
+      "%";
+
 
     /*
-       Changing Duck Amount while
-       ducking is active immediately
-       recalculates the current Radio
-       level.
+       If DUCK is active, change the
+       temporary Track Volume immediately.
+
+       The locked Track Volume itself
+       NEVER changes.
     */
 
     if(
       $("duckToggle").checked &&
-      liveMode
+      duckLockedTrackVolume !== null
     ){
 
       applyRadioDucking();
@@ -4930,6 +5030,7 @@ $("duckRelease").oninput =
 
     if(!isAdmin)
       return;
+
 
     $("duckReleaseOut").textContent =
       (
@@ -4958,40 +5059,68 @@ $("duckToggle").onchange =
 
     }
 
+
     if(
       $("duckToggle").checked
     ){
 
+      /*
+         LOCK THE TRACK VOLUME AT THE
+         EXACT VALUE PRESENT WHEN DUCK
+         IS PRESSED.
+
+         Normal Track Volume is 80%.
+      */
+
+      duckLockedTrackVolume =
+        Number(
+          $("volumeSlider").value
+        );
+
+
+      $("volumeSlider").value =
+        duckLockedTrackVolume;
+
+
+      $("volumeOut").textContent =
+        Math.round(
+          duckLockedTrackVolume * 100
+        ) +
+        "%";
+
+
+      $("volumeSlider").disabled =
+        true;
+
+
       $("duckState").textContent =
         "🦆 DUCKING ON";
 
+
       /*
-         Duck immediately using the
-         Radio level currently selected.
+         Apply the temporary duck
+         immediately.
       */
 
-      if(liveMode){
+      applyRadioDucking();
 
-        applyRadioDucking();
-
-      }else{
-
-        updateAudioRouting();
-
-      }
 
     }else{
 
       $("duckState").textContent =
         "MIXER ON";
 
+
       /*
-         Restore the CURRENT Radio
-         mixer level using the selected
-         recovery time.
+         Restore the exact Track Volume
+         captured when DUCK was pressed.
       */
 
       releaseRadioDucking();
+
+
+      $("volumeSlider").disabled =
+        !isAdmin;
 
     }
 
@@ -5005,16 +5134,15 @@ $("duckToggle").onchange =
 function applyRadioDucking(){
 
   if(
-    !audioCtx ||
-    !radioGain
+    !audioCtx
   )
     return;
 
 
-  const radioLevel =
-    Number(
-      $("radioMix").value
-    );
+  if(
+    duckLockedTrackVolume === null
+  )
+    return;
 
 
   const duckAmount =
@@ -5024,38 +5152,46 @@ function applyRadioDucking(){
 
 
   /*
-     Ducking is a percentage reduction
-     of the CURRENT Radio mixer level.
+     The Track Volume is LOCKED.
 
      Example:
 
-     Radio = 80%
+     Track = 80%
      Duck = 65%
 
-     Effective Radio =
+     Temporary output:
+
      80% × 35%
      = 28%
   */
 
   const target =
-    radioLevel *
+    duckLockedTrackVolume *
     (
       1 -
       duckAmount
     );
 
 
-  radioGain.gain
-    .cancelScheduledValues(
-      audioCtx.currentTime
-    );
+  const now =
+    audioCtx.currentTime;
 
 
-  radioGain.gain
-    .setTargetAtTime(
-      target,
-      audioCtx.currentTime,
-      .08
+  /*
+     Duck ONLY the audio element's
+     Track Volume.
+
+     Radio mixer and Master remain
+     completely independent.
+  */
+
+  audio.volume =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        target
+      )
     );
 
 }
@@ -5068,36 +5204,124 @@ function applyRadioDucking(){
 function releaseRadioDucking(){
 
   if(
-    !audioCtx ||
-    !radioGain
+    duckLockedTrackVolume === null
   )
     return;
 
 
-  const radioLevel =
-    Number(
-      $("radioMix").value
-    );
+  const restore =
+    duckLockedTrackVolume;
 
 
-  const release =
-    Number(
-      $("duckRelease").value
-    ) / 1000;
+  /*
+     Return the actual Track Volume
+     to the value captured when DUCK
+     was pressed.
+  */
+
+  if(audioCtx){
+
+    /*
+       A short smooth recovery.
+    */
+
+    const release =
+      Number(
+        $("duckRelease").value
+      ) / 1000;
 
 
-  radioGain.gain
-    .cancelScheduledValues(
-      audioCtx.currentTime
-    );
+    const start =
+      audio.volume;
 
 
-  radioGain.gain
-    .setTargetAtTime(
-      radioLevel,
-      audioCtx.currentTime,
-      release
-    );
+    const startTime =
+      performance.now();
+
+
+    const endTime =
+      startTime +
+      (
+        release * 1000
+      );
+
+
+    const recover =
+      () => {
+
+        /*
+           Duck was switched back on
+           during recovery — stop.
+        */
+
+        if(
+          $("duckToggle").checked
+        )
+          return;
+
+
+        const now =
+          performance.now();
+
+
+        const progress =
+          Math.min(
+            1,
+            Math.max(
+              0,
+              (
+                now -
+                startTime
+              ) /
+              (
+                endTime -
+                startTime
+              )
+            )
+          );
+
+
+        audio.volume =
+          start +
+          (
+            restore -
+            start
+          ) *
+          progress;
+
+
+        if(
+          progress < 1
+        ){
+
+          requestAnimationFrame(
+            recover
+          );
+
+        }else{
+
+          audio.volume =
+            restore;
+
+          duckLockedTrackVolume =
+            null;
+
+        }
+
+      };
+
+
+    recover();
+
+  }else{
+
+    audio.volume =
+      restore;
+
+    duckLockedTrackVolume =
+      null;
+
+  }
 
 }
 
@@ -5137,49 +5361,21 @@ function updateAudioRouting(){
   /*
      RADIO CHANNEL
 
-     Ducking modifies ONLY the
-     effective Radio channel level.
+     Radio mixer controls ONLY the
+     Radio Web Audio channel.
 
-     The mixer slider itself is never
-     changed.
+     DUCKING does NOT modify radioGain.
+
+     DUCKING operates separately on
+     audio.volume using the locked
+     Track Volume.
   */
 
-  if(
-    $("duckToggle").checked &&
-    liveMode
-  ){
-
-    const duckAmount =
-      Number(
-        $("duckAmount").value
-      );
-
-
-    const effectiveRadio =
-      radioLevel *
-      (
-        1 -
-        duckAmount
-      );
-
-
-    radioGain.gain
-      .setTargetAtTime(
-        effectiveRadio,
-        audioCtx.currentTime,
-        .08
-      );
-
-  }else{
-
-    radioGain.gain
-      .setTargetAtTime(
-        radioLevel,
-        audioCtx.currentTime,
-        .03
-      );
-
-  }
+  radioGain.gain.setTargetAtTime(
+    radioLevel,
+    audioCtx.currentTime,
+    .03
+  );
 
 
   /*
@@ -5191,12 +5387,11 @@ function updateAudioRouting(){
 
   if(liveGain){
 
-    liveGain.gain
-      .setTargetAtTime(
-        liveLevel,
-        audioCtx.currentTime,
-        .03
-      );
+    liveGain.gain.setTargetAtTime(
+      liveLevel,
+      audioCtx.currentTime,
+      .03
+    );
 
   }
 
@@ -5204,16 +5399,14 @@ function updateAudioRouting(){
   /*
      MASTER OUTPUT
 
-     Completely independent from
-     Radio ducking.
+     Final overall output control.
   */
 
-  masterGain.gain
-    .setTargetAtTime(
-      masterLevel,
-      audioCtx.currentTime,
-      .03
-    );
+  masterGain.gain.setTargetAtTime(
+    masterLevel,
+    audioCtx.currentTime,
+    .03
+  );
 
 }
 

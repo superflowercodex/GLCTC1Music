@@ -5362,53 +5362,67 @@ async function drawWaveform(deck) {
 
 
 // =====================================================
-// 🎯 STRONG KICK / LOUD TRANSIENT DETECTOR
+// 🎯 GLCTC1 SMART BEAT GRID
+// FIRST KICK → BPM → BEAT GRID → 4 BEAT SNAP
 // =====================================================
 
-const transientPoints = {
-  A: [],
-  B: []
+const beatAnalysis = {
+  A: {
+    firstKick: null,
+    bpm: null,
+    beatLength: null,
+    barLength: null,
+    beatGrid: [],
+    ready: false
+  },
+
+  B: {
+    firstKick: null,
+    bpm: null,
+    beatLength: null,
+    barLength: null,
+    beatGrid: [],
+    ready: false
+  }
 };
 
-function detectStrongTransients(audioBuffer) {
 
-  if (!audioBuffer) return [];
+// =====================================================
+// 🥁 KICK DETECTOR
+// Looks primarily at low-frequency energy
+// rather than simply finding the loudest sound.
+// =====================================================
 
-  const data =
-    audioBuffer.getChannelData(0);
+function detectKickPoints(audioBuffer) {
+
+  if (!audioBuffer) {
+    return [];
+  }
 
   const sampleRate =
     audioBuffer.sampleRate;
 
-  const points = [];
+  const data =
+    audioBuffer.getChannelData(0);
 
-  // Analyse short blocks of audio
   const blockSize =
-    Math.floor(sampleRate * 0.02); // 20 ms
+    Math.max(
+      256,
+      Math.floor(sampleRate * 0.01)
+    );
 
-  // Minimum gap between detected kicks
-  const minGap =
-    Math.floor(sampleRate * 0.20); // 200 ms
+  const envelope = [];
 
-  // Find the loudest level in the track
-  let highest = 0;
+  // ---------------------------------------------------
+  // LOW-FREQUENCY KICK ENERGY
+  // Simple low-pass style measurement.
+  // ---------------------------------------------------
 
-  for (let i = 0; i < data.length; i++) {
+  let previous =
+    0;
 
-    const level =
-      Math.abs(data[i]);
-
-    if (level > highest) {
-      highest = level;
-    }
-  }
-
-  // Only consider strong peaks
-  const threshold =
-    highest * 0.55;
-
-  let lastPeak =
-    -minGap;
+  const lowPassCoefficient =
+    0.12;
 
   for (
     let start = 0;
@@ -5416,14 +5430,14 @@ function detectStrongTransients(audioBuffer) {
     start += blockSize
   ) {
 
-    let peak = 0;
-    let peakPosition = start;
-
     const end =
       Math.min(
         start + blockSize,
         data.length
       );
+
+    let energy =
+      0;
 
     for (
       let i = start;
@@ -5431,39 +5445,411 @@ function detectStrongTransients(audioBuffer) {
       i++
     ) {
 
-      const level =
-        Math.abs(data[i]);
+      const sample =
+        data[i];
 
-      if (level > peak) {
+      previous +=
+        lowPassCoefficient *
+        (sample - previous);
 
-        peak =
-          level;
-
-        peakPosition =
-          i;
-      }
+      energy +=
+        previous * previous;
     }
 
-    if (
-      peak >= threshold &&
-      peakPosition - lastPeak >= minGap
-    ) {
-
-      points.push(
-        peakPosition / sampleRate
+    energy =
+      Math.sqrt(
+        energy /
+        Math.max(1, end - start)
       );
 
-      lastPeak =
-        peakPosition;
+    envelope.push({
+      time:
+        start / sampleRate,
+
+      energy
+    });
+  }
+
+
+  if (envelope.length < 10) {
+    return [];
+  }
+
+
+  // ---------------------------------------------------
+  // FIND STRONG KICK CANDIDATES
+  // ---------------------------------------------------
+
+  let totalEnergy =
+    0;
+
+  for (const point of envelope) {
+    totalEnergy += point.energy;
+  }
+
+  const averageEnergy =
+    totalEnergy /
+    envelope.length;
+
+
+  let maximumEnergy =
+    0;
+
+  for (const point of envelope) {
+
+    if (
+      point.energy >
+      maximumEnergy
+    ) {
+      maximumEnergy =
+        point.energy;
     }
   }
 
-  return points;
+
+  // Strong enough to be a kick,
+  // but not so high that only the
+  // loudest single hit survives.
+  const threshold =
+    Math.max(
+      averageEnergy * 1.8,
+      maximumEnergy * 0.18
+    );
+
+
+  const candidates = [];
+
+
+  for (
+    let i = 1;
+    i < envelope.length - 1;
+    i++
+  ) {
+
+    const current =
+      envelope[i];
+
+    const previousPoint =
+      envelope[i - 1];
+
+    const nextPoint =
+      envelope[i + 1];
+
+
+    if (
+      current.energy >=
+      threshold &&
+
+      current.energy >=
+      previousPoint.energy &&
+
+      current.energy >=
+      nextPoint.energy
+    ) {
+
+      candidates.push({
+        time:
+          current.time,
+
+        energy:
+          current.energy
+      });
+    }
+  }
+
+
+  // ---------------------------------------------------
+  // REMOVE KICK CANDIDATES THAT ARE TOO CLOSE
+  // ---------------------------------------------------
+
+  const kicks = [];
+
+  const minimumKickGap =
+    0.22;
+
+
+  for (const candidate of candidates) {
+
+    const last =
+      kicks[kicks.length - 1];
+
+
+    if (!last) {
+
+      kicks.push(
+        candidate
+      );
+
+      continue;
+    }
+
+
+    const gap =
+      candidate.time -
+      last.time;
+
+
+    if (
+      gap >=
+      minimumKickGap
+    ) {
+
+      kicks.push(
+        candidate
+      );
+
+    } else if (
+      candidate.energy >
+      last.energy
+    ) {
+
+      // Keep the stronger hit.
+      kicks[
+        kicks.length - 1
+      ] =
+        candidate;
+    }
+  }
+
+
+  return kicks.map(
+    point => point.time
+  );
 }
 
 
 // =====================================================
-// 🎯 BUILD TRANSIENT MAP FOR A DECK
+// 🧠 CALCULATE BPM FROM KICK INTERVALS
+// =====================================================
+
+function calculateKickBPM(kickPoints) {
+
+  if (
+    !kickPoints ||
+    kickPoints.length < 4
+  ) {
+    return null;
+  }
+
+
+  const intervals = [];
+
+
+  for (
+    let i = 1;
+    i < kickPoints.length;
+    i++
+  ) {
+
+    const interval =
+      kickPoints[i] -
+      kickPoints[i - 1];
+
+
+    // Accept realistic DJ tempos.
+    if (
+      interval >= 0.30 &&
+      interval <= 1.20
+    ) {
+
+      intervals.push(
+        interval
+      );
+    }
+  }
+
+
+  if (
+    intervals.length < 3
+  ) {
+    return null;
+  }
+
+
+  // ---------------------------------------------------
+  // MEDIAN INTERVAL
+  // More stable than simply using the average.
+  // ---------------------------------------------------
+
+  intervals.sort(
+    (a, b) => a - b
+  );
+
+
+  const middle =
+    Math.floor(
+      intervals.length / 2
+    );
+
+
+  const medianInterval =
+    intervals.length % 2 === 0
+
+      ? (
+          intervals[middle - 1] +
+          intervals[middle]
+        ) / 2
+
+      : intervals[middle];
+
+
+  let bpm =
+    60 /
+    medianInterval;
+
+
+  // ---------------------------------------------------
+  // NORMALISE HALF/DOUBLE TEMPO
+  // ---------------------------------------------------
+
+  while (bpm < 80) {
+    bpm *= 2;
+  }
+
+  while (bpm > 180) {
+    bpm /= 2;
+  }
+
+
+  return bpm;
+}
+
+
+// =====================================================
+// 🎯 BUILD 4-BEAT / BAR GRID
+// =====================================================
+
+function buildBeatGrid(
+  firstKick,
+  bpm,
+  duration
+) {
+
+  if (
+    !Number.isFinite(firstKick) ||
+    !Number.isFinite(bpm) ||
+    !Number.isFinite(duration) ||
+    bpm <= 0
+  ) {
+
+    return [];
+  }
+
+
+  const beatLength =
+    60 / bpm;
+
+
+  const barLength =
+    beatLength * 4;
+
+
+  const grid = [];
+
+
+  // Start exactly on the first kick.
+  for (
+    let time = firstKick;
+    time < duration;
+    time += barLength
+  ) {
+
+    grid.push(
+      time
+    );
+  }
+
+
+  return grid;
+}
+
+
+// =====================================================
+// 🎯 ANALYSE COMPLETE TRACK
+// FIRST KICK IS THE MASTER ANCHOR
+// =====================================================
+
+function analyseBeatGrid(
+  audioBuffer
+) {
+
+  const kickPoints =
+    detectKickPoints(
+      audioBuffer
+    );
+
+
+  if (
+    !kickPoints ||
+    kickPoints.length < 4
+  ) {
+
+    console.warn(
+      "GLCTC1: Not enough kick information to build beat grid."
+    );
+
+    return null;
+  }
+
+
+  const firstKick =
+    kickPoints[0];
+
+
+  const bpm =
+    calculateKickBPM(
+      kickPoints
+    );
+
+
+  if (
+    !Number.isFinite(bpm)
+  ) {
+
+    console.warn(
+      "GLCTC1: BPM calculation failed."
+    );
+
+    return null;
+  }
+
+
+  const beatLength =
+    60 / bpm;
+
+
+  const barLength =
+    beatLength * 4;
+
+
+  const beatGrid =
+    buildBeatGrid(
+      firstKick,
+      bpm,
+      audioBuffer.duration
+    );
+
+
+  return {
+
+    firstKick,
+
+    bpm,
+
+    beatLength,
+
+    barLength,
+
+    beatGrid,
+
+    ready:
+      beatGrid.length > 0
+  };
+}
+
+
+// =====================================================
+// 🎯 BUILD BEAT MAP FOR A DECK
 // =====================================================
 
 async function buildTransientMap(deck) {
@@ -5471,52 +5857,111 @@ async function buildTransientMap(deck) {
   const a =
     audio(deck);
 
-  if (!a || !a.src) return;
+
+  if (
+    !a ||
+    !a.src
+  ) {
+
+    return;
+  }
+
 
   try {
+
+    // Reset previous track analysis.
+    beatAnalysis[deck] = {
+
+      firstKick: null,
+      bpm: null,
+      beatLength: null,
+      barLength: null,
+      beatGrid: [],
+      ready: false
+
+    };
+
 
     const response =
       await fetch(a.src);
 
+
     const arrayBuffer =
       await response.arrayBuffer();
+
 
     const AudioContext =
       window.AudioContext ||
       window.webkitAudioContext;
 
+
     const audioContext =
       new AudioContext();
+
 
     const audioBuffer =
       await audioContext.decodeAudioData(
         arrayBuffer
       );
 
-    transientPoints[deck] =
-      detectStrongTransients(
+
+    const analysis =
+      analyseBeatGrid(
         audioBuffer
       );
 
-    console.log(
-      `GLCTC1 ${deck} TRANSIENTS:`,
-      transientPoints[deck]
-    );
+
+    if (analysis) {
+
+      beatAnalysis[deck] =
+        analysis;
+
+
+      console.log(
+        `GLCTC1 ${deck} BEAT GRID READY:`,
+        {
+          firstKick:
+            analysis.firstKick,
+
+          bpm:
+            Number(
+              analysis.bpm.toFixed(2)
+            ),
+
+          beatLength:
+            Number(
+              analysis.beatLength.toFixed(4)
+            ),
+
+          barLength:
+            Number(
+              analysis.barLength.toFixed(4)
+            ),
+
+          bars:
+            analysis.beatGrid.length
+        }
+      );
+
+    }
+
 
     await audioContext.close();
 
+
   } catch (error) {
 
-       console.error(
-      `GLCTC1 ${deck} TRANSIENT ERROR:`,
+    console.error(
+      `GLCTC1 ${deck} BEAT ANALYSIS ERROR:`,
       error
     );
+
   }
 }
 
 
 // =====================================================
-// 🎯 BUILD TRANSIENT MAP WHEN AUDIO LOADS
+// 🎯 BUILD BEAT MAP WHEN AUDIO LOADS
 // =====================================================
 
 function connectTransientDetection(deck) {
@@ -5524,27 +5969,36 @@ function connectTransientDetection(deck) {
   const a =
     audio(deck);
 
-  if (!a) return;
+
+  if (!a) {
+    return;
+  }
+
 
   a.addEventListener(
     "loadedmetadata",
     () => {
 
-      buildTransientMap(deck);
+      buildTransientMap(
+        deck
+      );
 
     }
   );
+
 
   a.addEventListener(
     "loadeddata",
     () => {
 
       if (
-        !transientPoints[deck] ||
-        transientPoints[deck].length === 0
+        !beatAnalysis[deck] ||
+        !beatAnalysis[deck].ready
       ) {
 
-        buildTransientMap(deck);
+        buildTransientMap(
+          deck
+        );
 
       }
 
@@ -5821,78 +6275,217 @@ function platterScratch(deck, movement) {
 
 
 // =====================================================
-// 🎯 SNAP TO STRONG KICK / LOUD TRANSIENT
+// 🎯 GLCTC1 4-BEAT SNAP
+// SNAP LEFT  = PREVIOUS BAR
+// SNAP RIGHT = NEXT BAR
 // =====================================================
 
 function snapLeft(deck) {
 
-  const a = audio(deck);
+  const a =
+    audio(deck);
 
-  if (!a) return;
+  if (!a) {
+    return;
+  }
 
-  const points =
-    transientPoints[deck];
+
+  const analysis =
+    beatAnalysis[deck];
+
 
   if (
-    !points ||
-    points.length === 0
-  ) return;
+    !analysis ||
+    !analysis.ready ||
+    !Number.isFinite(
+      analysis.barLength
+    )
+  ) {
+
+    console.warn(
+      `GLCTC1 ${deck}: Beat grid not ready yet.`
+    );
+
+    return;
+  }
+
+
+  const firstKick =
+    analysis.firstKick;
+
+
+  const barLength =
+    analysis.barLength;
+
 
   const current =
     a.currentTime;
 
-  // Find previous strong transient
-  let previous = null;
 
-  for (let i = 0; i < points.length; i++) {
+  // ---------------------------------------------------
+  // Calculate how many complete bars have passed
+  // since the first kick.
+  // ---------------------------------------------------
 
-    if (points[i] < current - 0.01) {
+  const barNumber =
+    Math.floor(
+      (
+        current -
+        firstKick -
+        0.001
+      ) /
+      barLength
+    );
 
-      previous =
-        points[i];
 
-    } else {
+  let target =
+    firstKick +
+    (
+      barNumber *
+      barLength
+    );
 
-      break;
-    }
+
+  // Never snap backwards before the first kick.
+  if (
+    target <
+    firstKick
+  ) {
+
+    target =
+      firstKick;
   }
 
-  if (previous !== null) {
 
-    a.currentTime =
-      previous;
-  }
+  a.currentTime =
+    Math.max(
+      0,
+      Math.min(
+        a.duration || target,
+        target
+      )
+    );
+
+
+  console.log(
+    `GLCTC1 ${deck} SNAP LEFT →`,
+    target.toFixed(3),
+    "sec"
+  );
 }
 
 
+// =====================================================
+// 🎯 SNAP RIGHT
+// NEXT 4-BEAT / BAR POSITION
+// =====================================================
+
 function snapRight(deck) {
 
-  const a = audio(deck);
+  const a =
+    audio(deck);
 
-  if (!a) return;
+  if (!a) {
+    return;
+  }
 
-  const points =
-    transientPoints[deck];
+
+  const analysis =
+    beatAnalysis[deck];
+
 
   if (
-    !points ||
-    points.length === 0
-  ) return;
+    !analysis ||
+    !analysis.ready ||
+    !Number.isFinite(
+      analysis.barLength
+    )
+  ) {
+
+    console.warn(
+      `GLCTC1 ${deck}: Beat grid not ready yet.`
+    );
+
+    return;
+  }
+
+
+  const firstKick =
+    analysis.firstKick;
+
+
+  const barLength =
+    analysis.barLength;
+
 
   const current =
     a.currentTime;
 
-  // Find next strong transient
-  for (let i = 0; i < points.length; i++) {
 
-    if (points[i] > current + 0.01) {
+  const relative =
+    current -
+    firstKick;
 
-      a.currentTime =
-        points[i];
 
-      break;
-    }
+  let barNumber =
+    Math.floor(
+      relative /
+      barLength
+    );
+
+
+  // If already on a bar, move to the next bar.
+  const currentBarTime =
+    firstKick +
+    (
+      barNumber *
+      barLength
+    );
+
+
+  if (
+    Math.abs(
+      current -
+      currentBarTime
+    ) < 0.02
+  ) {
+
+    barNumber++;
   }
+
+
+  let target =
+    firstKick +
+    (
+      barNumber *
+      barLength
+    );
+
+
+  if (
+    target <= current + 0.001
+  ) {
+
+    target +=
+      barLength;
+  }
+
+
+  a.currentTime =
+    Math.max(
+      0,
+      Math.min(
+        a.duration || target,
+        target
+      )
+    );
+
+
+  console.log(
+    `GLCTC1 ${deck} SNAP RIGHT →`,
+    target.toFixed(3),
+    "sec"
+  );
 }
 
 // =====================================================

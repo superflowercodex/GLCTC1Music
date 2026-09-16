@@ -1477,7 +1477,7 @@ tr.playing{
 </section>
 
 <!-- =====================================================
-     MIXER
+     GLCTC1 RADIO SPACE MIXER
 ===================================================== -->
 
 <section class="panel mixer">
@@ -1489,7 +1489,7 @@ tr.playing{
     </span>
 
     <span id="duckState">
-      DUCKING READY
+      MIXER ON
     </span>
 
   </div>
@@ -1497,10 +1497,17 @@ tr.playing{
   <div class="mixerBody">
 
     <div class="mixerTitle">
-      AUDIO MIX / DUCK / MASTER
+      PUBLIC AUDIO MIXER
     </div>
 
+
+    <!-- =================================================
+         PUBLIC CHANNELS
+    ================================================== -->
+
     <div class="mixerGrid">
+
+      <!-- RADIO CHANNEL -->
 
       <div class="mixerChannel">
 
@@ -1530,6 +1537,9 @@ tr.playing{
         </div>
 
       </div>
+
+
+      <!-- LIVE ARTIST CHANNEL -->
 
       <div class="mixerChannel">
 
@@ -1562,12 +1572,17 @@ tr.playing{
 
     </div>
 
+
+    <!-- =================================================
+         DUCKING
+    ================================================== -->
+
     <div class="duckBox">
 
       <div class="duckHeader">
 
         <span>
-          🦆 LIVE DUCKING
+          🦆 RADIO DUCKING
         </span>
 
         <label class="switch">
@@ -1575,7 +1590,6 @@ tr.playing{
           <input
             id="duckToggle"
             type="checkbox"
-            checked
           >
 
           <span></span>
@@ -1583,6 +1597,7 @@ tr.playing{
         </label>
 
       </div>
+
 
       <div
         class="sliderRow"
@@ -1607,6 +1622,7 @@ tr.playing{
         </output>
 
       </div>
+
 
       <div
         class="sliderRow"
@@ -1634,6 +1650,11 @@ tr.playing{
 
     </div>
 
+
+    <!-- =================================================
+         MASTER OUTPUT
+    ================================================== -->
+
     <div class="sliderRow">
 
       <label>
@@ -1652,6 +1673,135 @@ tr.playing{
       <output id="masterMixOut">
         90%
       </output>
+
+    </div>
+
+
+    <!-- =================================================
+         HEADPHONE CUE
+    ================================================== -->
+
+    <div class="duckBox">
+
+      <div class="duckHeader">
+
+        <span>
+          🎧 HEADPHONE CUE
+        </span>
+
+        <span id="cueState">
+          MONITOR READY
+        </span>
+
+      </div>
+
+
+      <div class="mixerGrid">
+
+        <div class="mixerChannel">
+
+          <strong>
+            📻 RADIO CUE
+          </strong>
+
+          <label class="switch">
+
+            <input
+              id="radioCueToggle"
+              type="checkbox"
+            >
+
+            <span></span>
+
+          </label>
+
+        </div>
+
+
+        <div class="mixerChannel">
+
+          <strong>
+            🔴 LIVE CUE
+          </strong>
+
+          <label class="switch">
+
+            <input
+              id="liveCueToggle"
+              type="checkbox"
+            >
+
+            <span></span>
+
+          </label>
+
+        </div>
+
+      </div>
+
+
+      <div
+        class="sliderRow"
+        style="margin-top:10px"
+      >
+
+        <label>
+          CUE MIX
+        </label>
+
+        <input
+          id="cueMix"
+          type="range"
+          min="0"
+          max="1"
+          step=".01"
+          value=".5"
+        >
+
+        <output id="cueMixOut">
+          50%
+        </output>
+
+      </div>
+
+
+      <div
+        class="sliderRow"
+        style="margin-top:8px"
+      >
+
+        <label>
+          CUE LEVEL
+        </label>
+
+        <input
+          id="cueLevel"
+          type="range"
+          min="0"
+          max="1"
+          step=".01"
+          value=".8"
+        >
+
+        <output id="cueLevelOut">
+          80%
+        </output>
+
+      </div>
+
+
+      <div
+        id="cueOutputNotice"
+        style="
+          margin-top:10px;
+          font-size:9px;
+          line-height:1.5;
+          opacity:.65;
+        "
+      >
+        HEADPHONE OUTPUT AVAILABLE WHEN
+        SUPPORTED BY THIS BROWSER
+      </div>
 
     </div>
 
@@ -4337,179 +4487,39 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ENDED — CONTINUOUS RADIO
-   SAVE EVERY NEW STATION TRACK
+   TRACK ENDED — SUPABASE MASTER CLOCK
+   ADMIN ADVANCES • PUBLIC FOLLOWS
 ===================================================== */
 
 audio.addEventListener(
   "ended",
   async () => {
 
-    if (radioAdvanceBusy)
+    if(!isAdmin)
       return;
 
-    radioAdvanceBusy = true;
+    if(radioStationAdvanceBusy)
+      return;
 
-    try {
+    try{
 
-      const list =
-        playableLibrary();
+      const advanced =
+        await advanceSupabaseRadioStation();
 
-      if (!list.length)
-        return;
-
-
-      /* ================================================
-         CHOOSE NEXT RANDOM RADIO TRACK
-      ================================================ */
-
-      let choices =
-        list.filter(
-          track =>
-            track !== currentTrack
-        );
-
-      if (!choices.length)
-        choices = list;
-
-
-      const randomIndex =
-        Math.floor(
-          Math.random() *
-          choices.length
-        );
-
-
-      currentTrack =
-        choices[randomIndex];
-
-      currentIndex =
-        library.indexOf(
-          currentTrack
-        );
-
-
-      updateTrackUI();
-
-
-      /* ================================================
-         START THE NEXT TRACK
-      ================================================ */
-
-      const started =
-        await playTrack(
-          currentTrack
-        );
-
-
-      if(started){
-
-        /*
-           Wait for the real duration of the
-           new track before saving the station clock.
-        */
-
-        if(
-          !Number.isFinite(
-            audio.duration
-          ) ||
-          audio.duration <= 0
-        ){
-
-          await new Promise(
-            resolve => {
-
-              audio.addEventListener(
-                "loadedmetadata",
-                resolve,
-                { once:true }
-              );
-
-            }
-          );
-
-        }
-
-
-        const duration =
-          Number(
-            audio.duration || 0
-          );
-
-
-        /* ==============================================
-           NEW AUTHORITATIVE RADIO STATE
-        ============================================== */
-
-        radioStationTrackKey =
-          radioTrackKey(
-            currentTrack
-          );
-
-        radioStationStartedAt =
-          Date.now();
-
-        radioStationDuration =
-          duration;
-
-        radioStationPlaying =
-          !audio.paused;
-
-
-        radioStationState = {
-
-          trackKey:
-            radioStationTrackKey,
-
-          playing:
-            radioStationPlaying,
-
-          position:
-            Number(
-              audio.currentTime || 0
-            ),
-
-          duration:
-            radioStationDuration,
-
-          savedAt:
-            Date.now()
-
-        };
-
-
-        /*
-           THIS IS THE IMPORTANT PART:
-
-           Every time the radio advances to a
-           new song, the new station state is
-           permanently saved.
-        */
-
-        saveLocalRadioState();
-
+      if(advanced){
 
         console.log(
-          "📻 GLCTC1 RADIO ADVANCED:",
-          currentTrack.title
+          "📻 GLCTC1 RADIO MASTER ADVANCED:",
+          currentTrack?.title || "NEXT TRACK"
         );
 
       }
 
-    } catch (error) {
+    }catch(error){
 
       console.error(
-        "GLCTC1 RADIO AUTO-SHUFFLE ERROR:",
+        "GLCTC1 RADIO MASTER ADVANCE ERROR:",
         error
-      );
-
-    } finally {
-
-      setTimeout(
-        () => {
-          radioAdvanceBusy = false;
-        },
-        250
       );
 
     }
@@ -4519,7 +4529,8 @@ audio.addEventListener(
 
 
 /* =====================================================
-   TRACK ERROR
+   TRACK ERROR — SUPABASE MASTER CLOCK
+   ADMIN MAY ADVANCE • PUBLIC BROWSERS WAIT
 ===================================================== */
 
 audio.addEventListener(
@@ -4531,35 +4542,31 @@ audio.addEventListener(
       audio.error
     );
 
+    if(!isAdmin)
+      return;
 
-    if(
-      playableLibrary().length > 1 &&
-      !radioAdvanceBusy
-    ){
+    if(radioStationAdvanceBusy)
+      return;
 
-      radioAdvanceBusy =
-        true;
+    setTimeout(
+      async () => {
 
+        try{
 
-      setTimeout(
-        async () => {
+          await advanceSupabaseRadioStation();
 
-          try{
+        }catch(error){
 
-            await chooseRandom();
+          console.error(
+            "GLCTC1 RADIO MASTER RECOVERY ERROR:",
+            error
+          );
 
-          }finally{
+        }
 
-            radioAdvanceBusy =
-              false;
-
-          }
-
-        },
-        700
-      );
-
-    }
+      },
+      700
+    );
 
   }
 );
@@ -4794,37 +4801,26 @@ $("volumeSlider").oninput =
   };
 
 /* =====================================================
-   MIXER
+   GLCTC1 MIXER
+   PUBLIC CHANNEL MIX
+   MASTER OUTPUT
+   RADIO DUCKING
 ===================================================== */
 
 $("radioMix").oninput =
   e => {
 
+    const value =
+      Number(
+        e.target.value
+      );
+
     $("radioMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        value * 100
+      ) + "%";
 
-    /*
-       RADIO LEVEL IS THE MIXER'S
-       CURRENT MASTER RADIO LEVEL.
-
-       When the mixer is active,
-       this is the level the radio
-       will run at.
-    */
-
-    if(
-      liveMode &&
-      $("duckToggle").checked
-    ){
-
-      duckRadio(true);
-
-    }
+    updateAudioRouting();
 
   };
 
@@ -4832,13 +4828,15 @@ $("radioMix").oninput =
 $("liveMix").oninput =
   e => {
 
+    const value =
+      Number(
+        e.target.value
+      );
+
     $("liveMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        value * 100
+      ) + "%";
 
     updateAudioRouting();
 
@@ -4848,18 +4846,24 @@ $("liveMix").oninput =
 $("masterMix").oninput =
   e => {
 
+    const value =
+      Number(
+        e.target.value
+      );
+
     $("masterMixOut").textContent =
       Math.round(
-        Number(
-          e.target.value
-        ) * 100
-      ) +
-      "%";
+        value * 100
+      ) + "%";
 
     updateAudioRouting();
 
   };
 
+
+/* =====================================================
+   DUCKING CONTROLS
+===================================================== */
 
 $("duckAmount").oninput =
   e => {
@@ -4869,8 +4873,22 @@ $("duckAmount").oninput =
         Number(
           e.target.value
         ) * 100
-      ) +
-      "%";
+      ) + "%";
+
+    /*
+       If ducking is already active,
+       immediately recalculate the
+       radio target.
+    */
+
+    if(
+      $("duckToggle").checked &&
+      liveMode
+    ){
+
+      applyRadioDucking();
+
+    }
 
   };
 
@@ -4889,7 +4907,40 @@ $("duckRelease").oninput =
   };
 
 
-function duckRadio(on){
+/* =====================================================
+   DUCKING SWITCH
+   OFF BY DEFAULT
+===================================================== */
+
+$("duckToggle").onchange =
+  () => {
+
+    if(
+      $("duckToggle").checked
+    ){
+
+      $("duckState").textContent =
+        "🦆 DUCKING ON";
+
+      applyRadioDucking();
+
+    }else{
+
+      $("duckState").textContent =
+        "MIXER ON";
+
+      releaseRadioDucking();
+
+    }
+
+  };
+
+
+/* =====================================================
+   APPLY RADIO DUCKING
+===================================================== */
+
+function applyRadioDucking(){
 
   if(
     !audioCtx ||
@@ -4899,24 +4950,60 @@ function duckRadio(on){
 
 
   /*
-     THE RADIO MIXER LEVEL IS THE
-     LEVEL THE MIXER TAKES OVER AT.
+     Ducking only modifies the
+     RADIO CHANNEL.
 
-     Example:
-
-     Radio Level = 40%
-
-     Press Ducking
-     → radio mixer takes over at 40%
-
-     Radio Level = 0%
-
-     Press Ducking
-     → radio is 0%
-
-     The mixer NEVER forces the radio
-     back to 100%.
+     It does NOT modify:
+       - Live Artist level
+       - Master level
+       - mixer controls
   */
+
+  const radioLevel =
+    Number(
+      $("radioMix").value
+    );
+
+
+  const duckAmount =
+    Number(
+      $("duckAmount").value
+    );
+
+
+  const target =
+    radioLevel *
+    (1 - duckAmount);
+
+
+  radioGain.gain
+    .cancelScheduledValues(
+      audioCtx.currentTime
+    );
+
+
+  radioGain.gain
+    .setTargetAtTime(
+      target,
+      audioCtx.currentTime,
+      .08
+    );
+
+}
+
+
+/* =====================================================
+   RELEASE RADIO DUCKING
+===================================================== */
+
+function releaseRadioDucking(){
+
+  if(
+    !audioCtx ||
+    !radioGain
+  )
+    return;
+
 
   const radioLevel =
     Number(
@@ -4930,13 +5017,6 @@ function duckRadio(on){
     ) / 1000;
 
 
-  const target =
-    on &&
-    $("duckToggle").checked
-      ? radioLevel
-      : radioLevel;
-
-
   radioGain.gain
     .cancelScheduledValues(
       audioCtx.currentTime
@@ -4945,26 +5025,184 @@ function duckRadio(on){
 
   radioGain.gain
     .setTargetAtTime(
-      target,
+      radioLevel,
       audioCtx.currentTime,
-      on ? .08 : release
+      release
     );
-
-
-  $("duckState").textContent =
-    on &&
-    $("duckToggle").checked
-      ? "🦆 MIXER ACTIVE"
-      : "DUCKING READY";
 
 }
 
 
-$("duckToggle").onchange =
-  () =>
-    duckRadio(
-      liveMode
+/* =====================================================
+   RADIO / LIVE / MASTER ROUTING
+===================================================== */
+
+function updateAudioRouting(){
+
+  if(
+    !audioCtx ||
+    !radioGain ||
+    !masterGain
+  )
+    return;
+
+
+  const radioLevel =
+    Number(
+      $("radioMix").value
     );
+
+
+  const liveLevel =
+    Number(
+      $("liveMix").value
+    );
+
+
+  const masterLevel =
+    Number(
+      $("masterMix").value
+    );
+
+
+  /*
+     RADIO CHANNEL
+
+     Ducking is a modifier of the
+     radio channel — never the mixer.
+  */
+
+  if(
+    $("duckToggle").checked &&
+    liveMode
+  ){
+
+    applyRadioDucking();
+
+  }else{
+
+    radioGain.gain
+      .setTargetAtTime(
+        radioLevel,
+        audioCtx.currentTime,
+        .03
+      );
+
+  }
+
+
+  /*
+     LIVE ARTIST CHANNEL
+  */
+
+  if(liveGain){
+
+    liveGain.gain
+      .setTargetAtTime(
+        liveLevel,
+        audioCtx.currentTime,
+        .03
+      );
+
+  }
+
+
+  /*
+     MASTER OUTPUT
+
+     Public control.
+  */
+
+  masterGain.gain
+    .setTargetAtTime(
+      masterLevel,
+      audioCtx.currentTime,
+      .03
+    );
+
+}
+
+
+/* =====================================================
+   HEADPHONE CUE UI
+===================================================== */
+
+$("radioCueToggle").onchange =
+  updateCueState;
+
+
+$("liveCueToggle").onchange =
+  updateCueState;
+
+
+$("cueMix").oninput =
+  e => {
+
+    $("cueMixOut").textContent =
+      Math.round(
+        Number(
+          e.target.value
+        ) * 100
+      ) + "%";
+
+    updateCueState();
+
+  };
+
+
+$("cueLevel").oninput =
+  e => {
+
+    $("cueLevelOut").textContent =
+      Math.round(
+        Number(
+          e.target.value
+        ) * 100
+      ) + "%";
+
+    updateCueState();
+
+  };
+
+
+function updateCueState(){
+
+  const radio =
+    $("radioCueToggle").checked;
+
+  const live =
+    $("liveCueToggle").checked;
+
+
+  if(
+    !radio &&
+    !live
+  ){
+
+    $("cueState").textContent =
+      "MONITOR READY";
+
+    return;
+
+  }
+
+
+  const sources = [];
+
+
+  if(radio)
+    sources.push("RADIO");
+
+
+  if(live)
+    sources.push("LIVE");
+
+
+  $("cueState").textContent =
+    "🎧 CUE: " +
+    sources.join(" + ");
+
+}
 
 /* =====================================================
    VISUALISER
@@ -5640,9 +5878,7 @@ function setLiveUI(on){
 
   if(audioCtx){
 
-    duckRadio(
-      on
-    );
+    updateAudioRouting();
 
   }
 
@@ -5804,13 +6040,11 @@ async function connectInvitedArtist(
             .length
         ){
 
-          setupLiveAudio(
+                   setupLiveAudio(
             new MediaStream(
               stream.getAudioTracks()
             )
           );
-
-          duckRadio(true);
 
         }
 
@@ -6897,7 +7131,7 @@ $("videoNotice").textContent =
         liveAnalyser;
 
 
-      duckRadio(true);
+      updateAudioRouting();
 
 
       await liveVideo
@@ -7083,7 +7317,7 @@ $("stopWebcamBtn").onclick =
     activeAnalyser =
       radioAnalyser;
 
-    duckRadio(false);
+    updateAudioRouting();
 
 
     /* ---------------------------------------------

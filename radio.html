@@ -5750,6 +5750,11 @@ async function connectInvitedArtist(
         RTC_CONFIG
       );
 
+
+    /* =================================================
+       VIEWER RECEIVES ARTIST VIDEO + AUDIO
+    ================================================= */
+
     viewerConnection.ontrack =
       e => {
 
@@ -5758,6 +5763,7 @@ async function connectInvitedArtist(
           new MediaStream(
             [e.track]
           );
+
 
         if(
           stream.getVideoTracks()
@@ -5792,6 +5798,7 @@ async function connectInvitedArtist(
 
         }
 
+
         if(
           stream.getAudioTracks()
             .length
@@ -5807,9 +5814,16 @@ async function connectInvitedArtist(
 
         }
 
+
         setLiveUI(true);
 
       };
+
+
+    /* =================================================
+       VIEWER ICE
+       NEVER WIPE EXISTING CANDIDATES
+    ================================================= */
 
     viewerConnection.onicecandidate =
       async e => {
@@ -5819,56 +5833,101 @@ async function connectInvitedArtist(
         )
           return;
 
-        const latest =
-          await getRoom(
-            artistId
+        try{
+
+          const latest =
+            await getRoom(
+              artistId
+            );
+
+          if(!latest)
+            return;
+
+          const s =
+            latest.signaling_data ||
+            {};
+
+          s.viewer_ice =
+            Array.isArray(
+              s.viewer_ice
+            )
+              ? s.viewer_ice
+              : [];
+
+          s.viewer_ice.push(
+            e.candidate.toJSON()
           );
 
-        if(!latest)
-          return;
+          await supabaseClient
+            .from(
+              "glctc1_live_rooms"
+            )
+            .update({
+              signaling_data:
+                s
+            })
+            .eq(
+              "user_id",
+              artistId
+            );
 
-        const s =
-          latest.signaling_data ||
-          {};
+        }catch(error){
 
-        s.viewer_ice =
-          Array.isArray(
-            s.viewer_ice
-          )
-            ? s.viewer_ice
-            : [];
-
-        s.viewer_ice.push(
-          e.candidate.toJSON()
-        );
-
-        await supabaseClient
-          .from(
-            "glctc1_live_rooms"
-          )
-          .update({
-            signaling_data:s
-          })
-          .eq(
-            "user_id",
-            artistId
+          console.warn(
+            "GLCTC1 VIEWER ICE SAVE ERROR:",
+            error
           );
+
+        }
 
       };
+
+
+    /* =================================================
+       CONNECTION DIAGNOSTICS
+    ================================================= */
+
+    viewerConnection
+      .onconnectionstatechange =
+      () => {
+
+        console.log(
+          "📡 GLCTC1 VIEWER CONNECTION:",
+          viewerConnection.connectionState
+        );
+
+      };
+
+
+    /* =================================================
+       APPLY ARTIST OFFER
+    ================================================= */
 
     await viewerConnection
       .setRemoteDescription(
         signaling.offer
       );
 
+
+    /* =================================================
+       CREATE VIEWER ANSWER
+    ================================================= */
+
     const answer =
       await viewerConnection
         .createAnswer();
+
 
     await viewerConnection
       .setLocalDescription(
         answer
       );
+
+
+    /* =================================================
+       SAVE ANSWER
+       DO NOT CLEAR viewer_ice
+    ================================================= */
 
     const latest =
       await getRoom(
@@ -5880,23 +5939,41 @@ async function connectInvitedArtist(
       signaling;
 
     s.answer = {
-      type:answer.type,
-      sdp:answer.sdp
+
+      type:
+        answer.type,
+
+      sdp:
+        answer.sdp
+
     };
 
-    s.viewer_ice = [];
+
+    s.viewer_ice =
+      Array.isArray(
+        s.viewer_ice
+      )
+        ? s.viewer_ice
+        : [];
+
 
     await supabaseClient
       .from(
         "glctc1_live_rooms"
       )
       .update({
-        signaling_data:s
+        signaling_data:
+          s
       })
       .eq(
         "user_id",
         artistId
       );
+
+
+    /* =================================================
+       APPLY ARTIST ICE TO VIEWER
+    ================================================= */
 
     if(
       artistIceTimer
@@ -5905,11 +5982,18 @@ async function connectInvitedArtist(
         artistIceTimer
       );
 
-    let applied = 0;
+    let applied =
+      0;
 
     artistIceTimer =
       setInterval(
         async () => {
+
+          if(
+            !viewerConnection
+          )
+            return;
+
 
           const r =
             await getRoom(
@@ -5920,6 +6004,7 @@ async function connectInvitedArtist(
             r?.signaling_data
               ?.artist_ice ||
             [];
+
 
           while(
             applied <
@@ -5935,15 +6020,35 @@ async function connectInvitedArtist(
                   ]
                 );
 
-            }catch(e){}
+              applied++;
 
-            applied++;
+            }catch(error){
+
+              /*
+                 Do not discard the candidate if
+                 the connection is not ready yet.
+                 Try it again on the next cycle.
+              */
+
+              console.warn(
+                "GLCTC1 ARTIST ICE WAITING:",
+                error
+              );
+
+              break;
+
+            }
 
           }
 
         },
-        1200
+        1000
       );
+
+
+    /* =================================================
+       WATCH ROOM
+    ================================================= */
 
     if(
       roomTimer
@@ -5961,6 +6066,7 @@ async function connectInvitedArtist(
               artistId
             );
 
+
           if(
             !r?.signaling_data?.offer
           ){
@@ -5973,8 +6079,15 @@ async function connectInvitedArtist(
         5000
       );
 
+
     $("videoNotice").textContent =
       "LIVE SESSION CONNECTED";
+
+
+    console.log(
+      "📡 GLCTC1 VIEWER WEBRTC READY"
+    );
+
 
   }catch(error){
 
@@ -6064,6 +6177,9 @@ let artistBroadcastIce =
 let artistAnswerTimer =
   null;
 
+let artistViewerIceTimer =
+  null;
+
 
 /* =====================================================
    START ARTIST WEBCAM BROADCAST
@@ -6080,8 +6196,10 @@ async function startGLCTC1WebcamBroadcast(){
 
   }
 
+
   const artistId =
     currentUser?.id;
+
 
   if(!artistId){
 
@@ -6092,12 +6210,19 @@ async function startGLCTC1WebcamBroadcast(){
 
   }
 
+
   try{
 
     await ensureAudioEngine();
 
 
-    if(artistBroadcastConnection){
+    /* =================================================
+       CLOSE PREVIOUS BROADCAST
+    ================================================= */
+
+    if(
+      artistBroadcastConnection
+    ){
 
       try{
         artistBroadcastConnection.close();
@@ -6109,7 +6234,9 @@ async function startGLCTC1WebcamBroadcast(){
     }
 
 
-    if(artistAnswerTimer){
+    if(
+      artistAnswerTimer
+    ){
 
       clearInterval(
         artistAnswerTimer
@@ -6121,9 +6248,27 @@ async function startGLCTC1WebcamBroadcast(){
     }
 
 
+    if(
+      artistViewerIceTimer
+    ){
+
+      clearInterval(
+        artistViewerIceTimer
+      );
+
+      artistViewerIceTimer =
+        null;
+
+    }
+
+
     artistBroadcastIce =
       [];
 
+
+    /* =================================================
+       CREATE ARTIST PEER CONNECTION
+    ================================================= */
 
     artistBroadcastConnection =
       new RTCPeerConnection(
@@ -6131,9 +6276,9 @@ async function startGLCTC1WebcamBroadcast(){
       );
 
 
-    /* ---------------------------------------------
+    /* =================================================
        SEND WEBCAM + MICROPHONE
-    --------------------------------------------- */
+    ================================================= */
 
     webcamStream
       .getTracks()
@@ -6150,52 +6295,100 @@ async function startGLCTC1WebcamBroadcast(){
       );
 
 
-    /* ---------------------------------------------
+    /* =================================================
        ARTIST ICE
-    --------------------------------------------- */
+       BUFFER FIRST — ROOM MAY NOT EXIST YET
+    ================================================= */
 
     artistBroadcastConnection
       .onicecandidate =
       async event => {
 
-        if(!event.candidate)
+        if(
+          !event.candidate
+        )
           return;
+
 
         artistBroadcastIce.push(
           event.candidate.toJSON()
         );
 
-        const room =
-          await getRoom(
-            artistId
+
+        try{
+
+          const room =
+            await getRoom(
+              artistId
+            );
+
+
+          /*
+             If the room does not exist yet,
+             the candidate remains safely inside
+             artistBroadcastIce and will be saved
+             when the room is created.
+          */
+
+          if(!room)
+            return;
+
+
+          const signaling =
+            room.signaling_data ||
+            {};
+
+
+          signaling.artist_ice =
+            artistBroadcastIce;
+
+
+          await supabaseClient
+            .from(
+              "glctc1_live_rooms"
+            )
+            .update({
+              signaling_data:
+                signaling
+            })
+            .eq(
+              "user_id",
+              artistId
+            );
+
+
+        }catch(error){
+
+          console.warn(
+            "GLCTC1 ARTIST ICE SAVE ERROR:",
+            error
           );
 
-        const signaling =
-          room?.signaling_data ||
-          {};
-
-        signaling.artist_ice =
-          artistBroadcastIce;
-
-        await supabaseClient
-          .from(
-            "glctc1_live_rooms"
-          )
-          .update({
-            signaling_data:
-              signaling
-          })
-          .eq(
-            "user_id",
-            artistId
-          );
+        }
 
       };
 
 
-    /* ---------------------------------------------
+    /* =================================================
+       CONNECTION DIAGNOSTICS
+    ================================================= */
+
+    artistBroadcastConnection
+      .onconnectionstatechange =
+      () => {
+
+        console.log(
+          "📡 GLCTC1 ARTIST CONNECTION:",
+          artistBroadcastConnection
+            ?.connectionState
+        );
+
+      };
+
+
+    /* =================================================
        CREATE OFFER
-    --------------------------------------------- */
+    ================================================= */
 
     const offer =
       await artistBroadcastConnection
@@ -6208,9 +6401,10 @@ async function startGLCTC1WebcamBroadcast(){
       );
 
 
-    /* ---------------------------------------------
+    /* =================================================
        SAVE LIVE ROOM
-    --------------------------------------------- */
+       PRESERVE BUFFERED ARTIST ICE
+    ================================================= */
 
     const existingRoom =
       await getRoom(
@@ -6237,20 +6431,36 @@ async function startGLCTC1WebcamBroadcast(){
     signaling.answer =
       null;
 
+
+    /*
+       IMPORTANT:
+
+       Do NOT reset artist_ice here.
+
+       ICE may already have been generated
+       while setLocalDescription() was running.
+    */
+
+    signaling.artist_ice =
+      Array.isArray(
+        artistBroadcastIce
+      )
+        ? artistBroadcastIce
+        : [];
+
+
     signaling.viewer_ice =
       [];
 
-    signaling.artist_ice =
-      [];
 
-
-    const { error } =
+    const {
+      error
+    } =
       await supabaseClient
         .from(
           "glctc1_live_rooms"
         )
         .upsert({
-
           user_id:
             artistId,
 
@@ -6260,7 +6470,6 @@ async function startGLCTC1WebcamBroadcast(){
         },{
           onConflict:
             "user_id"
-
         });
 
 
@@ -6268,9 +6477,9 @@ async function startGLCTC1WebcamBroadcast(){
       throw error;
 
 
-    /* ---------------------------------------------
+    /* =================================================
        WAIT FOR VIEWER ANSWER
-    --------------------------------------------- */
+    ================================================= */
 
     artistAnswerTimer =
       setInterval(
@@ -6326,7 +6535,7 @@ async function startGLCTC1WebcamBroadcast(){
 
 
             console.log(
-              "📡 GLCTC1 ARTIST BROADCAST CONNECTED"
+              "📡 GLCTC1 ARTIST REMOTE ANSWER APPLIED"
             );
 
 
@@ -6336,6 +6545,95 @@ async function startGLCTC1WebcamBroadcast(){
               "GLCTC1 REMOTE ANSWER ERROR:",
               error
             );
+
+          }
+
+        },
+        1000
+      );
+
+
+    /* =================================================
+       APPLY VIEWER ICE TO ARTIST
+    ================================================= */
+
+    let appliedViewerIce =
+      0;
+
+
+    artistViewerIceTimer =
+      setInterval(
+        async () => {
+
+          if(
+            !artistBroadcastConnection
+          )
+            return;
+
+
+          /*
+             ICE candidates must not be applied
+             until the viewer answer exists.
+          */
+
+          if(
+            !artistBroadcastConnection
+              .currentRemoteDescription
+          )
+            return;
+
+
+          const room =
+            await getRoom(
+              artistId
+            );
+
+
+          const list =
+            room?.signaling_data
+              ?.viewer_ice ||
+            [];
+
+
+          while(
+            appliedViewerIce <
+            list.length
+          ){
+
+            try{
+
+              await artistBroadcastConnection
+                .addIceCandidate(
+                  list[
+                    appliedViewerIce
+                  ]
+                );
+
+
+              console.log(
+                "📡 GLCTC1 VIEWER ICE APPLIED:",
+                appliedViewerIce + 1
+              );
+
+
+              appliedViewerIce++;
+
+
+            }catch(error){
+
+              /*
+                 Do not increment here.
+                 The same candidate will be retried.
+              */
+
+              console.warn(
+                "GLCTC1 VIEWER ICE WAITING:",
+                error
+              );
+
+              break;
+
+            }
 
           }
 
@@ -6360,7 +6658,6 @@ async function startGLCTC1WebcamBroadcast(){
       error
     );
 
-
     $("videoNotice").textContent =
       "WEBCAM BROADCAST ERROR";
 
@@ -6379,7 +6676,13 @@ async function stopGLCTC1WebcamBroadcast(){
     currentUser?.id;
 
 
-  if(artistAnswerTimer){
+  /* =================================================
+     STOP ANSWER TIMER
+  ================================================= */
+
+  if(
+    artistAnswerTimer
+  ){
 
     clearInterval(
       artistAnswerTimer
@@ -6391,7 +6694,31 @@ async function stopGLCTC1WebcamBroadcast(){
   }
 
 
-  if(artistBroadcastConnection){
+  /* =================================================
+     STOP VIEWER ICE TIMER
+  ================================================= */
+
+  if(
+    artistViewerIceTimer
+  ){
+
+    clearInterval(
+      artistViewerIceTimer
+    );
+
+    artistViewerIceTimer =
+      null;
+
+  }
+
+
+  /* =================================================
+     CLOSE ARTIST PEER CONNECTION
+  ================================================= */
+
+  if(
+    artistBroadcastConnection
+  ){
 
     try{
 
@@ -6405,6 +6732,18 @@ async function stopGLCTC1WebcamBroadcast(){
 
   }
 
+
+  /* =================================================
+     CLEAR ARTIST ICE BUFFER
+  ================================================= */
+
+  artistBroadcastIce =
+    [];
+
+
+  /* =================================================
+     CLEAR SUPABASE LIVE ROOM
+  ================================================= */
 
   if(artistId){
 

@@ -5363,15 +5363,18 @@ async function drawWaveform(deck) {
 
 // =====================================================
 // 🎯 GLCTC1 SMART BEAT GRID
-// FIRST KICK → BPM → 4 BEAT GRID → SNAP
+// FIRST KICK → BPM → 4-BEAT GRID → SNAP
 //
 // PURPOSE:
 // • Find the first real kick
 // • Analyse kick/onset rhythm
 // • Calculate BPM automatically
-// • Build a 4-beat / 1-bar grid
-// • SNAP LEFT  = previous 4-beat position
-// • SNAP RIGHT = next 4-beat position
+// • Build a FIXED 4-beat / 1-bar timeline
+// • SNAP works WITHOUT playback
+// • SNAP works WITHOUT cue
+// • SNAP works WITHOUT a queue
+// • SNAP RIGHT walks forward through the timeline
+// • SNAP LEFT walks backwards through the timeline
 // =====================================================
 
 const beatAnalysis = {
@@ -5382,8 +5385,12 @@ const beatAnalysis = {
     beatLength: null,
     barLength: null,
     beatGrid: [],
+    barGrid: [],
     kickPoints: [],
-    ready: false
+    ready: false,
+
+    // -1 = no SNAP position selected yet
+    snapIndex: -1
   },
 
   B: {
@@ -5392,8 +5399,12 @@ const beatAnalysis = {
     beatLength: null,
     barLength: null,
     beatGrid: [],
+    barGrid: [],
     kickPoints: [],
-    ready: false
+    ready: false,
+
+    // -1 = no SNAP position selected yet
+    snapIndex: -1
   }
 
 };
@@ -5417,6 +5428,7 @@ async function detectKickPoints(audioBuffer) {
     window.webkitOfflineAudioContext;
 
   if (!OfflineContext) {
+
     console.warn(
       "GLCTC1: OfflineAudioContext not supported."
     );
@@ -5508,6 +5520,7 @@ async function detectKickPoints(audioBuffer) {
     let sum =
       0;
 
+
     for (
       let i = start;
       i < end;
@@ -5548,10 +5561,10 @@ async function detectKickPoints(audioBuffer) {
 
   // ===================================================
   // 🔊 ONSET STRENGTH
-  // Look for sudden increases in kick energy.
   // ===================================================
 
   const onset = [];
+
 
   for (
     let i = 0;
@@ -5590,11 +5603,13 @@ async function detectKickPoints(audioBuffer) {
   let maximum =
     0;
 
+
   for (
     const value of onset
   ) {
 
-    sum += value;
+    sum +=
+      value;
 
     if (
       value > maximum
@@ -5613,6 +5628,7 @@ async function detectKickPoints(audioBuffer) {
 
   let variance =
     0;
+
 
   for (
     const value of onset
@@ -5817,10 +5833,6 @@ function calculateKickBPM(
   }
 
 
-  // ---------------------------------------------------
-  // SORT INTERVALS
-  // ---------------------------------------------------
-
   intervals.sort(
     (a, b) =>
       a - b
@@ -5833,7 +5845,7 @@ function calculateKickBPM(
     );
 
 
-  let median =
+  const median =
     intervals.length % 2 === 0
 
       ? (
@@ -5910,15 +5922,12 @@ function buildFullBeatGrid(
     60 /
     bpm;
 
-
   const grid = [];
 
 
   for (
     let time = firstKick;
-
     time < duration;
-
     time += beatLength
   ) {
 
@@ -5933,7 +5942,7 @@ function buildFullBeatGrid(
 
 
 // =====================================================
-// 🎯 BUILD 4-BEAT / BAR GRID
+// 🎯 BUILD FIXED 4-BEAT / 1-BAR TIMELINE
 // =====================================================
 
 function buildBarGrid(
@@ -5951,7 +5960,8 @@ function buildBarGrid(
     ) ||
     !Number.isFinite(
       duration
-    )
+    ) ||
+    bpm <= 0
   ) {
 
     return [];
@@ -5973,9 +5983,7 @@ function buildBarGrid(
 
   for (
     let time = firstKick;
-
     time < duration;
-
     time += barLength
   ) {
 
@@ -6064,6 +6072,10 @@ async function analyseBeatGrid(
     4;
 
 
+  // ---------------------------------------------------
+  // BUILD COMPLETE FIXED TIMELINE
+  // ---------------------------------------------------
+
   const beatGrid =
     buildFullBeatGrid(
       firstKick,
@@ -6122,6 +6134,11 @@ async function analyseBeatGrid(
   );
 
   console.log(
+    "4-BEAT TIMELINE:",
+    barGrid
+  );
+
+  console.log(
     "===================================="
   );
 
@@ -6143,7 +6160,12 @@ async function analyseBeatGrid(
     kickPoints,
 
     ready:
-      barGrid.length > 0
+      barGrid.length > 0,
+
+    // New analysis always starts
+    // with no SNAP position selected.
+    snapIndex:
+      -1
   };
 }
 
@@ -6192,11 +6214,19 @@ async function buildTransientMap(
       beatGrid:
         [],
 
+      barGrid:
+        [],
+
       kickPoints:
         [],
 
       ready:
-        false
+        false,
+
+      // IMPORTANT:
+      // New track = new SNAP timeline.
+      snapIndex:
+        -1
     };
 
 
@@ -6256,6 +6286,11 @@ async function buildTransientMap(
 
       console.log(
         `GLCTC1 ${deck}: BEAT GRID READY`
+      );
+
+
+      console.log(
+        `GLCTC1 ${deck}: SNAP POINTER RESET → -1`
       );
 
     } else {
@@ -6352,10 +6387,37 @@ connectTransientDetection(
 
 
 // =====================================================
-// 🎯 GLCTC1 4-BEAT SNAP
+// 🎯 GLCTC1 SNAP ENGINE
 //
-// SNAP LEFT  = PREVIOUS 4-BEAT POSITION
-// SNAP RIGHT = NEXT 4-BEAT POSITION
+// IMPORTANT:
+//
+// SNAP DOES NOT LOOK AT audio.currentTime
+// TO DECIDE WHERE TO GO.
+//
+// It walks the already-calculated barGrid.
+//
+// Example:
+//
+// barGrid:
+// [0.742, 2.617, 4.492, 6.367, 8.242]
+//
+// RIGHT:
+//
+// -1 → 0 → 1 → 2 → 3 → 4
+//
+// LEFT:
+//
+// 4 → 3 → 2 → 1 → 0
+//
+// Playback state is irrelevant.
+// Cue state is irrelevant.
+// Queue state is irrelevant.
+// =====================================================
+
+
+// =====================================================
+// ◀ SNAP LEFT
+// EXACTLY ONE CALCULATED 4-BEAT POSITION BACK
 // =====================================================
 
 function snapLeft(
@@ -6367,7 +6429,6 @@ function snapLeft(
 
 
   if (!a) {
-
     return;
   }
 
@@ -6376,75 +6437,98 @@ function snapLeft(
     beatAnalysis[deck];
 
 
+  // ---------------------------------------------------
+  // ANALYSIS MUST BE READY
+  // ---------------------------------------------------
+
   if (
     !analysis ||
     !analysis.ready ||
-    !Number.isFinite(
-      analysis.firstKick
+    !Array.isArray(
+      analysis.barGrid
     ) ||
-    !Number.isFinite(
-      analysis.barLength
-    )
+    analysis.barGrid.length === 0
   ) {
 
     console.warn(
-      `GLCTC1 ${deck}: Beat grid not ready yet.`
+      `GLCTC1 ${deck}: SMART SNAP WAITING FOR BEAT GRID`
     );
 
     return;
   }
 
 
-  const firstKick =
-    analysis.firstKick;
-
-
-  const barLength =
-    analysis.barLength;
-
-
-  const current =
-    a.currentTime;
-
-
   // ---------------------------------------------------
-  // FIND PREVIOUS 4-BEAT POSITION
+  // ENSURE POINTER EXISTS
   // ---------------------------------------------------
-
-  let barNumber =
-    Math.ceil(
-      (
-        current -
-        firstKick -
-        0.001
-      ) /
-      barLength
-    ) - 1;
-
 
   if (
-    barNumber < 0
+    !Number.isInteger(
+      analysis.snapIndex
+    )
   ) {
 
-    barNumber =
+    analysis.snapIndex =
+      -1;
+  }
+
+
+  // ---------------------------------------------------
+  // MOVE BACK ONE POSITION
+  //
+  // First press:
+  // -1 → 0
+  //
+  // Then:
+  // 3 → 2
+  // 2 → 1
+  // 1 → 0
+  // ---------------------------------------------------
+
+  if (
+    analysis.snapIndex < 0
+  ) {
+
+    analysis.snapIndex =
       0;
+
+  } else {
+
+    analysis.snapIndex =
+      Math.max(
+        0,
+        analysis.snapIndex - 1
+      );
   }
 
 
   const target =
-    firstKick +
-    (
-      barNumber *
-      barLength
-    );
+    analysis.barGrid[
+      analysis.snapIndex
+    ];
 
+
+  if (
+    !Number.isFinite(
+      target
+    )
+  ) {
+
+    return;
+  }
+
+
+  // ---------------------------------------------------
+  // JUMP DIRECTLY TO FIXED TIMELINE POSITION
+  // ---------------------------------------------------
 
   a.currentTime =
     Math.max(
       0,
       Math.min(
-        a.duration ||
-        target,
+        Number.isFinite(a.duration)
+          ? a.duration
+          : target,
         target
       )
     );
@@ -6452,14 +6536,15 @@ function snapLeft(
 
   console.log(
     `GLCTC1 ${deck} SNAP LEFT →`,
-    target.toFixed(3),
-    "sec"
+    `INDEX ${analysis.snapIndex}`,
+    `TIME ${target.toFixed(3)} sec`
   );
 }
 
 
 // =====================================================
-// 🎯 SNAP RIGHT
+// ▶ SNAP RIGHT
+// EXACTLY ONE CALCULATED 4-BEAT POSITION FORWARD
 // =====================================================
 
 function snapRight(
@@ -6471,7 +6556,6 @@ function snapRight(
 
 
   if (!a) {
-
     return;
   }
 
@@ -6480,87 +6564,85 @@ function snapRight(
     beatAnalysis[deck];
 
 
+  // ---------------------------------------------------
+  // ANALYSIS MUST BE READY
+  // ---------------------------------------------------
+
   if (
     !analysis ||
     !analysis.ready ||
-    !Number.isFinite(
-      analysis.firstKick
+    !Array.isArray(
+      analysis.barGrid
     ) ||
-    !Number.isFinite(
-      analysis.barLength
-    )
+    analysis.barGrid.length === 0
   ) {
 
     console.warn(
-      `GLCTC1 ${deck}: Beat grid not ready yet.`
+      `GLCTC1 ${deck}: SMART SNAP WAITING FOR BEAT GRID`
     );
 
     return;
   }
 
 
-  const firstKick =
-    analysis.firstKick;
-
-
-  const barLength =
-    analysis.barLength;
-
-
-  const current =
-    a.currentTime;
-
-
   // ---------------------------------------------------
-  // FIND NEXT 4-BEAT POSITION
+  // ENSURE POINTER EXISTS
   // ---------------------------------------------------
-
-  let barNumber =
-    Math.ceil(
-      (
-        current -
-        firstKick +
-        0.001
-      ) /
-      barLength
-    );
-
 
   if (
-    barNumber < 0
+    !Number.isInteger(
+      analysis.snapIndex
+    )
   ) {
 
-    barNumber =
-      0;
+    analysis.snapIndex =
+      -1;
   }
 
 
-  let target =
-    firstKick +
-    (
-      barNumber *
-      barLength
+  // ---------------------------------------------------
+  // MOVE FORWARD ONE POSITION
+  //
+  // -1 → 0
+  //  0 → 1
+  //  1 → 2
+  //  2 → 3
+  // ---------------------------------------------------
+
+  analysis.snapIndex =
+    Math.min(
+      analysis.snapIndex + 1,
+      analysis.barGrid.length - 1
     );
 
 
-  // Never remain stationary.
+  const target =
+    analysis.barGrid[
+      analysis.snapIndex
+    ];
+
+
   if (
-    target <=
-    current +
-    0.001
+    !Number.isFinite(
+      target
+    )
   ) {
 
-    target +=
-      barLength;
+    return;
   }
 
+
+  // ---------------------------------------------------
+  // JUMP DIRECTLY TO FIXED TIMELINE POSITION
+  // ---------------------------------------------------
 
   a.currentTime =
     Math.max(
       0,
       Math.min(
-        a.duration ||
-        target,
+        Number.isFinite(a.duration)
+          ? a.duration
+          : target,
         target
       )
     );
@@ -6568,8 +6650,8 @@ function snapRight(
 
   console.log(
     `GLCTC1 ${deck} SNAP RIGHT →`,
-    target.toFixed(3),
-    "sec"
+    `INDEX ${analysis.snapIndex}`,
+    `TIME ${target.toFixed(3)} sec`
   );
 }
   

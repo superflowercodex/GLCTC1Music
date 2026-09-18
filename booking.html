@@ -386,7 +386,7 @@ button:disabled{
 
 #glctc1GivingModule{
 
-    display:none;
+    display:block;
 
     width:100%;
     max-width:900px;
@@ -1407,15 +1407,6 @@ footer{
 
 <!-- =====================================================
      GLCTC1 GIVING MODULE
-     
-     DATA SOURCE:
-     ACCOUNT.HTML
-          ↓
-     PROFILES
-          ↓
-     SELECTED ARTIST ID
-          ↓
-     THIS MODULE
 ===================================================== -->
 
 <div
@@ -1451,12 +1442,16 @@ footer{
             <div
                 id="glctc1GivingArtist"
                 class="glctc1GivingArtist"
-            ></div>
+            >
+                SELECT AN ARTIST
+            </div>
 
             <div
                 id="glctc1GivingMessage"
                 class="glctc1GivingMessage"
-            ></div>
+            >
+                Choose an artist above to load their Giving options.
+            </div>
 
         </div>
 
@@ -1469,7 +1464,22 @@ footer{
 
         <div
             id="glctc1GivingMethods"
-        ></div>
+        >
+
+            <div
+                style="
+                    grid-column:1/-1;
+                    text-align:center;
+                    padding:18px;
+                    color:#777;
+                    font-size:10px;
+                    letter-spacing:1px;
+                "
+            >
+                SELECT AN ARTIST TO LOAD GIVING OPTIONS.
+            </div>
+
+        </div>
 
 
         <!-- AMOUNTS -->
@@ -2348,8 +2358,22 @@ function resetGivingModule(){
     if(!module) return;
 
 
+    /*
+       IMPORTANT:
+
+       The Giving Module is ALWAYS visible.
+
+       When there is no artist selected,
+       it displays a waiting message.
+
+       When an artist is selected,
+       loadArtistGiving() replaces the
+       waiting message with that artist's
+       receiving information.
+    */
+
     module.style.display =
-        "none";
+        "block";
 
 
     glctc1GivingProfile =
@@ -2362,23 +2386,64 @@ function resetGivingModule(){
         null;
 
 
+    const artist =
+        document.getElementById(
+            "glctc1GivingArtist"
+        );
+
+    const message =
+        document.getElementById(
+            "glctc1GivingMessage"
+        );
+
     const methods =
         document.getElementById(
             "glctc1GivingMethods"
         );
 
-    if(methods){
-
-        methods.innerHTML =
-            "";
-
-    }
-
-
     const status =
         document.getElementById(
             "glctc1GivingStatus"
         );
+
+
+    if(artist){
+
+        artist.textContent =
+            "SELECT AN ARTIST";
+
+    }
+
+
+    if(message){
+
+        message.textContent =
+            "Choose an artist above to load their Giving options.";
+
+    }
+
+
+    if(methods){
+
+        methods.innerHTML = `
+
+            <div
+                style="
+                    grid-column:1/-1;
+                    text-align:center;
+                    padding:18px;
+                    color:#777;
+                    font-size:10px;
+                    letter-spacing:1px;
+                "
+            >
+                SELECT AN ARTIST TO LOAD GIVING OPTIONS.
+            </div>
+
+        `;
+
+    }
+
 
     if(status){
 
@@ -2446,136 +2511,276 @@ async function loadArtistGiving(
     }
 
 
-    const {
-        data:profile,
-        error
-    } =
-    await supabaseClient
-
-        .from("profiles")
-
-        .select(`
-            id,
-            artist_name,
-            donation_enabled,
-            donation_message,
-            paypal_url,
-            xrp_address,
-            xlm_address,
-            crypto_url
-        `)
-
-        .eq(
-            "id",
-            artistId
-        )
-
-        .maybeSingle();
+    console.log(
+        "GLCTC1 GIVING: LOADING ARTIST:",
+        artistId
+    );
 
 
-    if(error){
+    try{
+
+        const {
+            data:profile,
+            error
+        } =
+        await supabaseClient
+
+            .from("profiles")
+
+            .select(`
+                id,
+                artist_name,
+                donation_enabled,
+                donation_message,
+                paypal_url,
+                xrp_address,
+                xlm_address,
+                crypto_url
+            `)
+
+            .eq(
+                "id",
+                artistId
+            )
+
+            .maybeSingle();
+
+
+        if(error){
+
+            console.error(
+                "GLCTC1 GIVING PROFILE ERROR:",
+                error
+            );
+
+            const artist =
+                document.getElementById(
+                    "glctc1GivingArtist"
+                );
+
+            const message =
+                document.getElementById(
+                    "glctc1GivingMessage"
+                );
+
+            const methods =
+                document.getElementById(
+                    "glctc1GivingMethods"
+                );
+
+
+            if(artist){
+
+                artist.textContent =
+                    "GIVING PROFILE ERROR";
+
+            }
+
+
+            if(message){
+
+                message.textContent =
+                    "The artist was found, but their Giving profile could not be loaded.";
+
+            }
+
+
+            if(methods){
+
+                methods.innerHTML = `
+
+                    <div
+                        style="
+                            grid-column:1/-1;
+                            text-align:center;
+                            padding:18px;
+                            color:#777;
+                            font-size:10px;
+                            letter-spacing:1px;
+                        "
+                    >
+                        GIVING PROFILE COULD NOT BE LOADED.
+                    </div>
+
+                `;
+
+            }
+
+            return;
+
+        }
+
+
+        if(!profile){
+
+            console.log(
+                "GLCTC1 GIVING: ARTIST PROFILE NOT FOUND."
+            );
+
+            return;
+
+        }
+
+
+        /*
+           =============================================
+           ACCOUNT.HTML → PROFILES → BOOKING SPACE
+           =============================================
+
+           These fields are controlled by the artist
+           from account.html:
+
+           donation_enabled
+           donation_message
+           paypal_url
+           xrp_address
+           xlm_address
+           crypto_url
+
+           The artist ID is the same currentArtist.id
+           used by the booking calendar.
+        */
+
+
+        glctc1GivingProfile =
+            profile;
+
+
+        const artist =
+            document.getElementById(
+                "glctc1GivingArtist"
+            );
+
+        const message =
+            document.getElementById(
+                "glctc1GivingMessage"
+            );
+
+
+        if(artist){
+
+            artist.textContent =
+                profile.artist_name ||
+                "ARTIST";
+
+        }
+
+
+        if(message){
+
+            message.textContent =
+                profile.donation_message ||
+                "Thank you for supporting the music and the journey. 💗";
+
+        }
+
+
+        /*
+           Giving can be disabled by the artist.
+
+           The module remains visible, but no receiving
+           information is exposed.
+        */
+
+        if(
+            profile.donation_enabled !== true
+        ){
+
+            const methods =
+                document.getElementById(
+                    "glctc1GivingMethods"
+                );
+
+            const status =
+                document.getElementById(
+                    "glctc1GivingStatus"
+                );
+
+
+            if(message){
+
+                message.textContent =
+                    "This artist has not currently enabled their Giving Space.";
+
+            }
+
+
+            if(methods){
+
+                methods.innerHTML = `
+
+                    <div
+                        style="
+                            grid-column:1/-1;
+                            text-align:center;
+                            padding:18px;
+                            color:#777;
+                            font-size:10px;
+                            letter-spacing:1px;
+                        "
+                    >
+                        GIVING IS CURRENTLY UNAVAILABLE FOR THIS ARTIST.
+                    </div>
+
+                `;
+
+            }
+
+
+            if(status){
+
+                status.textContent =
+                    "";
+
+            }
+
+
+            console.log(
+                "GLCTC1 GIVING: ARTIST HAS NOT ENABLED GIVING."
+            );
+
+            return;
+
+        }
+
+
+        /*
+           Artist has enabled Giving.
+        */
+
+        renderGivingMethods(
+            profile
+        );
+
+
+        const module =
+            document.getElementById(
+                "glctc1GivingModule"
+            );
+
+
+        if(module){
+
+            module.style.display =
+                "block";
+
+        }
+
+
+        console.log(
+            "GLCTC1 GIVING LOADED:",
+            profile.artist_name
+        );
+
+    }
+    catch(error){
 
         console.error(
-            "GLCTC1 GIVING PROFILE ERROR:",
+            "GLCTC1 GIVING LOAD FAILED:",
             error
         );
 
-        return;
-
     }
-
-
-    if(!profile){
-
-        console.log(
-            "GLCTC1 GIVING: ARTIST PROFILE NOT FOUND."
-        );
-
-        return;
-
-    }
-
-
-    /*
-       THIS IS THE CONNECTION TO ACCOUNT.HTML.
-
-       Account.html controls:
-       donation_enabled
-       donation_message
-       paypal_url
-       xrp_address
-       xlm_address
-       crypto_url
-    */
-
-    if(
-        profile.donation_enabled !== true
-    ){
-
-        console.log(
-            "GLCTC1 GIVING: ARTIST HAS NOT ENABLED GIVING."
-        );
-
-        return;
-
-    }
-
-
-    glctc1GivingProfile =
-        profile;
-
-
-    /* -------------------------------------------------
-       ARTIST NAME
-    ------------------------------------------------- */
-
-    document
-        .getElementById(
-            "glctc1GivingArtist"
-        )
-        .textContent =
-            profile.artist_name ||
-            "ARTIST";
-
-
-    /* -------------------------------------------------
-       ARTIST MESSAGE
-    ------------------------------------------------- */
-
-    document
-        .getElementById(
-            "glctc1GivingMessage"
-        )
-        .textContent =
-            profile.donation_message ||
-            "Thank you for supporting the music and the journey. 💗";
-
-
-    /* -------------------------------------------------
-       PAYMENT CARDS
-    ------------------------------------------------- */
-
-    renderGivingMethods(
-        profile
-    );
-
-
-    /* -------------------------------------------------
-       SHOW MODULE
-    ------------------------------------------------- */
-
-    document
-        .getElementById(
-            "glctc1GivingModule"
-        )
-        .style.display =
-            "block";
-
-
-    console.log(
-        "GLCTC1 GIVING LOADED:",
-        profile.artist_name
-    );
 
 }
 
@@ -2601,7 +2806,16 @@ function renderGivingMethods(
         "";
 
 
-    if(profile.paypal_url){
+    /*
+       PAYPAL
+    */
+
+    if(
+        profile.paypal_url &&
+        String(
+            profile.paypal_url
+        ).trim()
+    ){
 
         createGivingMethod(
             container,
@@ -2613,7 +2827,16 @@ function renderGivingMethods(
     }
 
 
-    if(profile.xrp_address){
+    /*
+       XRP
+    */
+
+    if(
+        profile.xrp_address &&
+        String(
+            profile.xrp_address
+        ).trim()
+    ){
 
         createGivingMethod(
             container,
@@ -2625,7 +2848,16 @@ function renderGivingMethods(
     }
 
 
-    if(profile.xlm_address){
+    /*
+       XLM
+    */
+
+    if(
+        profile.xlm_address &&
+        String(
+            profile.xlm_address
+        ).trim()
+    ){
 
         createGivingMethod(
             container,
@@ -2637,7 +2869,16 @@ function renderGivingMethods(
     }
 
 
-    if(profile.crypto_url){
+    /*
+       OTHER
+    */
+
+    if(
+        profile.crypto_url &&
+        String(
+            profile.crypto_url
+        ).trim()
+    ){
 
         createGivingMethod(
             container,
@@ -2650,9 +2891,8 @@ function renderGivingMethods(
 
 
     /*
-       If the artist has enabled Giving but has
-       not yet entered any receiving method,
-       keep the module visible but tell the visitor.
+       Giving enabled but no payment destination
+       has been configured yet.
     */
 
     if(!container.children.length){
@@ -2663,7 +2903,7 @@ function renderGivingMethods(
                 style="
                     grid-column:1/-1;
                     text-align:center;
-                    padding:15px;
+                    padding:18px;
                     color:#777;
                     font-size:10px;
                     letter-spacing:1px;
@@ -2704,17 +2944,37 @@ function createGivingMethod(
         type;
 
 
-    card.innerHTML = `
+    const iconElement =
+        document.createElement(
+            "div"
+        );
 
-        <div class="glctc1GivingMethodIcon">
-            ${icon}
-        </div>
+    iconElement.className =
+        "glctc1GivingMethodIcon";
 
-        <div class="glctc1GivingMethodName">
-            ${name}
-        </div>
+    iconElement.textContent =
+        icon;
 
-    `;
+
+    const nameElement =
+        document.createElement(
+            "div"
+        );
+
+    nameElement.className =
+        "glctc1GivingMethodName";
+
+    nameElement.textContent =
+        name;
+
+
+    card.appendChild(
+        iconElement
+    );
+
+    card.appendChild(
+        nameElement
+    );
 
 
     card.addEventListener(
@@ -2748,9 +3008,13 @@ function createGivingMethod(
                 );
 
 
-            status.textContent =
-                name +
-                " SELECTED.";
+            if(status){
+
+                status.textContent =
+                    name +
+                    " SELECTED.";
+
+            }
 
         }
     );
@@ -2874,6 +3138,13 @@ document
                 .focus();
 
 
+            document
+                .getElementById(
+                    "glctc1GivingStatus"
+                )
+                .textContent =
+                    "ENTER YOUR GIVING AMOUNT.";
+
         }
     );
 
@@ -2889,36 +3160,53 @@ async function copyGivingWallet(
 
     if(!address){
 
-        return;
+        return false;
 
     }
 
 
     try{
 
-        await navigator
-            .clipboard
-            .writeText(
-                address
-            );
+        if(
+            navigator.clipboard &&
+            navigator.clipboard.writeText
+        ){
 
+            await navigator
+                .clipboard
+                .writeText(
+                    address
+                );
 
-        return true;
+            return true;
+
+        }
 
     }
     catch(error){
 
-        window.prompt(
-            "COPY " +
-            type +
-            " WALLET ADDRESS:",
-            address
+        console.warn(
+            "CLIPBOARD API FAILED:",
+            error
         );
 
-
-        return true;
-
     }
+
+
+    /*
+       Fallback for browsers where Clipboard API
+       is unavailable.
+    */
+
+    window.prompt(
+        "COPY " +
+        type +
+        " WALLET ADDRESS:",
+        address
+    );
+
+
+    return true;
 
 }
 
@@ -2945,6 +3233,20 @@ document
 
                 status.textContent =
                     "PLEASE SELECT AN ARTIST FIRST.";
+
+                return;
+
+            }
+
+
+            if(
+                glctc1GivingProfile
+                    .donation_enabled !==
+                true
+            ){
+
+                status.textContent =
+                    "GIVING IS CURRENTLY UNAVAILABLE FOR THIS ARTIST.";
 
                 return;
 
@@ -4991,6 +5293,11 @@ async function initialise(){
     saveCalendar.style.display =
         "none";
 
+
+    /*
+       Giving Module is deliberately initialised
+       as visible before any artist is selected.
+    */
 
     resetGivingModule();
 

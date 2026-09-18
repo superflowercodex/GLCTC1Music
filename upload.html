@@ -4735,7 +4735,7 @@ if (masterLibraryEditorModule) {
 
 
     <!-- =================================================
-         💿 TRACK ARTWORK
+         💿 PLAYLIST ARTWORK
          ================================================= -->
 
     <div class="glctc1-playlist-artwork">
@@ -4852,6 +4852,63 @@ if (masterLibraryEditorModule) {
         </button>
 
       </div>
+
+
+    </div>
+
+  </div>
+
+
+    <!-- =================================================
+         PLAYER CONTROLS
+         ================================================= -->
+
+    <div class="glctc1-playlist-controls">
+
+      <div class="glctc1-playlist-control-row">
+
+        <button
+          id="glctc1PlaylistShuffle"
+          type="button"
+          title="Shuffle"
+        >
+          🔀
+        </button>
+
+        <button
+          id="glctc1PlaylistPrev"
+          type="button"
+          title="Previous"
+        >
+          ⏮
+        </button>
+
+        <button
+          id="glctc1PlaylistPlayPause"
+          type="button"
+          title="Play / Pause"
+        >
+          ▶
+        </button>
+
+        <button
+          id="glctc1PlaylistNext"
+          type="button"
+          title="Next"
+        >
+          ⏭
+        </button>
+
+        <button
+          id="glctc1PlaylistRepeat"
+          type="button"
+          title="Repeat"
+        >
+          🔁
+        </button>
+
+      </div>
+
 
     </div>
 
@@ -8833,6 +8890,79 @@ async function playPlaylistMasterTrack(
   }
 }
 
+// =====================================================
+// ▶️ MASTER LIBRARY — AUTO PLAY NEXT TRACK
+// =====================================================
+
+const libraryPlayer =
+  document.getElementById("libraryPlayer");
+
+if (libraryPlayer) {
+
+  libraryPlayer.addEventListener(
+    "ended",
+    async () => {
+
+      if (!library.length) return;
+
+      libraryIndex =
+        (libraryIndex + 1) % library.length;
+
+      const nextTrack =
+        library[libraryIndex];
+
+      if (!nextTrack) return;
+
+      selectedLibraryTrack =
+        nextTrack;
+
+      updateSelectedSlot(
+        nextTrack
+      );
+
+      showDetails(
+        nextTrack
+      );
+
+      const rows =
+        document.querySelectorAll(
+          "#libraryTable tbody tr"
+        );
+
+      const row =
+        Array.from(rows).find(row =>
+          row.children[5]?.textContent.trim() ===
+            String(
+              nextTrack.artist || ""
+            ).trim() &&
+          row.children[6]?.textContent.trim() ===
+            String(
+              nextTrack.title || ""
+            ).trim()
+        );
+
+      if (row) {
+        highlightSelectedRow(
+          row
+        );
+      }
+
+      await playLibraryTrack(
+        nextTrack
+      );
+
+      console.log(
+        "▶️ GLCTC1 AUTO NEXT:",
+        nextTrack.artist,
+        "—",
+        nextTrack.title
+      );
+
+    }
+  );
+
+}
+
 
 // --- GLCTC1 MASTER LIBRARY EDITOR ---
 // Populate editor when a Master Library track is selected
@@ -12701,7 +12831,7 @@ if (glctc1PlaylistAudio) {
 
 
 // -----------------------------------------------------
-// ⏮ PREVIOUS — PLAY PREVIOUS MASTER LIBRARY TRACK
+// ⏮ PREVIOUS — PLAY PREVIOUS PLAYLIST TRACK
 // -----------------------------------------------------
 
 if (glctc1PlaylistPrev) {
@@ -12709,41 +12839,29 @@ if (glctc1PlaylistPrev) {
   glctc1PlaylistPrev.onclick =
     async function () {
 
-      if (!library || !library.length) {
+      const playlist =
+        glctc1GetPlaylist();
+
+      if (
+        !playlist ||
+        !Array.isArray(playlist.tracks) ||
+        !playlist.tracks.length
+      ) {
         return;
       }
 
 
-      const orderedLibrary =
-        sortGLCTC1Library(library);
-
-
-      const currentTrack =
-        selectedLibraryTrack;
-
-
       let currentIndex =
-        orderedLibrary.indexOf(
-          currentTrack
+        Number(
+          glctc1PlaylistTrackIndex
         );
 
 
-      // -----------------------------------------------
-      // FALLBACK — MATCH BY TRACK ID
-      // -----------------------------------------------
+      if (
+        !Number.isInteger(currentIndex) ||
+        currentIndex < 0
+      ) {
 
-      if (currentIndex < 0) {
-
-        currentIndex =
-          orderedLibrary.findIndex(
-            track =>
-              String(track.id) ===
-              String(currentTrack?.id)
-          );
-      }
-
-
-      if (currentIndex < 0) {
         currentIndex = 0;
       }
 
@@ -12752,60 +12870,28 @@ if (glctc1PlaylistPrev) {
         (
           currentIndex -
           1 +
-          orderedLibrary.length
+          playlist.tracks.length
         ) %
-        orderedLibrary.length;
-
-
-      const previousTrack =
-        orderedLibrary[
-          previousIndex
-        ];
-
-
-      if (!previousTrack) {
-        return;
-      }
+        playlist.tracks.length;
 
 
       console.log(
-        "⏮ GLCTC1 PLAYLIST PREVIOUS — MASTER LIBRARY:",
-        previousTrack.artist,
-        "—",
-        previousTrack.title
+        "⏮ GLCTC1 PLAYLIST PREVIOUS:",
+        previousIndex + 1,
+        "/",
+        playlist.tracks.length
       );
 
 
-      selectedLibraryTrack =
-        previousTrack;
-
-
-      libraryIndex =
-        library.indexOf(
-          previousTrack
-        );
-
-
-      updateSelectedSlot(
-        previousTrack
+      await glctc1PlayPlaylistIndex(
+        previousIndex
       );
-
-
-      await playLibraryTrack(
-        previousTrack
-      );
-
-
-      showDetails(
-        previousTrack
-      );
-
     };
 }
 
 
 // -----------------------------------------------------
-// ⏭ NEXT — PLAY NEXT MASTER LIBRARY TRACK
+// ⏭ NEXT — PLAY NEXT PLAYLIST TRACK
 // -----------------------------------------------------
 
 if (glctc1PlaylistNext) {
@@ -12813,96 +12899,97 @@ if (glctc1PlaylistNext) {
   glctc1PlaylistNext.onclick =
     async function () {
 
-      if (!library || !library.length) {
+      const playlist =
+        glctc1GetPlaylist();
+
+      if (
+        !playlist ||
+        !Array.isArray(playlist.tracks) ||
+        !playlist.tracks.length
+      ) {
         return;
       }
 
 
-      const orderedLibrary =
-        sortGLCTC1Library(library);
-
-
-      const currentTrack =
-        selectedLibraryTrack;
-
-
       let currentIndex =
-        orderedLibrary.indexOf(
-          currentTrack
+        Number(
+          glctc1PlaylistTrackIndex
         );
 
 
-      // -----------------------------------------------
-      // FALLBACK — MATCH BY TRACK ID
-      // -----------------------------------------------
+      if (
+        !Number.isInteger(currentIndex) ||
+        currentIndex < 0
+      ) {
 
-      if (currentIndex < 0) {
-
-        currentIndex =
-          orderedLibrary.findIndex(
-            track =>
-              String(track.id) ===
-              String(currentTrack?.id)
-          );
-      }
-
-
-      if (currentIndex < 0) {
         currentIndex = 0;
       }
 
+
+      // -----------------------------------------------
+      // SHUFFLE NEXT
+      // -----------------------------------------------
+
+      if (
+        glctc1PlaylistShuffleOn &&
+        playlist.tracks.length > 1
+      ) {
+
+        let randomIndex;
+
+        do {
+
+          randomIndex =
+            Math.floor(
+              Math.random() *
+              playlist.tracks.length
+            );
+
+        } while (
+          randomIndex ===
+          currentIndex
+        );
+
+
+        console.log(
+          "🔀 GLCTC1 PLAYLIST SHUFFLE NEXT:",
+          randomIndex + 1,
+          "/",
+          playlist.tracks.length
+        );
+
+
+        await glctc1PlayPlaylistIndex(
+          randomIndex
+        );
+
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // NORMAL NEXT
+      // -----------------------------------------------
 
       const nextIndex =
         (
           currentIndex +
           1
         ) %
-        orderedLibrary.length;
-
-
-      const nextTrack =
-        orderedLibrary[
-          nextIndex
-        ];
-
-
-      if (!nextTrack) {
-        return;
-      }
+        playlist.tracks.length;
 
 
       console.log(
-        "⏭ GLCTC1 PLAYLIST NEXT — MASTER LIBRARY:",
-        nextTrack.artist,
-        "—",
-        nextTrack.title
+        "⏭ GLCTC1 PLAYLIST NEXT:",
+        nextIndex + 1,
+        "/",
+        playlist.tracks.length
       );
 
 
-      selectedLibraryTrack =
-        nextTrack;
-
-
-      libraryIndex =
-        library.indexOf(
-          nextTrack
-        );
-
-
-      updateSelectedSlot(
-        nextTrack
+      await glctc1PlayPlaylistIndex(
+        nextIndex
       );
-
-
-      await playLibraryTrack(
-        nextTrack
-      );
-
-
-      showDetails(
-        nextTrack
-      );
-
     };
 }
 

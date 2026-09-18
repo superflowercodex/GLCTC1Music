@@ -11348,7 +11348,7 @@ function shuffleNextTrack() {
 
 
 // -----------------------------------------------------
-// 🎵 TRACK FINISHED
+// 🎵 TRACK FINISHED — FOLLOW CURRENT TABLE ORDER
 // -----------------------------------------------------
 
 const libraryPlayer =
@@ -11356,11 +11356,133 @@ const libraryPlayer =
 
 if (libraryPlayer) {
 
-  libraryPlayer.addEventListener("ended", () => {
+  libraryPlayer.addEventListener("ended", async () => {
 
-    if (!shuffleOn) return;
+    if (!library.length) return;
 
-    shuffleNextTrack();
+
+    // =================================================
+    // 🔀 SHUFFLE ON = KEEP RANDOM BEHAVIOUR
+    // =================================================
+
+    if (shuffleOn) {
+
+      shuffleNextTrack();
+
+      return;
+    }
+
+
+    // =================================================
+    // 📚 SHUFFLE OFF = FOLLOW TABLE SORT ORDER
+    // =================================================
+
+    const orderedLibrary =
+      sortGLCTC1Library(library);
+
+
+    // Find the track that just finished
+    const currentTrack =
+      selectedLibraryTrack;
+
+
+    let currentPosition =
+      orderedLibrary.indexOf(currentTrack);
+
+
+    // Safety fallback
+    if (currentPosition < 0) {
+
+      currentPosition =
+        orderedLibrary.findIndex(track =>
+          String(track.id) ===
+          String(currentTrack?.id)
+        );
+    }
+
+
+    if (currentPosition < 0) {
+      currentPosition = 0;
+    }
+
+
+    // Next track in the CURRENT table order
+    const nextPosition =
+      (
+        currentPosition + 1
+      ) %
+      orderedLibrary.length;
+
+
+    const nextTrack =
+      orderedLibrary[nextPosition];
+
+
+    if (!nextTrack) return;
+
+
+    // Update library state
+    selectedLibraryTrack =
+      nextTrack;
+
+    libraryIndex =
+      library.indexOf(nextTrack);
+
+
+    // Update display
+    updateSelectedSlot(
+      nextTrack
+    );
+
+
+    // Play next track
+    await playLibraryTrack(
+      nextTrack
+    );
+
+
+    // Highlight correct table row
+    const rows =
+      document.querySelectorAll(
+        "#libraryTable tbody tr"
+      );
+
+
+    const row =
+      Array.from(rows).find(row =>
+
+        row.children[5]?.textContent
+          .trim() ===
+          String(
+            nextTrack.artist || ""
+          ).trim()
+
+        &&
+
+        row.children[6]?.textContent
+          .trim() ===
+          String(
+            nextTrack.title || ""
+          ).trim()
+      );
+
+
+    highlightSelectedRow(
+      row
+    );
+
+
+    showDetails(
+      nextTrack
+    );
+
+
+    console.log(
+      "▶️ GLCTC1 NEXT — FOLLOWING TABLE ORDER:",
+      nextTrack.artist,
+      "—",
+      nextTrack.title
+    );
 
   });
 
@@ -13492,10 +13614,56 @@ if (glctc1PlaylistSharePlaylist) {
       }
 
 
+      if (
+        !Array.isArray(playlist.tracks) ||
+        !playlist.tracks.length
+      ) {
+
+        alert(
+          "This playlist contains no tracks."
+        );
+
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // CREATE SMALL SHARE PAYLOAD
+      // -----------------------------------------------
+
+      const shareData = {
+
+        name:
+          playlist.name,
+
+        tracks:
+          playlist.tracks
+            .map(track =>
+              track.id ||
+              track.id_cat_no ||
+              track["ID Cat No"]
+            )
+            .filter(Boolean)
+
+      };
+
+
+      // -----------------------------------------------
+      // ENCODE PLAYLIST INTO URL
+      // -----------------------------------------------
+
+      const encodedPlaylist =
+        btoa(
+          encodeURIComponent(
+            JSON.stringify(
+              shareData
+            )
+          )
+        );
+
+
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?playlist=${encodeURIComponent(
-          playlist.name
-        )}`;
+        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
 
 
       try {
@@ -13518,6 +13686,7 @@ if (glctc1PlaylistSharePlaylist) {
 
             url:
               shareUrl
+
           });
 
         } else {
@@ -13529,6 +13698,7 @@ if (glctc1PlaylistSharePlaylist) {
           alert(
             "🔗 Playlist share link copied."
           );
+
         }
 
       } catch (error) {
@@ -13537,10 +13707,173 @@ if (glctc1PlaylistSharePlaylist) {
           "Playlist share cancelled:",
           error
         );
+
       }
+
     };
+
 }
 
+// -----------------------------------------------------
+// 🔗 LOAD SHARED PLAYLIST
+// -----------------------------------------------------
+
+const sharedPlaylistData =
+  new URLSearchParams(
+    window.location.search
+  ).get("playlist");
+
+
+if (sharedPlaylistData) {
+
+  try {
+
+    const decodedPlaylist =
+      JSON.parse(
+        decodeURIComponent(
+          atob(
+            sharedPlaylistData
+          )
+        )
+      );
+
+
+    if (
+      decodedPlaylist &&
+      decodedPlaylist.name &&
+      Array.isArray(
+        decodedPlaylist.tracks
+      )
+    ) {
+
+      // -----------------------------------------------
+      // FIND TRACKS IN MASTER LIBRARY
+      // -----------------------------------------------
+
+      const sharedTracks =
+        decodedPlaylist.tracks
+          .map(trackId =>
+
+            library.find(track =>
+
+              String(track.id) ===
+              String(trackId)
+
+              ||
+
+              String(track.id_cat_no) ===
+              String(trackId)
+
+              ||
+
+              String(track["ID Cat No"]) ===
+              String(trackId)
+
+            )
+
+          )
+          .filter(Boolean);
+
+
+      if (sharedTracks.length) {
+
+        // ---------------------------------------------
+        // CREATE LOCAL COPY OF SHARED PLAYLIST
+        // ---------------------------------------------
+
+        const sharedPlaylist = {
+
+          id:
+            "shared_" +
+            Date.now() +
+            "_" +
+            Math.random()
+              .toString(36)
+              .slice(2, 8),
+
+          name:
+            decodedPlaylist.name,
+
+          tracks:
+            sharedTracks.map(
+              track => ({
+                ...track
+              })
+            )
+
+        };
+
+
+        // ---------------------------------------------
+        // ADD TO PLAYLIST MASTER
+        // ---------------------------------------------
+
+        glctc1Playlists =
+          glctc1Playlists.filter(
+            playlist =>
+              playlist.name !==
+              decodedPlaylist.name
+          );
+
+
+        glctc1Playlists.push(
+          sharedPlaylist
+        );
+
+
+        glctc1SelectedPlaylistId =
+          sharedPlaylist.id;
+
+
+        glctc1PlaylistTrackIndex =
+          sharedPlaylist.tracks.length
+            ? 0
+            : -1;
+
+
+        glctc1SavePlaylists();
+
+        glctc1RenderPlaylistLibrary();
+
+        glctc1UpdatePlaylistPlayer();
+
+
+        console.log(
+          "🔗 GLCTC1 SHARED PLAYLIST LOADED:",
+          sharedPlaylist
+        );
+
+
+        // ---------------------------------------------
+        // REMOVE SHARE DATA FROM ADDRESS BAR
+        // ---------------------------------------------
+
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname
+        );
+
+      } else {
+
+        console.warn(
+          "⚠️ Shared playlist tracks not found in Master Library."
+        );
+
+      }
+
+    }
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
+      error
+    );
+
+  }
+
+}
 
 // -----------------------------------------------------
 // INITIAL PLAYLIST

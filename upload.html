@@ -7320,39 +7320,94 @@ function setGain(deck, value) {
 
 
 // =====================================================
-// 🎚️ GLCTC1 CHANNEL VOLUME
-// SAFE NODE-BASED CHANNEL FADER
+// 🎚️ GLCTC1 — INDEPENDENT CHANNEL VOLUME
+// SWAP 2
+// =====================================================
+//
+// CHANNEL A controls ONLY Deck A.
+// CHANNEL B controls ONLY Deck B.
+//
+// The channel fader does NOT control:
+// • the other deck
+// • the crossfader
+// • the master volume
+// • the headphone cue
+//
+// AUDIO PATH:
+//
+// Deck A → channelGain A → crossfade A → Master
+// Deck B → channelGain B → crossfade B → Master
 // =====================================================
 
-function setChannelVolume(deck, value) {
+function setChannelVolume(
+  deck,
+  value
+) {
 
   const eq =
     setupDeckEQ(deck);
 
-  if (!eq || !eq.output) return;
+  if (!eq) {
+    return;
+  }
 
-  const volume =
+
+  // ---------------------------------------------------
+  // CLEAN VALUE
+  // ---------------------------------------------------
+
+  const gain =
     Math.max(
       0,
       Math.min(
         1,
-        Number(value)
+        Number(value) || 0
       )
     );
 
-  eq.output.gain.setTargetAtTime(
-    volume,
+
+  // ---------------------------------------------------
+  // INDEPENDENT CHANNEL GAIN
+  // ---------------------------------------------------
+
+  if (
+    !eq.channelGain
+  ) {
+
+    console.error(
+      `❌ GLCTC1: Channel Gain ${deck} not available.`
+    );
+
+    return;
+  }
+
+
+  eq.channelGain.gain.setTargetAtTime(
+    gain,
     eq.context.currentTime,
     0.01
   );
 
+
+  // ---------------------------------------------------
+  // RESUME AUDIO
+  // ---------------------------------------------------
+
   if (
-    eq.context.state === "suspended"
+    eq.context.state ===
+    "suspended"
   ) {
 
     eq.context.resume();
 
   }
+
+
+  console.log(
+    `🎚️ GLCTC1 CHANNEL ${deck} VOLUME:`,
+    gain
+  );
+
 }
 
 // =====================================================
@@ -7714,56 +7769,42 @@ document.getElementById("snapRightB").addEventListener("click", () =>
 
 
 // =====================================================
-// 🎚️ CREATE EQ + METER FOR DECK
+// 🎛️ GLCTC1 — CLEAN DECK AUDIO ROUTING
+// SWAP 1
 // =====================================================
-// GLCTC1 SWAP 1
-//
-// Each deck now has its own independent mixer channel.
 //
 // DECK A:
-// source
+// Media Source
 //   ↓
-// LOW EQ
+// EQ
 //   ↓
-// HIGH EQ
+// Deck Output
 //   ↓
-// PAN
+// Channel Gain A
 //   ↓
-// FILTER
+// Crossfade Gain A
 //   ↓
-// OUTPUT
-//   ↓
-// CHANNEL GAIN A
-//   ↓
-// CROSSFADE A
-//   ↓
-// SHARED MASTER
+// MASTER BUS
 //
 // DECK B:
-// source
+// Media Source
 //   ↓
-// LOW EQ
+// EQ
 //   ↓
-// HIGH EQ
+// Deck Output
 //   ↓
-// PAN
+// Channel Gain B
 //   ↓
-// FILTER
+// Crossfade Gain B
 //   ↓
-// OUTPUT
-//   ↓
-// CHANNEL GAIN B
-//   ↓
-// CROSSFADE B
-//   ↓
-// SHARED MASTER
+// MASTER BUS
 //
 // IMPORTANT:
-// - Deck A and Deck B channel volumes are independent.
-// - Crossfader is separate from channel volume.
-// - No deck connects directly to ctx.destination.
-// - Master output remains a shared bus.
-// - Headphone routing is NOT changed in this swap.
+// • Deck A and B channel gains are completely independent.
+// • No HTML audio volume is used for mixer gain.
+// • No direct deck → ctx.destination connection.
+// • Crossfader is separate from channel volume.
+// • Master bus is created here.
 // =====================================================
 
 function setupDeckEQ(deck) {
@@ -7781,14 +7822,12 @@ function setupDeckEQ(deck) {
   // ---------------------------------------------------
 
   if (deckEQ[deck]) {
-
     return deckEQ[deck];
-
   }
 
 
   // ---------------------------------------------------
-  // AUDIO CONTEXT
+  // SHARED AUDIO CONTEXT
   // ---------------------------------------------------
 
   const AudioContext =
@@ -7798,16 +7837,12 @@ function setupDeckEQ(deck) {
   if (!AudioContext) {
 
     console.error(
-      "❌ GLCTC1: Web Audio is not supported."
+      "❌ GLCTC1: Web Audio API not supported."
     );
 
     return null;
   }
 
-
-  // ---------------------------------------------------
-  // SHARED AUDIO CONTEXT
-  // ---------------------------------------------------
 
   const ctx =
     window.glctc1SharedAudioContext ||
@@ -7819,10 +7854,6 @@ function setupDeckEQ(deck) {
 
   // ---------------------------------------------------
   // MEDIA ELEMENT SOURCE
-  // ---------------------------------------------------
-  // createMediaElementSource() must only happen once
-  // for each HTML audio element.
-  // deckEQ[deck] above protects against duplicates.
   // ---------------------------------------------------
 
   const source =
@@ -7906,7 +7937,7 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎛️ CREATE HALL IMPULSE
+  // 🎛️ HALL IMPULSE
   // ===================================================
 
   const hallLength =
@@ -7939,19 +7970,16 @@ function setupDeckEQ(deck) {
 
       const decay =
         Math.pow(
-          1 -
-          i / data.length,
+          1 - i / data.length,
           2.5
         );
 
       data[i] =
         (
-          Math.random() * 2 -
-          1
+          Math.random() * 2 - 1
         ) * decay;
 
     }
-
   }
 
 
@@ -7968,6 +7996,37 @@ function setupDeckEQ(deck) {
 
   output.gain.value =
     1;
+
+
+  // ===================================================
+  // 🎚️ INDEPENDENT CHANNEL GAIN
+  // ===================================================
+  //
+  // THIS NODE BELONGS ONLY TO THIS DECK.
+  //
+  // A = channelGainA
+  // B = channelGainB
+  //
+  // Moving A cannot touch B.
+  // Moving B cannot touch A.
+  // ===================================================
+
+  const channelGain =
+    ctx.createGain();
+
+  channelGain.gain.value =
+    1;
+
+
+  // ===================================================
+  // 🎚️ CROSSFADE GAIN
+  // ===================================================
+
+  const crossfadeGain =
+    ctx.createGain();
+
+  crossfadeGain.gain.value =
+    0.5;
 
 
   // ===================================================
@@ -7991,36 +8050,70 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎚️ INDEPENDENT CHANNEL GAIN
+  // 🔊 SHARED MASTER BUS
   // ===================================================
-  // THIS IS THE ACTUAL DECK CHANNEL FADER.
+
+  if (
+    !window.glctc1MasterBus
+  ) {
+
+    window.glctc1MasterBus =
+      ctx.createGain();
+
+    window.glctc1MasterBus.gain.value =
+      1;
+
+  }
+
+
+  // ===================================================
+  // 🔊 SHARED MASTER OUTPUT
+  // ===================================================
+
+  if (
+    !window.glctc1MasterOutput
+  ) {
+
+    window.glctc1MasterOutput =
+      ctx.createGain();
+
+    window.glctc1MasterOutput.gain.value =
+      1;
+
+
+    window.glctc1MasterBus.connect(
+      window.glctc1MasterOutput
+    );
+
+
+    window.glctc1MasterOutput.connect(
+      ctx.destination
+    );
+
+  }
+
+
+  // ===================================================
+  // 🎛️ MAIN AUDIO CHAIN
+  // ===================================================
   //
-  // A controls only A.
-  // B controls only B.
-  // ===================================================
-
-  const channelGain =
-    ctx.createGain();
-
-  channelGain.gain.value =
-    1;
-
-
-  // ===================================================
-  // 🎚️ INDEPENDENT CROSSFADE GAIN
-  // ===================================================
-  // Kept completely separate from channelGain.
-  // ===================================================
-
-  const crossfadeGain =
-    ctx.createGain();
-
-  crossfadeGain.gain.value =
-    1;
-
-
-  // ===================================================
-  // 🎛️ MAIN DECK AUDIO CHAIN
+  // SOURCE
+  //   ↓
+  // LOW
+  //   ↓
+  // HIGH
+  //   ↓
+  // PAN
+  //   ↓
+  // FILTER
+  //   ↓
+  // OUTPUT
+  //   ↓
+  // CHANNEL GAIN
+  //   ↓
+  // CROSSFADE
+  //   ↓
+  // MASTER BUS
   // ===================================================
 
   source
@@ -8029,19 +8122,6 @@ function setupDeckEQ(deck) {
     .connect(pan)
     .connect(filter)
     .connect(output);
-
-
-  // ===================================================
-  // 📊 METER SEND
-  // ===================================================
-  // Meter reads the deck signal before the channel
-  // fader, so moving the channel fader does not make
-  // the meter disappear.
-  // ===================================================
-
-  output.connect(
-    analyser
-  );
 
 
   // ===================================================
@@ -8055,56 +8135,42 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🔊 CHANNEL → CROSSFADE
+  // 📊 ANALYSER
   // ===================================================
 
-  output
-    .connect(channelGain)
-    .connect(crossfadeGain);
-
-
-  // ===================================================
-  // 🔊 CROSSFADE → SHARED MASTER
-  // ===================================================
-
-  if (
-    !window.glctc1AudioEngine
-  ) {
-
-    window.glctc1AudioEngine = {};
-
-  }
-
-
-  if (
-    !window.glctc1AudioEngine.master
-  ) {
-
-    const master =
-      ctx.createGain();
-
-    master.gain.value =
-      1;
-
-    window.glctc1AudioEngine.master =
-      master;
-
-    master.connect(
-      ctx.destination
-    );
-
-  }
-
-
-  crossfadeGain.connect(
-    window.glctc1AudioEngine.master
+  output.connect(
+    analyser
   );
 
 
   // ===================================================
-  // 🔊 FORCE HTML AUDIO TO UNITY
+  // 🎚️ CHANNEL → CROSSFADER
   // ===================================================
-  // Web Audio now controls the mixer levels.
+
+  output.connect(
+    channelGain
+  );
+
+
+  channelGain.connect(
+    crossfadeGain
+  );
+
+
+  // ===================================================
+  // 🎚️ CROSSFADER → MASTER
+  // ===================================================
+
+  crossfadeGain.connect(
+    window.glctc1MasterBus
+  );
+
+
+  // ===================================================
+  // 🔊 KEEP HTML AUDIO AT UNITY
+  // ===================================================
+  //
+  // Web Audio controls volume now.
   // ===================================================
 
   a.volume =
@@ -8112,30 +8178,7 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // ▶️ RESUME AUDIO CONTEXT WHEN POSSIBLE
-  // ===================================================
-
-  if (
-    ctx.state ===
-    "suspended"
-  ) {
-
-    ctx.resume().catch(
-      error => {
-
-        console.warn(
-          "⚠️ GLCTC1 AudioContext resume:",
-          error
-        );
-
-      }
-    );
-
-  }
-
-
-  // ===================================================
-  // 🎛️ STORE DECK AUDIO NODES
+  // 💾 STORE DECK NODES
   // ===================================================
 
   deckEQ[deck] = {
@@ -8167,28 +8210,29 @@ function setupDeckEQ(deck) {
     output:
       output,
 
-    analyser:
-      analyser,
-
     channelGain:
       channelGain,
 
     crossfadeGain:
       crossfadeGain,
 
-    masterGain:
-      window.glctc1AudioEngine.master
+    analyser:
+      analyser
 
   };
 
 
-  // ===================================================
-  // ✅ RETURN DECK
-  // ===================================================
+  console.log(
+    `🎛️ GLCTC1 DECK ${deck} AUDIO ROUTING READY`,
+    deckEQ[deck]
+  );
+
 
   return deckEQ[deck];
 
 }
+
+
 
 // =====================================================
 // 📊 GLCTC1 — LIVE CHANNEL LEVEL METERS
@@ -8644,13 +8688,78 @@ function setReverb(deck, value) {
 // 🎚️ CROSSFADER — SEPARATE
 // =====================================================
 
-function setCrossfader(value) {  
-  const a = audio("A");  
-  const b = audio("B");  
-  a.volume = 1 - value;  
-  b.volume = value;  
+function setCrossfader(value) {
+
+  const v =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        Number(value) || 0
+      )
+    );
+
+
+  const a =
+    setupDeckEQ("A");
+
+  const b =
+    setupDeckEQ("B");
+
+
+  if (!a || !b) {
+    return;
+  }
+
+
+  // ---------------------------------------------------
+  // DECK A
+  // ---------------------------------------------------
+
+  const gainA =
+    Math.cos(
+      v * Math.PI * 0.5
+    );
+
+
+  // ---------------------------------------------------
+  // DECK B
+  // ---------------------------------------------------
+
+  const gainB =
+    Math.sin(
+      v * Math.PI * 0.5
+    );
+
+
+  a.crossfadeGain.gain.setTargetAtTime(
+    gainA,
+    a.context.currentTime,
+    0.01
+  );
+
+
+  b.crossfadeGain.gain.setTargetAtTime(
+    gainB,
+    b.context.currentTime,
+    0.01
+  );
+
+
+  // ---------------------------------------------------
+  // MAKE SURE AUDIO CONTEXT IS RUNNING
+  // ---------------------------------------------------
+
+  if (
+    a.context.state ===
+    "suspended"
+  ) {
+    a.context.resume();
+  }
+
 }
-  
+
+
 // --- MASTER LIBRARY / BANKS STATE ---
 
 const GLCTC1_BANKS_STORAGE_KEY =
@@ -11463,20 +11572,48 @@ document
         )
       );
 
-    ["A", "B"].forEach(deck => {
 
-      const eq =
-        setupDeckEQ(deck);
+    // -------------------------------------------------
+    // SHARED MASTER OUTPUT
+    // -------------------------------------------------
 
-      if (!eq || !eq.masterGain) return;
-
-      eq.masterGain.gain.setTargetAtTime(
-        value,
-        eq.context.currentTime,
-        0.01
+    if (
+      !window.glctc1MasterOutput
+    ) {
+      console.error(
+        "❌ GLCTC1: Master Output not available."
       );
+      return;
+    }
 
-    });
+
+    // -------------------------------------------------
+    // SET MASTER VOLUME
+    // -------------------------------------------------
+
+    window.glctc1MasterOutput.gain.setTargetAtTime(
+      value,
+      window.glctc1MasterOutput.context.currentTime,
+      0.01
+    );
+
+
+    // -------------------------------------------------
+    // RESUME AUDIO CONTEXT
+    // -------------------------------------------------
+
+    if (
+      window.glctc1MasterOutput.context.state ===
+      "suspended"
+    ) {
+      window.glctc1MasterOutput.context.resume();
+    }
+
+
+    console.log(
+      "🔊 GLCTC1 MASTER VOLUME:",
+      value
+    );
 
   });
 

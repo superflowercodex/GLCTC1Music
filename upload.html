@@ -7321,43 +7321,15 @@ function setGain(deck, value) {
 
 // =====================================================
 // 🎚️ GLCTC1 CHANNEL VOLUME
-// 🔒 A / B COMPLETELY INDEPENDENT
+// SAFE NODE-BASED CHANNEL FADER
 // =====================================================
 
-const glctc1ChannelLevels = {
-  A: 1,
-  B: 1
-};
-
-
 function setChannelVolume(deck, value) {
-
-  // -----------------------------------------------
-  // ONLY accept A or B
-  // -----------------------------------------------
-
-  if (
-    deck !== "A" &&
-    deck !== "B"
-  ) {
-    return;
-  }
-
 
   const eq =
     setupDeckEQ(deck);
 
-  if (
-    !eq ||
-    !eq.output
-  ) {
-    return;
-  }
-
-
-  // -----------------------------------------------
-  // STORE THIS CHANNEL'S LEVEL ONLY
-  // -----------------------------------------------
+  if (!eq || !eq.output) return;
 
   const volume =
     Math.max(
@@ -7368,35 +7340,19 @@ function setChannelVolume(deck, value) {
       )
     );
 
-
-  glctc1ChannelLevels[deck] =
-    volume;
-
-
-  // -----------------------------------------------
-  // APPLY ONLY TO THIS DECK
-  // -----------------------------------------------
-
   eq.output.gain.setTargetAtTime(
-    glctc1ChannelLevels[deck],
+    volume,
     eq.context.currentTime,
     0.01
   );
 
-
-  // -----------------------------------------------
-  // RESUME AUDIO IF NEEDED
-  // -----------------------------------------------
-
   if (
-    eq.context.state ===
-    "suspended"
+    eq.context.state === "suspended"
   ) {
 
     eq.context.resume();
 
   }
-
 }
 
 // =====================================================
@@ -15880,62 +15836,102 @@ console.log(
 
 
   // ===================================================
-  // 🎚️ GLCTC1 MIDI VALUE → UI CONTROL
-  // ===================================================
+// 🎚️ GLCTC1 MIDI VALUE → UI CONTROL
+// ===================================================
 
-  function setGLCTC1Control(id, value) {
+function setGLCTC1Control(id, value) {
 
-    const element =
-      document.getElementById(id);
+  const element =
+    document.getElementById(id);
 
-    if (!element) {
-      return false;
-    }
-
-
-    // RANGE / FADER / KNOB
-
-    if (
-      element.type === "range"
-    ) {
-
-      const min =
-        Number(element.min || 0);
-
-      const max =
-        Number(element.max || 127);
-
-      element.value =
-        min +
-        (value / 127) *
-        (max - min);
-
-      element.dispatchEvent(
-        new Event("input", {
-          bubbles: true
-        })
-      );
-
-      return true;
-    }
-
-
-    // BUTTON
-
-    if (
-      element.tagName === "BUTTON"
-    ) {
-
-      if (value > 0) {
-        element.click();
-      }
-
-      return true;
-    }
-
-
+  if (!element) {
     return false;
   }
+
+
+  // =================================================
+  // 🎚️ CHANNEL VOLUME A / B
+  // VCI-300 FADERS ARE PHYSICALLY INVERTED
+  //
+  // MIDI 0   = FADER FULL UP
+  // MIDI 127 = FADER FULL DOWN
+  //
+  // Reverse ONLY these two controls.
+  // =================================================
+
+  if (
+    id === "glctc1ChannelVolumeA" ||
+    id === "glctc1ChannelVolumeB"
+  ) {
+
+    const min =
+      Number(element.min || 0);
+
+    const max =
+      Number(element.max || 1);
+
+    const inverted =
+      127 - Number(value);
+
+    element.value =
+      min +
+      (inverted / 127) *
+      (max - min);
+
+    element.dispatchEvent(
+      new Event("input", {
+        bubbles: true
+      })
+    );
+
+    return true;
+  }
+
+
+  // =================================================
+  // 🎛️ ALL OTHER RANGE CONTROLS
+  // LEAVE THEIR MIDI DIRECTION UNCHANGED
+  // =================================================
+
+  if (element.type === "range") {
+
+    const min =
+      Number(element.min || 0);
+
+    const max =
+      Number(element.max || 127);
+
+    element.value =
+      min +
+      (Number(value) / 127) *
+      (max - min);
+
+    element.dispatchEvent(
+      new Event("input", {
+        bubbles: true
+      })
+    );
+
+    return true;
+  }
+
+
+  // =================================================
+  // 🔘 BUTTON CONTROLS
+  // =================================================
+
+  if (element.tagName === "BUTTON") {
+
+    if (value > 0) {
+      element.click();
+    }
+
+    return true;
+  }
+
+
+  return false;
+}
 
 
   // ===================================================

@@ -7896,24 +7896,13 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎚️ INDEPENDENT CHANNEL VOLUME
+  // 🎚️ CHANNEL OUTPUT / VOLUME
   // ===================================================
 
-  const channelGain =
+  const output =
     ctx.createGain();
 
-  channelGain.gain.value =
-    1;
-
-
-  // ===================================================
-  // 🎚️ INDEPENDENT CROSSFADE VOLUME
-  // ===================================================
-
-  const crossfadeGain =
-    ctx.createGain();
-
-  crossfadeGain.gain.value =
+  output.gain.value =
     1;
 
 
@@ -7936,17 +7925,16 @@ function setupDeckEQ(deck) {
   analyser.maxDecibels =
     0;
 
+// ===================================================
+// 🔊 GLCTC1 MASTER VOLUME
+// FINAL OUTPUT GAIN
+// ===================================================
 
-  // ===================================================
-  // 🔊 GLCTC1 MASTER VOLUME
-  // ===================================================
+const masterGain =
+  ctx.createGain();
 
-  const masterGain =
-    ctx.createGain();
-
-  masterGain.gain.value =
-    1;
-
+masterGain.gain.value =
+  1;
 
   // ===================================================
   // 🎧 HEADPHONE CUE SEND
@@ -7956,53 +7944,22 @@ function setupDeckEQ(deck) {
     ctx.createGain();
 
   headphoneSend.gain.value =
-    0;
+    1;
 
 
   // ===================================================
   // 🎛️ MAIN AUDIO CHAIN
-  //
-  // DECK A:
-  // source → EQ → channelGainA
-  //        → crossfadeA → master
-  //
-  // DECK B:
-  // source → EQ → channelGainB
-  //        → crossfadeB → master
-  //
-  // Each deck has its OWN gain nodes.
   // ===================================================
 
   source
-    .connect(low)
-    .connect(high)
-    .connect(pan)
-    .connect(filter);
-
-
-  filter.connect(
-    channelGain
-  );
-
-
-  channelGain.connect(
-    crossfadeGain
-  );
-
-
-  crossfadeGain.connect(
-    analyser
-  );
-
-
-  analyser.connect(
-    masterGain
-  );
-
-
-  masterGain.connect(
-    ctx.destination
-  );
+  .connect(low)
+  .connect(high)
+  .connect(pan)
+  .connect(filter)
+  .connect(output)
+  .connect(analyser)
+  .connect(masterGain)
+  .connect(ctx.destination);
 
 
   // ===================================================
@@ -8012,67 +7969,16 @@ function setupDeckEQ(deck) {
   filter
     .connect(reverb)
     .connect(reverbGain)
-    .connect(channelGain);
+    .connect(output);
 
 
   // ===================================================
-  // 🎧 HEADPHONE CUE PATH
-  //
-  // Independent of the channel output.
+  // 🎧 HEADPHONE SEND
   // ===================================================
 
-  filter.connect(
+  output.connect(
     headphoneSend
   );
-
-
-  // ===================================================
-  // 🎧 HEADPHONE SEND TO EXISTING HEADPHONE BUS
-  // ===================================================
-
-  if (
-    !window.glctc1HeadphoneBus
-  ) {
-
-    window.glctc1HeadphoneBus =
-      ctx.createGain();
-
-    window.glctc1HeadphoneBus.gain.value =
-      1;
-
-    window.glctc1HeadphoneBus.connect(
-      ctx.destination
-    );
-
-  }
-
-
-  headphoneSend.connect(
-    window.glctc1HeadphoneBus
-  );
-
-
-  // ===================================================
-  // 🔊 HTML AUDIO ELEMENT UNITY
-  // ===================================================
-
-  a.volume =
-    1;
-
-
-  // ===================================================
-  // 🔊 RESUME AUDIO CONTEXT
-  // ===================================================
-
-  if (
-    ctx.state === "suspended"
-  ) {
-
-    ctx.resume().catch(
-      () => {}
-    );
-
-  }
 
 
   // ===================================================
@@ -8105,23 +8011,17 @@ function setupDeckEQ(deck) {
     reverbGain:
       reverbGain,
 
-    channelGain:
-      channelGain,
-
-    crossfadeGain:
-      crossfadeGain,
-
     output:
-      channelGain,
+  output,
 
-    analyser:
-      analyser,
+analyser:
+  analyser,
 
-    masterGain:
-      masterGain,
+masterGain:
+  masterGain,
 
-    headphoneSend:
-      headphoneSend
+headphoneSend:
+  headphoneSend
 
   };
 
@@ -16318,14 +16218,7 @@ const controls = {
   // HEADPHONE CUE MIX
   // ===================================================
 
-  0x19: "glctc1CueMix",
-
-
-  // ===================================================
-  // 🔊 MASTER VOLUME
-  // ===================================================
-
-  0x1A: "glctc1MasterVolume"
+  0x19: "glctc1CueMix"
 
 };
 
@@ -16467,7 +16360,7 @@ function handleMIDI(event) {
 
 
   // =================================================
-  // 💿 JOG / SCRATCH FIRST
+  // JOG FIRST
   // =================================================
 
   if (
@@ -16484,187 +16377,90 @@ function handleMIDI(event) {
 
 
   // =================================================
-  // 🎚️ MIDI CC CONTROLS
+  // 🎚️ VCI-300 CENTRE NAVIGATION
   // =================================================
   //
-  // 0x0C = CHANNEL A
-  // 0x12 = CHANNEL B
-  // 0x18 = CROSSFADER
-  // 0x19 = CUE MIX
-  // 0x1A = MASTER VOLUME
+  // 0x4D = UP
+  // 0x4E = DOWN
+  // 0x4F = BACK
+  // 0x50 = FORWARD
   //
-  // A and B are explicitly separated above.
+  // UP / FORWARD  = REVERB +
+  // DOWN / BACK   = REVERB -
+  // =================================================
+
+  if (
+    status === 0x90 &&
+    value > 0
+  ) {
+
+    if (
+      control === 0x4D
+    ) {
+
+      adjustGLCTC1ActiveReverb(
+        1
+      );
+
+      return;
+
+    }
+
+
+    if (
+      control === 0x4E
+    ) {
+
+      adjustGLCTC1ActiveReverb(
+        -1
+      );
+
+      return;
+
+    }
+
+
+    if (
+      control === 0x4F
+    ) {
+
+      adjustGLCTC1ActiveReverb(
+        -1
+      );
+
+      return;
+
+    }
+
+
+    if (
+      control === 0x50
+    ) {
+
+      adjustGLCTC1ActiveReverb(
+        1
+      );
+
+      return;
+
+    }
+
+  }
+
+
+  // =================================================
+  // 🎚️ CHANNEL CC
   // =================================================
 
   if (
     status === 0xB0
   ) {
 
-
-    // ------------------------------------------------
-    // CHANNEL A
-    // ------------------------------------------------
-
-    if (
-      control === 0x0C
-    ) {
-
-      const element =
-        document.getElementById(
-          "glctc1ChannelVolumeA"
-        );
-
-      if (element) {
-
-        const min =
-          Number(
-            element.min || 0
-          );
-
-        const max =
-          Number(
-            element.max || 1
-          );
-
-        element.value =
-          min +
-          (
-            value / 127
-          ) *
-          (
-            max - min
-          );
-
-        element.dispatchEvent(
-          new Event(
-            "input",
-            {
-              bubbles: true
-            }
-          )
-        );
-
-        glctc1ActiveDeck =
-          "A";
-
-      }
-
-      return;
-
-    }
-
-
-    // ------------------------------------------------
-    // CHANNEL B
-    // ------------------------------------------------
-
-    if (
-      control === 0x12
-    ) {
-
-      const element =
-        document.getElementById(
-          "glctc1ChannelVolumeB"
-        );
-
-      if (element) {
-
-        const min =
-          Number(
-            element.min || 0
-          );
-
-        const max =
-          Number(
-            element.max || 1
-          );
-
-        element.value =
-          min +
-          (
-            value / 127
-          ) *
-          (
-            max - min
-          );
-
-        element.dispatchEvent(
-          new Event(
-            "input",
-            {
-              bubbles: true
-            }
-          )
-        );
-
-        glctc1ActiveDeck =
-          "B";
-
-      }
-
-      return;
-
-    }
-
-
-    // ------------------------------------------------
-    // MASTER VOLUME
-    // ------------------------------------------------
-
-    if (
-      control === 0x1A
-    ) {
-
-      const element =
-        document.getElementById(
-          "glctc1MasterVolume"
-        );
-
-      if (element) {
-
-        const min =
-          Number(
-            element.min || 0
-          );
-
-        const max =
-          Number(
-            element.max || 1
-          );
-
-        element.value =
-          min +
-          (
-            value / 127
-          ) *
-          (
-            max - min
-          );
-
-        element.dispatchEvent(
-          new Event(
-            "input",
-            {
-              bubbles: true
-            }
-          )
-        );
-
-      }
-
-      return;
-
-    }
-
-
-    // ------------------------------------------------
-    // ALL OTHER MIDI CC CONTROLS
-    // ------------------------------------------------
-
     const id =
       controls[
         control
       ];
+
 
     if (id) {
 
@@ -16673,6 +16469,10 @@ function handleMIDI(event) {
         value
       );
 
+
+      // ---------------------------------------------
+      // REMEMBER LAST TOUCHED DECK
+      // ---------------------------------------------
 
       if (
         id.endsWith("A")
@@ -16695,80 +16495,14 @@ function handleMIDI(event) {
 
     }
 
+
     return;
 
   }
 
 
   // =================================================
-  // 🎚️ VCI-300 CENTRE NAVIGATION
-  // =================================================
-
-  if (
-    status === 0x90 &&
-    value > 0
-  ) {
-
-    // UP
-    if (
-      control === 0x4D
-    ) {
-
-      adjustGLCTC1ActiveReverb(
-        1
-      );
-
-      return;
-
-    }
-
-
-    // DOWN
-    if (
-      control === 0x4E
-    ) {
-
-      adjustGLCTC1ActiveReverb(
-        -1
-      );
-
-      return;
-
-    }
-
-
-    // BACK
-    if (
-      control === 0x4F
-    ) {
-
-      adjustGLCTC1ActiveReverb(
-        -1
-      );
-
-      return;
-
-    }
-
-
-    // FORWARD
-    if (
-      control === 0x50
-    ) {
-
-      adjustGLCTC1ActiveReverb(
-        1
-      );
-
-      return;
-
-    }
-
-  }
-
-
-  // =================================================
-  // 🔘 VCI-300 BUTTONS
+  // 🔘 CHANNEL BUTTONS
   // =================================================
 
   if (
@@ -16781,14 +16515,13 @@ function handleMIDI(event) {
         control
       ];
 
-    if (!id) {
-      return;
-    }
+
+    if (!id) return;
 
 
-    // ------------------------------------------------
+    // ---------------------------------------------
     // REMEMBER LAST TOUCHED DECK
-    // ------------------------------------------------
+    // ---------------------------------------------
 
     if (
       id.endsWith("A")
@@ -16815,9 +16548,8 @@ function handleMIDI(event) {
         id
       );
 
-    if (!element) {
-      return;
-    }
+
+    if (!element) return;
 
 
     element.click();

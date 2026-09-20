@@ -7896,13 +7896,24 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎚️ CHANNEL OUTPUT / VOLUME
+  // 🎚️ INDEPENDENT CHANNEL VOLUME
   // ===================================================
 
-  const output =
+  const channelGain =
     ctx.createGain();
 
-  output.gain.value =
+  channelGain.gain.value =
+    1;
+
+
+  // ===================================================
+  // 🎚️ INDEPENDENT CROSSFADE VOLUME
+  // ===================================================
+
+  const crossfadeGain =
+    ctx.createGain();
+
+  crossfadeGain.gain.value =
     1;
 
 
@@ -7925,16 +7936,17 @@ function setupDeckEQ(deck) {
   analyser.maxDecibels =
     0;
 
-// ===================================================
-// 🔊 GLCTC1 MASTER VOLUME
-// FINAL OUTPUT GAIN
-// ===================================================
 
-const masterGain =
-  ctx.createGain();
+  // ===================================================
+  // 🔊 GLCTC1 MASTER VOLUME
+  // ===================================================
 
-masterGain.gain.value =
-  1;
+  const masterGain =
+    ctx.createGain();
+
+  masterGain.gain.value =
+    1;
+
 
   // ===================================================
   // 🎧 HEADPHONE CUE SEND
@@ -7944,22 +7956,53 @@ masterGain.gain.value =
     ctx.createGain();
 
   headphoneSend.gain.value =
-    1;
+    0;
 
 
   // ===================================================
   // 🎛️ MAIN AUDIO CHAIN
+  //
+  // DECK A:
+  // source → EQ → channelGainA
+  //        → crossfadeA → master
+  //
+  // DECK B:
+  // source → EQ → channelGainB
+  //        → crossfadeB → master
+  //
+  // Each deck has its OWN gain nodes.
   // ===================================================
 
   source
-  .connect(low)
-  .connect(high)
-  .connect(pan)
-  .connect(filter)
-  .connect(output)
-  .connect(analyser)
-  .connect(masterGain)
-  .connect(ctx.destination);
+    .connect(low)
+    .connect(high)
+    .connect(pan)
+    .connect(filter);
+
+
+  filter.connect(
+    channelGain
+  );
+
+
+  channelGain.connect(
+    crossfadeGain
+  );
+
+
+  crossfadeGain.connect(
+    analyser
+  );
+
+
+  analyser.connect(
+    masterGain
+  );
+
+
+  masterGain.connect(
+    ctx.destination
+  );
 
 
   // ===================================================
@@ -7969,16 +8012,67 @@ masterGain.gain.value =
   filter
     .connect(reverb)
     .connect(reverbGain)
-    .connect(output);
+    .connect(channelGain);
 
 
   // ===================================================
-  // 🎧 HEADPHONE SEND
+  // 🎧 HEADPHONE CUE PATH
+  //
+  // Independent of the channel output.
   // ===================================================
 
-  output.connect(
+  filter.connect(
     headphoneSend
   );
+
+
+  // ===================================================
+  // 🎧 HEADPHONE SEND TO EXISTING HEADPHONE BUS
+  // ===================================================
+
+  if (
+    !window.glctc1HeadphoneBus
+  ) {
+
+    window.glctc1HeadphoneBus =
+      ctx.createGain();
+
+    window.glctc1HeadphoneBus.gain.value =
+      1;
+
+    window.glctc1HeadphoneBus.connect(
+      ctx.destination
+    );
+
+  }
+
+
+  headphoneSend.connect(
+    window.glctc1HeadphoneBus
+  );
+
+
+  // ===================================================
+  // 🔊 HTML AUDIO ELEMENT UNITY
+  // ===================================================
+
+  a.volume =
+    1;
+
+
+  // ===================================================
+  // 🔊 RESUME AUDIO CONTEXT
+  // ===================================================
+
+  if (
+    ctx.state === "suspended"
+  ) {
+
+    ctx.resume().catch(
+      () => {}
+    );
+
+  }
 
 
   // ===================================================
@@ -8011,17 +8105,23 @@ masterGain.gain.value =
     reverbGain:
       reverbGain,
 
+    channelGain:
+      channelGain,
+
+    crossfadeGain:
+      crossfadeGain,
+
     output:
-  output,
+      channelGain,
 
-analyser:
-  analyser,
+    analyser:
+      analyser,
 
-masterGain:
-  masterGain,
+    masterGain:
+      masterGain,
 
-headphoneSend:
-  headphoneSend
+    headphoneSend:
+      headphoneSend
 
   };
 

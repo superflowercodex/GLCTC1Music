@@ -7716,13 +7716,64 @@ document.getElementById("snapRightB").addEventListener("click", () =>
 // =====================================================
 // 🎚️ CREATE EQ + METER FOR DECK
 // =====================================================
+// GLCTC1 SWAP 1
+//
+// Each deck now has its own independent mixer channel.
+//
+// DECK A:
+// source
+//   ↓
+// LOW EQ
+//   ↓
+// HIGH EQ
+//   ↓
+// PAN
+//   ↓
+// FILTER
+//   ↓
+// OUTPUT
+//   ↓
+// CHANNEL GAIN A
+//   ↓
+// CROSSFADE A
+//   ↓
+// SHARED MASTER
+//
+// DECK B:
+// source
+//   ↓
+// LOW EQ
+//   ↓
+// HIGH EQ
+//   ↓
+// PAN
+//   ↓
+// FILTER
+//   ↓
+// OUTPUT
+//   ↓
+// CHANNEL GAIN B
+//   ↓
+// CROSSFADE B
+//   ↓
+// SHARED MASTER
+//
+// IMPORTANT:
+// - Deck A and Deck B channel volumes are independent.
+// - Crossfader is separate from channel volume.
+// - No deck connects directly to ctx.destination.
+// - Master output remains a shared bus.
+// - Headphone routing is NOT changed in this swap.
+// =====================================================
 
 function setupDeckEQ(deck) {
 
   const a =
     audio(deck);
 
-  if (!a) return null;
+  if (!a) {
+    return null;
+  }
 
 
   // ---------------------------------------------------
@@ -7730,7 +7781,9 @@ function setupDeckEQ(deck) {
   // ---------------------------------------------------
 
   if (deckEQ[deck]) {
+
     return deckEQ[deck];
+
   }
 
 
@@ -7744,13 +7797,17 @@ function setupDeckEQ(deck) {
 
   if (!AudioContext) {
 
-    console.log(
-      "Web Audio EQ not supported."
+    console.error(
+      "❌ GLCTC1: Web Audio is not supported."
     );
 
     return null;
   }
 
+
+  // ---------------------------------------------------
+  // SHARED AUDIO CONTEXT
+  // ---------------------------------------------------
 
   const ctx =
     window.glctc1SharedAudioContext ||
@@ -7762,6 +7819,10 @@ function setupDeckEQ(deck) {
 
   // ---------------------------------------------------
   // MEDIA ELEMENT SOURCE
+  // ---------------------------------------------------
+  // createMediaElementSource() must only happen once
+  // for each HTML audio element.
+  // deckEQ[deck] above protects against duplicates.
   // ---------------------------------------------------
 
   const source =
@@ -7831,7 +7892,7 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎛️ REVERB — MASSIVE HALL
+  // 🎛️ REVERB
   // ===================================================
 
   const reverb =
@@ -7878,16 +7939,19 @@ function setupDeckEQ(deck) {
 
       const decay =
         Math.pow(
-          1 - i / data.length,
+          1 -
+          i / data.length,
           2.5
         );
 
       data[i] =
         (
-          Math.random() * 2 - 1
+          Math.random() * 2 -
+          1
         ) * decay;
 
     }
+
   }
 
 
@@ -7896,7 +7960,7 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎚️ CHANNEL OUTPUT / VOLUME
+  // 🔊 DECK OUTPUT
   // ===================================================
 
   const output =
@@ -7925,333 +7989,204 @@ function setupDeckEQ(deck) {
   analyser.maxDecibels =
     0;
 
-// ===================================================
-// 🎛️ GLCTC1 — DEDICATED DECK CHANNEL OUTPUT
-// ===================================================
-// SWAP 1 — CORRECTED
-//
-// The original `output` node was already created above.
-// DO NOT create another `const output` here.
-//
-// Signal path:
-//
-// source
-//   ↓
-// EQ / FILTER
-//   ↓
-// output
-//   ↓
-// channelGain
-//   ↓
-// crossfadeGain
-//   ↓
-// MASTER MIX BUS
-// ===================================================
+
+  // ===================================================
+  // 🎚️ INDEPENDENT CHANNEL GAIN
+  // ===================================================
+  // THIS IS THE ACTUAL DECK CHANNEL FADER.
+  //
+  // A controls only A.
+  // B controls only B.
+  // ===================================================
+
+  const channelGain =
+    ctx.createGain();
+
+  channelGain.gain.value =
+    1;
 
 
-// ===================================================
-// 🎚️ INDEPENDENT CHANNEL GAIN
-// ===================================================
+  // ===================================================
+  // 🎚️ INDEPENDENT CROSSFADE GAIN
+  // ===================================================
+  // Kept completely separate from channelGain.
+  // ===================================================
 
-const channelGain =
-  ctx.createGain();
+  const crossfadeGain =
+    ctx.createGain();
 
-channelGain.gain.value =
-  1;
-
-
-// ===================================================
-// 🎚️ DECK CROSSFADE BUS
-// ===================================================
-
-const crossfadeGain =
-  ctx.createGain();
-
-crossfadeGain.gain.value =
-  1;
+  crossfadeGain.gain.value =
+    1;
 
 
-// ===================================================
-// 🎛️ MAIN AUDIO CHAIN
-// ===================================================
+  // ===================================================
+  // 🎛️ MAIN DECK AUDIO CHAIN
+  // ===================================================
 
-source
-  .connect(low)
-  .connect(high)
-  .connect(pan)
-  .connect(filter)
-  .connect(output);
-
-
-// ===================================================
-// 🎛️ REVERB PATH
-// ===================================================
-
-filter
-  .connect(reverb)
-  .connect(reverbGain)
-  .connect(output);
+  source
+    .connect(low)
+    .connect(high)
+    .connect(pan)
+    .connect(filter)
+    .connect(output);
 
 
-// ===================================================
-// 🎛️ GLCTC1 — MASTER MIX BUS
-// ===================================================
+  // ===================================================
+  // 📊 METER SEND
+  // ===================================================
+  // Meter reads the deck signal before the channel
+  // fader, so moving the channel fader does not make
+  // the meter disappear.
+  // ===================================================
 
-if (
-  window.glctc1AudioEngine &&
-  window.glctc1AudioEngine.master
-) {
+  output.connect(
+    analyser
+  );
+
+
+  // ===================================================
+  // 🎛️ REVERB PATH
+  // ===================================================
+
+  filter
+    .connect(reverb)
+    .connect(reverbGain)
+    .connect(output);
+
+
+  // ===================================================
+  // 🔊 CHANNEL → CROSSFADE
+  // ===================================================
+
+  output
+    .connect(channelGain)
+    .connect(crossfadeGain);
+
+
+  // ===================================================
+  // 🔊 CROSSFADE → SHARED MASTER
+  // ===================================================
+
+  if (
+    !window.glctc1AudioEngine
+  ) {
+
+    window.glctc1AudioEngine = {};
+
+  }
+
+
+  if (
+    !window.glctc1AudioEngine.master
+  ) {
+
+    const master =
+      ctx.createGain();
+
+    master.gain.value =
+      1;
+
+    window.glctc1AudioEngine.master =
+      master;
+
+    master.connect(
+      ctx.destination
+    );
+
+  }
+
 
   crossfadeGain.connect(
     window.glctc1AudioEngine.master
   );
 
-} else {
 
-  console.warn(
-    "⚠️ GLCTC1 master audio bus not ready yet."
-  );
+  // ===================================================
+  // 🔊 FORCE HTML AUDIO TO UNITY
+  // ===================================================
+  // Web Audio now controls the mixer levels.
+  // ===================================================
 
-}
-
-
-// ===================================================
-// 🔊 FORCE HTML AUDIO TO UNITY
-// ===================================================
-
-const deckAudio =
-  document.getElementById(
-    deck === "A"
-      ? "audioA"
-      : "audioB"
-  );
-
-if (deckAudio) {
-
-  deckAudio.volume =
+  a.volume =
     1;
 
-}
 
+  // ===================================================
+  // ▶️ RESUME AUDIO CONTEXT WHEN POSSIBLE
+  // ===================================================
 
-// ===================================================
-// 🎛️ STORE DECK AUDIO NODES
-// ===================================================
+  if (
+    ctx.state ===
+    "suspended"
+  ) {
 
-deckEQ[deck] = {
+    ctx.resume().catch(
+      error => {
 
-  context:
-    ctx,
+        console.warn(
+          "⚠️ GLCTC1 AudioContext resume:",
+          error
+        );
 
-  source:
-    source,
+      }
+    );
 
-  low:
-    low,
+  }
 
-  high:
-    high,
 
-  pan:
-    pan,
+  // ===================================================
+  // 🎛️ STORE DECK AUDIO NODES
+  // ===================================================
 
-  filter:
-    filter,
+  deckEQ[deck] = {
 
-  reverb:
-    reverb,
+    context:
+      ctx,
 
-  reverbGain:
-    reverbGain,
+    source:
+      source,
 
-  output:
-    output,
+    low:
+      low,
 
-  analyser:
-    analyser,
+    high:
+      high,
 
-  channelGain:
-    channelGain,
+    pan:
+      pan,
 
-  crossfadeGain:
-    crossfadeGain
+    filter:
+      filter,
 
-};
+    reverb:
+      reverb,
 
+    reverbGain:
+      reverbGain,
 
-// ===================================================
-// ✅ RETURN DECK
-// ===================================================
+    output:
+      output,
 
-return deckEQ[deck];
+    analyser:
+      analyser,
 
-}
+    channelGain:
+      channelGain,
 
+    crossfadeGain:
+      crossfadeGain,
 
-// ===================================================
-// 🎚️ INDEPENDENT CHANNEL GAIN
-// ===================================================
-// This is the individual mixer channel volume.
-// Deck A and Deck B have completely separate nodes.
-// ===================================================
+    masterGain:
+      window.glctc1AudioEngine.master
 
-const channelGain =
-  ctx.createGain();
+  };
 
-channelGain.gain.value =
-  1;
 
+  // ===================================================
+  // ✅ RETURN DECK
+  // ===================================================
 
-// ===================================================
-// 🎚️ DECK CROSSFADE BUS
-// ===================================================
-// Kept separate from channel volume.
-// This allows the crossfader to control A/B
-// independently without moving the channel faders.
-// ===================================================
-
-const crossfadeGain =
-  ctx.createGain();
-
-crossfadeGain.gain.value =
-  1;
-
-
-// ===================================================
-// 🎛️ MAIN AUDIO CHAIN
-// ===================================================
-
-source
-  .connect(low)
-  .connect(high)
-  .connect(pan)
-  .connect(filter)
-  .connect(output);
-
-
-// ===================================================
-// 🎛️ REVERB PATH
-// ===================================================
-
-filter
-  .connect(reverb)
-  .connect(reverbGain)
-  .connect(output);
-
-
-// ===================================================
-// 🎛️ GLCTC1 — MASTER MIX BUS
-// ===================================================
-// SWAP 2
-//
-// Each deck now has its own independent channel:
-//
-// DECK A
-// output → channelGainA → crossfadeGainA → master
-//
-// DECK B
-// output → channelGainB → crossfadeGainB → master
-//
-// The master bus is shared, but the channel gains
-// remain completely independent.
-// ===================================================
-
-
-// ===================================================
-// 🔊 MASTER MIX BUS
-// ===================================================
-
-if (
-  !window.glctc1AudioEngine ||
-  !window.glctc1AudioEngine.master
-) {
-
-  console.warn(
-    "⚠️ GLCTC1 master audio bus not ready yet."
-  );
-
-} else {
-
-  // =================================================
-  // 🎚️ CONNECT DECK TO MASTER
-  // =================================================
-
-  crossfadeGain.connect(
-    window.glctc1AudioEngine.master
-  );
-
-}
-
-
-// ===================================================
-// 🔊 FORCE HTML AUDIO TO UNITY
-// ===================================================
-// Web Audio now controls the mixer volume.
-// The HTML audio element must not attenuate it.
-// ===================================================
-
-const deckAudio =
-  document.getElementById(
-    deck === "A"
-      ? "audioA"
-      : "audioB"
-  );
-
-if (deckAudio) {
-
-  deckAudio.volume =
-    1;
-
-}
-
-
-// ===================================================
-// 🎛️ STORE DECK AUDIO NODES
-// ===================================================
-
-deckEQ[deck] = {
-
-  context:
-    ctx,
-
-  source:
-    source,
-
-  low:
-    low,
-
-  high:
-    high,
-
-  pan:
-    pan,
-
-  filter:
-    filter,
-
-  reverb:
-    reverb,
-
-  reverbGain:
-    reverbGain,
-
-  output:
-    output,
-
-  channelGain:
-    channelGain,
-
-  crossfadeGain:
-    crossfadeGain
-
-};
-
-
-// ===================================================
-// ✅ RETURN DECK
-// ===================================================
-
-return deckEQ[deck];
+  return deckEQ[deck];
 
 }
 

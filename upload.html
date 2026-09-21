@@ -5266,68 +5266,393 @@ if (masterLibraryEditorModule) {
 // =====================================================
 // 🎧 GLCTC1 HEADPHONE CUE BUTTONS
 // =====================================================
+//
+// REAL HEADPHONE CUE CONTROL
+//
+// CUE A:
+//   Enables / disables Deck A in headphones
+//
+// CUE B:
+//   Enables / disables Deck B in headphones
+//
+// HEADPHONE GAIN A/B:
+//   Controls individual cue level
+//
+// CUE MIX:
+//   0.0 = A ONLY
+//   0.5 = A + B
+//   1.0 = B ONLY
+//
+// =====================================================
+
 
 const glctc1CueA =
-  document.getElementById("glctc1CueA");
+  document.getElementById(
+    "glctc1CueA"
+  );
+
 
 const glctc1CueB =
-  document.getElementById("glctc1CueB");
+  document.getElementById(
+    "glctc1CueB"
+  );
+
+
+const glctc1HeadphoneGainA =
+  document.getElementById(
+    "glctc1HeadphoneGainA"
+  );
+
+
+const glctc1HeadphoneGainB =
+  document.getElementById(
+    "glctc1HeadphoneGainB"
+  );
+
+
+const glctc1CueMix =
+  document.getElementById(
+    "glctc1CueMix"
+  );
 
 
 // =====================================================
-// 🎧 CUE A — INDEPENDENT TOGGLE
+// 🎧 CUE STATE
+// =====================================================
+
+let glctc1CueStateA =
+  false;
+
+
+let glctc1CueStateB =
+  false;
+
+
+// =====================================================
+// 🎚️ UPDATE REAL HEADPHONE AUDIO
+// =====================================================
+
+function glctc1UpdateHeadphoneCue() {
+
+  const eqA =
+    window.deckEQ &&
+    window.deckEQ.A;
+
+
+  const eqB =
+    window.deckEQ &&
+    window.deckEQ.B;
+
+
+  // ---------------------------------------------------
+  // READ HEADPHONE GAIN A
+  // ---------------------------------------------------
+
+  const gainA =
+    glctc1HeadphoneGainA
+      ? Number(
+          glctc1HeadphoneGainA.value
+        )
+      : 1;
+
+
+  // ---------------------------------------------------
+  // READ HEADPHONE GAIN B
+  // ---------------------------------------------------
+
+  const gainB =
+    glctc1HeadphoneGainB
+      ? Number(
+          glctc1HeadphoneGainB.value
+        )
+      : 1;
+
+
+  // ---------------------------------------------------
+  // READ CUE MIX
+  // ---------------------------------------------------
+
+  let mix =
+    glctc1CueMix
+      ? Number(
+          glctc1CueMix.value
+        )
+      : 0.5;
+
+
+  // ---------------------------------------------------
+  // NORMALISE CUE MIX
+  // ---------------------------------------------------
+  //
+  // Supports:
+  //
+  // 0 → 1
+  //
+  // OR
+  //
+  // 0 → 127
+  //
+  // This also keeps the MIDI CC working correctly.
+  // ---------------------------------------------------
+
+  if (mix > 1) {
+
+    mix =
+      mix / 127;
+
+  }
+
+
+  mix =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        mix
+      )
+    );
+
+
+  // ---------------------------------------------------
+  // CALCULATE A / B MIX
+  // ---------------------------------------------------
+
+  const mixA =
+    1 - mix;
+
+
+  const mixB =
+    mix;
+
+
+  // ===================================================
+  // 🎧 DECK A HEADPHONE LEVEL
+  // ===================================================
+
+  if (
+    eqA &&
+    eqA.headphoneSend &&
+    eqA.context
+  ) {
+
+    const levelA =
+      glctc1CueStateA
+        ? gainA * mixA
+        : 0;
+
+
+    eqA.headphoneSend.gain.setTargetAtTime(
+      levelA,
+      eqA.context.currentTime,
+      0.01
+    );
+
+  }
+
+
+  // ===================================================
+  // 🎧 DECK B HEADPHONE LEVEL
+  // ===================================================
+
+  if (
+    eqB &&
+    eqB.headphoneSend &&
+    eqB.context
+  ) {
+
+    const levelB =
+      glctc1CueStateB
+        ? gainB * mixB
+        : 0;
+
+
+    eqB.headphoneSend.gain.setTargetAtTime(
+      levelB,
+      eqB.context.currentTime,
+      0.01
+    );
+
+  }
+
+
+  // ===================================================
+  // 🔊 RESUME AUDIO CONTEXT
+  // ===================================================
+
+  const context =
+    eqA?.context ||
+    eqB?.context;
+
+
+  if (
+    context &&
+    context.state === "suspended"
+  ) {
+
+    context.resume();
+
+  }
+
+}
+
+
+// =====================================================
+// 🎧 CUE A
 // =====================================================
 
 if (glctc1CueA) {
 
-  glctc1CueA.addEventListener("click", () => {
+  glctc1CueA.addEventListener(
+    "click",
+    () => {
 
-    const active =
-      glctc1CueA.getAttribute("aria-pressed") === "true";
+      glctc1CueStateA =
+        !glctc1CueStateA;
 
-    const newState = !active;
 
-    glctc1CueA.setAttribute(
-      "aria-pressed",
-      String(newState)
-    );
+      glctc1CueA.setAttribute(
+        "aria-pressed",
+        String(
+          glctc1CueStateA
+        )
+      );
 
-    glctc1CueA.classList.toggle(
-      "active",
-      newState
-    );
 
-  });
+      glctc1CueA.classList.toggle(
+        "active",
+        glctc1CueStateA
+      );
+
+
+      glctc1UpdateHeadphoneCue();
+
+    }
+  );
 
 }
 
 
 // =====================================================
-// 🎧 CUE B — INDEPENDENT TOGGLE
+// 🎧 CUE B
 // =====================================================
 
 if (glctc1CueB) {
 
-  glctc1CueB.addEventListener("click", () => {
+  glctc1CueB.addEventListener(
+    "click",
+    () => {
 
-    const active =
-      glctc1CueB.getAttribute("aria-pressed") === "true";
+      glctc1CueStateB =
+        !glctc1CueStateB;
 
-    const newState = !active;
 
-    glctc1CueB.setAttribute(
-      "aria-pressed",
-      String(newState)
-    );
+      glctc1CueB.setAttribute(
+        "aria-pressed",
+        String(
+          glctc1CueStateB
+        )
+      );
 
-    glctc1CueB.classList.toggle(
-      "active",
-      newState
-    );
 
-  });
+      glctc1CueB.classList.toggle(
+        "active",
+        glctc1CueStateB
+      );
+
+
+      glctc1UpdateHeadphoneCue();
+
+    }
+  );
 
 }
+
+
+// =====================================================
+// 🎚️ HEADPHONE GAIN A
+// =====================================================
+
+if (glctc1HeadphoneGainA) {
+
+  glctc1HeadphoneGainA.addEventListener(
+    "input",
+    () => {
+
+      glctc1UpdateHeadphoneCue();
+
+    }
+  );
+
+}
+
+
+// =====================================================
+// 🎚️ HEADPHONE GAIN B
+// =====================================================
+
+if (glctc1HeadphoneGainB) {
+
+  glctc1HeadphoneGainB.addEventListener(
+    "input",
+    () => {
+
+      glctc1UpdateHeadphoneCue();
+
+    }
+  );
+
+}
+
+
+// =====================================================
+// 🎧 CUE MIX
+// =====================================================
+
+if (glctc1CueMix) {
+
+  glctc1CueMix.addEventListener(
+    "input",
+    () => {
+
+      glctc1UpdateHeadphoneCue();
+
+    }
+  );
+
+}
+
+
+// =====================================================
+// 🎧 INITIALISE HEADPHONE CUE
+// =====================================================
+//
+// Start with both CUE channels OFF.
+// The existing headphoneSend nodes
+// remain available for immediate use.
+//
+// =====================================================
+
+glctc1UpdateHeadphoneCue();
+
+
+// =====================================================
+// 🎧 MIDI / UI ACCESS
+// =====================================================
+//
+// Existing MIDI routing:
+//
+// 0x19 → glctc1CueMix
+// 0x24 → cueA
+// 0x37 → cueB
+//
+// MIDI therefore enters through the
+// existing HTML controls.
+//
+// No MIDI mapping is changed here.
+// =====================================================
+
+
+// --- CORE HELPERS ---
 
 
 // --- CORE HELPERS ---
@@ -8153,13 +8478,43 @@ output
 // ===================================================
 //
 // IMPORTANT:
-// This is a separate feed.
-// It does NOT follow the main
-// crossfader.
+// This is a separate headphone feed.
+//
+// It is taken BEFORE the main
+// channel crossfader.
+//
+// The headphoneSend node is controlled
+// by CUE A / CUE B, Headphone Gain A/B
+// and the CUE MIX control.
+//
 // ===================================================
 
 output.connect(
   headphoneSend
+);
+
+
+// ===================================================
+// 🎧 HEADPHONE OUTPUT
+// ===================================================
+//
+// Send the dedicated cue feed to the
+// Web Audio output.
+//
+// The headphoneSend gain is controlled
+// by the CUE system.
+//
+// When CUE is OFF:
+//   headphoneSend gain = 0
+//
+// When CUE is ON:
+//   headphoneSend gain follows
+//   CUE MIX + headphone gain.
+//
+// ===================================================
+
+headphoneSend.connect(
+  ctx.destination
 );
 
 

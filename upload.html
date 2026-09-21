@@ -7298,38 +7298,72 @@ function setPitch(deck, value) {
 
 
 // =====================================================
-// 🔊 GAIN
+// 🔊 GLCTC1 GAIN
+// =====================================================
+// INDIVIDUAL DECK GAIN
+// SEPARATE FROM CHANNEL VOLUME
+// SEPARATE FROM CROSSFADER
 // =====================================================
 
 function setGain(deck, value) {
 
-  const a =
-    audio(deck);
+  const eq =
+    setupDeckEQ(deck);
 
-  if (!a) return;
+  if (!eq || !eq.gain) return;
 
-  a.volume =
+  const gain =
     Math.max(
       0,
       Math.min(
         1,
-        value
+        Number(value)
       )
     );
+
+  eq.gain.gain.setTargetAtTime(
+    gain,
+    eq.context.currentTime,
+    0.01
+  );
+
+  if (
+    eq.context.state ===
+    "suspended"
+  ) {
+
+    eq.context.resume();
+
+  }
+
 }
 
 
 // =====================================================
 // 🎚️ GLCTC1 CHANNEL VOLUME
-// SAFE NODE-BASED CHANNEL FADER
+// =====================================================
+// INDEPENDENT CHANNEL FADER
+//
+// GAIN ≠ CHANNEL VOLUME
+//
+// CHANNEL A → channelGain A
+// CHANNEL B → channelGain B
 // =====================================================
 
-function setChannelVolume(deck, value) {
+function setChannelVolume(
+  deck,
+  value
+) {
 
   const eq =
     setupDeckEQ(deck);
 
-  if (!eq || !eq.output) return;
+  if (
+    !eq ||
+    !eq.channelGain
+  ) {
+    return;
+  }
 
   const volume =
     Math.max(
@@ -7340,19 +7374,21 @@ function setChannelVolume(deck, value) {
       )
     );
 
-  eq.output.gain.setTargetAtTime(
+  eq.channelGain.gain.setTargetAtTime(
     volume,
     eq.context.currentTime,
     0.01
   );
 
   if (
-    eq.context.state === "suspended"
+    eq.context.state ===
+    "suspended"
   ) {
 
     eq.context.resume();
 
   }
+
 }
 
 // =====================================================
@@ -7896,38 +7932,129 @@ function setupDeckEQ(deck) {
 
 
   // ===================================================
-  // 🎚️ CHANNEL OUTPUT / VOLUME
-  // ===================================================
+// 🎚️ GLCTC1 — COMPLETE DECK MIXER ROUTING
+// ===================================================
+//
+// EACH DECK HAS:
+//
+// SOURCE
+//   ↓
+// LOW
+//   ↓
+// HIGH
+//   ↓
+// PAN
+//   ↓
+// FILTER
+//   ↓
+// DRY / REVERB MIX
+//   ↓
+// GAIN
+//   ↓
+// CHANNEL VOLUME
+//   ↓
+// CROSSFADER
+//   ↓
+// ANALYSER
+//   ↓
+// MASTER
+//   ↓
+// OUTPUT
+//
+// HEADPHONE CUE IS TAKEN FROM THE
+// PRE-CROSSFADER CHANNEL PATH.
+//
+// IMPORTANT:
+// GAIN, CHANNEL VOLUME AND CROSSFADER
+// ARE THREE SEPARATE AUDIO NODES.
+// ===================================================
 
-  const output =
-    ctx.createGain();
-
-  output.gain.value =
-    1;
-
-
-  // ===================================================
-  // 📊 CHANNEL ANALYSER
-  // ===================================================
-
-  const analyser =
-    ctx.createAnalyser();
-
-  analyser.fftSize =
-    256;
-
-  analyser.smoothingTimeConstant =
-    0.8;
-
-  analyser.minDecibels =
-    -60;
-
-  analyser.maxDecibels =
-    0;
 
 // ===================================================
-// 🔊 GLCTC1 MASTER VOLUME
-// FINAL OUTPUT GAIN
+// 🎚️ DECK OUTPUT BUS
+// ===================================================
+
+const output =
+  ctx.createGain();
+
+output.gain.value =
+  1;
+
+
+// ===================================================
+// 🔊 DECK GAIN
+// ===================================================
+//
+// INDIVIDUAL DECK GAIN.
+// THIS IS SEPARATE FROM CHANNEL VOLUME.
+//
+// A → gain A
+// B → gain B
+// ===================================================
+
+const gain =
+  ctx.createGain();
+
+gain.gain.value =
+  1;
+
+
+// ===================================================
+// 🎚️ CHANNEL VOLUME
+// ===================================================
+//
+// INDEPENDENT CHANNEL FADER.
+//
+// A → channelGain A
+// B → channelGain B
+// ===================================================
+
+const channelGain =
+  ctx.createGain();
+
+channelGain.gain.value =
+  1;
+
+
+// ===================================================
+// 🎚️ CROSSFADER
+// ===================================================
+//
+// INDEPENDENT CROSSFADE NODE.
+//
+// A = 1 - crossfader
+// B = crossfader
+// ===================================================
+
+const crossfadeGain =
+  ctx.createGain();
+
+crossfadeGain.gain.value =
+  1;
+
+
+// ===================================================
+// 📊 CHANNEL ANALYSER
+// ===================================================
+
+const analyser =
+  ctx.createAnalyser();
+
+analyser.fftSize =
+  256;
+
+analyser.smoothingTimeConstant =
+  0.8;
+
+analyser.minDecibels =
+  -60;
+
+analyser.maxDecibels =
+  0;
+
+
+// ===================================================
+// 🔊 MASTER VOLUME
 // ===================================================
 
 const masterGain =
@@ -7936,97 +8063,166 @@ const masterGain =
 masterGain.gain.value =
   1;
 
-  // ===================================================
-  // 🎧 HEADPHONE CUE SEND
-  // ===================================================
 
-  const headphoneSend =
-    ctx.createGain();
+// ===================================================
+// 🎧 HEADPHONE CUE SEND
+// ===================================================
+//
+// This is the independent headphone feed
+// for this deck.
+//
+// It is deliberately taken BEFORE
+// the channel crossfader so that the
+// DJ can preview either deck regardless
+// of the main crossfader position.
+// ===================================================
 
-  headphoneSend.gain.value =
-    1;
+const headphoneSend =
+  ctx.createGain();
+
+headphoneSend.gain.value =
+  1;
 
 
-  // ===================================================
-  // 🎛️ MAIN AUDIO CHAIN
-  // ===================================================
+// ===================================================
+// 🎧 HEADPHONE CUE STATE
+// ===================================================
+//
+// The cue buttons themselves are handled
+// elsewhere. This node provides the
+// dedicated audio path.
+// ===================================================
 
-  source
+
+// ===================================================
+// 🎛️ MAIN DRY AUDIO PATH
+// ===================================================
+
+source
   .connect(low)
   .connect(high)
   .connect(pan)
   .connect(filter)
-  .connect(output)
+  .connect(output);
+
+
+// ===================================================
+// 🎛️ REVERB PATH
+// ===================================================
+//
+// Reverb is mixed back into the same
+// deck output bus.
+// ===================================================
+
+filter
+  .connect(reverb)
+  .connect(reverbGain)
+  .connect(output);
+
+
+// ===================================================
+// 🎚️ MAIN MIXER CHAIN
+// ===================================================
+//
+// output
+//   ↓
+// gain
+//   ↓
+// channelGain
+//   ↓
+// crossfadeGain
+//   ↓
+// analyser
+//   ↓
+// masterGain
+//   ↓
+// destination
+// ===================================================
+
+output
+  .connect(gain)
+  .connect(channelGain)
+  .connect(crossfadeGain)
   .connect(analyser)
   .connect(masterGain)
   .connect(ctx.destination);
 
 
-  // ===================================================
-  // 🎛️ REVERB PATH
-  // ===================================================
+// ===================================================
+// 🎧 HEADPHONE SEND
+// ===================================================
+//
+// IMPORTANT:
+// This is a separate feed.
+// It does NOT follow the main
+// crossfader.
+// ===================================================
 
-  filter
-    .connect(reverb)
-    .connect(reverbGain)
-    .connect(output);
-
-
-  // ===================================================
-  // 🎧 HEADPHONE SEND
-  // ===================================================
-
-  output.connect(
-    headphoneSend
-  );
-
-
-  // ===================================================
-  // 🎛️ STORE DECK AUDIO NODES
-  // ===================================================
-
-  deckEQ[deck] = {
-
-    context:
-      ctx,
-
-    source:
-      source,
-
-    low:
-      low,
-
-    high:
-      high,
-
-    pan:
-      pan,
-
-    filter:
-      filter,
-
-    reverb:
-      reverb,
-
-    reverbGain:
-      reverbGain,
-
-    output:
-  output,
-
-analyser:
-  analyser,
-
-masterGain:
-  masterGain,
-
-headphoneSend:
+output.connect(
   headphoneSend
+);
 
-  };
+
+// ===================================================
+// 💾 STORE ALL DECK AUDIO NODES
+// ===================================================
+
+deckEQ[deck] = {
+
+  context:
+    ctx,
+
+  source:
+    source,
+
+  low:
+    low,
+
+  high:
+    high,
+
+  pan:
+    pan,
+
+  filter:
+    filter,
+
+  reverb:
+    reverb,
+
+  reverbGain:
+    reverbGain,
+
+  output:
+    output,
+
+  gain:
+    gain,
+
+  channelGain:
+    channelGain,
+
+  crossfadeGain:
+    crossfadeGain,
+
+  analyser:
+    analyser,
+
+  masterGain:
+    masterGain,
+
+  headphoneSend:
+    headphoneSend
+
+};
 
 
-  return deckEQ[deck];
+// ===================================================
+// ✅ RETURN DECK
+// ===================================================
+
+return deckEQ[deck];
+
 }
 
 // =====================================================
@@ -8480,14 +8676,79 @@ function setReverb(deck, value) {
 
 
 // =====================================================
-// 🎚️ CROSSFADER — SEPARATE
+// 🎚️ GLCTC1 CROSSFADER
+// =====================================================
+// SEPARATE FROM:
+//
+// GAIN
+// CHANNEL VOLUME
+// MASTER
+//
+// A = LEFT
+// B = RIGHT
 // =====================================================
 
-function setCrossfader(value) {  
-  const a = audio("A");  
-  const b = audio("B");  
-  a.volume = 1 - value;  
-  b.volume = value;  
+function setCrossfader(value) {
+
+  const position =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        Number(value)
+      )
+    );
+
+  const eqA =
+    setupDeckEQ("A");
+
+  const eqB =
+    setupDeckEQ("B");
+
+  if (
+    !eqA ||
+    !eqB ||
+    !eqA.crossfadeGain ||
+    !eqB.crossfadeGain
+  ) {
+    return;
+  }
+
+  // -----------------------------------------------
+  // DECK A
+  // -----------------------------------------------
+
+  eqA.crossfadeGain.gain.setTargetAtTime(
+    1 - position,
+    eqA.context.currentTime,
+    0.01
+  );
+
+
+  // -----------------------------------------------
+  // DECK B
+  // -----------------------------------------------
+
+  eqB.crossfadeGain.gain.setTargetAtTime(
+    position,
+    eqB.context.currentTime,
+    0.01
+  );
+
+
+  // -----------------------------------------------
+  // RESUME AUDIO CONTEXT
+  // -----------------------------------------------
+
+  if (
+    eqA.context.state ===
+    "suspended"
+  ) {
+
+    eqA.context.resume();
+
+  }
+
 }
   
 // --- MASTER LIBRARY / BANKS STATE ---
@@ -16218,7 +16479,14 @@ const controls = {
   // HEADPHONE CUE MIX
   // ===================================================
 
-  0x19: "glctc1CueMix"
+  0x19: "glctc1CueMix",
+
+
+  // ===================================================
+  // 🔊 MASTER VOLUME
+  // ===================================================
+
+  0x1A: "glctc1MasterVolume"
 
 };
 

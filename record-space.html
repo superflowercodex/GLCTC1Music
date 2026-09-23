@@ -4002,6 +4002,951 @@ function populateRecordsFromMasterLibrary(
 
 }
 
+
+/* =========================================================
+   LOAD RECORD SPACE
+========================================================= */
+
+async function loadRecords() {
+
+  /*
+     ------------------------------------------------------
+     START A NEW LOAD RUN
+     ------------------------------------------------------
+  */
+
+  const loadRun =
+    ++recordSpaceLoadRun;
+
+
+  setStatus(
+    "● LOADING RECORD SPACE..."
+  );
+
+
+  try {
+
+    /*
+       --------------------------------------------------
+       REMEMBER CURRENT SELECTION
+       --------------------------------------------------
+    */
+
+    const selectedRecordIdBeforeRefresh =
+      selectedRecord?.id ??
+      null;
+
+
+    const selectedRecordKeyBeforeRefresh =
+      selectedRecord
+        ? getRecordId(
+            selectedRecord
+          )
+        : null;
+
+
+    /*
+       --------------------------------------------------
+       LOAD RECORD SPACE — PAGINATED
+       --------------------------------------------------
+    */
+
+    const RECORD_SPACE_PAGE_SIZE =
+      1000;
+
+
+    const allRecordRows =
+      [];
+
+
+    let recordPageStart =
+      0;
+
+
+    while (
+      true
+    ) {
+
+      /*
+         ------------------------------------------------
+         STALE LOAD CHECK
+         ------------------------------------------------
+      */
+
+      if (
+        loadRun !==
+        recordSpaceLoadRun
+      ) {
+
+        console.log(
+          "↻ RECORD SPACE PAGINATED LOAD SUPERSEDED:",
+          loadRun
+        );
+
+        return;
+
+      }
+
+
+      const {
+        data: pageData,
+        error: pageError
+      } =
+        await supabaseClient
+          .from(
+            TABLE_NAME
+          )
+          .select("*")
+          .order(
+            "record_date",
+            {
+              ascending:
+                false,
+
+              nullsFirst:
+                false
+            }
+          )
+          .range(
+            recordPageStart,
+            recordPageStart +
+            RECORD_SPACE_PAGE_SIZE -
+            1
+          );
+
+
+      if (
+        pageError
+      ) {
+
+        throw pageError;
+
+      }
+
+
+      const pageRows =
+        Array.isArray(
+          pageData
+        )
+          ? pageData
+          : [];
+
+
+      allRecordRows.push(
+        ...pageRows
+      );
+
+
+      console.log(
+        "📚 RECORD SPACE PAGE LOADED:",
+        recordPageStart,
+        "→",
+        recordPageStart +
+        pageRows.length -
+        1,
+        "— TOTAL:",
+        allRecordRows.length
+      );
+
+
+      /*
+         ------------------------------------------------
+         END OF DATA
+         ------------------------------------------------
+      */
+
+      if (
+        pageRows.length <
+        RECORD_SPACE_PAGE_SIZE
+      ) {
+
+        break;
+
+      }
+
+
+      recordPageStart +=
+        RECORD_SPACE_PAGE_SIZE;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       FINAL PAGINATION STALE CHECK
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER ALL PAGES:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       COMPLETE DATASET
+       --------------------------------------------------
+    */
+
+    const data =
+      allRecordRows;
+
+
+    console.log(
+      "✅ RECORD SPACE COMPLETE DATASET:",
+      data.length,
+      "RECORDS"
+    );
+
+
+    /*
+       --------------------------------------------------
+       COMMIT DATASET
+       --------------------------------------------------
+    */
+
+    records =
+      Array.isArray(
+        data
+      )
+        ? data
+        : [];
+
+
+    selectedIds.clear();
+
+
+    editingRecord =
+      null;
+
+
+    editMode =
+      false;
+
+
+    newRecordMode =
+      false;
+
+
+    updateAdminButtons();
+
+
+    /*
+       --------------------------------------------------
+       LOAD MASTER LIBRARY
+       --------------------------------------------------
+    */
+
+    const masterLibraryLoadSucceeded =
+      await loadMasterLibrary(
+        loadRun
+      );
+
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER MASTER LIBRARY:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    if (
+      !masterLibraryLoadSucceeded
+    ) {
+
+      console.warn(
+        "⚠️ MASTER LIBRARY WAS NOT LOADED — RECORD SPACE DATA WILL REMAIN UNENRICHED."
+      );
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       ENRICH EMPTY RECORD SPACE FIELDS
+       --------------------------------------------------
+    */
+
+    const masterLibraryEnrichmentSucceeded =
+      populateRecordsFromMasterLibrary(
+        loadRun
+      );
+
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED DURING MASTER LIBRARY ENRICHMENT:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    if (
+      masterLibraryEnrichmentSucceeded ===
+      false
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE MASTER LIBRARY ENRICHMENT WAS SUPERSEDED:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       INITIAL RENDER
+       --------------------------------------------------
+    */
+
+    renderTable();
+
+    renderTop40();
+
+
+    /*
+       --------------------------------------------------
+       RESOLVE STORAGE ASSETS
+       --------------------------------------------------
+    */
+
+    await resolveVisibleRecordAssets(
+      records
+    );
+
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER ASSET RESOLUTION:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       RENDER AGAIN WITH RESOLVED ASSETS
+       --------------------------------------------------
+    */
+
+    renderTable();
+
+    renderTop40();
+
+
+    /*
+       --------------------------------------------------
+       RESTORE CURRENT RECORD AFTER REFRESH
+       --------------------------------------------------
+    */
+
+    if (
+      records.length
+    ) {
+
+      let restoredRecord =
+        null;
+
+
+      /*
+         ------------------------------------------------
+         FIRST — DATABASE ID
+         ------------------------------------------------
+      */
+
+      if (
+        selectedRecordIdBeforeRefresh !==
+        null &&
+        selectedRecordIdBeforeRefresh !==
+        undefined
+      ) {
+
+        restoredRecord =
+          records.find(
+            record =>
+              record &&
+              record.id ===
+              selectedRecordIdBeforeRefresh
+          ) ||
+          null;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         SECOND — RECORD SPACE IDENTITY KEY
+         ------------------------------------------------
+      */
+
+      if (
+        !restoredRecord &&
+        selectedRecordKeyBeforeRefresh
+      ) {
+
+        restoredRecord =
+          records.find(
+            record =>
+              record &&
+              getRecordId(
+                record
+              ) ===
+              selectedRecordKeyBeforeRefresh
+          ) ||
+          null;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         LOAD-RUN CHECK
+         ------------------------------------------------
+      */
+
+      if (
+        loadRun !==
+        recordSpaceLoadRun
+      ) {
+
+        console.log(
+          "↻ RECORD SPACE LOAD SUPERSEDED BEFORE SELECTION RESTORE:",
+          loadRun
+        );
+
+        return;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         RESTORE PREVIOUS SELECTION
+         ------------------------------------------------
+      */
+
+      if (
+        restoredRecord
+      ) {
+
+        selectedRecord =
+          restoredRecord;
+
+
+        console.log(
+          "↻ RECORD SPACE SELECTION RESTORED:",
+          getRecordId(
+            restoredRecord
+          ) ||
+          restoredRecord.id
+        );
+
+
+        await renderSelectedRecord();
+
+
+        if (
+          loadRun !==
+          recordSpaceLoadRun
+        ) {
+
+          console.log(
+            "↻ RECORD SPACE LOAD SUPERSEDED AFTER RESTORING SELECTION:",
+            loadRun
+          );
+
+          return;
+
+        }
+
+
+        if (
+          selectedRecord !==
+          restoredRecord
+        ) {
+
+          console.log(
+            "↻ RECORD SELECTION CHANGED DURING RESTORE — KEEPING CURRENT SELECTION."
+          );
+
+        }
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         NO RESTORABLE SELECTION
+         ------------------------------------------------
+      */
+
+      else {
+
+        await selectRecord(
+          records[0]
+        );
+
+
+        if (
+          loadRun !==
+          recordSpaceLoadRun
+        ) {
+
+          console.log(
+            "↻ RECORD SPACE LOAD SUPERSEDED AFTER INITIAL SELECTION:",
+            loadRun
+          );
+
+          return;
+
+        }
+
+      }
+
+    }
+
+    else {
+
+      selectedRecord =
+        null;
+
+
+      resetSelectedDisplay();
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       FINAL ADMIN STATE
+       --------------------------------------------------
+    */
+
+    updateAdminButtons();
+
+
+    /*
+       --------------------------------------------------
+       FINAL STATUS
+       --------------------------------------------------
+    */
+
+    if (
+      currentUser
+    ) {
+
+      setStatus(
+        `● RECORD SPACE ONLINE — ${records.length} RECORDS — SIGNED IN`
+      );
+
+    }
+
+    else {
+
+      setStatus(
+        `● RECORD SPACE ONLINE — ${records.length} RECORDS — PUBLIC VIEW`
+      );
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       FINAL RECORD SPACE INTEGRATION CHECK
+       --------------------------------------------------
+    */
+
+    const recordSpaceIntegrationChecks = {
+
+      recordSpaceLoaded:
+        Array.isArray(
+          records
+        ),
+
+      recordSpaceCount:
+        Array.isArray(
+          records
+        )
+          ? records.length
+          : 0,
+
+      masterLibraryLoaded:
+        Array.isArray(
+          masterLibrary
+        ),
+
+      masterLibraryCount:
+        Array.isArray(
+          masterLibrary
+        )
+          ? masterLibrary.length
+          : 0,
+
+      columnsLoaded:
+        Array.isArray(
+          columns
+        ),
+
+      columnDefinitions:
+        Array.isArray(
+          columns
+        )
+          ? columns.length
+          : 0,
+
+      physicalColumnCount:
+        TOTAL_COLUMNS,
+
+      storageResolver:
+        typeof resolveRecordStorageAsset ===
+        "function",
+
+      audioResolver:
+        typeof resolveRecordAudioField ===
+        "function",
+
+      artworkResolver:
+        typeof resolveRecordArtworkField ===
+        "function",
+
+      recordAssetResolver:
+        typeof resolveRecordAssets ===
+        "function",
+
+      visibleAssetResolver:
+        typeof resolveVisibleRecordAssets ===
+        "function",
+
+      masterLibraryLoader:
+        typeof loadMasterLibrary ===
+        "function",
+
+      masterLibraryEnrichment:
+        typeof populateRecordsFromMasterLibrary ===
+        "function",
+
+      selectedRecordLoader:
+        typeof renderSelectedRecord ===
+        "function",
+
+      recordSelection:
+        typeof selectRecord ===
+        "function",
+
+      tableRenderer:
+        typeof renderTable ===
+        "function",
+
+      top40Renderer:
+        typeof renderTop40 ===
+        "function"
+
+    };
+
+
+    /*
+       --------------------------------------------------
+       COLUMN STRUCTURE CHECK
+       --------------------------------------------------
+    */
+
+    const columnStructureCorrect =
+      recordSpaceIntegrationChecks
+        .columnDefinitions ===
+      60 &&
+      recordSpaceIntegrationChecks
+        .physicalColumnCount ===
+      61;
+
+
+    /*
+       --------------------------------------------------
+       CORE FUNCTION CHECK
+       --------------------------------------------------
+    */
+
+    const coreFunctionsReady =
+      recordSpaceIntegrationChecks
+        .storageResolver &&
+      recordSpaceIntegrationChecks
+        .audioResolver &&
+      recordSpaceIntegrationChecks
+        .artworkResolver &&
+      recordSpaceIntegrationChecks
+        .recordAssetResolver &&
+      recordSpaceIntegrationChecks
+        .visibleAssetResolver &&
+      recordSpaceIntegrationChecks
+        .masterLibraryLoader &&
+      recordSpaceIntegrationChecks
+        .masterLibraryEnrichment &&
+      recordSpaceIntegrationChecks
+        .selectedRecordLoader &&
+      recordSpaceIntegrationChecks
+        .recordSelection &&
+      recordSpaceIntegrationChecks
+        .tableRenderer &&
+      recordSpaceIntegrationChecks
+        .top40Renderer;
+
+
+    /*
+       --------------------------------------------------
+       SAMPLE RATE CHECK
+       --------------------------------------------------
+    */
+
+    const sampleRateColumnExists =
+      Array.isArray(
+        columns
+      ) &&
+      columns.some(
+        column =>
+          column &&
+          column.key ===
+          "sample_rate"
+      );
+
+
+    /*
+       --------------------------------------------------
+       FINAL INTEGRATION RESULT
+       --------------------------------------------------
+    */
+
+    const recordSpaceIntegrationReady =
+      recordSpaceIntegrationChecks
+        .recordSpaceLoaded &&
+      recordSpaceIntegrationChecks
+        .masterLibraryLoaded &&
+      columnStructureCorrect &&
+      coreFunctionsReady &&
+      sampleRateColumnExists;
+
+
+    console.log(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+
+    console.log(
+      "🔎 GLCTC1 RECORD SPACE — FINAL INTEGRATION CHECK"
+    );
+
+
+    console.log(
+      "📚 RECORD SPACE:",
+      recordSpaceIntegrationChecks
+        .recordSpaceCount,
+      "RECORDS"
+    );
+
+
+    console.log(
+      "🎵 MASTER LIBRARY:",
+      recordSpaceIntegrationChecks
+        .masterLibraryCount,
+      "RECORDS"
+    );
+
+
+    console.log(
+      "📐 COLUMN MAP:",
+      recordSpaceIntegrationChecks
+        .columnDefinitions,
+      "DATA COLUMNS /",
+      recordSpaceIntegrationChecks
+        .physicalColumnCount,
+      "PHYSICAL CELLS"
+    );
+
+
+    console.log(
+      "🎚️ SAMPLE RATE COLUMN:",
+      sampleRateColumnExists
+        ? "PRESENT"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🗂️ STORAGE RESOLVER:",
+      recordSpaceIntegrationChecks
+        .storageResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎧 AUDIO RESOLVER:",
+      recordSpaceIntegrationChecks
+        .audioResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🖼️ ARTWORK RESOLVER:",
+      recordSpaceIntegrationChecks
+        .artworkResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "👁️ VISIBLE ASSET RESOLVER:",
+      recordSpaceIntegrationChecks
+        .visibleAssetResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎵 MASTER LIBRARY ENRICHMENT:",
+      recordSpaceIntegrationChecks
+        .masterLibraryEnrichment
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎯 SELECTED RECORD:",
+      recordSpaceIntegrationChecks
+        .selectedRecordLoader
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "📊 TABLE RENDERER:",
+      recordSpaceIntegrationChecks
+        .tableRenderer
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🔥 TOP 40:",
+      recordSpaceIntegrationChecks
+        .top40Renderer
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    /*
+       --------------------------------------------------
+       FINAL RESULT
+       --------------------------------------------------
+    */
+
+    if (
+      recordSpaceIntegrationReady
+    ) {
+
+      console.log(
+        "✅ GLCTC1 RECORD SPACE INTEGRATION CHECK PASSED."
+      );
+
+    }
+
+    else {
+
+      console.error(
+        "❌ GLCTC1 RECORD SPACE INTEGRATION CHECK FAILED.",
+        recordSpaceIntegrationChecks
+      );
+
+    }
+
+
+    console.log(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+
+  }
+  catch (
+    error
+  ) {
+
+    /*
+       --------------------------------------------------
+       DO NOT REPORT AN ERROR FROM AN OLD LOAD
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ OLD RECORD SPACE LOAD FAILED AFTER BEING SUPERSEDED:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    console.error(
+      "❌ RECORD SPACE LOAD ERROR:",
+      error
+    );
+
+
+    setStatus(
+      "● RECORD SPACE ERROR"
+    );
+
+  }
+
+}
+
 // =====================================================
 // STORAGE ASSET CACHE
 // =====================================================

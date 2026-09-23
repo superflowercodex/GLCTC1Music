@@ -3485,7 +3485,7 @@ function populateRecordsFromMasterLibrary(
   }
 
 
-  // ---------------------------------------------------
+   // ---------------------------------------------------
   // PRIMARY LOOKUP — RECORD ID
   // ---------------------------------------------------
 
@@ -3494,11 +3494,49 @@ function populateRecordsFromMasterLibrary(
 
 
   // ---------------------------------------------------
-  // FALLBACK LOOKUP — ARTIST + TRACK TITLE
+  // SECONDARY LOOKUP — ARTIST + TRACK TITLE
   // ---------------------------------------------------
 
   const masterByArtistTitle =
     new Map();
+
+
+  // ---------------------------------------------------
+  // THIRD LOOKUP — UNIQUE TRACK TITLE
+  // ---------------------------------------------------
+
+  const masterByTitle =
+    new Map();
+
+
+  /*
+     --------------------------------------------------
+     NORMALISED MATCH KEY
+
+     Makes matching tolerant of:
+
+     • CAPITALS
+     • lowercase
+     • extra spaces
+     • punctuation
+     • hyphens
+     • apostrophes
+     --------------------------------------------------
+  */
+
+  const makeMatchKey =
+    value => {
+
+      return normaliseMasterValue(
+        value
+      )
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9]+/g,
+          ""
+        );
+
+    };
 
 
   masterLibrary.forEach(
@@ -3510,13 +3548,13 @@ function populateRecordsFromMasterLibrary(
 
 
       // -------------------------------------------------
-      // ID MATCH
+      // RECORD ID
       // -------------------------------------------------
 
       const masterId =
         normaliseMasterValue(
           masterRecord["ID Cat No"]
-        );
+        ).toLowerCase();
 
 
       if (masterId) {
@@ -3530,31 +3568,36 @@ function populateRecordsFromMasterLibrary(
 
 
       // -------------------------------------------------
-      // ARTIST + TITLE MATCH
+      // ARTIST
       // -------------------------------------------------
 
       const artist =
-        normaliseMasterValue(
+        makeMatchKey(
           masterRecord["Artist"]
-        ).toLowerCase();
+        );
 
+
+      // -------------------------------------------------
+      // TRACK TITLE
+      // -------------------------------------------------
 
       const title =
-        normaliseMasterValue(
+        makeMatchKey(
           masterRecord["Track Title"]
-        ).toLowerCase();
+        );
 
 
-      /*
-         Only create the fallback key when BOTH
-         artist and title exist.
+      if (!title) {
+        return;
+      }
 
-         This prevents a partial match.
-      */
+
+      // -------------------------------------------------
+      // ARTIST + TITLE
+      // -------------------------------------------------
 
       if (
-        artist &&
-        title
+        artist
       ) {
 
         const artistTitleKey =
@@ -3576,135 +3619,151 @@ function populateRecordsFromMasterLibrary(
 
       }
 
+
+      // -------------------------------------------------
+      // UNIQUE TITLE LOOKUP
+      //
+      // If two different Master Library records have
+      // the same title, mark it ambiguous rather than
+      // guessing.
+      // -------------------------------------------------
+
+      if (
+        !masterByTitle.has(
+          title
+        )
+      ) {
+
+        masterByTitle.set(
+          title,
+          masterRecord
+        );
+
+      }
+
+      else {
+
+        masterByTitle.set(
+          title,
+          null
+        );
+
+      }
+
     }
   );
 
 
   // ---------------------------------------------------
-  // MATCH COUNTERS
+  // FIND MASTER LIBRARY MATCH
   // ---------------------------------------------------
 
-  let matchedCount =
-    0;
-
-  let idMatchedCount =
-    0;
-
-  let artistTitleMatchedCount =
-    0;
-
-  let unmatchedCount =
-    0;
+  const recordId =
+    normaliseMasterValue(
+      record.record_id
+    ).toLowerCase();
 
 
-  // ---------------------------------------------------
-  // ENRICH RECORD SPACE
-  // ---------------------------------------------------
+  let masterRecord =
+    null;
 
-  for (
-    const record
-    of records
+
+  /*
+     ==================================================
+     MATCH 1 — EXACT RECORD ID
+     ==================================================
+  */
+
+  if (
+    recordId
   ) {
 
-    /*
-       A newer Record Space load has started.
-
-       Stop immediately so the newer load owns
-       the current dataset.
-    */
-
-    if (
-      activeLoadRun !==
-      recordSpaceLoadRun
-    ) {
-
-      console.warn(
-        "⏹️ MASTER LIBRARY ENRICHMENT ABORTED — NEWER LOAD RUN DETECTED."
-      );
-
-      return false;
-
-    }
-
-
-    if (!record) {
-      continue;
-    }
-
-
-    // -------------------------------------------------
-    // FIND MASTER LIBRARY MATCH
-    // -------------------------------------------------
-
-    const recordId =
-      normaliseMasterValue(
-        record.record_id
-      );
-
-
-    let masterRecord =
+    masterRecord =
+      masterById.get(
+        recordId
+      ) ||
       null;
 
+  }
 
-    /*
-       FIRST:
-       Exact Record ID / Catalogue Number match.
-    */
+
+  /*
+     ==================================================
+     MATCH 2 — ARTIST + TRACK TITLE
+     ==================================================
+  */
+
+  if (
+    !masterRecord
+  ) {
+
+    const recordArtist =
+      makeMatchKey(
+        record.artist
+      );
+
+
+    const recordTitle =
+      makeMatchKey(
+        record.track_title
+      );
+
 
     if (
-      recordId
+      recordArtist &&
+      recordTitle
     ) {
 
+      const artistTitleKey =
+        `${recordArtist}|||${recordTitle}`;
+
+
       masterRecord =
-        masterById.get(
-          recordId
+        masterByArtistTitle.get(
+          artistTitleKey
         ) ||
         null;
 
     }
 
+  }
 
-    /*
-       SECOND:
-       Artist + Track Title fallback.
 
-       Only used when an ID match was not found.
-    */
+  /*
+     ==================================================
+     MATCH 3 — UNIQUE TRACK TITLE
+     ==================================================
+
+     Only used when the title exists exactly once in
+     Master Library.
+
+     If the title is duplicated, the lookup returns
+     null and we deliberately do NOT guess.
+  */
+
+  if (
+    !masterRecord
+  ) {
+
+    const recordTitle =
+      makeMatchKey(
+        record.track_title
+      );
+
 
     if (
-      !masterRecord
+      recordTitle
     ) {
 
-      const recordArtist =
-        normaliseMasterValue(
-          record.artist
-        ).toLowerCase();
-
-
-      const recordTitle =
-        normaliseMasterValue(
-          record.track_title
-        ).toLowerCase();
-
-
-      if (
-        recordArtist &&
-        recordTitle
-      ) {
-
-        const artistTitleKey =
-          `${recordArtist}|||${recordTitle}`;
-
-
-        masterRecord =
-          masterByArtistTitle.get(
-            artistTitleKey
-          ) ||
-          null;
-
-      }
+      masterRecord =
+        masterByTitle.get(
+          recordTitle
+        ) ||
+        null;
 
     }
+
+  }
 
 
     // -------------------------------------------------

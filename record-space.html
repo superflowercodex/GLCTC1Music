@@ -4100,23 +4100,26 @@ async function resolveRecordStorageAsset(
      as fallbacks.
   */
 
-  const buckets = [];
+   const buckets = [];
 
 
-  if (
-    preferredBucket
-  ) {
+  /*
+     =====================================================
+     GLCTC1 MASTER LIBRARY STORAGE
+     =====================================================
 
-    buckets.push(
-      preferredBucket
-    );
+     Record Space follows the same Storage location
+     used by the working Master Library editor.
 
-  }
+     master-library is ALWAYS tried first.
 
+     The existing tracks bucket remains as a fallback
+     for older GLCTC1 records.
+  */
 
   [
-    "tracks",
-    "master-library"
+    "master-library",
+    "tracks"
   ].forEach(
     bucket => {
 
@@ -4134,6 +4137,25 @@ async function resolveRecordStorageAsset(
 
     }
   );
+
+
+  /*
+     If Record Space explicitly supplies another bucket,
+     put that first without removing the normal fallbacks.
+  */
+
+  if (
+    preferredBucket &&
+    !buckets.includes(
+      preferredBucket
+    )
+  ) {
+
+    buckets.unshift(
+      preferredBucket
+    );
+
+  }
 
 
   /*
@@ -4388,12 +4410,13 @@ async function resolveRecordAudioField(
 
 
   /*
-     KEEP THE ORIGINAL RECORD VALUE.
+     --------------------------------------------------
+     KEEP ORIGINAL DATABASE VALUE
+     --------------------------------------------------
 
-     Supabase signed URLs are temporary display/playback
-     URLs and must NEVER replace the stored path.
+     The Storage path is never replaced.
 
-     The temporary URL is kept separately as:
+     The temporary signed URL is stored only in:
 
        _resolved_master_audio
        _resolved_stem_1
@@ -4408,7 +4431,9 @@ async function resolveRecordAudioField(
     ).trim();
 
 
-  if (!original) {
+  if (
+    !original
+  ) {
 
     return "";
 
@@ -4416,7 +4441,9 @@ async function resolveRecordAudioField(
 
 
   /*
-     ALREADY A NORMAL HTTP / HTTPS URL
+     --------------------------------------------------
+     ALREADY A REAL URL
+     --------------------------------------------------
   */
 
   if (
@@ -4436,33 +4463,27 @@ async function resolveRecordAudioField(
 
 
   /*
-     PREFER THE RECORD'S EXPLICIT STORAGE BUCKET
+     --------------------------------------------------
+     GLCTC1 MASTER LIBRARY AUDIO
+     --------------------------------------------------
+
+     Do NOT depend on storage_bucket.
+
+     Try the working Master Library bucket first.
+     The resolver itself retains tracks as fallback.
   */
-
-  const preferredBucket =
-    normaliseMasterValue(
-      record.storage_bucket
-    );
-
 
   const resolved =
     await resolveRecordStorageAsset(
       original,
-      preferredBucket
+      "master-library"
     );
 
 
   /*
-     IMPORTANT:
-
-     NEVER DO:
-
-       record[fieldName] = resolved;
-
-     The original Storage path must remain intact.
-
-     Only the temporary resolved URL is stored in the
-     display-only _resolved_ field.
+     --------------------------------------------------
+     ONLY STORE A TEMPORARY RESOLVED URL
+     --------------------------------------------------
   */
 
   if (
@@ -4477,6 +4498,7 @@ async function resolveRecordAudioField(
       resolved;
 
   }
+
   else {
 
     delete record[
@@ -6780,9 +6802,15 @@ function renderTable() {
             /*
               -------------------------------------------------
               STORAGE IMAGE PATH
-              
-              If the resolver has not yet produced a URL,
-              resolve it on demand.
+
+              Record Space uses the same artwork Storage
+              location as the working Master Library.
+
+              MASTER-LIBRARY is tried first.
+              TRACKS remains available as the fallback
+              for older records.
+
+              The database value is NEVER changed.
               -------------------------------------------------
             */
 
@@ -6799,77 +6827,202 @@ function renderTable() {
                 ).trim();
 
 
+              if (
+                !originalImageValue
+              ) {
+
+                tr.appendChild(
+                  td
+                );
+
+                return;
+
+              }
+
+
               /*
-                Resolve the Storage artwork without
-                changing the database value.
+                -------------------------------------------------
+                DIRECT MASTER LIBRARY RESOLUTION
+                -------------------------------------------------
+
+                Do not rely on record.storage_bucket.
+
+                The artwork used by the working Master Library
+                editor is stored in:
+
+                  master-library
+
+                using the existing stored path.
+                -------------------------------------------------
               */
 
-              resolveRecordStorageAsset(
-                originalImageValue,
-                record.storage_bucket ||
-                ""
-              )
-              .then(
-                resolved => {
+              supabaseClient.storage
+                .from(
+                  "master-library"
+                )
+                .createSignedUrl(
+                  originalImageValue,
+                  60 * 60 * 24
+                )
+                .then(
+                  async ({
+                    data,
+                    error
+                  }) => {
 
-                  if (
-                    !isSafeHttpUrl(
-                      resolved
-                    )
-                  ) {
+                    /*
+                      -------------------------------------------------
+                      MASTER-LIBRARY SUCCESS
+                      -------------------------------------------------
+                    */
 
-                    return;
+                    if (
+                      !error &&
+                      data?.signedUrl &&
+                      isSafeHttpUrl(
+                        data.signedUrl
+                      )
+                    ) {
 
-                  }
-
-
-                  const img =
-                    document.createElement(
-                      "img"
-                    );
-
-
-                  img.className =
-                    "cover";
-
-                  img.loading =
-                    "lazy";
-
-                  img.src =
-                    resolved;
-
-                  img.alt =
-                    "COVER ART";
+                      const img =
+                        document.createElement(
+                          "img"
+                        );
 
 
-                  img.onerror =
-                    () => {
+                      img.className =
+                        "cover";
 
-                      img.replaceWith(
-                        makeNoCover()
+
+                      img.loading =
+                        "lazy";
+
+
+                      img.src =
+                        data.signedUrl;
+
+
+                      img.alt =
+                        "COVER ART";
+
+
+                      img.onerror =
+                        () => {
+
+                          img.replaceWith(
+                            makeNoCover()
+                          );
+
+                        };
+
+
+                      td.innerHTML =
+                        "";
+
+
+                      td.appendChild(
+                        img
                       );
 
-                    };
+
+                      return;
+
+                    }
 
 
-                  td.innerHTML = "";
+                    /*
+                      -------------------------------------------------
+                      FALLBACK TO EXISTING RESOLVER
+                      -------------------------------------------------
 
-                  td.appendChild(
-                    img
-                  );
+                      Older Master Library records may still
+                      point to the tracks bucket.
+                    */
 
-                }
-              )
-              .catch(
-                error => {
+                    try {
 
-                  console.warn(
-                    "⚠️ RECORD SPACE ARTWORK COULD NOT BE RESOLVED:",
-                    error
-                  );
+                      const resolved =
+                        await resolveRecordStorageAsset(
+                          originalImageValue,
+                          "tracks"
+                        );
 
-                }
-              );
+
+                      if (
+                        !isSafeHttpUrl(
+                          resolved
+                        )
+                      ) {
+
+                        return;
+
+                      }
+
+
+                      const img =
+                        document.createElement(
+                          "img"
+                        );
+
+
+                      img.className =
+                        "cover";
+
+
+                      img.loading =
+                        "lazy";
+
+
+                      img.src =
+                        resolved;
+
+
+                      img.alt =
+                        "COVER ART";
+
+
+                      img.onerror =
+                        () => {
+
+                          img.replaceWith(
+                            makeNoCover()
+                          );
+
+                        };
+
+
+                      td.innerHTML =
+                        "";
+
+
+                      td.appendChild(
+                        img
+                      );
+
+                    }
+                    catch (
+                      fallbackError
+                    ) {
+
+                      console.warn(
+                        "⚠️ RECORD SPACE ARTWORK FALLBACK FAILED:",
+                        fallbackError
+                      );
+
+                    }
+
+                  }
+                )
+                .catch(
+                  error => {
+
+                    console.warn(
+                      "⚠️ RECORD SPACE MASTER LIBRARY ARTWORK ERROR:",
+                      error
+                    );
+
+                  }
+                );
 
             }
 
@@ -7616,17 +7769,50 @@ async function renderSelectedRecord() {
 
 
   /* -------------------------------------------------------
-     SELECTED AUDIO
-  ------------------------------------------------------- */
+   SELECTED AUDIO
+------------------------------------------------------- */
 
-  const audioContainer =
-    document.getElementById(
-      "selectedAudio"
-    );
+const audioContainer =
+  document.getElementById(
+    "selectedAudio"
+  );
 
+
+if (
+  !audioContainer
+) {
+
+  return;
+
+}
+
+
+audioContainer.innerHTML =
+  "";
+
+
+/*
+   -------------------------------------------------------
+   PLAY COUNTER
+   -------------------------------------------------------
+
+   Count one play when the Master Audio actually starts.
+
+   The database value is incremented directly in
+   Record Space.
+
+   Do not count repeated play events from the same
+   playback session.
+*/
+
+let playCounted =
+  false;
+
+
+async function recordPlay() {
 
   if (
-    !audioContainer
+    playCounted
   ) {
 
     return;
@@ -7634,124 +7820,291 @@ async function renderSelectedRecord() {
   }
 
 
-  audioContainer.innerHTML =
-    "";
+  if (
+    !record ||
+    !record.id
+  ) {
+
+    return;
+
+  }
+
+
+  playCounted =
+    true;
+
+
+  const currentPlayCount =
+    Number(
+      record.plays || 0
+    );
+
+
+  const newPlayCount =
+    currentPlayCount + 1;
 
 
   /*
-     Prefer the temporary resolved URL.
-
-     If no resolved URL exists, keep the original value.
-
-     The original Storage path is therefore never replaced
-     in the Record Space data.
+     Update the Record Space database.
   */
 
-  const audioValue =
-    displayRecord._resolved_master_audio ||
-    displayRecord.master_audio ||
-    "";
+  const {
+    data,
+    error
+  } =
+    await supabaseClient
+      .from(
+        TABLE_NAME
+      )
+      .update({
+        plays:
+          newPlayCount
+      })
+      .eq(
+        "id",
+        record.id
+      )
+      .select()
+      .single();
 
 
   if (
-    isSafeHttpUrl(
-      audioValue
-    )
+    error
   ) {
 
-    const audio =
-      document.createElement(
-        "audio"
-      );
-
-
-    audio.controls =
-      true;
-
-
-    audio.preload =
-      "metadata";
-
-
-    audio.src =
-      audioValue;
-
-
-    audioContainer.appendChild(
-      audio
+    console.error(
+      "❌ RECORD SPACE PLAY COUNT FAILED:",
+      error
     );
+
+
+    playCounted =
+      false;
+
+
+    return;
 
   }
 
 
   /*
-     If the original value is a Supabase Storage path
-     and resolution failed, create an on-demand player.
+     Keep the local Record Space data
+     immediately in sync.
   */
 
-  else if (
-    displayRecord.master_audio
+  if (
+    data
   ) {
 
-    const audio =
-      document.createElement(
-        "audio"
+    const index =
+      records.findIndex(
+        item =>
+          item.id ===
+          record.id
       );
 
 
-    audio.controls =
-      true;
+    if (
+      index >= 0
+    ) {
+
+      records[index] =
+        data;
+
+    }
 
 
-    audio.preload =
-      "none";
+    /*
+       Keep selectedRecord pointing at
+       the updated database row.
+    */
+
+    if (
+      selectedRecord ===
+      record
+    ) {
+
+      selectedRecord =
+        records[index];
+
+    }
 
 
-    audio.dataset.storagePath =
-      displayRecord.master_audio;
+    /*
+       Update the visible play count.
+    */
+
+    const detailPlays =
+      document.getElementById(
+        "detailPlays"
+      );
 
 
-    audio.addEventListener(
-      "play",
-      async () => {
+    if (
+      detailPlays
+    ) {
 
-        if (
-          audio.dataset.storageResolved ===
-          "true"
-        ) {
+      detailPlays.textContent =
+        formatNumber(
+          data.plays
+        );
 
-          return;
+    }
 
-        }
 
+    /*
+       Re-rank TOP 40 immediately.
+    */
+
+    renderTop40();
+
+  }
+
+}
+
+
+/*
+   -------------------------------------------------------
+   AUDIO VALUE
+   -------------------------------------------------------
+*/
+
+const audioValue =
+  displayRecord._resolved_master_audio ||
+  displayRecord.master_audio ||
+  "";
+
+
+/*
+   -------------------------------------------------------
+   DIRECT URL
+   -------------------------------------------------------
+*/
+
+if (
+  isSafeHttpUrl(
+    audioValue
+  )
+) {
+
+  const audio =
+    document.createElement(
+      "audio"
+    );
+
+
+  audio.controls =
+    true;
+
+
+  audio.preload =
+    "metadata";
+
+
+  audio.src =
+    audioValue;
+
+
+  audio.addEventListener(
+    "play",
+    recordPlay
+  );
+
+
+  audioContainer.appendChild(
+    audio
+  );
+
+}
+
+
+/*
+   -------------------------------------------------------
+   SUPABASE STORAGE PATH
+   -------------------------------------------------------
+*/
+
+else if (
+  displayRecord.master_audio
+) {
+
+  const audio =
+    document.createElement(
+      "audio"
+    );
+
+
+  audio.controls =
+    true;
+
+
+  audio.preload =
+    "none";
+
+
+  audio.dataset.storagePath =
+    displayRecord.master_audio;
+
+
+  audio.addEventListener(
+    "play",
+    async () => {
+
+      /*
+         Resolve Storage only once.
+      */
+
+      if (
+        audio.dataset.storageResolved ===
+        "true"
+      ) {
 
         /*
-           Capture the record represented by this
-           particular audio element.
-
-           This prevents a delayed Storage response
-           from an older player being applied after
-           another record has been selected.
+           Audio is already resolved.
+           Count this playback.
         */
 
-        const audioRecord =
-          record;
+        await recordPlay();
 
+        return;
+
+      }
+
+
+      if (
+        audio.dataset.storageResolving ===
+        "true"
+      ) {
+
+        return;
+
+      }
+
+
+      audio.dataset.storageResolving =
+        "true";
+
+
+      const audioRecord =
+        record;
+
+
+      try {
+
+        /*
+           MASTER LIBRARY FIRST.
+        */
 
         const resolved =
           await resolveRecordStorageAsset(
             displayRecord.master_audio,
-            displayRecord.storage_bucket ||
-            ""
+            "master-library"
           );
 
 
         /*
-           The selected record may have changed while
-           this Storage request was running.
-
-           Do not attach an old record's audio to the
-           currently displayed record.
+           Do not attach an old record's
+           audio to a newer selection.
         */
 
         if (
@@ -7770,49 +8123,89 @@ async function renderSelectedRecord() {
           )
         ) {
 
+          console.warn(
+            "⚠️ RECORD SPACE MASTER AUDIO COULD NOT BE RESOLVED:",
+            displayRecord.master_audio
+          );
+
+
           audio.pause();
+
 
           return;
 
         }
 
 
-        audio.dataset.storageResolved =
-          "true";
-
-
         audio.src =
           resolved;
 
 
+        audio.dataset.storageResolved =
+          "true";
+
+
         audio.load();
 
+
+        /*
+           Count this actual playback.
+        */
+
+        await recordPlay();
+
+
+        /*
+           Start the requested playback.
+        */
 
         try {
 
           await audio.play();
 
         }
+
         catch (
-          error
+          playbackError
         ) {
 
           console.warn(
-            "Selected record audio playback failed:",
-            error
+            "⚠️ RECORD SPACE MASTER AUDIO PLAYBACK FAILED:",
+            playbackError
           );
 
         }
 
       }
-    );
+
+      catch (
+        error
+      ) {
+
+        console.error(
+          "❌ RECORD SPACE MASTER AUDIO RESOLUTION FAILED:",
+          error
+        );
 
 
-    audioContainer.appendChild(
-      audio
-    );
+        audio.pause();
 
-  }
+      }
+
+      finally {
+
+        audio.dataset.storageResolving =
+          "false";
+
+      }
+
+    }
+  );
+
+
+  audioContainer.appendChild(
+    audio
+  );
 
 }
 

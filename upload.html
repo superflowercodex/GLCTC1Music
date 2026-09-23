@@ -861,54 +861,6 @@ async function uploadAndSign(file) {
   return uploadData.path;
 }
 
-// =====================================================
-// 🖼️ GLCTC1 COVER ART UPLOAD
-// =====================================================
-
-async function uploadCoverArt(file) {
-
-  if (!file) return "";
-
-  const safeName =
-    file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-
-  const filePath =
-    `cover-art/${Date.now()}_${safeName}`;
-
-  const {
-    data: coverArtData,
-    error: coverArtError
-  } =
-    await supabaseClient.storage
-      .from("tracks")
-      .upload(
-        filePath,
-        file,
-        {
-          upsert: true,
-          contentType: file.type || "image/jpeg"
-        }
-      );
-
-  console.log(
-    "Cover Art Upload Data:",
-    coverArtData
-  );
-
-  console.log(
-    "Cover Art Upload Error:",
-    coverArtError
-  );
-
-  if (coverArtError) {
-    throw new Error(
-      "Cover Art Upload Failed: " +
-      coverArtError.message
-    );
-  }
-
-  return coverArtData.path;
-}
 
 // ===============================
 // UPLOAD MASTER
@@ -974,21 +926,10 @@ try {
     document.getElementById("stem4").files[0];
 
   const stem4URL =
-  await uploadAndSign(stem4File);
+    await uploadAndSign(stem4File);
 
 
-// =====================================================
-// 🖼️ UPLOAD COVER ART
-// =====================================================
-
-const coverArtFile =
-  document.getElementById("cover_art").files[0];
-
-const coverArtPath =
-  await uploadCoverArt(coverArtFile);
-
-
-// ===============================
+   // ===============================
 // CREATE TRACK OBJECT
 // ===============================
 
@@ -1045,7 +986,9 @@ const track = {
     document.getElementById("notes").value.trim(),
 
   cover_art:
-  coverArtPath || "”
+    document.getElementById("cover_art").files[0]
+      ? document.getElementById("cover_art").files[0].name
+      : ""
 };
 
 
@@ -9940,76 +9883,6 @@ function renderLibraryTable(searchTerm = "") {
 
     `;
 
-// =====================================================
-// 🖼️ GLCTC1 MASTER LIBRARY — COVER ART RESOLVER
-// =====================================================
-
-async function glctc1ResolveCoverArt(artwork) {
-
-  if (!artwork) {
-    return "";
-  }
-
-  const value =
-    String(artwork).trim();
-
-  if (!value) {
-    return "";
-  }
-
-  // ---------------------------------------------------
-  // ALREADY A COMPLETE IMAGE URL
-  // ---------------------------------------------------
-
-  if (
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:image/")
-  ) {
-
-    return value;
-  }
-
-  // ---------------------------------------------------
-  // SUPABASE STORAGE PATH
-  // ---------------------------------------------------
-
-  try {
-
-    const {
-      data,
-      error
-    } =
-      await supabaseClient.storage
-        .from("tracks")
-        .createSignedUrl(
-          value,
-          60 * 60 * 24
-        );
-
-    if (
-      !error &&
-      data?.signedUrl
-    ) {
-
-      return data.signedUrl;
-    }
-
-    console.warn(
-      "⚠️ GLCTC1 COVER ART SIGNED URL ERROR:",
-      error
-    );
-
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 COVER ART RESOLUTION ERROR:",
-      error
-    );
-  }
-
-  return "";
-}
 
  // ===================================================
 // SELECT LIBRARY TRACK
@@ -10055,18 +9928,54 @@ if (glctc1PlaylistArtwork) {
     track["Cover Art"] ||
     "";
 
-  const artworkURL =
-    await glctc1ResolveCoverArt(
-      artwork
-    );
-
-  if (artworkURL) {
+  if (
+    artwork &&
+    (
+      artwork.startsWith("http://") ||
+      artwork.startsWith("https://") ||
+      artwork.startsWith("data:image/")
+    )
+  ) {
 
     glctc1PlaylistArtwork.src =
-      artworkURL;
+      artwork;
 
     glctc1PlaylistArtwork.style.display =
       "block";
+
+  } else if (artwork) {
+
+    const {
+      data,
+      error
+    } =
+      await supabaseClient.storage
+        .from("tracks")
+        .createSignedUrl(
+          artwork,
+          60 * 60 * 24
+        );
+
+    if (
+      !error &&
+      data?.signedUrl
+    ) {
+
+      glctc1PlaylistArtwork.src =
+        data.signedUrl;
+
+      glctc1PlaylistArtwork.style.display =
+        "block";
+
+    } else {
+
+      glctc1PlaylistArtwork.removeAttribute(
+        "src"
+      );
+
+      glctc1PlaylistArtwork.style.display =
+        "none";
+    }
 
   } else {
 
@@ -10080,16 +9989,16 @@ if (glctc1PlaylistArtwork) {
 }
 
 
-highlightSelectedRow(
-  row
-);
+    highlightSelectedRow(
+      row
+    );
 
 
-// Populate the
-// GLCTC1 Master Library Editor
-showDetails(
-  track
-);
+    // Populate the
+    // GLCTC1 Master Library Editor
+    showDetails(
+      track
+    );
 
   }
 );

@@ -2393,11 +2393,29 @@ const supabaseClient =
 const TABLE_NAME =
   "record_space";
 
+
 /*
+   RECORD SPACE TABLE STRUCTURE
+
    1 SELECT
-   60 columns array entries
+   59 DATA COLUMNS
    1 DELETE
-   = 61 rendered table columns
+
+   TOTAL = 61 physical cells per row.
+
+   IMPORTANT:
+
+   The columns array contains:
+   59 DATA COLUMNS
+   + 1 DELETE COLUMN
+   = 60 column definitions.
+
+   The rendered table row contains:
+   1 SELECT cell
+   + 60 column-definition cells
+   = 61 physical cells.
+
+   TOTAL_COLUMNS therefore remains 61.
 */
 
 const TOTAL_COLUMNS =
@@ -2405,35 +2423,30 @@ const TOTAL_COLUMNS =
 
 
 /* =========================================================
-   STATE
-========================================================= */
+   RECORD SPACE COLUMN MAP
+=========================================================
 
-let records = [];
+   IMPORTANT:
 
-let filteredRecords = [];
+   This is the single source of truth for the table.
 
-let selectedIds = new Set();
+   The group names correspond directly with the
+   group-filter options already present in the HTML.
 
-let selectedRecord = null;
+   COLUMN COUNT:
 
-let editingRecord = null;
+   59 DATA COLUMNS
+   1 DELETE COLUMN
+   = 60 COLUMN DEFINITIONS
 
-let editMode = false;
-
-let newRecordMode = false;
-
-let sortColumn = "record_date";
-
-let sortDirection = "desc";
-
-let currentUser = null;
-
-
-/* =========================================================
-   COLUMN DEFINITIONS
 ========================================================= */
 
 const columns = [
+
+  /* =======================================================
+     RECORD
+     3
+  ======================================================= */
 
   {
     key: "record_id",
@@ -2453,6 +2466,11 @@ const columns = [
     group: "record"
   },
 
+
+  /* =======================================================
+     ARTIST / MUSIC
+     4
+  ======================================================= */
 
   {
     key: "artist_id",
@@ -2479,6 +2497,11 @@ const columns = [
   },
 
 
+  /* =======================================================
+     AUDIO
+     9
+  ======================================================= */
+
   {
     key: "master_audio",
     label: "MASTER AUDIO",
@@ -2489,25 +2512,29 @@ const columns = [
   {
     key: "stem_1",
     label: "STEM 1",
-    group: "audio"
+    group: "audio",
+    audio: true
   },
 
   {
     key: "stem_2",
     label: "STEM 2",
-    group: "audio"
+    group: "audio",
+    audio: true
   },
 
   {
     key: "stem_3",
     label: "STEM 3",
-    group: "audio"
+    group: "audio",
+    audio: true
   },
 
   {
     key: "stem_4",
     label: "STEM 4",
-    group: "audio"
+    group: "audio",
+    audio: true
   },
 
   {
@@ -2528,16 +2555,17 @@ const columns = [
     group: "audio"
   },
 
-  /*
-     SAMPLE RATE RETAINED
-  */
-
   {
     key: "sample_rate",
     label: "SAMPLE RATE",
     group: "audio"
   },
 
+
+  /* =======================================================
+     MUSIC DATA
+     10
+  ======================================================= */
 
   {
     key: "genre",
@@ -2548,8 +2576,7 @@ const columns = [
   {
     key: "bpm",
     label: "BPM",
-    group: "music",
-    number: true
+    group: "music"
   },
 
   {
@@ -2561,8 +2588,7 @@ const columns = [
   {
     key: "frequency_hz",
     label: "FREQUENCY (HZ)",
-    group: "music",
-    number: true
+    group: "music"
   },
 
   {
@@ -2598,10 +2624,14 @@ const columns = [
   {
     key: "carrier_frequency",
     label: "CARRIER FREQUENCY",
-    group: "music",
-    number: true
+    group: "music"
   },
 
+
+  /* =======================================================
+     ARTWORK
+     4
+  ======================================================= */
 
   {
     key: "cover_art",
@@ -2614,7 +2644,7 @@ const columns = [
     key: "artwork_url",
     label: "ARTWORK URL",
     group: "artwork",
-    link: true
+    image: true
   },
 
   {
@@ -2630,6 +2660,11 @@ const columns = [
     link: true
   },
 
+
+  /* =======================================================
+     RIGHTS / CREDITS
+     5
+  ======================================================= */
 
   {
     key: "copyright",
@@ -2662,18 +2697,21 @@ const columns = [
   },
 
 
+  /* =======================================================
+     ACTIVITY
+     3
+  ======================================================= */
+
   {
     key: "plays",
     label: "PLAYS",
-    group: "activity",
-    number: true
+    group: "activity"
   },
 
   {
     key: "favourites",
-    label: "FAVOURITES",
+    label: "FAV",
     group: "activity",
-    number: true,
     favourite: true
   },
 
@@ -2683,6 +2721,11 @@ const columns = [
     group: "activity"
   },
 
+
+  /* =======================================================
+     VIDEO / LIVE
+     3
+  ======================================================= */
 
   {
     key: "video_url",
@@ -2704,6 +2747,11 @@ const columns = [
     group: "live"
   },
 
+
+  /* =======================================================
+     RADIO / PLAYLIST
+     5
+  ======================================================= */
 
   {
     key: "radio",
@@ -2732,10 +2780,14 @@ const columns = [
   {
     key: "radio_order",
     label: "RADIO ORDER",
-    group: "radio",
-    number: true
+    group: "radio"
   },
 
+
+  /* =======================================================
+     SOCIAL / LINKS
+     5
+  ======================================================= */
 
   {
     key: "social_url",
@@ -2768,10 +2820,14 @@ const columns = [
   {
     key: "artist_social",
     label: "ARTIST SOCIAL",
-    group: "social",
-    link: true
+    group: "social"
   },
 
+
+  /* =======================================================
+     TECHNICAL
+     4
+  ======================================================= */
 
   {
     key: "storage_bucket",
@@ -2798,6 +2854,11 @@ const columns = [
   },
 
 
+  /* =======================================================
+     FUTURE GLCTC1
+     4
+  ======================================================= */
+
   {
     key: "left_frequency",
     label: "LEFT FREQUENCY",
@@ -2823,267 +2884,1624 @@ const columns = [
   },
 
 
+  /* =======================================================
+     DELETE
+  ======================================================= */
+
   {
     key: "__delete",
-    label: "DELETE",
-    group: "delete"
+    label: "DELETE"
   }
 
 ];
 
 
-/*
-   60 column definitions:
-   59 real Record Space fields + DELETE
-*/
+/* =========================================================
+   COLUMN COUNT VERIFICATION
+========================================================= */
 
-if (
-  columns.length !==
-  TOTAL_COLUMNS - 1
-) {
+if (columns.length !== 60) {
 
   console.error(
-    "GLCTC1 RECORD SPACE COLUMN CONFIGURATION ERROR:",
-    columns.length
+    "❌ RECORD SPACE COLUMN MAP ERROR:",
+    columns.length,
+    "column definitions; expected 60."
   );
 
 }
 
 
 /* =========================================================
-   BUILD TABLE HEADERS
+   COLUMN MAP VERIFIED
 ========================================================= */
 
-function buildHeaders() {
+/*
+   The authoritative column-count check is above.
 
-  const row =
-    document.getElementById(
-      "columnHeaderRow"
+   columns.length must be:
+
+   59 DATA COLUMNS
+   + 1 DELETE COLUMN
+   = 60 definitions
+
+   TOTAL_COLUMNS remains 61 because each rendered row
+   also contains the separate SELECT cell.
+*/
+
+console.log(
+  "✅ RECORD SPACE COLUMN MAP VERIFIED:",
+  columns.length,
+  "column definitions /",
+  TOTAL_COLUMNS,
+  "physical row cells."
+);
+
+
+/* =========================================================
+   STATE
+========================================================= */
+
+let records =
+  [];
+
+let filteredRecords =
+  [];
+
+let selectedIds =
+  new Set();
+
+let sortColumn =
+  "record_date";
+
+let sortDirection =
+  "desc";
+
+let currentUser =
+  null;
+
+
+// =====================================================
+// MASTER LIBRARY + RECORD SPACE STATE
+// =====================================================
+
+let masterLibrary = [];
+
+let masterLibraryLoaded =
+  false;
+
+let selectedRecord =
+  null;
+
+let editingRecord =
+  null;
+
+let editMode =
+  false;
+
+let newRecordMode =
+  false;
+
+
+/* =========================================================
+   LOAD RUN CONTROL
+=========================================================
+
+   Prevents an older asynchronous refresh from
+   overwriting a newer refresh.
+
+   Each loadRecords() call receives its own run ID.
+
+========================================================= */
+
+let recordSpaceLoadRun =
+  0;
+
+
+/* =========================================================
+   SAFE HTTP URL CHECK
+=========================================================
+
+   IMPORTANT:
+
+   This function deliberately accepts ONLY absolute
+   HTTP / HTTPS URLs.
+
+   Supabase Storage paths such as:
+
+       filename.mp3
+       folder/filename.mp3
+       tracks/filename.mp3
+
+   must NOT be treated as URLs.
+
+========================================================= */
+
+function isSafeHttpUrl(value) {
+
+  if (!value) {
+    return false;
+  }
+
+
+  const valueString =
+    String(value).trim();
+
+
+  if (!valueString) {
+    return false;
+  }
+
+
+  try {
+
+    const url =
+      new URL(
+        valueString
+      );
+
+
+    return (
+      url.protocol === "http:" ||
+      url.protocol === "https:"
     );
 
-  row.innerHTML = "";
+  } catch {
+
+    return false;
+
+  }
+
+}
 
 
-  const selectHeader =
-    document.createElement(
-      "th"
+/* =========================================================
+   NORMALISE MASTER LIBRARY VALUE
+========================================================= */
+
+function normaliseMasterValue(value) {
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+
+    return "";
+
+  }
+
+
+  return String(
+    value
+  ).trim();
+
+}
+
+
+/* =========================================================
+   MASTER LIBRARY MATCH KEY
+========================================================= */
+
+function getMasterRecordKey(record) {
+
+  if (!record) {
+    return "";
+  }
+
+
+  const id =
+    normaliseMasterValue(
+      record["ID Cat No"]
     );
 
-  selectHeader.textContent =
-    "SELECT";
 
-  row.appendChild(
-    selectHeader
-  );
+  if (id) {
+
+    return id.toLowerCase();
+
+  }
 
 
-  columns.forEach(
-    column => {
+  const artist =
+    normaliseMasterValue(
+      record["Artist"]
+    ).toLowerCase();
 
-      const th =
-        document.createElement(
-          "th"
-        );
 
-      th.textContent =
-        column.label;
+  const title =
+    normaliseMasterValue(
+      record["Track Title"]
+    ).toLowerCase();
 
+
+  if (
+    artist ||
+    title
+  ) {
+
+    return (
+      `${artist}|||${title}`
+    );
+
+  }
+
+
+  return "";
+
+}
+
+
+/* =========================================================
+   RECORD SPACE MATCH KEY
+========================================================= */
+
+function getRecordSpaceKey(record) {
+
+  if (!record) {
+    return "";
+  }
+
+
+  const id =
+    normaliseMasterValue(
+      record.record_id
+    );
+
+
+  if (id) {
+
+    return id.toLowerCase();
+
+  }
+
+
+  const artist =
+    normaliseMasterValue(
+      record.artist
+    ).toLowerCase();
+
+
+  const title =
+    normaliseMasterValue(
+      record.track_title
+    ).toLowerCase();
+
+
+  if (
+    artist ||
+    title
+  ) {
+
+    return (
+      `${artist}|||${title}`
+    );
+
+  }
+
+
+  return "";
+
+}
+
+
+// =====================================================
+// LOAD MASTER LIBRARY
+// =====================================================
+//
+// Loads the complete Master Library safely in pages.
+//
+// IMPORTANT:
+// - Never overwrites Record Space source data.
+// - Supports large Master Library datasets.
+// - Protects against an older async load finishing after
+//   a newer Record Space load has started.
+// - Uses the existing masterLibrary / masterLibraryLoaded
+//   state.
+//
+
+async function loadMasterLibrary(
+  activeLoadRun = recordSpaceLoadRun
+) {
+
+  masterLibrary = [];
+  masterLibraryLoaded = false;
+
+  const PAGE_SIZE = 1000;
+
+  let allMasterLibraryRows = [];
+  let from = 0;
+
+  try {
+
+    while (true) {
+
+      // -------------------------------------------------
+      // STOP IF A NEW RECORD SPACE LOAD HAS STARTED
+      // -------------------------------------------------
 
       if (
-        column.key !==
-        "__delete"
+        activeLoadRun !== recordSpaceLoadRun
       ) {
 
-        th.title =
-          "SORT BY " +
-          column.label;
+        console.warn(
+          "⏹️ MASTER LIBRARY LOAD ABORTED — newer load is active."
+        );
 
-        th.addEventListener(
-          "click",
-          () => {
+        return false;
 
-            if (
-              sortColumn ===
-              column.key
-            ) {
+      }
 
-              sortDirection =
-                sortDirection ===
-                "asc"
-                  ? "desc"
-                  : "asc";
 
-            } else {
+      // -------------------------------------------------
+      // LOAD ONE PAGE
+      // -------------------------------------------------
 
-              sortColumn =
-                column.key;
+      const {
+        data,
+        error
+      } = await supabaseClient
+        .from("master_library")
+        .select("*")
+        .range(
+          from,
+          from + PAGE_SIZE - 1
+        );
 
-              sortDirection =
-                "asc";
 
-            }
+      // -------------------------------------------------
+      // ERROR
+      // -------------------------------------------------
 
-            renderTable();
+      if (error) {
 
-          }
+        console.warn(
+          "⚠️ MASTER LIBRARY LOAD:",
+          error
+        );
+
+        return false;
+
+      }
+
+
+      // -------------------------------------------------
+      // STOP IF A NEW LOAD STARTED WHILE SUPABASE
+      // WAS RESPONDING
+      // -------------------------------------------------
+
+      if (
+        activeLoadRun !== recordSpaceLoadRun
+      ) {
+
+        console.warn(
+          "⏹️ MASTER LIBRARY LOAD DISCARDED — newer load is active."
+        );
+
+        return false;
+
+      }
+
+
+      // -------------------------------------------------
+      // NORMALISE PAGE
+      // -------------------------------------------------
+
+      const page =
+        Array.isArray(data)
+          ? data
+          : [];
+
+
+      // -------------------------------------------------
+      // ADD PAGE
+      // -------------------------------------------------
+
+      allMasterLibraryRows.push(
+        ...page
+      );
+
+
+      // -------------------------------------------------
+      // LAST PAGE
+      // -------------------------------------------------
+
+      if (
+        page.length < PAGE_SIZE
+      ) {
+
+        break;
+
+      }
+
+
+      // -------------------------------------------------
+      // NEXT PAGE
+      // -------------------------------------------------
+
+      from += PAGE_SIZE;
+
+    }
+
+
+    // ---------------------------------------------------
+    // FINAL STALE-LOAD CHECK
+    // ---------------------------------------------------
+
+    if (
+      activeLoadRun !== recordSpaceLoadRun
+    ) {
+
+      console.warn(
+        "⏹️ MASTER LIBRARY LOAD DISCARDED — newer load is active."
+      );
+
+      return false;
+
+    }
+
+
+    // ---------------------------------------------------
+    // COMMIT ONLY THE CURRENT LOAD
+    // ---------------------------------------------------
+
+    masterLibrary =
+      allMasterLibraryRows;
+
+    masterLibraryLoaded = true;
+
+
+    console.log(
+      `🎵 MASTER LIBRARY CONNECTED: ${masterLibrary.length} records`
+    );
+
+
+    return true;
+
+  } catch (error) {
+
+    // ---------------------------------------------------
+    // IGNORE ERRORS FROM OBSOLETE LOADS
+    // ---------------------------------------------------
+
+    if (
+      activeLoadRun !== recordSpaceLoadRun
+    ) {
+
+      console.warn(
+        "⏹️ MASTER LIBRARY LOAD ERROR IGNORED — newer load is active."
+      );
+
+      return false;
+
+    }
+
+
+    console.warn(
+      "⚠️ MASTER LIBRARY CONNECTION FAILED:",
+      error
+    );
+
+
+    return false;
+
+  }
+
+}
+
+
+// =====================================================
+// POPULATE ONE RECORD FROM MASTER LIBRARY
+// =====================================================
+
+function populateMasterField(
+  target,
+  targetField,
+  sourceValue
+) {
+
+  if (
+    sourceValue === null ||
+    sourceValue === undefined
+  ) {
+    return;
+  }
+
+  const value =
+    normaliseMasterValue(
+      sourceValue
+    );
+
+  if (!value) {
+    return;
+  }
+
+  const existing =
+    normaliseMasterValue(
+      target[targetField]
+    );
+
+  /*
+     IMPORTANT:
+     Never overwrite existing Record Space data.
+     Master Library only fills empty fields.
+  */
+
+  if (!existing) {
+    target[targetField] = value;
+  }
+
+}
+
+
+// =====================================================
+// POPULATE RECORD SPACE FROM MASTER LIBRARY
+// =====================================================
+//
+// Record Space remains the authoritative database table.
+//
+// Master Library is used only to enrich empty Record
+// Space fields in memory.
+//
+// IMPORTANT:
+// - Record Space data is never overwritten in Supabase.
+// - Existing Record Space values are never replaced.
+// - Master Library values only fill empty fields.
+// - The active Record Space load-run is checked so an
+//   older load cannot enrich a newer dataset.
+// =====================================================
+
+function populateRecordsFromMasterLibrary(
+  activeLoadRun = recordSpaceLoadRun
+) {
+
+  /*
+     --------------------------------------------------
+     LOAD-RUN PROTECTION
+     --------------------------------------------------
+  */
+
+  if (
+    activeLoadRun !==
+    recordSpaceLoadRun
+  ) {
+
+    console.warn(
+      "⏹️ MASTER LIBRARY ENRICHMENT ABORTED — STALE LOAD RUN."
+    );
+
+    return false;
+
+  }
+
+
+  if (
+    !Array.isArray(records) ||
+    !records.length ||
+    !Array.isArray(masterLibrary) ||
+    !masterLibrary.length
+  ) {
+
+    return true;
+
+  }
+
+
+  // ---------------------------------------------------
+  // PRIMARY LOOKUP — RECORD ID
+  // ---------------------------------------------------
+
+  const masterById =
+    new Map();
+
+
+  // ---------------------------------------------------
+  // FALLBACK LOOKUP — ARTIST + TRACK TITLE
+  // ---------------------------------------------------
+
+  const masterByArtistTitle =
+    new Map();
+
+
+  masterLibrary.forEach(
+    masterRecord => {
+
+      if (!masterRecord) {
+        return;
+      }
+
+
+      // -------------------------------------------------
+      // ID MATCH
+      // -------------------------------------------------
+
+      const masterId =
+        normaliseMasterValue(
+          masterRecord["ID Cat No"]
+        );
+
+
+      if (masterId) {
+
+        masterById.set(
+          masterId,
+          masterRecord
         );
 
       }
 
 
-      row.appendChild(
-        th
-      );
+      // -------------------------------------------------
+      // ARTIST + TITLE MATCH
+      // -------------------------------------------------
+
+      const artist =
+        normaliseMasterValue(
+          masterRecord["Artist"]
+        ).toLowerCase();
+
+
+      const title =
+        normaliseMasterValue(
+          masterRecord["Track Title"]
+        ).toLowerCase();
+
+
+      /*
+         Only create the fallback key when BOTH
+         artist and title exist.
+
+         This prevents a partial match.
+      */
+
+      if (
+        artist &&
+        title
+      ) {
+
+        const artistTitleKey =
+          `${artist}|||${title}`;
+
+
+        if (
+          !masterByArtistTitle.has(
+            artistTitleKey
+          )
+        ) {
+
+          masterByArtistTitle.set(
+            artistTitleKey,
+            masterRecord
+          );
+
+        }
+
+      }
 
     }
   );
 
-}
+
+  // ---------------------------------------------------
+  // MATCH COUNTERS
+  // ---------------------------------------------------
+
+  let matchedCount =
+    0;
+
+  let idMatchedCount =
+    0;
+
+  let artistTitleMatchedCount =
+    0;
+
+  let unmatchedCount =
+    0;
 
 
-/* =========================================================
-   AUTH
-========================================================= */
+  // ---------------------------------------------------
+  // ENRICH RECORD SPACE
+  // ---------------------------------------------------
 
-async function loadSession() {
+  for (
+    const record
+    of records
+  ) {
 
-  try {
+    /*
+       A newer Record Space load has started.
 
-    const {
-      data,
-      error
-    } =
-      await supabaseClient
-        .auth
-        .getSession();
-
+       Stop immediately so the newer load owns
+       the current dataset.
+    */
 
     if (
-      error
+      activeLoadRun !==
+      recordSpaceLoadRun
     ) {
 
-      console.error(
-        "AUTH SESSION ERROR:",
-        error
+      console.warn(
+        "⏹️ MASTER LIBRARY ENRICHMENT ABORTED — NEWER LOAD RUN DETECTED."
       );
 
-      currentUser = null;
+      return false;
 
-    } else {
+    }
 
-      currentUser =
-        data?.session?.user ||
+
+    if (!record) {
+      continue;
+    }
+
+
+    // -------------------------------------------------
+    // FIND MASTER LIBRARY MATCH
+    // -------------------------------------------------
+
+    const recordId =
+      normaliseMasterValue(
+        record.record_id
+      );
+
+
+    let masterRecord =
+      null;
+
+
+    /*
+       FIRST:
+       Exact Record ID / Catalogue Number match.
+    */
+
+    if (
+      recordId
+    ) {
+
+      masterRecord =
+        masterById.get(
+          recordId
+        ) ||
         null;
 
     }
 
-  } catch (error) {
 
-    console.error(
-      "AUTH ERROR:",
-      error
+    /*
+       SECOND:
+       Artist + Track Title fallback.
+
+       Only used when an ID match was not found.
+    */
+
+    if (
+      !masterRecord
+    ) {
+
+      const recordArtist =
+        normaliseMasterValue(
+          record.artist
+        ).toLowerCase();
+
+
+      const recordTitle =
+        normaliseMasterValue(
+          record.track_title
+        ).toLowerCase();
+
+
+      if (
+        recordArtist &&
+        recordTitle
+      ) {
+
+        const artistTitleKey =
+          `${recordArtist}|||${recordTitle}`;
+
+
+        masterRecord =
+          masterByArtistTitle.get(
+            artistTitleKey
+          ) ||
+          null;
+
+      }
+
+    }
+
+
+    // -------------------------------------------------
+    // NO MATCH
+    // -------------------------------------------------
+
+    if (
+      !masterRecord
+    ) {
+
+      unmatchedCount++;
+
+      continue;
+
+    }
+
+
+    matchedCount++;
+
+
+    /*
+       Determine which matching method succeeded.
+    */
+
+    if (
+      recordId &&
+      masterById.get(
+        recordId
+      ) === masterRecord
+    ) {
+
+      idMatchedCount++;
+
+    }
+    else {
+
+      artistTitleMatchedCount++;
+
+    }
+
+
+    // -------------------------------------------------
+    // ARTIST / MUSIC
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "artist",
+      masterRecord["Artist"]
     );
 
-    currentUser = null;
+
+    populateMasterField(
+      record,
+      "track_title",
+      masterRecord["Track Title"]
+    );
+
+
+    populateMasterField(
+      record,
+      "album",
+      masterRecord["Album"]
+    );
+
+
+    // -------------------------------------------------
+    // AUDIO
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "master_audio",
+      masterRecord["Master Audio"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_1",
+      masterRecord["Stem 1"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_2",
+      masterRecord["Stem 2"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_3",
+      masterRecord["Stem 3"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_4",
+      masterRecord["Stem 4"]
+    );
+
+
+    // -------------------------------------------------
+    // OPTIONAL AUDIO METADATA
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "audio_format",
+      masterRecord["Audio Format"]
+    );
+
+
+    populateMasterField(
+      record,
+      "sample_rate",
+      masterRecord["Sample Rate"]
+    );
+
+
+    populateMasterField(
+      record,
+      "duration",
+      masterRecord["Duration"]
+    );
+
+
+    // -------------------------------------------------
+    // MUSIC DATA
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "genre",
+      masterRecord["Genre"]
+    );
+
+
+    populateMasterField(
+      record,
+      "bpm",
+      masterRecord["BPM"]
+    );
+
+
+    populateMasterField(
+      record,
+      "key",
+      masterRecord["Key"]
+    );
+
+
+    populateMasterField(
+      record,
+      "frequency_hz",
+      masterRecord["Frequency (Hz)"]
+    );
+
+
+    populateMasterField(
+      record,
+      "chakra",
+      masterRecord["Chakra"]
+    );
+
+
+    populateMasterField(
+      record,
+      "planet",
+      masterRecord["Planet"]
+    );
+
+
+    populateMasterField(
+      record,
+      "spatial",
+      masterRecord["Spatial"]
+    );
+
+
+    populateMasterField(
+      record,
+      "solfeggio",
+      masterRecord["Solfeggio"]
+    );
+
+
+    populateMasterField(
+      record,
+      "binaural",
+      masterRecord["Binaural"]
+    );
+
+
+    populateMasterField(
+      record,
+      "carrier_frequency",
+      masterRecord["Carrier Frequency"]
+    );
+
+
+    populateMasterField(
+      record,
+      "notes",
+      masterRecord["Notes"]
+    );
+
+
+    // -------------------------------------------------
+    // RECORD ID
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "record_id",
+      masterRecord["ID Cat No"]
+    );
+
+
+    // -------------------------------------------------
+    // RIGHTS
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "copyright",
+      masterRecord["Copyright"]
+    );
+
+
+    // -------------------------------------------------
+    // ARTWORK
+    // -------------------------------------------------
+
+    populateMasterField(
+      record,
+      "cover_art",
+      masterRecord["Cover Art"]
+    );
 
   }
 
 
-  updateAuthUI();
+  /*
+     --------------------------------------------------
+     FINAL LOAD-RUN CHECK
+     --------------------------------------------------
+  */
+
+  if (
+    activeLoadRun !==
+    recordSpaceLoadRun
+  ) {
+
+    console.warn(
+      "⏹️ MASTER LIBRARY ENRICHMENT FINISHED FOR STALE LOAD."
+    );
+
+    return false;
+
+  }
+
+
+  // ---------------------------------------------------
+  // MATCH REPORT
+  // ---------------------------------------------------
+
+  console.log(
+    "🔗 RECORD SPACE → MASTER LIBRARY MATCH:",
+    matchedCount,
+    "matched /",
+    unmatchedCount,
+    "unmatched /",
+    records.length,
+    "total"
+  );
+
+
+  console.log(
+    "   ↳ ID MATCHES:",
+    idMatchedCount
+  );
+
+
+  console.log(
+    "   ↳ ARTIST + TITLE MATCHES:",
+    artistTitleMatchedCount
+  );
+
+
+  return true;
 
 }
 
 
-function updateAuthUI() {
+  // ---------------------------------------------------
+  // POPULATE RECORD SPACE
+  // ---------------------------------------------------
 
-  const status =
-    document.getElementById(
-      "moduleStatus"
-    );
+  let matchedCount =
+    0;
 
-  const adminStatus =
-    document.getElementById(
-      "adminStatus"
-    );
+  let idMatchedCount =
+    0;
+
+  let artistTitleMatchedCount =
+    0;
+
+  let unmatchedCount =
+    0;
+
+
+  records.forEach(
+    record => {
+
+      if (!record) {
+        return;
+      }
+
+
+      let masterRecord =
+        null;
+
+      let matchedBy =
+        "";
+
+
+      // -------------------------------------------------
+      // 1. PRIMARY MATCH — RECORD ID
+      // -------------------------------------------------
+
+      const recordId =
+        normaliseMasterValue(
+          record.record_id
+        );
+
+
+      if (recordId) {
+
+        masterRecord =
+          masterById.get(
+            recordId
+          ) || null;
+
+
+        if (masterRecord) {
+
+          matchedBy =
+            "RECORD ID";
+
+        }
+
+      }
+
+
+      // -------------------------------------------------
+      // 2. FALLBACK — ARTIST + TRACK TITLE
+      // -------------------------------------------------
+
+      if (!masterRecord) {
+
+        const artist =
+          normaliseMasterValue(
+            record.artist
+          ).toLowerCase();
+
+
+        const title =
+          normaliseMasterValue(
+            record.track_title
+          ).toLowerCase();
+
+
+        if (
+          artist &&
+          title
+        ) {
+
+          const artistTitleKey =
+            `${artist}|||${title}`;
+
+
+          masterRecord =
+            masterByArtistTitle.get(
+              artistTitleKey
+            ) || null;
+
+
+          if (masterRecord) {
+
+            matchedBy =
+              "ARTIST + TITLE";
+
+          }
+
+        }
+
+      }
+
+
+      // -------------------------------------------------
+      // NO MATCH
+      // -------------------------------------------------
+
+      if (!masterRecord) {
+
+        unmatchedCount++;
+
+        return;
+
+      }
+
+
+      // -------------------------------------------------
+      // MATCH COUNTERS
+      // -------------------------------------------------
+
+      matchedCount++;
+
+
+      if (
+        matchedBy ===
+        "RECORD ID"
+      ) {
+
+        idMatchedCount++;
+
+      }
+
+
+      if (
+        matchedBy ===
+        "ARTIST + TITLE"
+      ) {
+
+        artistTitleMatchedCount++;
+
+      }
+
+
+      // -------------------------------------------------
+      // RECORD / ARTIST / MUSIC
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "artist",
+        masterRecord["Artist"]
+      );
+
+      populateMasterField(
+        record,
+        "track_title",
+        masterRecord["Track Title"]
+      );
+
+      populateMasterField(
+        record,
+        "album",
+        masterRecord["Album"]
+      );
+
+
+      // -------------------------------------------------
+      // AUDIO
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "master_audio",
+        masterRecord["Master Audio"]
+      );
+
+      populateMasterField(
+        record,
+        "stem_1",
+        masterRecord["Stem 1"]
+      );
+
+      populateMasterField(
+        record,
+        "stem_2",
+        masterRecord["Stem 2"]
+      );
+
+      populateMasterField(
+        record,
+        "stem_3",
+        masterRecord["Stem 3"]
+      );
+
+      populateMasterField(
+        record,
+        "stem_4",
+        masterRecord["Stem 4"]
+      );
+
+
+      // -------------------------------------------------
+      // OPTIONAL AUDIO METADATA
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "audio_format",
+        masterRecord["Audio Format"]
+      );
+
+      populateMasterField(
+        record,
+        "sample_rate",
+        masterRecord["Sample Rate"]
+      );
+
+      populateMasterField(
+        record,
+        "duration",
+        masterRecord["Duration"]
+      );
+
+
+      // -------------------------------------------------
+      // MUSIC DATA
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "genre",
+        masterRecord["Genre"]
+      );
+
+      populateMasterField(
+        record,
+        "bpm",
+        masterRecord["BPM"]
+      );
+
+      populateMasterField(
+        record,
+        "key",
+        masterRecord["Key"]
+      );
+
+      populateMasterField(
+        record,
+        "frequency_hz",
+        masterRecord["Frequency (Hz)"]
+      );
+
+      populateMasterField(
+        record,
+        "chakra",
+        masterRecord["Chakra"]
+      );
+
+      populateMasterField(
+        record,
+        "planet",
+        masterRecord["Planet"]
+      );
+
+      populateMasterField(
+        record,
+        "spatial",
+        masterRecord["Spatial"]
+      );
+
+      populateMasterField(
+        record,
+        "solfeggio",
+        masterRecord["Solfeggio"]
+      );
+
+      populateMasterField(
+        record,
+        "binaural",
+        masterRecord["Binaural"]
+      );
+
+      populateMasterField(
+        record,
+        "carrier_frequency",
+        masterRecord["Carrier Frequency"]
+      );
+
+      populateMasterField(
+        record,
+        "notes",
+        masterRecord["Notes"]
+      );
+
+
+      // -------------------------------------------------
+      // RECORD ID / RIGHTS
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "record_id",
+        masterRecord["ID Cat No"]
+      );
+
+      populateMasterField(
+        record,
+        "copyright",
+        masterRecord["Copyright"]
+      );
+
+
+      // -------------------------------------------------
+      // ARTWORK
+      // -------------------------------------------------
+
+      populateMasterField(
+        record,
+        "cover_art",
+        masterRecord["Cover Art"]
+      );
+
+    }
+  );
+
+
+  // ---------------------------------------------------
+  // MASTER LIBRARY MATCH REPORT
+  // ---------------------------------------------------
+
+  console.log(
+    "🔗 RECORD SPACE → MASTER LIBRARY MATCH:",
+    matchedCount,
+    "matched /",
+    unmatchedCount,
+    "unmatched /",
+    records.length,
+    "total"
+  );
+
+
+  console.log(
+    "   ├─ RECORD ID MATCHES:",
+    idMatchedCount
+  );
+
+
+  console.log(
+    "   └─ ARTIST + TITLE MATCHES:",
+    artistTitleMatchedCount
+  );
+
+}
+
+
+// ---------------------------------------------------
+// MASTER LIBRARY MATCH REPORT
+// ---------------------------------------------------
+
+console.log(
+  "🔗 RECORD SPACE → MASTER LIBRARY MATCH:",
+  matchedCount,
+  "matched /",
+  unmatchedCount,
+  "unmatched /",
+  records.length,
+  "total"
+);
+
+
+// =====================================================
+// STORAGE ASSET CACHE
+// =====================================================
+//
+// Keeps signed URLs from being regenerated repeatedly
+// during the same page session.
+//
+// IMPORTANT:
+//
+// Supabase signed URLs are temporary.
+//
+// Record Space creates them for 3600 seconds
+// (1 hour).
+//
+// Therefore the cache MUST also remember when the
+// signed URL expires.
+//
+// An expired signed URL is never returned from the
+// cache. A fresh one is generated instead.
+//
+// The original database Storage path is NEVER changed.
+//
+const storageAssetCache =
+  new Map();
+
+
+// =====================================================
+// STORAGE SIGNED URL LIFETIME
+// =====================================================
+//
+// Supabase signed URLs are currently created for:
+//
+// 3600 seconds = 1 hour
+//
+// Keep the cache lifetime slightly shorter than the
+// actual URL lifetime so Record Space does not attempt
+// to use a URL right on the expiry boundary.
+//
+const STORAGE_SIGNED_URL_LIFETIME =
+  3600;
+
+const STORAGE_CACHE_SAFETY_MARGIN =
+  60;
+
+
+// =====================================================
+// RESOLVE STORAGE ASSET
+// =====================================================
+
+async function resolveRecordStorageAsset(
+  value,
+  preferredBucket = ""
+) {
+
+  if (!value) {
+    return "";
+  }
+
+
+  const original =
+    String(value).trim();
+
+
+  if (!original) {
+    return "";
+  }
+
+
+  /*
+     --------------------------------------------------
+     EXISTING HTTP / HTTPS URL
+     --------------------------------------------------
+
+     Never alter an existing normal URL.
+  */
+
+  if (
+    isSafeHttpUrl(
+      original
+    )
+  ) {
+
+    return original;
+
+  }
+
+
+  /*
+     --------------------------------------------------
+     STORAGE BUCKETS
+     --------------------------------------------------
+
+     Preferred bucket is attempted first.
+
+     Existing GLCTC1 buckets are then checked
+     as fallbacks.
+  */
+
+  const buckets = [];
 
 
   if (
-    currentUser
+    preferredBucket
   ) {
 
-    status.textContent =
-      "● RECORD SPACE ONLINE — SIGNED IN";
-
-    status.style.color =
-      "var(--green)";
-
-    adminStatus.textContent =
-      "SIGNED IN — ADMIN CONTROLS AVAILABLE";
-
-    adminStatus.style.color =
-      "var(--green)";
-
-  } else {
-
-    status.textContent =
-      "● RECORD SPACE ONLINE — PUBLIC VIEW";
-
-    status.style.color =
-      "var(--cyan)";
-
-    adminStatus.textContent =
-      "PUBLIC VIEW — SIGN IN REQUIRED FOR EDITING";
-
-    adminStatus.style.color =
-      "var(--yellow)";
+    buckets.push(
+      preferredBucket
+    );
 
   }
 
-  updateAdminButtons();
 
-}
-
-
-/* =========================================================
-   ADMIN BUTTON STATE
-========================================================= */
-
-function updateAdminButtons() {
-
-  const authButtons = [
-
-    document.getElementById(
-      "newRecordButton"
-    ),
-
-    document.getElementById(
-      "editSelectedButton"
-    ),
-
-    document.getElementById(
-      "saveEditButton"
-    ),
-
-    document.getElementById(
-      "deleteSelectedAdminButton"
-    ),
-
-    document.getElementById(
-      "addRecordButton"
-    )
-
-  ];
-
-
-  authButtons.forEach(
-    button => {
+  [
+    "tracks",
+    "master-library"
+  ].forEach(
+    bucket => {
 
       if (
-        button
+        !buckets.includes(
+          bucket
+        )
       ) {
 
-        button.disabled =
-          !currentUser;
+        buckets.push(
+          bucket
+        );
 
       }
 
@@ -3091,20 +4509,659 @@ function updateAdminButtons() {
   );
 
 
-  document.getElementById(
-    "saveEditButton"
-  ).disabled =
-    !currentUser ||
-    !editingRecord;
+  /*
+     --------------------------------------------------
+     TRY EACH BUCKET
+     --------------------------------------------------
+  */
+
+  for (
+    const bucket
+    of buckets
+  ) {
+
+    /*
+       ------------------------------------------------
+       CACHE KEY
+       ------------------------------------------------
+
+       The ACTUAL bucket being attempted is part of
+       the cache key.
+
+       This prevents a path resolved from a fallback
+       bucket from being incorrectly stored against
+       the preferred bucket.
+    */
+
+    const cacheKey =
+      bucket +
+      "::" +
+      original;
+
+
+    /*
+       ------------------------------------------------
+       CHECK EXISTING CACHE
+       ------------------------------------------------
+    */
+
+    const cached =
+      storageAssetCache.get(
+        cacheKey
+      );
+
+
+    if (
+      cached &&
+      cached.url &&
+      cached.expiresAt &&
+      Date.now() <
+        cached.expiresAt
+    ) {
+
+      return cached.url;
+
+    }
+
+
+    /*
+       ------------------------------------------------
+       REMOVE EXPIRED CACHE ENTRY
+       ------------------------------------------------
+    */
+
+    if (
+      cached
+    ) {
+
+      storageAssetCache.delete(
+        cacheKey
+      );
+
+    }
+
+
+    /*
+       ------------------------------------------------
+       NORMALISE STORAGE PATH
+       ------------------------------------------------
+
+       Accept:
+
+       filename.mp3
+       folder/filename.mp3
+       tracks/filename.mp3
+       master-library/filename.mp3
+    */
+
+    let path =
+      original;
+
+
+    const bucketPrefix =
+      `${bucket}/`;
+
+
+    if (
+      path.startsWith(
+        bucketPrefix
+      )
+    ) {
+
+      path =
+        path.substring(
+          bucketPrefix.length
+        );
+
+    }
+
+
+    /*
+       ------------------------------------------------
+       CREATE SIGNED URL
+       ------------------------------------------------
+    */
+
+    try {
+
+      const {
+        data,
+        error
+      } =
+        await supabaseClient
+          .storage
+          .from(bucket)
+          .createSignedUrl(
+            path,
+            STORAGE_SIGNED_URL_LIFETIME
+          );
+
+
+      /*
+         ------------------------------------------------
+         SUCCESSFUL RESOLUTION
+         ------------------------------------------------
+      */
+
+      if (
+        !error &&
+        data?.signedUrl &&
+        isSafeHttpUrl(
+          data.signedUrl
+        )
+      ) {
+
+        /*
+           Store the cache expiry slightly before
+           the actual Supabase signed URL expires.
+
+           This preserves the 60-second safety margin.
+        */
+
+        const expiresAt =
+          Date.now() +
+          (
+            (
+              STORAGE_SIGNED_URL_LIFETIME -
+              STORAGE_CACHE_SAFETY_MARGIN
+            ) *
+            1000
+          );
+
+
+        storageAssetCache.set(
+          cacheKey,
+          {
+            url:
+              data.signedUrl,
+
+            expiresAt:
+              expiresAt
+          }
+        );
+
+
+        return data.signedUrl;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         BUCKET FAILED — TRY NEXT BUCKET
+         ------------------------------------------------
+      */
+
+      if (
+        error
+      ) {
+
+        console.warn(
+          `⚠️ STORAGE RESOLVE FAILED [${bucket}]`,
+          path,
+          error
+        );
+
+      }
+
+    }
+    catch (
+      error
+    ) {
+
+      /*
+         One failed bucket must not prevent the
+         remaining fallback buckets from being tried.
+      */
+
+      console.warn(
+        `⚠️ STORAGE RESOLVE FAILED [${bucket}]`,
+        path,
+        error
+      );
+
+    }
+
+  }
+
+
+  /*
+     --------------------------------------------------
+     RESOLUTION FAILED
+     --------------------------------------------------
+
+     NEVER replace the original database value with
+     an empty string or failed temporary URL.
+
+     Keep the original Storage path intact.
+  */
+
+  return original;
 
 }
 
 
+// =====================================================
+// RESOLVE ONE AUDIO FIELD
+// =====================================================
+
+async function resolveRecordAudioField(
+  record,
+  fieldName
+) {
+
+  if (
+    !record ||
+    !record[fieldName]
+  ) {
+
+    return "";
+
+  }
+
+
+  /*
+     KEEP THE ORIGINAL RECORD VALUE.
+
+     Supabase signed URLs are temporary display/playback
+     URLs and must NEVER replace the stored path.
+
+     The temporary URL is kept separately as:
+
+       _resolved_master_audio
+       _resolved_stem_1
+       _resolved_stem_2
+       _resolved_stem_3
+       _resolved_stem_4
+  */
+
+  const original =
+    String(
+      record[fieldName]
+    ).trim();
+
+
+  if (!original) {
+
+    return "";
+
+  }
+
+
+  /*
+     ALREADY A NORMAL HTTP / HTTPS URL
+  */
+
+  if (
+    isSafeHttpUrl(
+      original
+    )
+  ) {
+
+    record[
+      `_resolved_${fieldName}`
+    ] =
+      original;
+
+    return original;
+
+  }
+
+
+  /*
+     PREFER THE RECORD'S EXPLICIT STORAGE BUCKET
+  */
+
+  const preferredBucket =
+    normaliseMasterValue(
+      record.storage_bucket
+    );
+
+
+  const resolved =
+    await resolveRecordStorageAsset(
+      original,
+      preferredBucket
+    );
+
+
+  /*
+     IMPORTANT:
+
+     NEVER DO:
+
+       record[fieldName] = resolved;
+
+     The original Storage path must remain intact.
+
+     Only the temporary resolved URL is stored in the
+     display-only _resolved_ field.
+  */
+
+  if (
+    isSafeHttpUrl(
+      resolved
+    )
+  ) {
+
+    record[
+      `_resolved_${fieldName}`
+    ] =
+      resolved;
+
+  }
+  else {
+
+    delete record[
+      `_resolved_${fieldName}`
+    ];
+
+  }
+
+
+  return resolved;
+
+}
+
+
+// =====================================================
+// RESOLVE ONE ARTWORK FIELD
+// =====================================================
+
+async function resolveRecordArtworkField(
+  record,
+  fieldName
+) {
+
+  if (
+    !record ||
+    !record[fieldName]
+  ) {
+
+    return "";
+
+  }
+
+
+  /*
+     KEEP THE ORIGINAL ARTWORK VALUE.
+
+     Temporary signed URLs are display-only.
+  */
+
+  const original =
+    String(
+      record[fieldName]
+    ).trim();
+
+
+  if (!original) {
+
+    return "";
+
+  }
+
+
+  /*
+     ALREADY A NORMAL HTTP / HTTPS URL
+  */
+
+  if (
+    isSafeHttpUrl(
+      original
+    )
+  ) {
+
+    record[
+      `_resolved_${fieldName}`
+    ] =
+      original;
+
+    return original;
+
+  }
+
+
+  /*
+     PREFER THE RECORD'S EXPLICIT STORAGE BUCKET
+  */
+
+  const preferredBucket =
+    normaliseMasterValue(
+      record.storage_bucket
+    );
+
+
+  const resolved =
+    await resolveRecordStorageAsset(
+      original,
+      preferredBucket
+    );
+
+
+  /*
+     NEVER REPLACE THE ORIGINAL DATABASE VALUE.
+
+     Store only the temporary display URL.
+  */
+
+  if (
+    isSafeHttpUrl(
+      resolved
+    )
+  ) {
+
+    record[
+      `_resolved_${fieldName}`
+    ] =
+      resolved;
+
+  }
+  else {
+
+    delete record[
+      `_resolved_${fieldName}`
+    ];
+
+  }
+
+
+  return resolved;
+
+}
+
+
+// =====================================================
+// RESOLVE RECORD ASSETS
+// =====================================================
+
+async function resolveRecordAssets(
+  record
+) {
+
+  if (!record) {
+
+    return;
+
+  }
+
+
+  /*
+     MASTER AUDIO
+  */
+
+  await resolveRecordAudioField(
+    record,
+    "master_audio"
+  );
+
+
+  /*
+     STEMS 1–4
+  */
+
+  await resolveRecordAudioField(
+    record,
+    "stem_1"
+  );
+
+  await resolveRecordAudioField(
+    record,
+    "stem_2"
+  );
+
+  await resolveRecordAudioField(
+    record,
+    "stem_3"
+  );
+
+  await resolveRecordAudioField(
+    record,
+    "stem_4"
+  );
+
+
+  /*
+     COVER ART
+  */
+
+  await resolveRecordArtworkField(
+    record,
+    "cover_art"
+  );
+
+
+  /*
+     SECONDARY ARTWORK
+  */
+
+  await resolveRecordArtworkField(
+    record,
+    "artwork_url"
+  );
+
+}
+
+// =====================================================
+// RESOLVE VISIBLE RECORD ASSETS
+// =====================================================
+//
+// Resolve only the records that are actually useful
+// for the initial Record Space display.
+//
+// IMPORTANT:
+// - Original database Storage paths are never changed.
+// - Temporary signed URLs are stored only in
+//   _resolved_* fields.
+// - Resolution is performed serially to avoid creating
+//   a large number of simultaneous Supabase Storage
+//   requests.
+// - The first 100 records are resolved here.
+// - Selected records are resolved separately by
+//   renderSelectedRecord().
+//
+// =====================================================
+
+async function resolveVisibleRecordAssets(
+  recordList
+) {
+
+  if (
+    !Array.isArray(
+      recordList
+    ) ||
+    !recordList.length
+  ) {
+
+    return;
+
+  }
+
+
+  /*
+     --------------------------------------------------
+     VISIBLE RECORD LIMIT
+     --------------------------------------------------
+
+     Do not attempt to generate signed URLs for all
+     1,000+ Record Space rows during initial loading.
+
+     The table can contain many records, but only the
+     first visible section needs immediate asset
+     resolution.
+
+     Selected records are resolved separately.
+  */
+
+  const visibleRecords =
+    recordList.slice(
+      0,
+      100
+    );
+
+
+  /*
+     --------------------------------------------------
+     RESOLVE ONE RECORD AT A TIME
+     --------------------------------------------------
+
+     Serial resolution deliberately avoids sending a
+     large burst of Storage requests to Supabase.
+
+     The original Record Space database values remain
+     untouched.
+  */
+
+  for (
+    const record
+    of visibleRecords
+  ) {
+
+    /*
+       Stop safely if a newer Record Space load has
+       replaced the current dataset.
+    */
+
+    if (
+      !records.includes(
+        record
+      )
+    ) {
+
+      return;
+
+    }
+
+
+    await resolveRecordAssets(
+      record
+    );
+
+  }
+
+}
+
 /* =========================================================
-   LOAD RECORDS
+   LOAD RECORD SPACE
 ========================================================= */
 
 async function loadRecords() {
+
+  /*
+     ------------------------------------------------------
+     START A NEW LOAD RUN
+     ------------------------------------------------------
+
+     Every refresh receives a unique run number.
+
+     If another refresh starts before this one finishes,
+     this run becomes stale and must not write newer state
+     over the latest refresh.
+  */
+
+  const loadRun =
+    ++recordSpaceLoadRun;
+
 
   setStatus(
     "● LOADING RECORD SPACE..."
@@ -3113,39 +5170,176 @@ async function loadRecords() {
 
   try {
 
-    const {
-      data,
-      error
-    } =
-      await supabaseClient
-        .from(
-          TABLE_NAME
-        )
-        .select("*")
-        .order(
-          "record_date",
-          {
-            ascending: false,
-            nullsFirst: false
-          }
-        );
+    /*
+       --------------------------------------------------
+       REMEMBER CURRENT SELECTION
+       --------------------------------------------------
+
+       Keep both the database ID and Record Space identity
+       before the fresh database load begins.
+
+       The OLD record object is never reused after refresh.
+    */
+
+    const selectedRecordIdBeforeRefresh =
+      selectedRecord?.id ??
+      null;
 
 
-    if (
-      error
+    const selectedRecordKeyBeforeRefresh =
+      selectedRecord
+        ? getRecordId(
+            selectedRecord
+          )
+        : null;
+
+
+    /*
+       --------------------------------------------------
+       LOAD RECORD SPACE — PAGINATED
+       --------------------------------------------------
+
+       Record Space contains more than 1,000 records.
+
+       Load the complete table in pages.
+    */
+
+    const RECORD_SPACE_PAGE_SIZE =
+      1000;
+
+
+    const allRecordRows =
+      [];
+
+
+    let recordPageStart =
+      0;
+
+
+    while (
+      true
     ) {
 
-      console.error(
-        "RECORD SPACE LOAD ERROR:",
-        error
+      /*
+         ------------------------------------------------
+         STALE LOAD CHECK
+         ------------------------------------------------
+      */
+
+      if (
+        loadRun !==
+        recordSpaceLoadRun
+      ) {
+
+        console.log(
+          "↻ RECORD SPACE PAGINATED LOAD SUPERSEDED:",
+          loadRun
+        );
+
+        return;
+
+      }
+
+
+      const {
+        data: pageData,
+        error: pageError
+      } =
+        await supabaseClient
+          .from(
+            TABLE_NAME
+          )
+          .select("*")
+          .order(
+            "record_date",
+            {
+              ascending:
+                false,
+
+              nullsFirst:
+                false
+            }
+          )
+          .range(
+            recordPageStart,
+            recordPageStart +
+            RECORD_SPACE_PAGE_SIZE -
+            1
+          );
+
+
+      if (
+        pageError
+      ) {
+
+        throw pageError;
+
+      }
+
+
+      const pageRows =
+        Array.isArray(
+          pageData
+        )
+          ? pageData
+          : [];
+
+
+      allRecordRows.push(
+        ...pageRows
       );
 
-      setStatus(
-        "● RECORD SPACE DATABASE ERROR"
+
+      console.log(
+        "📚 RECORD SPACE PAGE LOADED:",
+        recordPageStart,
+        "→",
+        recordPageStart +
+        pageRows.length -
+        1,
+        "— TOTAL:",
+        allRecordRows.length
       );
 
-      renderError(
-        error.message
+
+      /*
+         ------------------------------------------------
+         END OF DATA
+         ------------------------------------------------
+
+         A shorter page means there are no more records.
+      */
+
+      if (
+        pageRows.length <
+        RECORD_SPACE_PAGE_SIZE
+      ) {
+
+        break;
+
+      }
+
+
+      recordPageStart +=
+        RECORD_SPACE_PAGE_SIZE;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       FINAL PAGINATION STALE CHECK
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER ALL PAGES:",
+        loadRun
       );
 
       return;
@@ -3153,106 +5347,863 @@ async function loadRecords() {
     }
 
 
+    /*
+       --------------------------------------------------
+       COMPLETE DATASET
+       --------------------------------------------------
+    */
+
+    const data =
+      allRecordRows;
+
+
+    console.log(
+      "✅ RECORD SPACE COMPLETE DATASET:",
+      data.length,
+      "RECORDS"
+    );
+
+
+    /*
+       --------------------------------------------------
+       COMMIT DATASET
+       --------------------------------------------------
+    */
+
     records =
-      Array.isArray(data)
+      Array.isArray(
+        data
+      )
         ? data
         : [];
 
 
+    /*
+       --------------------------------------------------
+       RESET TRANSIENT PAGE STATE
+       --------------------------------------------------
+
+       IMPORTANT:
+
+       Do NOT set selectedRecord = null here.
+
+       The previous selection was captured above and
+       will be restored from the fresh dataset.
+    */
+
     selectedIds.clear();
 
-    renderTable();
 
-    renderTop40();
+    editingRecord =
+      null;
 
-    setStatus(
-      "● RECORD SPACE ONLINE"
-    );
+
+    editMode =
+      false;
+
+
+    newRecordMode =
+      false;
+
+
+    updateAdminButtons();
+
+
+    /*
+       --------------------------------------------------
+       LOAD MASTER LIBRARY
+       --------------------------------------------------
+
+       Pass the SAME loadRun into the Master Library
+       loader so an older refresh cannot commit data
+       after a newer refresh has started.
+    */
+
+    const masterLibraryLoadSucceeded =
+      await loadMasterLibrary(
+        loadRun
+      );
+
+
+    /*
+       --------------------------------------------------
+       STALE LOAD CHECK
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER MASTER LIBRARY:",
+        loadRun
+      );
+
+      return;
+
+    }
 
 
     if (
-      records.length &&
-      !selectedRecord
+      !masterLibraryLoadSucceeded
     ) {
 
-      selectRecord(
-        records[0]
+      console.warn(
+        "⚠️ MASTER LIBRARY WAS NOT LOADED — RECORD SPACE DATA WILL REMAIN UNENRICHED."
       );
 
     }
 
 
-  } catch (error) {
+    /*
+       --------------------------------------------------
+       ENRICH EMPTY RECORD SPACE FIELDS
+       FROM MASTER LIBRARY
+       --------------------------------------------------
+
+       IMPORTANT:
+
+       This remains in-memory only.
+
+       Nothing is written back to Master Library or
+       Record Space by this operation.
+    */
+
+    const masterLibraryEnrichmentSucceeded =
+      populateRecordsFromMasterLibrary(
+        loadRun
+      );
+
+
+    /*
+       --------------------------------------------------
+       STALE / ENRICHMENT CHECK
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED DURING MASTER LIBRARY ENRICHMENT:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    if (
+      masterLibraryEnrichmentSucceeded ===
+      false
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE MASTER LIBRARY ENRICHMENT WAS SUPERSEDED:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       INITIAL RENDER
+       --------------------------------------------------
+    */
+
+    renderTable();
+
+    renderTop40();
+
+
+    /*
+       --------------------------------------------------
+       RESOLVE STORAGE ASSETS
+       --------------------------------------------------
+
+       Resolves visible:
+
+       MASTER AUDIO
+       STEM 1
+       STEM 2
+       STEM 3
+       STEM 4
+       COVER ART
+       ARTWORK URL
+    */
+
+    await resolveVisibleRecordAssets(
+      records
+    );
+
+
+    /*
+       --------------------------------------------------
+       STALE LOAD CHECK
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ RECORD SPACE LOAD SUPERSEDED AFTER ASSET RESOLUTION:",
+        loadRun
+      );
+
+      return;
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       RENDER AGAIN WITH RESOLVED ASSETS
+       --------------------------------------------------
+    */
+
+    renderTable();
+
+    renderTop40();
+
+
+    /*
+       --------------------------------------------------
+       RESTORE CURRENT RECORD AFTER REFRESH
+       --------------------------------------------------
+
+       Find the matching record inside the NEW dataset.
+
+       Priority:
+
+       1. Supabase database ID
+       2. Record Space identity key
+       3. First record only when there was no previous
+          selection or the previous record no longer exists.
+    */
+
+    if (
+      records.length
+    ) {
+
+      let restoredRecord =
+        null;
+
+
+      /*
+         ------------------------------------------------
+         FIRST — DATABASE ID
+         ------------------------------------------------
+      */
+
+      if (
+        selectedRecordIdBeforeRefresh !==
+        null &&
+        selectedRecordIdBeforeRefresh !==
+        undefined
+      ) {
+
+        restoredRecord =
+          records.find(
+            record =>
+              record &&
+              record.id ===
+              selectedRecordIdBeforeRefresh
+          ) ||
+          null;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         SECOND — RECORD SPACE IDENTITY KEY
+         ------------------------------------------------
+      */
+
+      if (
+        !restoredRecord &&
+        selectedRecordKeyBeforeRefresh
+      ) {
+
+        restoredRecord =
+          records.find(
+            record =>
+              record &&
+              getRecordId(
+                record
+              ) ===
+              selectedRecordKeyBeforeRefresh
+          ) ||
+          null;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         LOAD-RUN CHECK BEFORE RESTORING
+         ------------------------------------------------
+      */
+
+      if (
+        loadRun !==
+        recordSpaceLoadRun
+      ) {
+
+        console.log(
+          "↻ RECORD SPACE LOAD SUPERSEDED BEFORE SELECTION RESTORE:",
+          loadRun
+        );
+
+        return;
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         RESTORE PREVIOUS SELECTION
+         ------------------------------------------------
+      */
+
+      if (
+        restoredRecord
+      ) {
+
+        selectedRecord =
+          restoredRecord;
+
+
+        console.log(
+          "↻ RECORD SPACE SELECTION RESTORED:",
+          getRecordId(
+            restoredRecord
+          ) ||
+          restoredRecord.id
+        );
+
+
+        await renderSelectedRecord();
+
+
+        /*
+           renderSelectedRecord() is asynchronous.
+
+           Never allow an older refresh to finish by
+           taking control of a newer load.
+        */
+
+        if (
+          loadRun !==
+          recordSpaceLoadRun
+        ) {
+
+          console.log(
+            "↻ RECORD SPACE LOAD SUPERSEDED AFTER RESTORING SELECTION:",
+            loadRun
+          );
+
+          return;
+
+        }
+
+
+        /*
+           A user may have selected another record while
+           the selected record was resolving.
+
+           Never overwrite that newer selection.
+        */
+
+        if (
+          selectedRecord !==
+          restoredRecord
+        ) {
+
+          console.log(
+            "↻ RECORD SELECTION CHANGED DURING RESTORE — KEEPING CURRENT SELECTION."
+          );
+
+        }
+
+      }
+
+
+      /*
+         ------------------------------------------------
+         NO RESTORABLE SELECTION
+         ------------------------------------------------
+
+         On initial page load there is no previous
+         selection, so select the first record normally.
+
+         If the previous record has genuinely disappeared
+         from the fresh dataset, this also provides a safe
+         visible selection.
+      */
+
+      else {
+
+        await selectRecord(
+          records[0]
+        );
+
+
+        /*
+           selectRecord() contains asynchronous rendering,
+           so verify that this is still the current load.
+        */
+
+        if (
+          loadRun !==
+          recordSpaceLoadRun
+        ) {
+
+          console.log(
+            "↻ RECORD SPACE LOAD SUPERSEDED AFTER INITIAL SELECTION:",
+            loadRun
+          );
+
+          return;
+
+        }
+
+      }
+
+    }
+
+    else {
+
+      /*
+         ------------------------------------------------
+         NO RECORDS
+         ------------------------------------------------
+      */
+
+      selectedRecord =
+        null;
+
+
+      resetSelectedDisplay();
+
+    }
+
+
+    /*
+       --------------------------------------------------
+       FINAL ADMIN STATE
+       --------------------------------------------------
+    */
+
+    updateAdminButtons();
+
+
+    /*
+       --------------------------------------------------
+       FINAL STATUS
+       --------------------------------------------------
+    */
+
+    if (
+      currentUser
+    ) {
+
+      setStatus(
+        `● RECORD SPACE ONLINE — ${records.length} RECORDS — SIGNED IN`
+      );
+
+    }
+
+    else {
+
+      setStatus(
+        `● RECORD SPACE ONLINE — ${records.length} RECORDS — PUBLIC VIEW`
+      );
+
+    }
+
+
+       /*
+       --------------------------------------------------
+       FINAL RECORD SPACE INTEGRATION CHECK
+       --------------------------------------------------
+
+       Read-only verification.
+
+       This does NOT write to Supabase.
+       This does NOT modify Record Space data.
+       This does NOT modify Master Library data.
+       This does NOT modify Storage.
+    */
+
+    const recordSpaceIntegrationChecks = {
+
+      recordSpaceLoaded:
+        Array.isArray(
+          records
+        ),
+
+      recordSpaceCount:
+        Array.isArray(
+          records
+        )
+          ? records.length
+          : 0,
+
+      masterLibraryLoaded:
+        Array.isArray(
+          masterLibrary
+        ),
+
+      masterLibraryCount:
+        Array.isArray(
+          masterLibrary
+        )
+          ? masterLibrary.length
+          : 0,
+
+      columnsLoaded:
+        Array.isArray(
+          columns
+        ),
+
+      columnDefinitions:
+        Array.isArray(
+          columns
+        )
+          ? columns.length
+          : 0,
+
+      physicalColumnCount:
+        TOTAL_COLUMNS,
+
+      storageResolver:
+        typeof resolveRecordStorageAsset ===
+        "function",
+
+      audioResolver:
+        typeof resolveRecordAudioField ===
+        "function",
+
+      artworkResolver:
+        typeof resolveRecordArtworkField ===
+        "function",
+
+      recordAssetResolver:
+        typeof resolveRecordAssets ===
+        "function",
+
+      visibleAssetResolver:
+        typeof resolveVisibleRecordAssets ===
+        "function",
+
+      masterLibraryLoader:
+        typeof loadMasterLibrary ===
+        "function",
+
+      masterLibraryEnrichment:
+        typeof populateRecordsFromMasterLibrary ===
+        "function",
+
+      selectedRecordLoader:
+        typeof renderSelectedRecord ===
+        "function",
+
+      recordSelection:
+        typeof selectRecord ===
+        "function",
+
+      tableRenderer:
+        typeof renderTable ===
+        "function",
+
+      top40Renderer:
+        typeof renderTop40 ===
+        "function"
+
+    };
+
+
+    /*
+       --------------------------------------------------
+       COLUMN STRUCTURE CHECK
+       --------------------------------------------------
+    */
+
+    const columnStructureCorrect =
+      recordSpaceIntegrationChecks
+        .columnDefinitions ===
+      60 &&
+      recordSpaceIntegrationChecks
+        .physicalColumnCount ===
+      61;
+
+
+    /*
+       --------------------------------------------------
+       CORE FUNCTION CHECK
+       --------------------------------------------------
+    */
+
+    const coreFunctionsReady =
+      recordSpaceIntegrationChecks
+        .storageResolver &&
+      recordSpaceIntegrationChecks
+        .audioResolver &&
+      recordSpaceIntegrationChecks
+        .artworkResolver &&
+      recordSpaceIntegrationChecks
+        .recordAssetResolver &&
+      recordSpaceIntegrationChecks
+        .visibleAssetResolver &&
+      recordSpaceIntegrationChecks
+        .masterLibraryLoader &&
+      recordSpaceIntegrationChecks
+        .masterLibraryEnrichment &&
+      recordSpaceIntegrationChecks
+        .selectedRecordLoader &&
+      recordSpaceIntegrationChecks
+        .recordSelection &&
+      recordSpaceIntegrationChecks
+        .tableRenderer &&
+      recordSpaceIntegrationChecks
+        .top40Renderer;
+
+
+    /*
+       --------------------------------------------------
+       SAMPLE RATE CHECK
+       --------------------------------------------------
+
+       Sample Rate remains part of Record Space even
+       when the current Master Library data does not
+       populate the field.
+    */
+
+    const sampleRateColumnExists =
+      Array.isArray(
+        columns
+      ) &&
+      columns.some(
+        column =>
+          column &&
+          column.key ===
+            "sample_rate"
+      );
+
+
+    /*
+       --------------------------------------------------
+       FINAL INTEGRATION RESULT
+       --------------------------------------------------
+    */
+
+    const recordSpaceIntegrationReady =
+      recordSpaceIntegrationChecks
+        .recordSpaceLoaded &&
+      recordSpaceIntegrationChecks
+        .masterLibraryLoaded &&
+      columnStructureCorrect &&
+      coreFunctionsReady &&
+      sampleRateColumnExists;
+
+
+    console.log(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+
+    console.log(
+      "🔎 GLCTC1 RECORD SPACE — FINAL INTEGRATION CHECK"
+    );
+
+
+    console.log(
+      "📚 RECORD SPACE:",
+      recordSpaceIntegrationChecks
+        .recordSpaceCount,
+      "RECORDS"
+    );
+
+
+    console.log(
+      "🎵 MASTER LIBRARY:",
+      recordSpaceIntegrationChecks
+        .masterLibraryCount,
+      "RECORDS"
+    );
+
+
+    console.log(
+      "📐 COLUMN MAP:",
+      recordSpaceIntegrationChecks
+        .columnDefinitions,
+      "DATA COLUMNS /",
+      recordSpaceIntegrationChecks
+        .physicalColumnCount,
+      "PHYSICAL CELLS"
+    );
+
+
+    console.log(
+      "🎚️ SAMPLE RATE COLUMN:",
+      sampleRateColumnExists
+        ? "PRESENT"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🗂️ STORAGE RESOLVER:",
+      recordSpaceIntegrationChecks
+        .storageResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎧 AUDIO RESOLVER:",
+      recordSpaceIntegrationChecks
+        .audioResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🖼️ ARTWORK RESOLVER:",
+      recordSpaceIntegrationChecks
+        .artworkResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "👁️ VISIBLE ASSET RESOLVER:",
+      recordSpaceIntegrationChecks
+        .visibleAssetResolver
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎵 MASTER LIBRARY ENRICHMENT:",
+      recordSpaceIntegrationChecks
+        .masterLibraryEnrichment
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🎯 SELECTED RECORD:",
+      recordSpaceIntegrationChecks
+        .selectedRecordLoader
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "📊 TABLE RENDERER:",
+      recordSpaceIntegrationChecks
+        .tableRenderer
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    console.log(
+      "🔥 TOP 40:",
+      recordSpaceIntegrationChecks
+        .top40Renderer
+        ? "READY"
+        : "MISSING"
+    );
+
+
+    /*
+       --------------------------------------------------
+       FINAL RESULT
+       --------------------------------------------------
+    */
+
+    if (
+      recordSpaceIntegrationReady
+    ) {
+
+      console.log(
+        "✅ GLCTC1 RECORD SPACE INTEGRATION CHECK PASSED."
+      );
+
+    }
+
+    else {
+
+      console.error(
+        "❌ GLCTC1 RECORD SPACE INTEGRATION CHECK FAILED.",
+        recordSpaceIntegrationChecks
+      );
+
+    }
+
+
+    console.log(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+
+  }
+  catch (
+    error
+  ) {
+
+    /*
+       --------------------------------------------------
+       DO NOT REPORT AN ERROR FROM AN OLD LOAD
+       --------------------------------------------------
+    */
+
+    if (
+      loadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.log(
+        "↻ OLD RECORD SPACE LOAD FAILED AFTER BEING SUPERSEDED:",
+        loadRun
+      );
+
+      return;
+
+    }
+
 
     console.error(
-      "RECORD SPACE ERROR:",
+      "❌ RECORD SPACE LOAD ERROR:",
       error
     );
+
 
     setStatus(
       "● RECORD SPACE ERROR"
     );
 
-    renderError(
-      error.message
-    );
-
   }
-
-}
-
-
-/* =========================================================
-   STATUS
-========================================================= */
-
-function setStatus(text) {
-
-  const element =
-    document.getElementById(
-      "moduleStatus"
-    );
-
-  if (
-    element
-  ) {
-
-    element.textContent =
-      text;
-
-  }
-
-}
-
-
-/* =========================================================
-   ERROR
-========================================================= */
-
-function renderError(message) {
-
-  document.getElementById(
-    "recordBody"
-  ).innerHTML = `
-
-    <tr>
-
-      <td
-        colspan="${TOTAL_COLUMNS}"
-        class="empty"
-      >
-
-        RECORD SPACE COULD NOT LOAD.
-
-        <br><br>
-
-        ${escapeHtml(message)}
-
-      </td>
-
-    </tr>
-
-  `;
 
 }
 
@@ -3708,6 +6659,10 @@ function renderTable() {
             );
 
 
+          /* =========================================
+             DELETE
+          ========================================= */
+
           if (
             column.key ===
             "__delete"
@@ -3763,11 +6718,19 @@ function renderTable() {
           }
 
 
+          /* =========================================
+             FIELD VALUE
+          ========================================= */
+
           const fieldValue =
             record[
               column.key
             ];
 
+
+          /* =========================================
+             FAVOURITES
+          ========================================= */
 
           if (
             column.favourite
@@ -3813,11 +6776,22 @@ function renderTable() {
           }
 
 
+          /* =========================================
+             AUDIO TRANSPORT
+             
+             Accept:
+             • normal HTTP / HTTPS audio URL
+             • resolved Supabase Storage URL
+             • Supabase Storage path
+             
+             IMPORTANT:
+             The original database value is NEVER
+             replaced by the temporary signed URL.
+          ========================================= */
+
           if (
             column.audio &&
-            isSafeHttpUrl(
-              fieldValue
-            )
+            fieldValue
           ) {
 
             td.className =
@@ -3836,8 +6810,228 @@ function renderTable() {
             audio.preload =
               "none";
 
-            audio.src =
-              fieldValue;
+
+            /*
+              ORIGINAL DATABASE VALUE
+
+              This remains untouched.
+
+              It may be:
+
+              • HTTP / HTTPS URL
+              • Supabase Storage path
+              • filename
+              • folder / filename
+            */
+
+            const originalAudioValue =
+              String(
+                fieldValue
+              ).trim();
+
+
+            /*
+              -------------------------------------------------
+              FIRST:
+              Use an already-resolved temporary URL.
+
+              The resolver stores these as:
+
+                _resolved_master_audio
+                _resolved_stem_1
+                _resolved_stem_2
+                _resolved_stem_3
+                _resolved_stem_4
+              -------------------------------------------------
+            */
+
+            const resolvedAudioValue =
+              record[
+                `_resolved_${column.key}`
+              ];
+
+
+            if (
+              isSafeHttpUrl(
+                resolvedAudioValue
+              )
+            ) {
+
+              audio.src =
+                resolvedAudioValue;
+
+            }
+
+
+            /*
+              -------------------------------------------------
+              SECOND:
+              The original value is already a real
+              HTTP / HTTPS URL.
+              -------------------------------------------------
+            */
+
+            else if (
+              isSafeHttpUrl(
+                originalAudioValue
+              )
+            ) {
+
+              audio.src =
+                originalAudioValue;
+
+            }
+
+
+            /*
+              -------------------------------------------------
+              THIRD:
+              Supabase Storage path.
+
+              Keep the original path on the element.
+
+              Resolve it when PLAY is pressed.
+              -------------------------------------------------
+            */
+
+            else {
+
+              audio.dataset.storagePath =
+                originalAudioValue;
+
+
+              audio.addEventListener(
+                "play",
+                async () => {
+
+                  /*
+                    Do not resolve the same audio
+                    more than once.
+                  */
+
+                  if (
+                    audio.dataset.storageResolved ===
+                    "true"
+                  ) {
+
+                    return;
+
+                  }
+
+
+                  /*
+                    Prevent duplicate simultaneous
+                    resolution requests.
+                  */
+
+                  if (
+                    audio.dataset.storageResolving ===
+                    "true"
+                  ) {
+
+                    return;
+
+                  }
+
+
+                  audio.dataset.storageResolving =
+                    "true";
+
+
+                  try {
+
+                    const resolved =
+                      await resolveRecordStorageAsset(
+                        originalAudioValue,
+                        record.storage_bucket ||
+                        ""
+                      );
+
+
+                    if (
+                      !isSafeHttpUrl(
+                        resolved
+                      )
+                    ) {
+
+                      console.warn(
+                        "⚠️ RECORD SPACE AUDIO COULD NOT BE RESOLVED:",
+                        originalAudioValue
+                      );
+
+                      audio.pause();
+
+                      return;
+
+                    }
+
+
+                    /*
+                      Temporary signed URL only.
+
+                      The Record Space database value
+                      remains the original Storage path.
+                    */
+
+                    audio.src =
+                      resolved;
+
+
+                    audio.dataset.storageResolved =
+                      "true";
+
+
+                    audio.load();
+
+
+                    /*
+                      Continue playback after the
+                      signed URL has been loaded.
+                    */
+
+                    try {
+
+                      await audio.play();
+
+                    }
+                    catch (
+                      playbackError
+                    ) {
+
+                      console.warn(
+                        "⚠️ RECORD SPACE AUDIO PLAYBACK:",
+                        playbackError
+                      );
+
+                    }
+
+                  }
+                  catch (
+                    error
+                  ) {
+
+                    console.error(
+                      "❌ RECORD SPACE AUDIO RESOLUTION FAILED:",
+                      error
+                    );
+
+                    audio.pause();
+
+                  }
+                  finally {
+
+                    audio.dataset.storageResolving =
+                      "false";
+
+                  }
+
+                },
+                {
+                  once: true
+                }
+              );
+
+            }
 
 
             td.appendChild(
@@ -3853,45 +7047,205 @@ function renderTable() {
           }
 
 
+          /* =========================================
+             IMAGE / COVER ART
+             
+             Accept:
+             • normal HTTP / HTTPS image URL
+             • resolved Supabase Storage URL
+             • Supabase Storage path
+             
+             IMPORTANT:
+             The original database value is NEVER
+             replaced by the temporary signed URL.
+          ========================================= */
+
           if (
             column.image &&
-            isSafeHttpUrl(
-              fieldValue
-            )
+            fieldValue
           ) {
 
-            const img =
-              document.createElement(
-                "img"
+            td.className =
+              "image-cell";
+
+
+            /*
+              -------------------------------------------------
+              FIRST:
+              Use the temporary resolved artwork URL.
+              -------------------------------------------------
+            */
+
+            const resolvedImageValue =
+              record[
+                `_resolved_${column.key}`
+              ];
+
+
+            /*
+              -------------------------------------------------
+              SECOND:
+              Fall back to the original database value
+              if it is already a real HTTP / HTTPS URL.
+              -------------------------------------------------
+            */
+
+            const imageValue =
+              isSafeHttpUrl(
+                resolvedImageValue
+              )
+                ? resolvedImageValue
+                : (
+                    isSafeHttpUrl(
+                      fieldValue
+                    )
+                      ? fieldValue
+                      : ""
+                  );
+
+
+            /*
+              -------------------------------------------------
+              DIRECT IMAGE URL
+              -------------------------------------------------
+            */
+
+            if (
+              imageValue
+            ) {
+
+              const img =
+                document.createElement(
+                  "img"
+                );
+
+
+              img.className =
+                "cover";
+
+              img.loading =
+                "lazy";
+
+              img.src =
+                imageValue;
+
+              img.alt =
+                "COVER ART";
+
+
+              img.onerror =
+                () => {
+
+                  img.replaceWith(
+                    makeNoCover()
+                  );
+
+                };
+
+
+              td.appendChild(
+                img
+              );
+
+            }
+
+
+            /*
+              -------------------------------------------------
+              STORAGE IMAGE PATH
+              
+              If the resolver has not yet produced a URL,
+              resolve it on demand.
+              -------------------------------------------------
+            */
+
+            else {
+
+              td.appendChild(
+                makeNoCover()
               );
 
 
-            img.className =
-              "cover";
-
-            img.loading =
-              "lazy";
-
-            img.src =
-              fieldValue;
-
-            img.alt =
-              "COVER ART";
+              const originalImageValue =
+                String(
+                  fieldValue
+                ).trim();
 
 
-            img.onerror =
-              () => {
+              /*
+                Resolve the Storage artwork without
+                changing the database value.
+              */
 
-                img.replaceWith(
-                  makeNoCover()
-                );
+              resolveRecordStorageAsset(
+                originalImageValue,
+                record.storage_bucket ||
+                ""
+              )
+              .then(
+                resolved => {
 
-              };
+                  if (
+                    !isSafeHttpUrl(
+                      resolved
+                    )
+                  ) {
+
+                    return;
+
+                  }
 
 
-            td.appendChild(
-              img
-            );
+                  const img =
+                    document.createElement(
+                      "img"
+                    );
+
+
+                  img.className =
+                    "cover";
+
+                  img.loading =
+                    "lazy";
+
+                  img.src =
+                    resolved;
+
+                  img.alt =
+                    "COVER ART";
+
+
+                  img.onerror =
+                    () => {
+
+                      img.replaceWith(
+                        makeNoCover()
+                      );
+
+                    };
+
+
+                  td.innerHTML = "";
+
+                  td.appendChild(
+                    img
+                  );
+
+                }
+              )
+              .catch(
+                error => {
+
+                  console.warn(
+                    "⚠️ RECORD SPACE ARTWORK COULD NOT BE RESOLVED:",
+                    error
+                  );
+
+                }
+              );
+
+            }
+
 
             tr.appendChild(
               td
@@ -3901,6 +7255,10 @@ function renderTable() {
 
           }
 
+
+          /* =========================================
+             LINKS
+          ========================================= */
 
           if (
             column.link &&
@@ -3944,6 +7302,10 @@ function renderTable() {
 
           }
 
+
+          /* =========================================
+             NORMAL DATA
+          ========================================= */
 
           td.textContent =
             fieldValue ?? "";
@@ -4223,7 +7585,7 @@ function renderTop40() {
    SELECT RECORD
 ========================================================= */
 
-function selectRecord(record) {
+async function selectRecord(record) {
 
   if (
     !record
@@ -4234,24 +7596,108 @@ function selectRecord(record) {
   }
 
 
+  /* -------------------------------------------------------
+     SET SELECTED RECORD
+
+     IMPORTANT:
+     selectedRecord controls the currently displayed
+     Record Space record.
+
+     DO NOT modify selectedIds here.
+
+     selectedIds is reserved for checkbox/bulk-selection
+     state and must remain independent from the current
+     record being viewed.
+  ------------------------------------------------------- */
+
   selectedRecord =
     record;
 
 
-  selectedIds.clear();
+  /* -------------------------------------------------------
+     UPDATE ADMIN STATE
 
-  selectedIds.add(
-    getRecordId(
-      record
-    )
-  );
+     This immediately enables/disables:
+
+     ✎ EDIT SELECTED
+     🗑 DELETE SELECTED
+
+     according to the newly selected record.
+  ------------------------------------------------------- */
+
+  updateAdminButtons();
 
 
-  renderSelectedRecord();
+  /* -------------------------------------------------------
+     RENDER SELECTED RECORD
+
+     IMPORTANT:
+
+     renderSelectedRecord() is asynchronous because
+     artwork and audio may require Supabase Storage
+     resolution.
+
+     Await it so the selected record display resolves
+     before continuing.
+  ------------------------------------------------------- */
+
+  await renderSelectedRecord();
+
+
+  /* -------------------------------------------------------
+     SELECTION RACE PROTECTION
+
+     IMPORTANT:
+
+     The user may have selected another record while
+     artwork/audio was being resolved.
+
+     renderSelectedRecord() already protects its own
+     display updates.
+
+     This second check protects everything that happens
+     AFTER renderSelectedRecord():
+
+       • TOP 40
+       • TABLE
+       • STATUS
+
+     Therefore an older selection can never finish late
+     and overwrite the current selection state.
+  ------------------------------------------------------- */
+
+  if (
+    selectedRecord !==
+    record
+  ) {
+
+    return;
+
+  }
+
+
+  /* -------------------------------------------------------
+     REFRESH TOP 40
+  ------------------------------------------------------- */
 
   renderTop40();
 
+
+  /* -------------------------------------------------------
+     REFRESH TABLE
+
+     This updates the selected-row highlight.
+  ------------------------------------------------------- */
+
   renderTable();
+
+
+  /* -------------------------------------------------------
+     STATUS
+
+     Only update the status if this is still the record
+     currently selected.
+  ------------------------------------------------------- */
 
   setStatus(
     "● RECORD SELECTED — " +
@@ -4271,7 +7717,7 @@ function selectRecord(record) {
    RENDER SELECTED RECORD
 ========================================================= */
 
-function renderSelectedRecord() {
+async function renderSelectedRecord() {
 
   if (
     !selectedRecord
@@ -4282,9 +7728,68 @@ function renderSelectedRecord() {
   }
 
 
+  /*
+     IMPORTANT:
+
+     Capture the exact record being rendered.
+
+     Artwork and audio may require asynchronous
+     Supabase Storage resolution.
+
+     The user can select another record while those
+     requests are still running.
+
+     This reference lets us verify that the same
+     record is still selected before updating the
+     display.
+  */
+
   const record =
     selectedRecord;
 
+
+  /* -------------------------------------------------------
+     RESOLVE DISPLAY ASSETS
+
+     IMPORTANT:
+     These are resolved for display only.
+
+     The original database values are NOT replaced.
+  ------------------------------------------------------- */
+
+  const displayRecord =
+    {
+      ...record
+    };
+
+
+  await resolveRecordAssets(
+    displayRecord
+  );
+
+
+  /* -------------------------------------------------------
+     SELECTION SAFETY CHECK
+
+     If another record was selected while Storage
+     resolution was running, stop this older render.
+
+     The newer selected record will render itself.
+  ------------------------------------------------------- */
+
+  if (
+    selectedRecord !==
+    record
+  ) {
+
+    return;
+
+  }
+
+
+  /* -------------------------------------------------------
+     ARTWORK
+  ------------------------------------------------------- */
 
   const artworkContainer =
     document.getElementById(
@@ -4298,7 +7803,7 @@ function renderSelectedRecord() {
 
     artworkContainer.replaceWith(
       createArtworkElement(
-        record,
+        displayRecord,
         "selected-art",
         true
       )
@@ -4306,6 +7811,10 @@ function renderSelectedRecord() {
 
   }
 
+
+  /* -------------------------------------------------------
+     BASIC RECORD DETAILS
+  ------------------------------------------------------- */
 
   document.getElementById(
     "selectedArtist"
@@ -4335,6 +7844,10 @@ function renderSelectedRecord() {
     "NO RECORD ID";
 
 
+  /* -------------------------------------------------------
+     ACTIVITY
+  ------------------------------------------------------- */
+
   document.getElementById(
     "detailPlays"
   ).textContent =
@@ -4350,6 +7863,10 @@ function renderSelectedRecord() {
       record.favourites
     );
 
+
+  /* -------------------------------------------------------
+     MUSIC DATA
+  ------------------------------------------------------- */
 
   document.getElementById(
     "detailGenre"
@@ -4415,6 +7932,10 @@ function renderSelectedRecord() {
     );
 
 
+  /* -------------------------------------------------------
+     RADIO / PLAYLIST / BANK
+  ------------------------------------------------------- */
+
   document.getElementById(
     "detailRadio"
   ).textContent =
@@ -4438,6 +7959,10 @@ function renderSelectedRecord() {
       record.bank
     );
 
+
+  /* -------------------------------------------------------
+     RECORD STATUS / ID
+  ------------------------------------------------------- */
 
   document.getElementById(
     "detailStatus"
@@ -4463,19 +7988,47 @@ function renderSelectedRecord() {
     );
 
 
+  /* -------------------------------------------------------
+     SELECTED AUDIO
+  ------------------------------------------------------- */
+
   const audioContainer =
     document.getElementById(
       "selectedAudio"
     );
 
 
+  if (
+    !audioContainer
+  ) {
+
+    return;
+
+  }
+
+
   audioContainer.innerHTML =
+    "";
+
+
+  /*
+     Prefer the temporary resolved URL.
+
+     If no resolved URL exists, keep the original value.
+
+     The original Storage path is therefore never replaced
+     in the Record Space data.
+  */
+
+  const audioValue =
+    displayRecord._resolved_master_audio ||
+    displayRecord.master_audio ||
     "";
 
 
   if (
     isSafeHttpUrl(
-      record.master_audio
+      audioValue
     )
   ) {
 
@@ -4488,11 +8041,144 @@ function renderSelectedRecord() {
     audio.controls =
       true;
 
+
     audio.preload =
       "metadata";
 
+
     audio.src =
-      record.master_audio;
+      audioValue;
+
+
+    audioContainer.appendChild(
+      audio
+    );
+
+  }
+
+
+  /*
+     If the original value is a Supabase Storage path
+     and resolution failed, create an on-demand player.
+  */
+
+  else if (
+    displayRecord.master_audio
+  ) {
+
+    const audio =
+      document.createElement(
+        "audio"
+      );
+
+
+    audio.controls =
+      true;
+
+
+    audio.preload =
+      "none";
+
+
+    audio.dataset.storagePath =
+      displayRecord.master_audio;
+
+
+    audio.addEventListener(
+      "play",
+      async () => {
+
+        if (
+          audio.dataset.storageResolved ===
+          "true"
+        ) {
+
+          return;
+
+        }
+
+
+        /*
+           Capture the record represented by this
+           particular audio element.
+
+           This prevents a delayed Storage response
+           from an older player being applied after
+           another record has been selected.
+        */
+
+        const audioRecord =
+          record;
+
+
+        const resolved =
+          await resolveRecordStorageAsset(
+            displayRecord.master_audio,
+            displayRecord.storage_bucket ||
+            ""
+          );
+
+
+        /*
+           The selected record may have changed while
+           this Storage request was running.
+
+           Do not attach an old record's audio to the
+           currently displayed record.
+        */
+
+        if (
+          selectedRecord !==
+          audioRecord
+        ) {
+
+          return;
+
+        }
+
+
+        if (
+          !isSafeHttpUrl(
+            resolved
+          )
+        ) {
+
+          audio.pause();
+
+          return;
+
+        }
+
+
+        audio.dataset.storageResolved =
+          "true";
+
+
+        audio.src =
+          resolved;
+
+
+        audio.load();
+
+
+        try {
+
+          await audio.play();
+
+        }
+        catch (
+          error
+        ) {
+
+          console.warn(
+            "Selected record audio playback failed:",
+            error
+          );
+
+        }
+
+      }
+    );
 
 
     audioContainer.appendChild(
@@ -4505,41 +8191,54 @@ function renderSelectedRecord() {
 
 
 /* =========================================================
-   ARTWORK
+   CREATE ARTWORK ELEMENT
 ========================================================= */
 
 function createArtworkElement(
   record,
-  className,
+  className = "",
   selected = false
 ) {
 
-  let source = "";
+  /*
+     Prefer temporary resolved artwork URLs.
 
+     These _resolved_ values are display-only.
+     They never get written back to Record Space.
+  */
+
+  const artworkUrl =
+    isSafeHttpUrl(
+      record?._resolved_cover_art
+    )
+      ? record._resolved_cover_art
+      : (
+          isSafeHttpUrl(
+            record?._resolved_artwork_url
+          )
+            ? record._resolved_artwork_url
+            : (
+                isSafeHttpUrl(
+                  record?.cover_art
+                )
+                  ? record.cover_art
+                  : (
+                      isSafeHttpUrl(
+                        record?.artwork_url
+                      )
+                        ? record.artwork_url
+                        : ""
+                    )
+              )
+        );
+
+
+  /* -------------------------------------------------------
+     ARTWORK FOUND
+  ------------------------------------------------------- */
 
   if (
-    isSafeHttpUrl(
-      record?.cover_art
-    )
-  ) {
-
-    source =
-      record.cover_art;
-
-  } else if (
-    isSafeHttpUrl(
-      record?.artwork_url
-    )
-  ) {
-
-    source =
-      record.artwork_url;
-
-  }
-
-
-  if (
-    source
+    artworkUrl
   ) {
 
     const img =
@@ -4551,31 +8250,52 @@ function createArtworkElement(
     img.className =
       className;
 
-    img.loading =
-      "lazy";
 
     img.src =
-      source;
+      artworkUrl;
+
 
     img.alt =
-      (
-        record?.track_title ||
-        "GLCTC1 RECORD"
-      ) +
-      " COVER ART";
+      record?.track_title ||
+      "Artwork";
+
+
+    img.loading =
+      "lazy";
 
 
     img.onerror =
       () => {
 
-        img.replaceWith(
-          createNoArtwork(
-            className,
+        const fallback =
+          makeNoCover(
             selected
-          )
+          );
+
+
+        fallback.className =
+          className;
+
+
+        img.replaceWith(
+          fallback
         );
 
       };
+
+
+    /* -----------------------------------------------------
+       KEEP selectedArtwork ID alive
+    ----------------------------------------------------- */
+
+    if (
+      selected
+    ) {
+
+      img.id =
+        "selectedArtwork";
+
+    }
 
 
     return img;
@@ -4583,36 +8303,185 @@ function createArtworkElement(
   }
 
 
-  return createNoArtwork(
-    className,
-    selected
-  );
+  /* -------------------------------------------------------
+     NO DIRECT ARTWORK URL
+
+     If the record still contains a Storage path,
+     resolve it asynchronously without changing the
+     original record value.
+  ------------------------------------------------------- */
+
+  const storageArtwork =
+    record?.cover_art ||
+    record?.artwork_url ||
+    "";
+
+
+  if (
+    storageArtwork &&
+    !isSafeHttpUrl(
+      storageArtwork
+    )
+  ) {
+
+    const img =
+      document.createElement(
+        "img"
+      );
+
+
+    img.className =
+      className;
+
+
+    img.alt =
+      record?.track_title ||
+      "Artwork";
+
+
+    img.loading =
+      "lazy";
+
+
+    if (
+      selected
+    ) {
+
+      img.id =
+        "selectedArtwork";
+
+    }
+
+
+    /*
+       Start with the normal fallback while the
+       Supabase Storage asset is being resolved.
+    */
+
+    img.src =
+      createArtworkPlaceholderUrl();
+
+
+    resolveRecordStorageAsset(
+      storageArtwork,
+      record?.storage_bucket ||
+      ""
+    )
+      .then(
+        resolved => {
+
+          if (
+            isSafeHttpUrl(
+              resolved
+            )
+          ) {
+
+            img.src =
+              resolved;
+
+          }
+          else {
+
+            const fallback =
+              makeNoCover(
+                selected
+              );
+
+
+            fallback.className =
+              className;
+
+
+            img.replaceWith(
+              fallback
+            );
+
+          }
+
+        }
+      )
+      .catch(
+        error => {
+
+          console.warn(
+            "Artwork resolution failed:",
+            error
+          );
+
+
+          const fallback =
+            makeNoCover(
+              selected
+            );
+
+
+          fallback.className =
+            className;
+
+
+          if (
+            img.isConnected
+          ) {
+
+            img.replaceWith(
+              fallback
+            );
+
+          }
+
+        }
+      );
+
+
+    return img;
+
+  }
+
+
+  /* -------------------------------------------------------
+     NO ARTWORK
+  ------------------------------------------------------- */
+
+  const noCover =
+    makeNoCover(
+      selected
+    );
+
+
+  noCover.className =
+    className;
+
+
+  return noCover;
 
 }
 
 
-function createNoArtwork(
-  className,
-  selected = false
-) {
+/* =========================================================
+   ARTWORK PLACEHOLDER
+========================================================= */
 
-  const div =
-    document.createElement(
-      "div"
-    );
+function createArtworkPlaceholderUrl() {
 
-
-  div.className =
-    selected
-      ? "selected-no-art"
-      : "popular-no-art";
-
-
-  div.textContent =
-    "NO ART";
-
-
-  return div;
+  return (
+    "data:image/svg+xml;charset=UTF-8," +
+    encodeURIComponent(
+      `
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="600"
+          height="600"
+          viewBox="0 0 600 600"
+        >
+          <rect
+            width="600"
+            height="600"
+            fill="#111"
+          />
+        </svg>
+      `
+    )
+  );
 
 }
 
@@ -4621,7 +8490,9 @@ function createNoArtwork(
    FORMAT HELPERS
 ========================================================= */
 
-function formatNumber(value) {
+function formatNumber(
+  value
+) {
 
   const number =
     Number(
@@ -4630,7 +8501,9 @@ function formatNumber(value) {
 
 
   if (
-    !Number.isFinite(number)
+    !Number.isFinite(
+      number
+    )
   ) {
 
     return "0";
@@ -4643,12 +8516,16 @@ function formatNumber(value) {
 }
 
 
-function valueOrDash(value) {
+function valueOrDash(
+  value
+) {
 
   if (
     value === null ||
     value === undefined ||
-    String(value).trim() === ""
+    String(
+      value
+    ).trim() === ""
   ) {
 
     return "—";
@@ -4656,68 +8533,21 @@ function valueOrDash(value) {
   }
 
 
-  return String(value);
+  return String(
+    value
+  );
 
 }
 
-
-/* =========================================================
-   SAFE URL
-========================================================= */
-
-function isSafeHttpUrl(value) {
-
-  if (
-    typeof value !==
-    "string"
-  ) {
-
-    return false;
-
-  }
-
-
-  const trimmed =
-    value.trim();
-
-
-  if (
-    !trimmed
-  ) {
-
-    return false;
-
-  }
-
-
-  try {
-
-    const url =
-      new URL(
-        trimmed,
-        window.location.href
-      );
-
-
-    return (
-      url.protocol === "https:" ||
-      url.protocol === "http:"
-    );
-
-  } catch {
-
-    return false;
-
-  }
-
-}
 
 
 /* =========================================================
    NO COVER
 ========================================================= */
 
-function makeNoCover() {
+function makeNoCover(
+  selected = false
+) {
 
   const div =
     document.createElement(
@@ -4729,6 +8559,14 @@ function makeNoCover() {
     "no-cover";
 
 
+  if (selected) {
+
+    div.id =
+      "selectedArtwork";
+
+  }
+
+
   div.textContent =
     "—";
 
@@ -4736,7 +8574,6 @@ function makeNoCover() {
   return div;
 
 }
-
 
 /* =========================================================
    RECORD ID
@@ -5412,14 +9249,391 @@ function buildRecordFromForm() {
 
 
 /* =========================================================
+   RECORD SPACE UI HELPERS
+========================================================= */
+
+function setStatus(message) {
+
+  const status =
+    document.getElementById(
+      "moduleStatus"
+    );
+
+  if (status) {
+
+    status.textContent =
+      message;
+
+  }
+
+}
+
+
+function updateAdminButtons() {
+
+  const signedIn =
+    !!currentUser;
+
+  const hasSelected =
+    !!selectedRecord;
+
+  const hasEditing =
+    !!editingRecord;
+
+
+  const newButton =
+    document.getElementById(
+      "newRecordButton"
+    );
+
+  const editButton =
+    document.getElementById(
+      "editSelectedButton"
+    );
+
+  const saveButton =
+    document.getElementById(
+      "saveEditButton"
+    );
+
+  const deleteButton =
+    document.getElementById(
+      "deleteSelectedAdminButton"
+    );
+
+  const addButton =
+    document.getElementById(
+      "addRecordButton"
+    );
+
+
+  /* -------------------------------------------------------
+     + NEW RECORD
+  ------------------------------------------------------- */
+
+  if (newButton) {
+
+    newButton.disabled =
+      !signedIn;
+
+  }
+
+
+  /* -------------------------------------------------------
+     ✎ EDIT SELECTED
+  ------------------------------------------------------- */
+
+  if (editButton) {
+
+    editButton.disabled =
+      !signedIn ||
+      !hasSelected ||
+      editMode ||
+      newRecordMode;
+
+  }
+
+
+  /* -------------------------------------------------------
+     💾 SAVE
+     
+     SAVE is enabled when:
+     
+     • an existing record is being edited
+     OR
+     • NEW RECORD MODE is active
+     
+     The SAVE button itself calls saveEdit().
+     saveEdit() already redirects NEW RECORD MODE
+     to saveNewRecord().
+  ------------------------------------------------------- */
+
+  if (saveButton) {
+
+    saveButton.disabled =
+      !signedIn ||
+      (
+        !hasEditing &&
+        !newRecordMode
+      );
+
+  }
+
+
+  /* -------------------------------------------------------
+     🗑 DELETE SELECTED
+  ------------------------------------------------------- */
+
+  if (deleteButton) {
+
+    deleteButton.disabled =
+      !signedIn ||
+      !hasSelected;
+
+  }
+
+
+  /* -------------------------------------------------------
+     + SAVE NEW RECORD
+     
+     IMPORTANT:
+     
+     This button calls saveNewRecord() directly.
+     
+     Therefore it must ONLY be enabled while
+     NEW RECORD MODE is active.
+     
+     It must NEVER be enabled during EDIT MODE.
+  ------------------------------------------------------- */
+
+  if (addButton) {
+
+    addButton.disabled =
+      !signedIn ||
+      !newRecordMode;
+
+  }
+
+
+  /* -------------------------------------------------------
+     ADMIN STATUS
+  ------------------------------------------------------- */
+
+  const adminStatus =
+    document.getElementById(
+      "adminStatus"
+    );
+
+
+  if (adminStatus) {
+
+    if (!signedIn) {
+
+      adminStatus.textContent =
+        "PUBLIC VIEW — SIGN IN REQUIRED FOR EDITING";
+
+    }
+
+    else if (editMode) {
+
+      adminStatus.textContent =
+        "SIGNED IN — EDIT MODE";
+
+    }
+
+    else if (newRecordMode) {
+
+      adminStatus.textContent =
+        "SIGNED IN — NEW RECORD MODE";
+
+    }
+
+    else {
+
+      adminStatus.textContent =
+        "SIGNED IN — ADMIN ACCESS";
+
+    }
+
+  }
+
+}
+
+
+function updateAuthUI() {
+
+  updateAdminButtons();
+
+}
+
+
+async function loadSession() {
+
+  try {
+
+    const {
+      data,
+      error
+    } =
+      await supabaseClient.auth.getSession();
+
+
+    if (error) {
+
+      console.warn(
+        "⚠️ SESSION LOAD:",
+        error
+      );
+
+      currentUser =
+        null;
+
+      updateAuthUI();
+
+      return null;
+
+    }
+
+
+    currentUser =
+      data?.session?.user ||
+      null;
+
+
+    updateAuthUI();
+
+
+    return currentUser;
+
+  }
+
+  catch (error) {
+
+    console.warn(
+      "⚠️ SESSION LOAD FAILED:",
+      error
+    );
+
+    currentUser =
+      null;
+
+    updateAuthUI();
+
+    return null;
+
+  }
+
+}
+
+
+function escapeHtml(value) {
+
+  return String(
+    value ?? ""
+  )
+
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+
+    .replace(
+      /</g,
+      "&lt;"
+    )
+
+    .replace(
+      />/g,
+      "&gt;"
+    )
+
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+
+function buildHeaders() {
+
+  const headerRow =
+    document.getElementById(
+      "columnHeaderRow"
+    );
+
+
+  if (!headerRow) {
+
+    return;
+
+  }
+
+
+  headerRow.innerHTML =
+    "";
+
+
+  columns.forEach(
+    column => {
+
+      const th =
+        document.createElement(
+          "th"
+        );
+
+
+      th.textContent =
+        column.label;
+
+
+      th.dataset.column =
+        column.key;
+
+
+      if (
+        column.key !==
+        "__delete"
+      ) {
+
+        th.addEventListener(
+          "click",
+          () => {
+
+            if (
+              sortColumn ===
+              column.key
+            ) {
+
+              sortDirection =
+                sortDirection ===
+                "asc"
+                  ? "desc"
+                  : "asc";
+
+            }
+
+            else {
+
+              sortColumn =
+                column.key;
+
+              sortDirection =
+                "asc";
+
+            }
+
+
+            renderTable();
+
+          }
+        );
+
+      }
+
+
+      headerRow.appendChild(
+        th
+      );
+
+    }
+  );
+
+}
+
+
+/* =========================================================
    NEW RECORD
 ========================================================= */
 
 function startNewRecord() {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO CREATE RECORDS."
@@ -5430,38 +9644,100 @@ function startNewRecord() {
   }
 
 
-  editingRecord = null;
+  /* -------------------------------------------------------
+     CLEAR EDIT / SELECTION STATE
+  ------------------------------------------------------- */
 
-  selectedRecord = null;
+  editingRecord =
+    null;
 
-  editMode = false;
+  selectedRecord =
+    null;
 
-  newRecordMode = true;
+  selectedIds.clear();
 
+  editMode =
+    false;
+
+  newRecordMode =
+    true;
+
+
+  /* -------------------------------------------------------
+     CLEAR FORM + SELECTED DISPLAY
+  ------------------------------------------------------- */
 
   clearForm();
 
+  resetSelectedDisplay();
 
-  document.getElementById(
-    "entryTitle"
-  ).textContent =
-    "+ NEW RECORD";
 
+  /* -------------------------------------------------------
+     REFRESH TABLE + TOP 40
+     
+     IMPORTANT:
+     
+     The previous selected row/card must immediately
+     lose its visual selection when NEW RECORD mode starts.
+  ------------------------------------------------------- */
+
+  renderTable();
+
+  renderTop40();
+
+
+  /* -------------------------------------------------------
+     ENTRY TITLE
+  ------------------------------------------------------- */
+
+  const entryTitle =
+    document.getElementById(
+      "entryTitle"
+    );
+
+
+  if (entryTitle) {
+
+    entryTitle.textContent =
+      "+ NEW RECORD";
+
+  }
+
+
+  /* -------------------------------------------------------
+     STATUS
+  ------------------------------------------------------- */
 
   setStatus(
     "● NEW RECORD MODE"
   );
 
 
+  /* -------------------------------------------------------
+     ADMIN BUTTON STATE
+  ------------------------------------------------------- */
+
   updateAdminButtons();
 
 
-  document.getElementById(
-    "entryArea"
-  ).scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
+  /* -------------------------------------------------------
+     SCROLL TO ENTRY AREA
+  ------------------------------------------------------- */
+
+  const entryArea =
+    document.getElementById(
+      "entryArea"
+    );
+
+
+  if (entryArea) {
+
+    entryArea.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+
+  }
 
 }
 
@@ -5472,9 +9748,7 @@ function startNewRecord() {
 
 function startEditSelected() {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO EDIT RECORDS."
@@ -5485,9 +9759,7 @@ function startEditSelected() {
   }
 
 
-  if (
-    !selectedRecord
-  ) {
+  if (!selectedRecord) {
 
     alert(
       "PLEASE SELECT A RECORD FIRST."
@@ -5513,15 +9785,23 @@ function startEditSelected() {
   );
 
 
-  document.getElementById(
-    "entryTitle"
-  ).textContent =
-    "✎ EDITING RECORD — " +
-    (
-      selectedRecord.track_title ||
-      selectedRecord.record_id ||
-      ""
+  const entryTitle =
+    document.getElementById(
+      "entryTitle"
     );
+
+
+  if (entryTitle) {
+
+    entryTitle.textContent =
+      "✎ EDITING RECORD — " +
+      (
+        selectedRecord.track_title ||
+        selectedRecord.record_id ||
+        ""
+      );
+
+  }
 
 
   setStatus(
@@ -5532,12 +9812,20 @@ function startEditSelected() {
   updateAdminButtons();
 
 
-  document.getElementById(
-    "entryArea"
-  ).scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
+  const entryArea =
+    document.getElementById(
+      "entryArea"
+    );
+
+
+  if (entryArea) {
+
+    entryArea.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+
+  }
 
 }
 
@@ -5548,9 +9836,7 @@ function startEditSelected() {
 
 async function saveNewRecord() {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO ADD RECORDS."
@@ -5597,9 +9883,7 @@ async function saveNewRecord() {
         .single();
 
 
-    if (
-      error
-    ) {
+    if (error) {
 
       console.error(
         "RECORD INSERT ERROR:",
@@ -5622,41 +9906,135 @@ async function saveNewRecord() {
     }
 
 
-    if (
-      data
-    ) {
+    /* -------------------------------------------------------
+       ADD NEW RECORD TO RECORD SPACE
 
-      records.unshift(data);
+       IMPORTANT:
 
-      selectedRecord = data;
+       The newly created record becomes the currently
+       displayed selectedRecord.
+
+       It is NOT automatically added to selectedIds.
+
+       selectedIds is reserved exclusively for checkbox /
+       bulk-selection state.
+    ------------------------------------------------------- */
+
+    if (data) {
+
+      records.unshift(
+        data
+      );
+
+
+      selectedRecord =
+        data;
 
     }
 
 
-    editingRecord = null;
+    /* -------------------------------------------------------
+       RESET EDIT / NEW RECORD STATE
+    ------------------------------------------------------- */
 
-    newRecordMode = false;
+    editingRecord =
+      null;
 
-    editMode = false;
+    newRecordMode =
+      false;
 
+    editMode =
+      false;
+
+
+    /* -------------------------------------------------------
+       CLEAR FORM
+    ------------------------------------------------------- */
 
     clearForm();
 
 
-    document.getElementById(
-      "entryTitle"
-    ).textContent =
-      "+ ADD / EDIT RECORD";
+    const entryTitle =
+      document.getElementById(
+        "entryTitle"
+      );
 
+
+    if (entryTitle) {
+
+      entryTitle.textContent =
+        "+ ADD / EDIT RECORD";
+
+    }
+
+
+    /* -------------------------------------------------------
+       REFRESH TABLE + TOP 40
+
+       IMPORTANT:
+
+       The new record is selected for viewing,
+       but remains unchecked for bulk operations.
+    ------------------------------------------------------- */
 
     renderTable();
 
     renderTop40();
 
-    renderSelectedRecord();
+
+    /* -------------------------------------------------------
+       RENDER SELECTED RECORD
+
+       Artwork/audio resolution remains display-only.
+
+       IMPORTANT:
+
+       Another record may be selected while this
+       asynchronous render is running.
+    ------------------------------------------------------- */
+
+    await renderSelectedRecord();
+
+
+    /* -------------------------------------------------------
+       SELECTION RACE PROTECTION
+
+       IMPORTANT:
+
+       If the user selected another record while the
+       newly-created record was resolving artwork/audio,
+       this save operation must NOT overwrite the newer
+       selection's UI state.
+
+       The database save has already completed, so there
+       is nothing more to do for the saved record here.
+    ------------------------------------------------------- */
+
+    if (
+      selectedRecord !==
+      data
+    ) {
+
+      updateAdminButtons();
+
+      return;
+
+    }
+
+
+    /* -------------------------------------------------------
+       FINAL ADMIN STATE
+    ------------------------------------------------------- */
 
     updateAdminButtons();
 
+
+    /* -------------------------------------------------------
+       FINAL STATUS
+
+       Only report the newly-created record as the
+       current selected record if it is still selected.
+    ------------------------------------------------------- */
 
     setStatus(
       "● RECORD SAVED"
@@ -5692,9 +10070,7 @@ async function saveNewRecord() {
 
 async function saveEdit() {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO SAVE CHANGES."
@@ -5705,13 +10081,9 @@ async function saveEdit() {
   }
 
 
-  if (
-    !editingRecord
-  ) {
+  if (!editingRecord) {
 
-    if (
-      newRecordMode
-    ) {
+    if (newRecordMode) {
 
       await saveNewRecord();
 
@@ -5729,9 +10101,7 @@ async function saveEdit() {
   }
 
 
-  if (
-    !editingRecord.id
-  ) {
+  if (!editingRecord.id) {
 
     alert(
       "THIS RECORD DOES NOT HAVE A DATABASE ID."
@@ -5740,6 +10110,25 @@ async function saveEdit() {
     return;
 
   }
+
+
+  /*
+     -------------------------------------------------------
+     CAPTURE THE RECORD BEING EDITED
+
+     IMPORTANT:
+
+     Keep a stable reference to the record associated
+     with this save operation.
+
+     If another record is selected while the asynchronous
+     save/render is running, the older operation must not
+     overwrite the newer selection's UI.
+  -------------------------------------------------------
+  */
+
+  const recordBeingEdited =
+    editingRecord;
 
 
   const updated =
@@ -5776,15 +10165,13 @@ async function saveEdit() {
         .update(updated)
         .eq(
           "id",
-          editingRecord.id
+          recordBeingEdited.id
         )
         .select()
         .single();
 
 
-    if (
-      error
-    ) {
+    if (error) {
 
       console.error(
         "RECORD UPDATE ERROR:",
@@ -5807,21 +10194,31 @@ async function saveEdit() {
     }
 
 
-    if (
-      data
-    ) {
+    /* -------------------------------------------------------
+       UPDATE RECORD SPACE MEMORY
+
+       IMPORTANT:
+
+       Replace the existing in-memory record with the
+       database response.
+
+       selectedIds is deliberately NOT changed.
+
+       selectedIds belongs exclusively to checkbox /
+       bulk-selection state.
+    ------------------------------------------------------- */
+
+    if (data) {
 
       const index =
         records.findIndex(
           record =>
             record.id ===
-            editingRecord.id
+            recordBeingEdited.id
         );
 
 
-      if (
-        index >= 0
-      ) {
+      if (index >= 0) {
 
         records[index] =
           data;
@@ -5829,41 +10226,152 @@ async function saveEdit() {
       }
 
 
-      selectedRecord =
-        data;
+      /*
+         Only make the updated record the selected record
+         if the user has not selected something else while
+         the database operation was running.
+
+         This prevents an older save operation from
+         stealing the current selection.
+      */
+
+      if (
+        selectedRecord ===
+        recordBeingEdited
+      ) {
+
+        selectedRecord =
+          data;
+
+      }
 
     }
 
 
-    editingRecord = null;
+    /* -------------------------------------------------------
+       RESET EDIT / NEW RECORD STATE
 
-    editMode = false;
+       Only clear the editing state if this save operation
+       is still associated with the current edit operation.
+    ------------------------------------------------------- */
 
-    newRecordMode = false;
+    if (
+      editingRecord ===
+      recordBeingEdited
+    ) {
+
+      editingRecord =
+        null;
+
+      editMode =
+        false;
+
+      newRecordMode =
+        false;
 
 
-    clearForm();
+      /* -----------------------------------------------------
+         CLEAR FORM
+      ----------------------------------------------------- */
+
+      clearForm();
 
 
-    document.getElementById(
-      "entryTitle"
-    ).textContent =
-      "+ ADD / EDIT RECORD";
+      const entryTitle =
+        document.getElementById(
+          "entryTitle"
+        );
 
+
+      if (entryTitle) {
+
+        entryTitle.textContent =
+          "+ ADD / EDIT RECORD";
+
+      }
+
+    }
+
+
+    /* -------------------------------------------------------
+       REFRESH TABLE + TOP 40
+    ------------------------------------------------------- */
 
     renderTable();
 
     renderTop40();
 
-    renderSelectedRecord();
+
+    /* -------------------------------------------------------
+       RENDER UPDATED SELECTED RECORD
+
+       Only render the updated record if it is still the
+       current selection.
+
+       If the user selected another record while the save
+       was running, that newer selection must remain in
+       control.
+    ------------------------------------------------------- */
+
+    if (
+      selectedRecord ===
+      data
+    ) {
+
+      await renderSelectedRecord();
+
+
+      /*
+         ---------------------------------------------------
+         FINAL SELECTION RACE PROTECTION
+         ---------------------------------------------------
+
+         Another record may have been selected while the
+         artwork/audio was resolving.
+
+         If so, stop here.
+
+         The database update has already succeeded.
+      */
+
+      if (
+        selectedRecord !==
+        data
+      ) {
+
+        updateAdminButtons();
+
+        return;
+
+      }
+
+    }
+
+
+    /* -------------------------------------------------------
+       FINAL ADMIN STATE
+    ------------------------------------------------------- */
 
     updateAdminButtons();
 
 
-    setStatus(
-      "● RECORD UPDATED"
-    );
+    /* -------------------------------------------------------
+       FINAL STATUS
 
+       Only report RECORD UPDATED if the save operation is
+       still associated with the current selected record.
+    ------------------------------------------------------- */
+
+    if (
+      selectedRecord ===
+      data
+    ) {
+
+      setStatus(
+        "● RECORD UPDATED"
+      );
+
+    }
 
   } catch (error) {
 
@@ -5892,30 +10400,28 @@ async function saveEdit() {
    DELETE ONE
 ========================================================= */
 
-async function deleteRecord(record) {
+async function deleteRecord(
+  record
+) {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO DELETE RECORDS."
     );
 
-    return;
+    return false;
 
   }
 
 
-  if (
-    !record?.id
-  ) {
+  if (!record?.id) {
 
     alert(
       "THIS RECORD DOES NOT HAVE A DATABASE ID."
     );
 
-    return;
+    return false;
 
   }
 
@@ -5933,18 +10439,51 @@ async function deleteRecord(record) {
 
       (
         record.track_title ?? ""
-      )
+      ) +
+
+      "\n\n" +
+
+      "Record Space data will be removed.\n" +
+      "Original Master Library files will NOT be deleted."
 
     );
 
 
-  if (
-    !confirmed
-  ) {
+  if (!confirmed) {
 
-    return;
+    return false;
 
   }
+
+
+  /*
+     -------------------------------------------------------
+     CAPTURE THE RECORD BEING DELETED
+
+     IMPORTANT:
+
+     This is the exact record associated with this
+     asynchronous delete operation.
+
+     The user may select another record while Supabase
+     is processing the delete.
+
+     The delete must remain attached to THIS record only.
+  -------------------------------------------------------
+  */
+
+  const recordBeingDeleted =
+    record;
+
+
+  const deletedRecordId =
+    recordBeingDeleted.id;
+
+
+  const deletedRecordSelectionId =
+    getRecordId(
+      recordBeingDeleted
+    );
 
 
   setStatus(
@@ -5952,21 +10491,161 @@ async function deleteRecord(record) {
   );
 
 
-  const {
-    error
-  } =
-    await supabaseClient
-      .from(TABLE_NAME)
-      .delete()
-      .eq(
-        "id",
-        record.id
+  try {
+
+    const {
+      error
+    } =
+      await supabaseClient
+        .from(TABLE_NAME)
+        .delete()
+        .eq(
+          "id",
+          deletedRecordId
+        );
+
+
+    if (error) {
+
+      console.error(
+        "DELETE ERROR:",
+        error
       );
 
 
-  if (
-    error
-  ) {
+      alert(
+        "DELETE FAILED:\n\n" +
+        error.message
+      );
+
+
+      /*
+         Only show DELETE FAILED if the user is still
+         looking at the same record.
+
+         Otherwise do not overwrite the newer selection's
+         status.
+      */
+
+      if (
+        selectedRecord ===
+        recordBeingDeleted
+      ) {
+
+        setStatus(
+          "● DELETE FAILED"
+        );
+
+      }
+
+      return false;
+
+    }
+
+
+    /* -------------------------------------------------------
+       REMOVE THE DELETED RECORD FROM MEMORY
+
+       This always happens because the database deletion
+       succeeded.
+
+       It does NOT depend on which record is currently
+       selected.
+    ------------------------------------------------------- */
+
+    records =
+      records.filter(
+        item =>
+          item.id !==
+          deletedRecordId
+      );
+
+
+    /* -------------------------------------------------------
+       REMOVE ONLY THIS RECORD FROM BULK SELECTION
+    ------------------------------------------------------- */
+
+    selectedIds.delete(
+      deletedRecordSelectionId
+    );
+
+
+    /* -------------------------------------------------------
+       CHECK WHETHER THE DELETED RECORD IS STILL THE
+       CURRENTLY DISPLAYED RECORD
+       
+       If the user selected another record while the delete
+       was running, leave that newer selection alone.
+    ------------------------------------------------------- */
+
+    const deletedRecordWasSelected =
+      selectedRecord ===
+      recordBeingDeleted;
+
+
+    /* -------------------------------------------------------
+       CLEAR EDIT / DISPLAY STATE ONLY IF THE DELETED
+       RECORD IS STILL THE CURRENT SELECTION
+    ------------------------------------------------------- */
+
+    if (
+      deletedRecordWasSelected
+    ) {
+
+      selectedRecord =
+        null;
+
+      editingRecord =
+        null;
+
+      editMode =
+        false;
+
+      newRecordMode =
+        false;
+
+      clearForm();
+
+      resetSelectedDisplay();
+
+    }
+
+
+    /* -------------------------------------------------------
+       REFRESH TABLE + TOP 40
+       
+       The deleted record must disappear regardless of
+       which record is currently selected.
+    ------------------------------------------------------- */
+
+    renderTable();
+
+    renderTop40();
+
+    updateAdminButtons();
+
+
+    /* -------------------------------------------------------
+       FINAL STATUS
+       
+       Do not overwrite a newer selection's status.
+    ------------------------------------------------------- */
+
+    if (
+      deletedRecordWasSelected
+    ) {
+
+      setStatus(
+        "● RECORD DELETED"
+      );
+
+    }
+
+
+    return true;
+
+  }
+  catch (error) {
 
     console.error(
       "DELETE ERROR:",
@@ -5980,61 +10659,26 @@ async function deleteRecord(record) {
     );
 
 
-    setStatus(
-      "● DELETE FAILED"
-    );
+    /*
+       Do not overwrite the status belonging to a newer
+       selected record.
+    */
 
-    return;
+    if (
+      selectedRecord ===
+      recordBeingDeleted
+    ) {
 
-  }
+      setStatus(
+        "● DELETE FAILED"
+      );
+
+    }
 
 
-  records =
-    records.filter(
-      item =>
-        item.id !==
-        record.id
-    );
-
-
-  if (
-    selectedRecord &&
-    selectedRecord.id ===
-      record.id
-  ) {
-
-    selectedRecord =
-      null;
+    return false;
 
   }
-
-
-  selectedIds.delete(
-    getRecordId(record)
-  );
-
-
-  renderTable();
-
-  renderTop40();
-
-
-  if (
-    selectedRecord
-  ) {
-
-    renderSelectedRecord();
-
-  } else {
-
-    resetSelectedDisplay();
-
-  }
-
-
-  setStatus(
-    "● RECORD DELETED"
-  );
 
 }
 
@@ -6045,9 +10689,7 @@ async function deleteRecord(record) {
 
 async function deleteSelectedAdmin() {
 
-  if (
-    !selectedRecord
-  ) {
+  if (!selectedRecord) {
 
     alert(
       "PLEASE SELECT A RECORD FIRST."
@@ -6071,9 +10713,7 @@ async function deleteSelectedAdmin() {
 
 async function deleteSelected() {
 
-  if (
-    !currentUser
-  ) {
+  if (!currentUser) {
 
     alert(
       "PLEASE SIGN IN TO DELETE RECORDS."
@@ -6084,14 +10724,43 @@ async function deleteSelected() {
   }
 
 
+  /* -------------------------------------------------------
+     CAPTURE THE RECORDS BELONGING TO THIS DELETE OPERATION
+
+     IMPORTANT:
+
+     If the user changes checkbox selections while the
+     Supabase delete is processing, those newer selections
+     must NOT be deleted or cleared.
+  ------------------------------------------------------- */
+
   const selectedRecords =
     records.filter(
       record =>
         selectedIds.has(
-          getRecordId(record)
+          getRecordId(
+            record
+          )
         )
     );
 
+
+  if (
+    selectedRecords.length === 0
+  ) {
+
+    alert(
+      "NO RECORDS SELECTED."
+    );
+
+    return;
+
+  }
+
+
+  /* -------------------------------------------------------
+     CAPTURE DATABASE IDS
+  ------------------------------------------------------- */
 
   const ids =
     selectedRecords
@@ -6111,7 +10780,7 @@ async function deleteSelected() {
   ) {
 
     alert(
-      "NO RECORDS SELECTED."
+      "THE SELECTED RECORDS HAVE NO DATABASE IDs."
     );
 
     return;
@@ -6119,17 +10788,60 @@ async function deleteSelected() {
   }
 
 
-  const confirmed =
-    window.confirm(
-      "DELETE " +
-      ids.length +
-      " SELECTED RECORD(S)?"
+  /* -------------------------------------------------------
+     CAPTURE THE CURRENTLY DISPLAYED RECORD
+
+     This reference belongs to the state when the delete
+     operation started.
+
+     It prevents a newer selection from being cleared by
+     this asynchronous operation.
+  ------------------------------------------------------- */
+
+  const selectionAtDeleteStart =
+    selectedRecord;
+
+
+  /* -------------------------------------------------------
+     CAPTURE ONLY THE CHECKBOX IDS BELONGING TO THIS
+     DELETE OPERATION
+
+     DO NOT use selectedIds.clear() after the await.
+
+     The user may select additional records while the
+     database delete is processing.
+  ------------------------------------------------------- */
+
+  const deletingSelectionIds =
+    new Set(
+      selectedRecords.map(
+        record =>
+          getRecordId(
+            record
+          )
+      )
     );
 
 
-  if (
-    !confirmed
-  ) {
+  /* -------------------------------------------------------
+     CONFIRM DELETE
+  ------------------------------------------------------- */
+
+  const confirmed =
+    window.confirm(
+
+      "DELETE " +
+      ids.length +
+      " SELECTED RECORD(S)?\n\n" +
+
+      "Record Space rows will be removed.\n" +
+
+      "Original Master Library files will NOT be deleted."
+
+    );
+
+
+  if (!confirmed) {
 
     return;
 
@@ -6141,21 +10853,190 @@ async function deleteSelected() {
   );
 
 
-  const {
-    error
-  } =
-    await supabaseClient
-      .from(TABLE_NAME)
-      .delete()
-      .in(
-        "id",
+  /* -------------------------------------------------------
+     DATABASE DELETE
+  ------------------------------------------------------- */
+
+  try {
+
+    const {
+      error
+    } =
+      await supabaseClient
+        .from(TABLE_NAME)
+        .delete()
+        .in(
+          "id",
+          ids
+        );
+
+
+    /* -----------------------------------------------------
+       DELETE FAILED
+    ----------------------------------------------------- */
+
+    if (error) {
+
+      console.error(
+        "BULK DELETE ERROR:",
+        error
+      );
+
+
+      alert(
+        "DELETE FAILED:\n\n" +
+        error.message
+      );
+
+
+      /*
+         Only change the status if the same record that was
+         selected when this delete began is still selected.
+      */
+
+      if (
+        selectedRecord ===
+        selectionAtDeleteStart
+      ) {
+
+        setStatus(
+          "● DELETE FAILED"
+        );
+
+      }
+
+      return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       CREATE LOOKUP SET OF RECORDS ACTUALLY DELETED
+    ----------------------------------------------------- */
+
+    const deletedIdSet =
+      new Set(
         ids
       );
 
 
-  if (
-    error
-  ) {
+    /* -----------------------------------------------------
+       REMOVE ONLY THE DELETED RECORDS FROM MEMORY
+    ----------------------------------------------------- */
+
+    records =
+      records.filter(
+        record =>
+          !deletedIdSet.has(
+            record.id
+          )
+      );
+
+
+    /* -----------------------------------------------------
+       REMOVE ONLY THE CHECKBOX SELECTIONS THAT BELONG
+       TO THIS DELETE OPERATION
+
+       IMPORTANT:
+
+       New selections made while the delete was processing
+       remain untouched.
+    ----------------------------------------------------- */
+
+    deletingSelectionIds.forEach(
+      id => {
+
+        selectedIds.delete(
+          id
+        );
+
+      }
+    );
+
+
+    /* -----------------------------------------------------
+       CHECK WHETHER THE ORIGINAL DISPLAYED RECORD WAS
+       DELETED
+    ----------------------------------------------------- */
+
+    const originalSelectionWasDeleted =
+      !!selectionAtDeleteStart &&
+      deletedIdSet.has(
+        selectionAtDeleteStart.id
+      );
+
+
+    /* -----------------------------------------------------
+       ONLY CLEAR THE DISPLAY / EDIT STATE IF:
+
+       1. The original selected record was deleted
+       2. The user has NOT selected another record while
+          the delete was processing
+    ----------------------------------------------------- */
+
+    if (
+      originalSelectionWasDeleted &&
+      selectedRecord ===
+      selectionAtDeleteStart
+    ) {
+
+      selectedRecord =
+        null;
+
+      editingRecord =
+        null;
+
+      editMode =
+        false;
+
+      newRecordMode =
+        false;
+
+      clearForm();
+
+      resetSelectedDisplay();
+
+    }
+
+
+    /* -----------------------------------------------------
+       REFRESH DISPLAY
+    ----------------------------------------------------- */
+
+    renderTable();
+
+    renderTop40();
+
+    updateAdminButtons();
+
+
+    /* -----------------------------------------------------
+       FINAL STATUS
+
+       Do not overwrite a newer selection's status.
+    ----------------------------------------------------- */
+
+    if (
+      selectedRecord ===
+      selectionAtDeleteStart
+    ) {
+
+      setStatus(
+        "● " +
+        ids.length +
+        " RECORD" +
+        (
+          ids.length === 1
+            ? ""
+            : "S"
+        ) +
+        " DELETED"
+      );
+
+    }
+
+  }
+  catch (error) {
 
     console.error(
       "BULK DELETE ERROR:",
@@ -6169,61 +11050,23 @@ async function deleteSelected() {
     );
 
 
-    setStatus(
-      "● DELETE FAILED"
-    );
+    /*
+       Do not overwrite the status belonging to a newer
+       selected record.
+    */
 
-    return;
+    if (
+      selectedRecord ===
+      selectionAtDeleteStart
+    ) {
 
-  }
+      setStatus(
+        "● DELETE FAILED"
+      );
 
-
-  records =
-    records.filter(
-      record =>
-        !ids.includes(
-          record.id
-        )
-    );
-
-
-  if (
-    selectedRecord &&
-    ids.includes(
-      selectedRecord.id
-    )
-  ) {
-
-    selectedRecord =
-      null;
+    }
 
   }
-
-
-  selectedIds.clear();
-
-
-  renderTable();
-
-  renderTop40();
-
-
-  if (
-    selectedRecord
-  ) {
-
-    renderSelectedRecord();
-
-  } else {
-
-    resetSelectedDisplay();
-
-  }
-
-
-  setStatus(
-    "● SELECTED RECORDS DELETED"
-  );
 
 }
 
@@ -6240,46 +11083,84 @@ function resetSelectedDisplay() {
     );
 
 
-  if (
-    artwork
-  ) {
+  if (artwork) {
 
-    artwork.outerHTML = `
+    const replacement =
+      makeNoCover(
+        true
+      );
 
-      <div
-        id="selectedArtwork"
-        class="selected-no-art"
-      >
-        NO RECORD SELECTED
-      </div>
 
-    `;
+    replacement.id =
+      "selectedArtwork";
+
+
+    replacement.className =
+      artwork.className ||
+      "selected-art";
+
+
+    artwork.replaceWith(
+      replacement
+    );
 
   }
 
 
-  document.getElementById(
-    "selectedArtist"
-  ).textContent =
-    "—";
+  const selectedArtist =
+    document.getElementById(
+      "selectedArtist"
+    );
 
 
-  document.getElementById(
-    "selectedTitle"
-  ).textContent =
-    "SELECT A RECORD";
+  if (selectedArtist) {
+
+    selectedArtist.textContent =
+      "—";
+
+  }
 
 
-  document.getElementById(
-    "selectedAlbum"
-  ).textContent =
-    "—";
+  const selectedTitle =
+    document.getElementById(
+      "selectedTitle"
+    );
 
 
-  document.getElementById(
-    "selectedMeta"
-  ).textContent =
-    "SELECT A RECORD BELOW";
+  if (selectedTitle) {
+
+    selectedTitle.textContent =
+      "SELECT A RECORD";
+
+  }
+
+
+  const selectedAlbum =
+    document.getElementById(
+      "selectedAlbum"
+    );
+
+
+  if (selectedAlbum) {
+
+    selectedAlbum.textContent =
+      "—";
+
+  }
+
+
+  const selectedMeta =
+    document.getElementById(
+      "selectedMeta"
+    );
+
+
+  if (selectedMeta) {
+
+    selectedMeta.textContent =
+      "SELECT A RECORD BELOW";
+
+  }
 
 
   [
@@ -6309,9 +11190,8 @@ function resetSelectedDisplay() {
           id
         );
 
-      if (
-        element
-      ) {
+
+      if (element) {
 
         element.textContent =
           "—";
@@ -6322,10 +11202,18 @@ function resetSelectedDisplay() {
   );
 
 
-  document.getElementById(
-    "selectedAudio"
-  ).innerHTML =
-    "";
+  const audio =
+    document.getElementById(
+      "selectedAudio"
+    );
+
+
+  if (audio) {
+
+    audio.innerHTML =
+      "";
+
+  }
 
 }
 
@@ -6336,18 +11224,46 @@ function resetSelectedDisplay() {
 
 function selectAll() {
 
+  if (
+    !Array.isArray(
+      filteredRecords
+    )
+  ) {
+
+    return;
+
+  }
+
+
   filteredRecords.forEach(
     record => {
 
-      selectedIds.add(
-        getRecordId(record)
-      );
+      const id =
+        getRecordId(
+          record
+        );
+
+
+      if (id) {
+
+        selectedIds.add(
+          id
+        );
+
+      }
 
     }
   );
 
 
   renderTable();
+
+  updateAdminButtons();
+
+
+  setStatus(
+    `${selectedIds.size} RECORD(S) SELECTED`
+  );
 
 }
 
@@ -6360,167 +11276,22 @@ function clearSelection() {
 
   selectedIds.clear();
 
+
   renderTable();
 
-}
+  updateAdminButtons();
 
 
-/* =========================================================
-   ESCAPE HTML
-========================================================= */
-
-function escapeHtml(value) {
-
-  return String(
-    value ?? ""
-  )
-  .replace(
-    /&/g,
-    "&amp;"
-  )
-  .replace(
-    /</g,
-    "&lt;"
-  )
-  .replace(
-    />/g,
-    "&gt;"
-  )
-  .replace(
-    /"/g,
-    "&quot;"
-  )
-  .replace(
-    /'/g,
-    "&#039;"
+  setStatus(
+    "● SELECTION CLEARED"
   );
 
 }
 
 
 /* =========================================================
-   EVENTS
+   CLEAR FORM BUTTON
 ========================================================= */
-
-document
-  .getElementById(
-    "searchInput"
-  )
-  .addEventListener(
-    "input",
-    renderTable
-  );
-
-
-document
-  .getElementById(
-    "groupFilter"
-  )
-  .addEventListener(
-    "change",
-    renderTable
-  );
-
-
-document
-  .getElementById(
-    "refreshButton"
-  )
-  .addEventListener(
-    "click",
-    loadRecords
-  );
-
-
-document
-  .getElementById(
-    "refreshAdminButton"
-  )
-  .addEventListener(
-    "click",
-    loadRecords
-  );
-
-
-document
-  .getElementById(
-    "selectAllButton"
-  )
-  .addEventListener(
-    "click",
-    selectAll
-  );
-
-
-document
-  .getElementById(
-    "clearSelectionButton"
-  )
-  .addEventListener(
-    "click",
-    clearSelection
-  );
-
-
-document
-  .getElementById(
-    "deleteSelectedButton"
-  )
-  .addEventListener(
-    "click",
-    deleteSelected
-  );
-
-
-document
-  .getElementById(
-    "deleteSelectedAdminButton"
-  )
-  .addEventListener(
-    "click",
-    deleteSelectedAdmin
-  );
-
-
-document
-  .getElementById(
-    "newRecordButton"
-  )
-  .addEventListener(
-    "click",
-    startNewRecord
-  );
-
-
-document
-  .getElementById(
-    "editSelectedButton"
-  )
-  .addEventListener(
-    "click",
-    startEditSelected
-  );
-
-
-document
-  .getElementById(
-    "saveEditButton"
-  )
-  .addEventListener(
-    "click",
-    saveEdit
-  );
-
-
-document
-  .getElementById(
-    "addRecordButton"
-  )
-  .addEventListener(
-    "click",
-    saveNewRecord
-  );
-
 
 document
   .getElementById(
@@ -6532,23 +11303,235 @@ document
 
       clearForm();
 
-      editingRecord = null;
+      editingRecord =
+        null;
 
-      editMode = false;
+      editMode =
+        false;
 
-      newRecordMode = false;
+      newRecordMode =
+        false;
 
 
-      document.getElementById(
-        "entryTitle"
-      ).textContent =
-        "+ ADD / EDIT RECORD";
+      const entryTitle =
+        document.getElementById(
+          "entryTitle"
+        );
+
+
+      if (entryTitle) {
+
+        entryTitle.textContent =
+          "+ ADD / EDIT RECORD";
+
+      }
 
 
       updateAdminButtons();
 
+
+      setStatus(
+        "● FORM CLEARED"
+      );
+
     }
   );
+
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+const searchInput =
+  document.getElementById(
+    "searchInput"
+  );
+
+
+if (searchInput) {
+
+  searchInput.addEventListener(
+    "input",
+    renderTable
+  );
+
+}
+
+
+const groupFilter =
+  document.getElementById(
+    "groupFilter"
+  );
+
+
+if (groupFilter) {
+
+  groupFilter.addEventListener(
+    "change",
+    renderTable
+  );
+
+}
+
+
+const refreshButton =
+  document.getElementById(
+    "refreshButton"
+  );
+
+
+if (refreshButton) {
+
+  refreshButton.addEventListener(
+    "click",
+    loadRecords
+  );
+
+}
+
+
+const refreshAdminButton =
+  document.getElementById(
+    "refreshAdminButton"
+  );
+
+
+if (refreshAdminButton) {
+
+  refreshAdminButton.addEventListener(
+    "click",
+    loadRecords
+  );
+
+}
+
+
+const selectAllButton =
+  document.getElementById(
+    "selectAllButton"
+  );
+
+
+if (selectAllButton) {
+
+  selectAllButton.addEventListener(
+    "click",
+    selectAll
+  );
+
+}
+
+
+const clearSelectionButton =
+  document.getElementById(
+    "clearSelectionButton"
+  );
+
+
+if (clearSelectionButton) {
+
+  clearSelectionButton.addEventListener(
+    "click",
+    clearSelection
+  );
+
+}
+
+
+const deleteSelectedButton =
+  document.getElementById(
+    "deleteSelectedButton"
+  );
+
+
+if (deleteSelectedButton) {
+
+  deleteSelectedButton.addEventListener(
+    "click",
+    deleteSelected
+  );
+
+}
+
+
+const deleteSelectedAdminButton =
+  document.getElementById(
+    "deleteSelectedAdminButton"
+  );
+
+
+if (deleteSelectedAdminButton) {
+
+  deleteSelectedAdminButton.addEventListener(
+    "click",
+    deleteSelectedAdmin
+  );
+
+}
+
+
+const newRecordButton =
+  document.getElementById(
+    "newRecordButton"
+  );
+
+
+if (newRecordButton) {
+
+  newRecordButton.addEventListener(
+    "click",
+    startNewRecord
+  );
+
+}
+
+
+const editSelectedButton =
+  document.getElementById(
+    "editSelectedButton"
+  );
+
+
+if (editSelectedButton) {
+
+  editSelectedButton.addEventListener(
+    "click",
+    startEditSelected
+  );
+
+}
+
+
+const saveEditButton =
+  document.getElementById(
+    "saveEditButton"
+  );
+
+
+if (saveEditButton) {
+
+  saveEditButton.addEventListener(
+    "click",
+    saveEdit
+  );
+
+}
+
+
+const addRecordButton =
+  document.getElementById(
+    "addRecordButton"
+  );
+
+
+if (addRecordButton) {
+
+  addRecordButton.addEventListener(
+    "click",
+    saveNewRecord
+  );
+
+}
 
 
 /* =========================================================
@@ -6566,6 +11549,7 @@ supabaseClient
       currentUser =
         session?.user ||
         null;
+
 
       updateAuthUI();
 

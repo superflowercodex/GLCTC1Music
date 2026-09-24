@@ -3463,7 +3463,7 @@ function populateMasterField(
 //   older load cannot enrich a newer dataset.
 // =====================================================
 
-function populateRecordsFromMasterLibrary(
+async function populateRecordsFromMasterLibrary(
   activeLoadRun = recordSpaceLoadRun
 ) {
 
@@ -3613,10 +3613,19 @@ function populateRecordsFromMasterLibrary(
       }
 
 
-      /*
+           /*
          ----------------------------------------------
          ARTIST + TITLE
          ----------------------------------------------
+
+         A single Artist + Track Title is a valid
+         deterministic match.
+
+         If more than one Master Library record has
+         the same Artist + Track Title, mark the
+         combination ambiguous.
+
+         We do NOT guess between duplicates.
       */
 
       if (
@@ -3636,6 +3645,14 @@ function populateRecordsFromMasterLibrary(
           masterByArtistTitle.set(
             artistTitleKey,
             masterRecord
+          );
+
+        }
+        else {
+
+          masterByArtistTitle.set(
+            artistTitleKey,
+            null
           );
 
         }
@@ -3889,14 +3906,15 @@ function populateRecordsFromMasterLibrary(
     }
 
 
-    /*
+          /*
        ==================================================
        MASTER LIBRARY STATUS
        ==================================================
 
-       Only ACTIVE or empty statuses are changed.
+       This record has a confirmed Master Library match.
 
-       Deliberately assigned statuses are preserved.
+       A confirmed match is marked:
+       MASTER LIBRARY
     */
 
     const currentRecordStatus =
@@ -3918,7 +3936,10 @@ function populateRecordsFromMasterLibrary(
         "MASTER LIBRARY";
 
 
-      supabaseClient
+      const {
+        error:
+          masterLibraryStatusError
+      } = await supabaseClient
         .from(
           TABLE_NAME
         )
@@ -3929,34 +3950,28 @@ function populateRecordsFromMasterLibrary(
         .eq(
           "id",
           record.id
-        )
-        .then(
-          ({
-            error
-          }) => {
-
-            if (
-              error
-            ) {
-
-              console.error(
-                "❌ MASTER LIBRARY STATUS UPDATE FAILED:",
-                error
-              );
-
-              return;
-
-            }
-
-
-            console.log(
-              "✅ RECORD STATUS → MASTER LIBRARY:",
-              record.record_id ||
-              record.id
-            );
-
-          }
         );
+
+
+      if (
+        masterLibraryStatusError
+      ) {
+
+        console.error(
+          "❌ MASTER LIBRARY STATUS UPDATE FAILED:",
+          masterLibraryStatusError
+        );
+
+        return false;
+
+      }
+
+
+      console.log(
+        "✅ RECORD STATUS → MASTER LIBRARY:",
+        record.record_id ||
+        record.id
+      );
 
     }
 
@@ -4029,27 +4044,6 @@ function populateRecordsFromMasterLibrary(
     );
 
 
-    populateMasterField(
-      record,
-      "audio_format",
-      masterRecord["Audio Format"]
-    );
-
-
-    populateMasterField(
-      record,
-      "sample_rate",
-      masterRecord["Sample Rate"]
-    );
-
-
-    populateMasterField(
-      record,
-      "duration",
-      masterRecord["Duration"]
-    );
-
-
     /*
        ==================================================
        MUSIC DATA
@@ -4107,27 +4101,6 @@ function populateRecordsFromMasterLibrary(
 
     populateMasterField(
       record,
-      "solfeggio",
-      masterRecord["Solfeggio"]
-    );
-
-
-    populateMasterField(
-      record,
-      "binaural",
-      masterRecord["Binaural"]
-    );
-
-
-    populateMasterField(
-      record,
-      "carrier_frequency",
-      masterRecord["Carrier Frequency"]
-    );
-
-
-    populateMasterField(
-      record,
       "notes",
       masterRecord["Notes"]
     );
@@ -4170,6 +4143,121 @@ function populateRecordsFromMasterLibrary(
       "cover_art",
       masterRecord["Cover Art"]
     );
+
+
+    /*
+       ==================================================
+       PERSIST MASTER LIBRARY ENRICHMENT
+       ==================================================
+    */
+
+    if (
+      record.id
+    ) {
+
+      const masterLibraryUpdate = {
+        artist_id:
+          record.artist_id,
+
+        artist:
+          record.artist,
+
+        track_title:
+          record.track_title,
+
+        album:
+          record.album,
+
+        master_audio:
+          record.master_audio,
+
+        stem_1:
+          record.stem_1,
+
+        stem_2:
+          record.stem_2,
+
+        stem_3:
+          record.stem_3,
+
+        stem_4:
+          record.stem_4,
+
+        genre:
+          record.genre,
+
+        bpm:
+          record.bpm,
+
+        key:
+          record.key,
+
+        frequency_hz:
+          record.frequency_hz,
+
+        chakra:
+          record.chakra,
+
+        planet:
+          record.planet,
+
+        spatial:
+          record.spatial,
+
+        notes:
+          record.notes,
+
+        record_id:
+          record.record_id,
+
+        copyright:
+          record.copyright,
+
+        cover_art:
+          record.cover_art
+      };
+
+
+      supabaseClient
+        .from(
+          TABLE_NAME
+        )
+        .update(
+          masterLibraryUpdate
+        )
+        .eq(
+          "id",
+          record.id
+        )
+        .then(
+          ({
+            error
+          }) => {
+
+            if (
+              error
+            ) {
+
+              console.error(
+                "❌ RECORD SPACE MASTER LIBRARY ENRICHMENT SAVE FAILED:",
+                error
+              );
+
+              return;
+
+            }
+
+
+            console.log(
+              "✅ RECORD SPACE MASTER LIBRARY DATA SAVED:",
+              record.record_id ||
+              record.id
+            );
+
+          }
+        );
+
+    }
 
   }
 
@@ -6290,8 +6378,8 @@ async function loadRecords() {
        Record Space by this operation.
     */
 
-    const masterLibraryEnrichmentSucceeded =
-      populateRecordsFromMasterLibrary(
+       const masterLibraryEnrichmentSucceeded =
+      await populateRecordsFromMasterLibrary(
         loadRun
       );
 
@@ -6336,6 +6424,12 @@ async function loadRecords() {
        --------------------------------------------------
        INITIAL RENDER
        --------------------------------------------------
+
+       IMPORTANT:
+
+       Rendering happens only AFTER Master Library
+       matching, population and persistence have
+       completed.
     */
 
     renderTable();

@@ -3449,6 +3449,20 @@ function populateMasterField(
 //   older load cannot enrich a newer dataset.
 // =====================================================
 
+// =====================================================
+// MASTER LIBRARY ENRICHMENT
+// =====================================================
+//
+// Master Library is used to enrich Record Space records.
+//
+// IMPORTANT:
+// - Record Space data is never overwritten unnecessarily.
+// - Existing Record Space values are preserved.
+// - Master Library values fill the corresponding fields.
+// - The active Record Space load-run is checked so an
+//   older load cannot enrich a newer dataset.
+// =====================================================
+
 function populateRecordsFromMasterLibrary(
   activeLoadRun = recordSpaceLoadRun
 ) {
@@ -3485,25 +3499,19 @@ function populateRecordsFromMasterLibrary(
   }
 
 
-   // ---------------------------------------------------
-  // PRIMARY LOOKUP — RECORD ID
-  // ---------------------------------------------------
+  /*
+     --------------------------------------------------
+     MASTER LIBRARY LOOKUP MAPS
+     --------------------------------------------------
+  */
 
   const masterById =
     new Map();
 
 
-  // ---------------------------------------------------
-  // SECONDARY LOOKUP — ARTIST + TRACK TITLE
-  // ---------------------------------------------------
-
   const masterByArtistTitle =
     new Map();
 
-
-  // ---------------------------------------------------
-  // THIRD LOOKUP — UNIQUE TRACK TITLE
-  // ---------------------------------------------------
 
   const masterByTitle =
     new Map();
@@ -3512,15 +3520,6 @@ function populateRecordsFromMasterLibrary(
   /*
      --------------------------------------------------
      NORMALISED MATCH KEY
-
-     Makes matching tolerant of:
-
-     • CAPITALS
-     • lowercase
-     • extra spaces
-     • punctuation
-     • hyphens
-     • apostrophes
      --------------------------------------------------
   */
 
@@ -3539,17 +3538,29 @@ function populateRecordsFromMasterLibrary(
     };
 
 
+  /*
+     --------------------------------------------------
+     BUILD MASTER LIBRARY LOOKUPS
+     --------------------------------------------------
+  */
+
   masterLibrary.forEach(
     masterRecord => {
 
-      if (!masterRecord) {
+      if (
+        !masterRecord
+      ) {
+
         return;
+
       }
 
 
-      // -------------------------------------------------
-      // RECORD ID
-      // -------------------------------------------------
+      /*
+         ----------------------------------------------
+         RECORD ID
+         ----------------------------------------------
+      */
 
       const masterId =
         normaliseMasterValue(
@@ -3557,7 +3568,9 @@ function populateRecordsFromMasterLibrary(
         ).toLowerCase();
 
 
-      if (masterId) {
+      if (
+        masterId
+      ) {
 
         masterById.set(
           masterId,
@@ -3567,9 +3580,11 @@ function populateRecordsFromMasterLibrary(
       }
 
 
-      // -------------------------------------------------
-      // ARTIST
-      // -------------------------------------------------
+      /*
+         ----------------------------------------------
+         ARTIST
+         ----------------------------------------------
+      */
 
       const artist =
         makeMatchKey(
@@ -3577,9 +3592,11 @@ function populateRecordsFromMasterLibrary(
         );
 
 
-      // -------------------------------------------------
-      // TRACK TITLE
-      // -------------------------------------------------
+      /*
+         ----------------------------------------------
+         TRACK TITLE
+         ----------------------------------------------
+      */
 
       const title =
         makeMatchKey(
@@ -3587,14 +3604,20 @@ function populateRecordsFromMasterLibrary(
         );
 
 
-      if (!title) {
+      if (
+        !title
+      ) {
+
         return;
+
       }
 
 
-      // -------------------------------------------------
-      // ARTIST + TITLE
-      // -------------------------------------------------
+      /*
+         ----------------------------------------------
+         ARTIST + TITLE
+         ----------------------------------------------
+      */
 
       if (
         artist
@@ -3620,13 +3643,16 @@ function populateRecordsFromMasterLibrary(
       }
 
 
-      // -------------------------------------------------
-      // UNIQUE TITLE LOOKUP
-      //
-      // If two different Master Library records have
-      // the same title, mark it ambiguous rather than
-      // guessing.
-      // -------------------------------------------------
+      /*
+         ----------------------------------------------
+         UNIQUE TITLE
+         ----------------------------------------------
+
+         If more than one Master Library record has
+         the same title, mark the title ambiguous.
+
+         We do NOT guess between duplicate titles.
+      */
 
       if (
         !masterByTitle.has(
@@ -3640,7 +3666,6 @@ function populateRecordsFromMasterLibrary(
         );
 
       }
-
       else {
 
         masterByTitle.set(
@@ -3654,612 +3679,382 @@ function populateRecordsFromMasterLibrary(
   );
 
 
-  // ---------------------------------------------------
-// FIND MASTER LIBRARY MATCH
-// ---------------------------------------------------
+  /*
+     --------------------------------------------------
+     MATCH COUNTERS
+     --------------------------------------------------
+  */
 
-let matchedCount = 0;
-let unmatchedCount = 0;
+  let matchedCount =
+    0;
 
-let idMatchedCount = 0;
-let artistTitleMatchedCount = 0;
+  let unmatchedCount =
+    0;
 
+  let idMatchedCount =
+    0;
 
-for (
-  const record
-  of records
-) {
-
-  if (
-    activeLoadRun !==
-    recordSpaceLoadRun
-  ) {
-
-    console.warn(
-      "⏹️ MASTER LIBRARY ENRICHMENT STOPPED — LOAD SUPERSEDED."
-    );
-
-    return false;
-
-  }
-
-
-  if (
-    !record
-  ) {
-
-    continue;
-
-  }
-
-
-  // ---------------------------------------------------
-  // FIND MASTER LIBRARY MATCH
-  // ---------------------------------------------------
-
-  const recordId =
-    normaliseMasterValue(
-      record.record_id
-    ).toLowerCase();
-
-
-  let masterRecord =
-    null;
+  let artistTitleMatchedCount =
+    0;
 
 
   /*
      ==================================================
-     MATCH 1 — EXACT RECORD ID
+     PROCESS EVERY RECORD SPACE RECORD
      ==================================================
   */
 
-  if (
-    recordId
+  for (
+    const record
+    of records
   ) {
 
-    masterRecord =
-      masterById.get(
-        recordId
-      ) ||
+    /*
+       ----------------------------------------------
+       LOAD-RUN PROTECTION
+       ----------------------------------------------
+    */
+
+    if (
+      activeLoadRun !==
+      recordSpaceLoadRun
+    ) {
+
+      console.warn(
+        "⏹️ MASTER LIBRARY ENRICHMENT STOPPED — LOAD SUPERSEDED."
+      );
+
+      return false;
+
+    }
+
+
+    if (
+      !record
+    ) {
+
+      continue;
+
+    }
+
+
+    /*
+       ----------------------------------------------
+       RECORD ID
+       ----------------------------------------------
+    */
+
+    const recordId =
+      normaliseMasterValue(
+        record.record_id
+      ).toLowerCase();
+
+
+    let masterRecord =
       null;
 
-  }
 
-
-  /*
-     ==================================================
-     MATCH 2 — ARTIST + TRACK TITLE
-     ==================================================
-  */
-
-  if (
-    !masterRecord
-  ) {
-
-    const recordArtist =
-      makeMatchKey(
-        record.artist
-      );
-
-
-    const recordTitle =
-      makeMatchKey(
-        record.track_title
-      );
-
+    /*
+       ==================================================
+       MATCH 1 — EXACT RECORD ID
+       ==================================================
+    */
 
     if (
-      recordArtist &&
-      recordTitle
-    ) {
-
-      const artistTitleKey =
-        `${recordArtist}|||${recordTitle}`;
-
-
-      masterRecord =
-        masterByArtistTitle.get(
-          artistTitleKey
-        ) ||
-        null;
-
-    }
-
-  }
-
-
-  /*
-     ==================================================
-     MATCH 3 — UNIQUE TRACK TITLE
-     ==================================================
-  */
-
-  if (
-    !masterRecord
-  ) {
-
-    const recordTitle =
-      makeMatchKey(
-        record.track_title
-      );
-
-
-    if (
-      recordTitle
-    ) {
-
-      masterRecord =
-        masterByTitle.get(
-          recordTitle
-        ) ||
-        null;
-
-    }
-
-  }
-
-
-  /*
-     ==================================================
-     NO MASTER LIBRARY MATCH
-     ==================================================
-  */
-
-  if (
-    !masterRecord
-  ) {
-
-    unmatchedCount++;
-
-    continue;
-
-  }
-
-
-  matchedCount++;
-
-
-  /*
-     ==================================================
-     MATCH METHOD COUNTERS
-     ==================================================
-  */
-
-  const matchedMasterId =
-    normaliseMasterValue(
-      masterRecord["ID Cat No"]
-    ).toLowerCase();
-
-
-  if (
-    recordId &&
-    matchedMasterId &&
-    recordId === matchedMasterId
-  ) {
-
-    idMatchedCount++;
-
-  } else {
-
-    artistTitleMatchedCount++;
-
-  }
-
-
-  /*
-     ==================================================
-     STATUS
-     ==================================================
-  */
-
-  const currentRecordStatus =
-    normaliseMasterValue(
-      record.status
-    ).toUpperCase();
-
-
-  if (
-    record.id &&
-    (
-      !currentRecordStatus ||
-      currentRecordStatus === "ACTIVE"
-    )
-  ) {
-
-    record.status =
-      "MASTER LIBRARY";
-
-
-    supabaseClient
-      .from(
-        TABLE_NAME
-      )
-      .update({
-        status:
-          "MASTER LIBRARY"
-      })
-      .eq(
-        "id",
-        record.id
-      )
-      .then(
-        ({
-          error
-        }) => {
-
-          if (
-            error
-          ) {
-
-            console.warn(
-              "⚠️ RECORD SPACE STATUS UPDATE FAILED:",
-              error
-            );
-
-          }
-
-        }
-      );
-
-  }
-
-
-  /*
-     ==================================================
-     POPULATE MASTER LIBRARY FIELDS
-     ==================================================
-  */
-
-  populateMasterField(
-    record,
-    "record_id",
-    masterRecord["ID Cat No"]
-  );
-
-
-  populateMasterField(
-    record,
-    "artist",
-    masterRecord["Artist"]
-  );
-
-
-  populateMasterField(
-    record,
-    "track_title",
-    masterRecord["Track Title"]
-  );
-
-
-  populateMasterField(
-    record,
-    "album",
-    masterRecord["Album"]
-  );
-
-
-  populateMasterField(
-    record,
-    "genre",
-    masterRecord["Genre"]
-  );
-
-
-  populateMasterField(
-    record,
-    "bpm",
-    masterRecord["BPM"]
-  );
-
-
-  populateMasterField(
-    record,
-    "key",
-    masterRecord["Key"]
-  );
-
-
-  populateMasterField(
-    record,
-    "frequency_hz",
-    masterRecord["Frequency (Hz)"]
-  );
-
-
-  populateMasterField(
-    record,
-    "chakra",
-    masterRecord["Chakra"]
-  );
-
-
-  populateMasterField(
-    record,
-    "planet",
-    masterRecord["Planet"]
-  );
-
-
-  populateMasterField(
-    record,
-    "spatial",
-    masterRecord["Spatial"]
-  );
-
-
-  populateMasterField(
-    record,
-    "notes",
-    masterRecord["Notes"]
-  );
-
-
-  populateMasterField(
-    record,
-    "copyright",
-    masterRecord["Copyright"]
-  );
-
-
-  populateMasterField(
-    record,
-    "cover_art",
-    masterRecord["Cover Art"]
-  );
-
-}
-
-     Only used when the title exists exactly once in
-     Master Library.
-
-     If the title is duplicated, the lookup returns
-     null and we deliberately do NOT guess.
-  */
-
-  if (
-    !masterRecord
-  ) {
-
-    const recordTitle =
-      makeMatchKey(
-        record.track_title
-      );
-
-
-    if (
-      recordTitle
-    ) {
-
-      masterRecord =
-        masterByTitle.get(
-          recordTitle
-        ) ||
-        null;
-
-    }
-
-  }
-
-
-  // -------------------------------------------------
-  // NO MATCH
-  // -------------------------------------------------
-
-  if (
-    !masterRecord
-  ) {
-
-    unmatchedCount++;
-
-    continue;
-
-  }
-
-
-  matchedCount++;
-
-
-  /*
-     --------------------------------------------------
-     MASTER LIBRARY STATUS
-     --------------------------------------------------
-
-     If this Record Space record has successfully
-     matched a Master Library record, it belongs to
-     the MASTER LIBRARY status.
-
-     IMPORTANT:
-
-     We only change ACTIVE / empty records.
-
-     This prevents deliberately assigned statuses
-     from being overwritten.
-
-     The in-memory record is updated immediately so
-     the table displays the correct status straight
-     away.
-
-     The same status is then written back to
-     Supabase so the correction persists after
-     refresh.
-  --------------------------------------------------
-  */
-
-  const currentRecordStatus =
-    normaliseMasterValue(
-      record.status
-    ).toUpperCase();
-
-
-  if (
-    record.id &&
-    (
-      !currentRecordStatus ||
-      currentRecordStatus ===
-        "ACTIVE"
-    )
-  ) {
-
-    record.status =
-      "MASTER LIBRARY";
-
-
-    supabaseClient
-      .from(
-        TABLE_NAME
-      )
-      .update({
-        status:
-          "MASTER LIBRARY"
-      })
-      .eq(
-        "id",
-        record.id
-      )
-      .then(
-        ({
-          error
-        }) => {
-
-          if (error) {
-
-            console.error(
-              "❌ MASTER LIBRARY STATUS UPDATE FAILED:",
-              error
-            );
-
-            return;
-
-          }
-
-
-          console.log(
-            "✅ RECORD STATUS → MASTER LIBRARY:",
-            record.record_id ||
-            record.id
-          );
-
-        }
-      );
-
-  }
-
-
-  /*
-     --------------------------------------------------
-     DETERMINE MATCH METHOD
-     --------------------------------------------------
-  */
-
-  if (
-    recordId &&
-    masterById.get(
       recordId
-    ) === masterRecord
-  ) {
+    ) {
 
-    idMatchedCount++;
+      masterRecord =
+        masterById.get(
+          recordId
+        ) ||
+        null;
 
-  }
-  else {
-
-    artistTitleMatchedCount++;
-
-  }
+    }
 
 
-  // -------------------------------------------------
-  // ARTIST / MUSIC
-  // -------------------------------------------------
+    /*
+       ==================================================
+       MATCH 2 — ARTIST + TRACK TITLE
+       ==================================================
+    */
 
-  populateMasterField(
-    record,
-    "artist",
-    masterRecord["Artist"]
-  );
+    if (
+      !masterRecord
+    ) {
 
-
-  populateMasterField(
-    record,
-    "track_title",
-    masterRecord["Track Title"]
-  );
+      const recordArtist =
+        makeMatchKey(
+          record.artist
+        );
 
 
-  populateMasterField(
-    record,
-    "album",
-    masterRecord["Album"]
-  );
+      const recordTitle =
+        makeMatchKey(
+          record.track_title
+        );
 
 
-  // -------------------------------------------------
-  // AUDIO
-  // -------------------------------------------------
+      if (
+        recordArtist &&
+        recordTitle
+      ) {
 
-  populateMasterField(
-    record,
-    "master_audio",
-    masterRecord["Master Audio"]
-  );
+        const artistTitleKey =
+          `${recordArtist}|||${recordTitle}`;
 
 
-  populateMasterField(
-    record,
-    "stem_1",
-    masterRecord["Stem 1"]
-  );
+        masterRecord =
+          masterByArtistTitle.get(
+            artistTitleKey
+          ) ||
+          null;
+
+      }
+
+    }
 
 
-  populateMasterField(
-    record,
-    "stem_2",
-    masterRecord["Stem 2"]
-  );
+    /*
+       ==================================================
+       MATCH 3 — UNIQUE TRACK TITLE
+       ==================================================
+    */
+
+    if (
+      !masterRecord
+    ) {
+
+      const recordTitle =
+        makeMatchKey(
+          record.track_title
+        );
 
 
-  populateMasterField(
-    record,
-    "stem_3",
-    masterRecord["Stem 3"]
-  );
+      if (
+        recordTitle
+      ) {
+
+        masterRecord =
+          masterByTitle.get(
+            recordTitle
+          ) ||
+          null;
+
+      }
+
+    }
 
 
-  populateMasterField(
-    record,
-    "stem_4",
-    masterRecord["Stem 4"]
-  );
+    /*
+       ==================================================
+       NO MASTER LIBRARY MATCH
+       ==================================================
+    */
+
+    if (
+      !masterRecord
+    ) {
+
+      unmatchedCount++;
+
+      continue;
+
+    }
 
 
-  // -------------------------------------------------
-  // OPTIONAL AUDIO METADATA
-  // -------------------------------------------------
-
-  populateMasterField(
-    record,
-    "audio_format",
-    masterRecord["Audio Format"]
-  );
+    matchedCount++;
 
 
-  populateMasterField(
-    record,
-    "sample_rate",
-    masterRecord["Sample Rate"]
-  );
+    /*
+       ==================================================
+       DETERMINE MATCH METHOD
+       ==================================================
+    */
+
+    if (
+      recordId &&
+      masterById.get(
+        recordId
+      ) === masterRecord
+    ) {
+
+      idMatchedCount++;
+
+    }
+    else {
+
+      artistTitleMatchedCount++;
+
+    }
 
 
-  populateMasterField(
-    record,
-    "duration",
-    masterRecord["Duration"]
-  );
+    /*
+       ==================================================
+       MASTER LIBRARY STATUS
+       ==================================================
+
+       Only ACTIVE or empty statuses are changed.
+
+       Deliberately assigned statuses are preserved.
+    */
+
+    const currentRecordStatus =
+      normaliseMasterValue(
+        record.status
+      ).toUpperCase();
 
 
-    // -------------------------------------------------
-    // MUSIC DATA
-    // -------------------------------------------------
+    if (
+      record.id &&
+      (
+        !currentRecordStatus ||
+        currentRecordStatus ===
+          "ACTIVE"
+      )
+    ) {
+
+      record.status =
+        "MASTER LIBRARY";
+
+
+      supabaseClient
+        .from(
+          TABLE_NAME
+        )
+        .update({
+          status:
+            "MASTER LIBRARY"
+        })
+        .eq(
+          "id",
+          record.id
+        )
+        .then(
+          ({
+            error
+          }) => {
+
+            if (
+              error
+            ) {
+
+              console.error(
+                "❌ MASTER LIBRARY STATUS UPDATE FAILED:",
+                error
+              );
+
+              return;
+
+            }
+
+
+            console.log(
+              "✅ RECORD STATUS → MASTER LIBRARY:",
+              record.record_id ||
+              record.id
+            );
+
+          }
+        );
+
+    }
+
+
+    /*
+       ==================================================
+       ARTIST / MUSIC
+       ==================================================
+    */
+
+    populateMasterField(
+      record,
+      "artist",
+      masterRecord["Artist"]
+    );
+
+
+    populateMasterField(
+      record,
+      "track_title",
+      masterRecord["Track Title"]
+    );
+
+
+    populateMasterField(
+      record,
+      "album",
+      masterRecord["Album"]
+    );
+
+
+    /*
+       ==================================================
+       AUDIO
+       ==================================================
+    */
+
+    populateMasterField(
+      record,
+      "master_audio",
+      masterRecord["Master Audio"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_1",
+      masterRecord["Stem 1"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_2",
+      masterRecord["Stem 2"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_3",
+      masterRecord["Stem 3"]
+    );
+
+
+    populateMasterField(
+      record,
+      "stem_4",
+      masterRecord["Stem 4"]
+    );
+
+
+    populateMasterField(
+      record,
+      "audio_format",
+      masterRecord["Audio Format"]
+    );
+
+
+    populateMasterField(
+      record,
+      "sample_rate",
+      masterRecord["Sample Rate"]
+    );
+
+
+    populateMasterField(
+      record,
+      "duration",
+      masterRecord["Duration"]
+    );
+
+
+    /*
+       ==================================================
+       MUSIC DATA
+       ==================================================
+    */
 
     populateMasterField(
       record,
@@ -4338,9 +4133,11 @@ for (
     );
 
 
-    // -------------------------------------------------
-    // RECORD ID
-    // -------------------------------------------------
+    /*
+       ==================================================
+       RECORD ID
+       ==================================================
+    */
 
     populateMasterField(
       record,
@@ -4349,9 +4146,11 @@ for (
     );
 
 
-    // -------------------------------------------------
-    // RIGHTS
-    // -------------------------------------------------
+    /*
+       ==================================================
+       RIGHTS
+       ==================================================
+    */
 
     populateMasterField(
       record,
@@ -4360,9 +4159,11 @@ for (
     );
 
 
-    // -------------------------------------------------
-    // ARTWORK
-    // -------------------------------------------------
+    /*
+       ==================================================
+       ARTWORK
+       ==================================================
+    */
 
     populateMasterField(
       record,
@@ -4374,9 +4175,9 @@ for (
 
 
   /*
-     --------------------------------------------------
+     ==================================================
      FINAL LOAD-RUN CHECK
-     --------------------------------------------------
+     ==================================================
   */
 
   if (
@@ -4393,9 +4194,11 @@ for (
   }
 
 
-  // ---------------------------------------------------
-  // MATCH REPORT
-  // ---------------------------------------------------
+  /*
+     ==================================================
+     MATCH REPORT
+     ==================================================
+  */
 
   console.log(
     "🔗 RECORD SPACE → MASTER LIBRARY MATCH:",

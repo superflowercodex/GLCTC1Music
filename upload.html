@@ -8621,149 +8621,60 @@ let selectedLibraryTrack = null;
 
 
 // =====================================================
-// 🔗 SHARE SELECTED MASTER LIBRARY TRACK — WITH ARTWORK
+// 🔗 SHARE SELECTED MASTER LIBRARY TRACK
 // =====================================================
 
-document
-  .getElementById("shareTrackBtn")
-  .addEventListener(
-    "click",
-    async () => {
+document.getElementById("shareTrackBtn").addEventListener("click", async () => {
 
-      if (!selectedLibraryTrack) {
+  if (!selectedLibraryTrack) {
+    alert("Please select a track first.");
+    return;
+  }
 
-        alert(
-          "Please select a track first."
-        );
+  const trackId = selectedLibraryTrack.id;
 
-        return;
-      }
+  if (!trackId) {
+    alert("This track has no Track ID.");
+    return;
+  }
 
+  const shareUrl =
+    `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}`;
 
-      // -----------------------------------------------
-      // GET TRACK ID
-      // -----------------------------------------------
+  // 📱 Use the phone's native Share menu
+  if (navigator.share) {
 
-      const trackId =
-        selectedLibraryTrack.id ||
-        selectedLibraryTrack.id_cat_no ||
-        selectedLibraryTrack["ID Cat No"] ||
-        "";
+    try {
 
+      await navigator.share({
+        title: selectedLibraryTrack.title || "GLCTC1 Track",
+        text:
+          `${selectedLibraryTrack.artist || ""} - ${selectedLibraryTrack.title || ""}`,
+        url: shareUrl
+      });
 
-      if (!trackId) {
+    } catch (error) {
 
-        alert(
-          "This track has no Track ID."
-        );
-
-        return;
-      }
-
-
-      // -----------------------------------------------
-      // GET TRACK ARTWORK
-      // -----------------------------------------------
-
-      const artwork =
-        selectedLibraryTrack.cover_art ||
-        selectedLibraryTrack["Cover Art"] ||
-        "";
-
-
-      // -----------------------------------------------
-      // CREATE SHARE PAYLOAD
-      // -----------------------------------------------
-
-      const shareData = {
-
-        id:
-          trackId,
-
-        cover_art:
-          artwork
-
-      };
-
-
-      // -----------------------------------------------
-      // ENCODE TRACK INTO URL
-      // -----------------------------------------------
-
-      const encodedTrack =
-        btoa(
-          encodeURIComponent(
-            JSON.stringify(
-              shareData
-            )
-          )
-        );
-
-
-      const shareUrl =
-        `${window.location.origin}${window.location.pathname}?track=${encodedTrack}`;
-
-
-      // -----------------------------------------------
-      // 📱 USE PHONE'S NATIVE SHARE MENU
-      // -----------------------------------------------
-
-      if (navigator.share) {
-
-        try {
-
-          await navigator.share({
-
-            title:
-              selectedLibraryTrack.title ||
-              "GLCTC1 Track",
-
-            text:
-              `${
-                selectedLibraryTrack.artist ||
-                ""
-              } - ${
-                selectedLibraryTrack.title ||
-                ""
-              }`,
-
-            url:
-              shareUrl
-
-          });
-
-        } catch (error) {
-
-          // User cancelled the share window
-
-          console.log(
-            "Share cancelled."
-          );
-
-        }
-
-      } else {
-
-        // ---------------------------------------------
-        // 💻 FALLBACK — COPY LINK
-        // ---------------------------------------------
-
-        await navigator.clipboard.writeText(
-          shareUrl
-        );
-
-        alert(
-          "🔗 Track link copied to clipboard:\n\n" +
-          shareUrl
-        );
-
-      }
+      // User cancelled the share window
+      console.log("Share cancelled.");
 
     }
-  );
 
+  } else {
+
+    // 💻 Fallback — copy link
+    await navigator.clipboard.writeText(shareUrl);
+
+    alert(
+      "🔗 Track link copied to clipboard:\n\n" +
+      shareUrl
+    );
+
+  }
+
+});
   
-// --- LOADERS ---
+// --- LOADERS ---  
 async function loadToDeck(deck, track) {
 
   if (!track || !track.master_audio) return;
@@ -14199,12 +14110,96 @@ document
           btn.dataset.bank
         );
       }
-      );
-});
+    );
+  });
 
 
 // -----------------------------------------------------
-// 🔗 SHARE ENTIRE PLAYLIST — WITH ARTWORK
+// 🔗 SHARE CURRENT PLAYLIST TRACK
+// -----------------------------------------------------
+
+if (glctc1PlaylistShareTrack) {
+
+  glctc1PlaylistShareTrack.onclick =
+    async function () {
+
+      const track =
+        glctc1GetCurrentPlaylistTrack();
+
+      if (!track) {
+
+        alert(
+          "Please select a playlist track first."
+        );
+
+        return;
+      }
+
+
+      const trackId =
+        track.id ||
+        track.id_cat_no ||
+        track["ID Cat No"];
+
+
+      if (!trackId) {
+
+        alert(
+          "This track does not have a shareable ID."
+        );
+
+        return;
+      }
+
+
+      const shareUrl =
+        `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(
+          trackId
+        )}`;
+
+
+      try {
+
+        if (
+          navigator.share
+        ) {
+
+          await navigator.share({
+
+            title:
+              glctc1TrackTitle(track),
+
+            text:
+              `${glctc1TrackTitle(track)} — ${glctc1TrackArtist(track)}`,
+
+            url:
+              shareUrl
+          });
+
+        } else {
+
+          await navigator.clipboard.writeText(
+            shareUrl
+          );
+
+          alert(
+            "🔗 Track share link copied."
+          );
+        }
+
+      } catch (error) {
+
+        console.log(
+          "Playlist track share cancelled:",
+          error
+        );
+      }
+    };
+}
+
+
+// -----------------------------------------------------
+// 🔗 SHARE ENTIRE PLAYLIST
 // -----------------------------------------------------
 
 if (glctc1PlaylistSharePlaylist) {
@@ -14239,8 +14234,7 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       // -----------------------------------------------
-      // 🖼️ CREATE SHARE PAYLOAD
-      // INCLUDE TRACK ID + ARTWORK
+      // CREATE SMALL SHARE PAYLOAD
       // -----------------------------------------------
 
       const shareData = {
@@ -14250,31 +14244,12 @@ if (glctc1PlaylistSharePlaylist) {
 
         tracks:
           playlist.tracks
-            .map(track => {
-
-              const trackId =
-                track.id ||
-                track.id_cat_no ||
-                track["ID Cat No"] ||
-                "";
-
-              const artwork =
-                track.cover_art ||
-                track["Cover Art"] ||
-                "";
-
-              return {
-
-                id:
-                  trackId,
-
-                cover_art:
-                  artwork
-
-              };
-
-            })
-            .filter(item => item.id)
+            .map(track =>
+              track.id ||
+              track.id_cat_no ||
+              track["ID Cat No"]
+            )
+            .filter(Boolean)
 
       };
 
@@ -14345,9 +14320,8 @@ if (glctc1PlaylistSharePlaylist) {
 
 }
 
-
 // -----------------------------------------------------
-// 🔗 LOAD SHARED PLAYLIST — WITH ARTWORK
+// 🔗 LOAD SHARED PLAYLIST
 // -----------------------------------------------------
 
 const sharedPlaylistData =
@@ -14378,100 +14352,36 @@ if (sharedPlaylistData) {
       )
     ) {
 
-
       // -----------------------------------------------
       // FIND TRACKS IN MASTER LIBRARY
       // -----------------------------------------------
 
       const sharedTracks =
         decodedPlaylist.tracks
-          .map(sharedTrack => {
+          .map(trackId =>
 
-            /*
-              NEW SHARE FORMAT:
-              {
-                id: "...",
-                cover_art: "..."
-              }
+            library.find(track =>
 
-              OLD SHARE FORMAT:
-              "..."
-            */
+              String(track.id) ===
+              String(trackId)
 
-            const trackId =
-              (
-                sharedTrack &&
-                typeof sharedTrack === "object"
-              )
-                ? (
-                    sharedTrack.id ||
-                    sharedTrack.id_cat_no ||
-                    sharedTrack["ID Cat No"] ||
-                    ""
-                  )
-                : sharedTrack;
+              ||
 
+              String(track.id_cat_no) ===
+              String(trackId)
 
-            const sharedArtwork =
-              (
-                sharedTrack &&
-                typeof sharedTrack === "object"
-              )
-                ? (
-                    sharedTrack.cover_art ||
-                    sharedTrack["Cover Art"] ||
-                    ""
-                  )
-                : "";
+              ||
 
+              String(track["ID Cat No"]) ===
+              String(trackId)
 
-            const masterTrack =
-              library.find(track =>
+            )
 
-                String(track.id) ===
-                String(trackId)
-
-                ||
-
-                String(track.id_cat_no) ===
-                String(trackId)
-
-                ||
-
-                String(track["ID Cat No"]) ===
-                String(trackId)
-
-              );
-
-
-            if (!masterTrack) {
-              return null;
-            }
-
-
-            // -----------------------------------------
-            // 🖼️ PRESERVE MASTER LIBRARY ARTWORK
-            // BUT USE SHARED ARTWORK IF PRESENT
-            // -----------------------------------------
-
-            return {
-
-              ...masterTrack,
-
-              cover_art:
-                sharedArtwork ||
-                masterTrack.cover_art ||
-                masterTrack["Cover Art"] ||
-                ""
-
-            };
-
-          })
+          )
           .filter(Boolean);
 
 
       if (sharedTracks.length) {
-
 
         // ---------------------------------------------
         // CREATE LOCAL COPY OF SHARED PLAYLIST
@@ -14493,19 +14403,7 @@ if (sharedPlaylistData) {
           tracks:
             sharedTracks.map(
               track => ({
-
-                ...track,
-
-                /*
-                  Explicitly preserve artwork
-                  on the shared playlist copy.
-                */
-
-                cover_art:
-                  track.cover_art ||
-                  track["Cover Art"] ||
-                  ""
-
+                ...track
               })
             )
 
@@ -14539,117 +14437,15 @@ if (sharedPlaylistData) {
             : -1;
 
 
-        // ---------------------------------------------
-        // 💾 SAVE SHARED PLAYLIST
-        // ---------------------------------------------
-
         glctc1SavePlaylists();
-
-
-        // ---------------------------------------------
-        // 🔄 REFRESH PLAYLIST DISPLAY
-        // ---------------------------------------------
 
         glctc1RenderPlaylistLibrary();
 
-
-        await glctc1UpdatePlaylistPlayer();
-
-
-        // ---------------------------------------------
-        // 🖼️ FORCE ARTWORK REFRESH
-        // ---------------------------------------------
-
-        const currentSharedTrack =
-          sharedPlaylist.tracks[
-            glctc1PlaylistTrackIndex
-          ];
-
-
-        if (
-          currentSharedTrack &&
-          glctc1PlaylistArtwork
-        ) {
-
-          const artwork =
-            currentSharedTrack.cover_art ||
-            currentSharedTrack["Cover Art"] ||
-            "";
-
-
-          if (
-            artwork &&
-            (
-              artwork.startsWith("http://") ||
-              artwork.startsWith("https://") ||
-              artwork.startsWith("data:image/")
-            )
-          ) {
-
-            glctc1PlaylistArtwork.src =
-              artwork;
-
-            glctc1PlaylistArtwork.style.display =
-              "block";
-
-          }
-
-          else if (artwork) {
-
-            const {
-              data,
-              error
-            } =
-              await supabaseClient.storage
-                .from("tracks")
-                .createSignedUrl(
-                  artwork,
-                  60 * 60 * 24
-                );
-
-
-            if (
-              !error &&
-              data?.signedUrl
-            ) {
-
-              glctc1PlaylistArtwork.src =
-                data.signedUrl;
-
-              glctc1PlaylistArtwork.style.display =
-                "block";
-
-            }
-
-            else {
-
-              glctc1PlaylistArtwork.removeAttribute(
-                "src"
-              );
-
-              glctc1PlaylistArtwork.style.display =
-                "none";
-
-            }
-
-          }
-
-          else {
-
-            glctc1PlaylistArtwork.removeAttribute(
-              "src"
-            );
-
-            glctc1PlaylistArtwork.style.display =
-              "none";
-
-          }
-
-        }
+        glctc1UpdatePlaylistPlayer();
 
 
         console.log(
-          "🔗 GLCTC1 SHARED PLAYLIST LOADED WITH ARTWORK:",
+          "🔗 GLCTC1 SHARED PLAYLIST LOADED:",
           sharedPlaylist
         );
 
@@ -14664,10 +14460,7 @@ if (sharedPlaylistData) {
           window.location.pathname
         );
 
-
-      }
-
-      else {
+      } else {
 
         console.warn(
           "⚠️ Shared playlist tracks not found in Master Library."
@@ -14677,9 +14470,7 @@ if (sharedPlaylistData) {
 
     }
 
-  }
-
-  catch (error) {
+  } catch (error) {
 
     console.error(
       "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
@@ -14689,11 +14480,6 @@ if (sharedPlaylistData) {
   }
 
 }
-
-
-// -----------------------------------------------------
-// INITIAL PLAYLIST
-// -----------------------------------------------------
 
 // -----------------------------------------------------
 // INITIAL PLAYLIST

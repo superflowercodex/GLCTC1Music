@@ -12031,18 +12031,16 @@ async function deleteRecord(
      - ID Cat No
      - or any other record field.
 
-     The database row ID is the ONLY identifier required
-     to tell Supabase which row to delete.
+     The record is identified using:
+     1. record_id
+     2. database id
+     3. artist + track_title + created_at fallback
   */
 
-  if (
-    !record ||
-    record.id === null ||
-    record.id === undefined
-  ) {
+  if (!record) {
 
     alert(
-      "THIS RECORD DOES NOT HAVE A DATABASE ID."
+      "NO RECORD WAS SELECTED."
     );
 
     return false;
@@ -12088,10 +12086,6 @@ async function deleteRecord(
     record;
 
 
-  const deletedRecordId =
-    recordBeingDeleted.id;
-
-
   const deletedRecordSelectionId =
     getRecordId(
       recordBeingDeleted
@@ -12105,16 +12099,116 @@ async function deleteRecord(
 
   try {
 
+    let deleteQuery =
+      supabaseClient
+        .from(TABLE_NAME)
+        .delete();
+
+
+    /*
+       FIRST CHOICE:
+       RECORD SPACE RECORD ID
+    */
+
+    if (
+      recordBeingDeleted.record_id !== null &&
+      recordBeingDeleted.record_id !== undefined &&
+      String(
+        recordBeingDeleted.record_id
+      ).trim() !== ""
+    ) {
+
+      deleteQuery =
+        deleteQuery.eq(
+          "record_id",
+          recordBeingDeleted.record_id
+        );
+
+    }
+
+
+    /*
+       SECOND CHOICE:
+       DATABASE ID
+    */
+
+    else if (
+      recordBeingDeleted.id !== null &&
+      recordBeingDeleted.id !== undefined &&
+      String(
+        recordBeingDeleted.id
+      ).trim() !== ""
+    ) {
+
+      deleteQuery =
+        deleteQuery.eq(
+          "id",
+          recordBeingDeleted.id
+        );
+
+    }
+
+
+    /*
+       FINAL FALLBACK:
+       SAME IDENTIFIER STRUCTURE USED BY
+       getRecordId()
+    */
+
+    else if (
+      recordBeingDeleted.artist !== null &&
+      recordBeingDeleted.artist !== undefined &&
+      recordBeingDeleted.track_title !== null &&
+      recordBeingDeleted.track_title !== undefined &&
+      recordBeingDeleted.created_at !== null &&
+      recordBeingDeleted.created_at !== undefined
+    ) {
+
+      deleteQuery =
+        deleteQuery
+          .eq(
+            "artist",
+            recordBeingDeleted.artist
+          )
+          .eq(
+            "track_title",
+            recordBeingDeleted.track_title
+          )
+          .eq(
+            "created_at",
+            recordBeingDeleted.created_at
+          );
+
+    }
+
+
+    /*
+       THERE IS NO SAFE DATABASE TARGET.
+
+       This is NOT a record-content restriction.
+       It simply prevents sending an unqualified DELETE
+       request to Supabase.
+    */
+
+    else {
+
+      alert(
+        "THIS RECORD CANNOT BE IDENTIFIED FOR DELETION."
+      );
+
+      setStatus(
+        "● DELETE FAILED"
+      );
+
+      return false;
+
+    }
+
+
     const {
       error
     } =
-      await supabaseClient
-        .from(TABLE_NAME)
-        .delete()
-        .eq(
-          "id",
-          deletedRecordId
-        );
+      await deleteQuery;
 
 
     if (error) {
@@ -12155,8 +12249,10 @@ async function deleteRecord(
     records =
       records.filter(
         item =>
-          item.id !==
-          deletedRecordId
+          getRecordId(
+            item
+          ) !==
+          deletedRecordSelectionId
       );
 
 
@@ -12349,37 +12445,6 @@ async function deleteSelected() {
 
 
   /*
-     DATABASE ID IS THE ONLY THING REQUIRED
-     TO DELETE A ROW.
-  */
-
-  const ids =
-    selectedRecords
-      .map(
-        record =>
-          record.id
-      )
-      .filter(
-        id =>
-          id !== null &&
-          id !== undefined
-      );
-
-
-  if (
-    ids.length === 0
-  ) {
-
-    alert(
-      "THE SELECTED RECORDS HAVE NO DATABASE IDs."
-    );
-
-    return;
-
-  }
-
-
-  /*
      CAPTURE CURRENT DISPLAYED RECORD
   */
 
@@ -12411,7 +12476,7 @@ async function deleteSelected() {
     window.confirm(
 
       "DELETE " +
-      ids.length +
+      selectedRecords.length +
       " SELECTED RECORD(S)?\n\n" +
 
       "The selected Record Space rows will be permanently deleted.\n" +
@@ -12436,80 +12501,151 @@ async function deleteSelected() {
   try {
 
     /*
-       DELETE ONLY BY DATABASE ID.
+       DELETE EACH SELECTED RECORD USING THE SAME
+       IDENTIFIER PRIORITY AS deleteRecord():
 
-       No other field is checked.
+       1. record_id
+       2. database id
+       3. artist + track_title + created_at
+
+       No record-content validation is performed.
     */
 
-    const {
-      error
-    } =
-      await supabaseClient
-        .from(TABLE_NAME)
-        .delete()
-        .in(
-          "id",
-          ids
-        );
+    for (
+      const record of selectedRecords
+    ) {
+
+      let deleteQuery =
+        supabaseClient
+          .from(TABLE_NAME)
+          .delete();
 
 
-    if (error) {
-
-      console.error(
-        "BULK DELETE ERROR:",
-        error
-      );
-
-
-      alert(
-        "DELETE FAILED:\n\n" +
-        error.message
-      );
-
+      /*
+         FIRST CHOICE:
+         RECORD SPACE RECORD ID
+      */
 
       if (
-        selectedRecord ===
-        selectionAtDeleteStart
+        record.record_id !== null &&
+        record.record_id !== undefined &&
+        String(
+          record.record_id
+        ).trim() !== ""
       ) {
 
-        setStatus(
-          "● DELETE FAILED"
-        );
+        deleteQuery =
+          deleteQuery.eq(
+            "record_id",
+            record.record_id
+          );
 
       }
 
 
-      return;
+      /*
+         SECOND CHOICE:
+         DATABASE ID
+      */
+
+      else if (
+        record.id !== null &&
+        record.id !== undefined &&
+        String(
+          record.id
+        ).trim() !== ""
+      ) {
+
+        deleteQuery =
+          deleteQuery.eq(
+            "id",
+            record.id
+          );
+
+      }
+
+
+      /*
+         FINAL FALLBACK
+      */
+
+      else if (
+        record.artist !== null &&
+        record.artist !== undefined &&
+        record.track_title !== null &&
+        record.track_title !== undefined &&
+        record.created_at !== null &&
+        record.created_at !== undefined
+      ) {
+
+        deleteQuery =
+          deleteQuery
+            .eq(
+              "artist",
+              record.artist
+            )
+            .eq(
+              "track_title",
+              record.track_title
+            )
+            .eq(
+              "created_at",
+              record.created_at
+            );
+
+      }
+
+
+      /*
+         NO SAFE DATABASE TARGET FOR THIS ROW.
+         Skip only this unidentifiable row.
+      */
+
+      else {
+
+        console.warn(
+          "SKIPPING UNIDENTIFIABLE RECORD:",
+          record
+        );
+
+        continue;
+
+      }
+
+
+      const {
+        error
+      } =
+        await deleteQuery;
+
+
+      if (error) {
+
+        throw error;
+
+      }
 
     }
 
 
     /*
-       CREATE LOOKUP SET OF DELETED RECORDS
-    */
-
-    const deletedIdSet =
-      new Set(
-        ids
-      );
-
-
-    /*
-       REMOVE DELETED RECORDS FROM MEMORY
+       REMOVE THE DELETED RECORDS FROM MEMORY
     */
 
     records =
       records.filter(
         record =>
-          !deletedIdSet.has(
-            record.id
+          !deletingSelectionIds.has(
+            getRecordId(
+              record
+            )
           )
       );
 
 
     /*
        REMOVE ONLY THE CHECKBOX SELECTIONS
-       THAT WERE ACTUALLY DELETED
+       BELONGING TO THIS DELETE OPERATION
     */
 
     deletingSelectionIds.forEach(
@@ -12530,8 +12666,10 @@ async function deleteSelected() {
 
     const originalSelectionWasDeleted =
       !!selectionAtDeleteStart &&
-      deletedIdSet.has(
-        selectionAtDeleteStart.id
+      deletingSelectionIds.has(
+        getRecordId(
+          selectionAtDeleteStart
+        )
       );
 
 
@@ -12588,10 +12726,10 @@ async function deleteSelected() {
 
       setStatus(
         "● " +
-        ids.length +
+        selectedRecords.length +
         " RECORD" +
         (
-          ids.length === 1
+          selectedRecords.length === 1
             ? ""
             : "S"
         ) +

@@ -12330,6 +12330,27 @@ function glctc1PlaylistTime(seconds) {
 
 function glctc1GetPlaylist() {
 
+  // ===================================================
+  // 🔗 TEMPORARY SHARED PLAYLIST
+  // ===================================================
+  // Shared playlists are NEVER added to
+  // glctc1Playlists and are NEVER saved to localStorage.
+  // ===================================================
+
+  if (
+    typeof glctc1SharedPlaylist !== "undefined" &&
+    glctc1SharedPlaylist
+  ) {
+
+    return glctc1SharedPlaylist;
+
+  }
+
+
+  // ===================================================
+  // 👤 NORMAL PERSONAL PLAYLIST
+  // ===================================================
+
   return (
     glctc1Playlists.find(
       playlist =>
@@ -14321,8 +14342,17 @@ if (glctc1PlaylistSharePlaylist) {
 }
 
 // -----------------------------------------------------
-// 🔗 LOAD SHARED PLAYLIST
+// 🔗 LOAD SHARED PLAYLIST DATA
 // -----------------------------------------------------
+// IMPORTANT:
+// This does NOT touch glctc1Playlists.
+// This does NOT call glctc1SavePlaylists().
+// This only stores the shared URL data temporarily.
+// The Master Library will resolve the track IDs later,
+// after Supabase has finished loading the library.
+// -----------------------------------------------------
+
+let glctc1PendingSharedPlaylist = null;
 
 const sharedPlaylistData =
   new URLSearchParams(
@@ -14353,127 +14383,40 @@ if (sharedPlaylistData) {
     ) {
 
       // -----------------------------------------------
-      // FIND TRACKS IN MASTER LIBRARY
+      // STORE ONLY THE SHARED URL DATA
+      // -----------------------------------------------
+      // DO NOT add this to glctc1Playlists.
+      // DO NOT save it to localStorage.
       // -----------------------------------------------
 
-      const sharedTracks =
-        decodedPlaylist.tracks
-          .map(trackId =>
+      glctc1PendingSharedPlaylist = {
 
-            library.find(track =>
+        name:
+          decodedPlaylist.name,
 
-              String(track.id) ===
-              String(trackId)
+        tracks:
+          decodedPlaylist.tracks.slice()
 
-              ||
-
-              String(track.id_cat_no) ===
-              String(trackId)
-
-              ||
-
-              String(track["ID Cat No"]) ===
-              String(trackId)
-
-            )
-
-          )
-          .filter(Boolean);
+      };
 
 
-      if (sharedTracks.length) {
+      console.log(
+        "🔗 GLCTC1 SHARED PLAYLIST DATA READY:",
+        glctc1PendingSharedPlaylist
+      );
 
-        // ---------------------------------------------
-        // CREATE LOCAL COPY OF SHARED PLAYLIST
-        // ---------------------------------------------
+    } else {
 
-        const sharedPlaylist = {
-
-          id:
-            "shared_" +
-            Date.now() +
-            "_" +
-            Math.random()
-              .toString(36)
-              .slice(2, 8),
-
-          name:
-            decodedPlaylist.name,
-
-          tracks:
-            sharedTracks.map(
-              track => ({
-                ...track
-              })
-            )
-
-        };
-
-
-        // ---------------------------------------------
-        // ADD TO PLAYLIST MASTER
-        // ---------------------------------------------
-
-        glctc1Playlists =
-          glctc1Playlists.filter(
-            playlist =>
-              playlist.name !==
-              decodedPlaylist.name
-          );
-
-
-        glctc1Playlists.push(
-          sharedPlaylist
-        );
-
-
-        glctc1SelectedPlaylistId =
-          sharedPlaylist.id;
-
-
-        glctc1PlaylistTrackIndex =
-          sharedPlaylist.tracks.length
-            ? 0
-            : -1;
-
-
-        glctc1SavePlaylists();
-
-        glctc1RenderPlaylistLibrary();
-
-        glctc1UpdatePlaylistPlayer();
-
-
-        console.log(
-          "🔗 GLCTC1 SHARED PLAYLIST LOADED:",
-          sharedPlaylist
-        );
-
-
-        // ---------------------------------------------
-        // REMOVE SHARE DATA FROM ADDRESS BAR
-        // ---------------------------------------------
-
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
-
-      } else {
-
-        console.warn(
-          "⚠️ Shared playlist tracks not found in Master Library."
-        );
-
-      }
+      console.warn(
+        "⚠️ Invalid GLCTC1 shared playlist data."
+      );
 
     }
 
   } catch (error) {
 
     console.error(
-      "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
+      "❌ GLCTC1 SHARED PLAYLIST DATA ERROR:",
       error
     );
 
@@ -14677,6 +14620,143 @@ if (!data) {
 
 renderLibraryTable();
 
+// ===================================================
+// 🔗 GLCTC1 SHARED PLAYLIST — TEMPORARY PLAYER
+// ===================================================
+// IMPORTANT:
+//
+// This playlist exists ONLY in memory.
+//
+// It is NOT:
+// - pushed into glctc1Playlists
+// - written to localStorage
+// - passed to glctc1SavePlaylists()
+//
+// Therefore the user's existing personal playlists
+// remain completely untouched.
+// ===================================================
+
+let glctc1SharedPlaylist = null;
+
+
+if (
+  typeof glctc1PendingSharedPlaylist !== "undefined" &&
+  glctc1PendingSharedPlaylist
+) {
+
+  try {
+
+    const sharedTracks =
+      glctc1PendingSharedPlaylist.tracks
+        .map(trackId =>
+
+          library.find(track =>
+
+            String(track.id) ===
+            String(trackId)
+
+            ||
+
+            String(track.id_cat_no) ===
+            String(trackId)
+
+            ||
+
+            String(track["ID Cat No"]) ===
+            String(trackId)
+
+          )
+
+        )
+        .filter(Boolean);
+
+
+    if (sharedTracks.length) {
+
+      // -----------------------------------------------
+      // CREATE TEMPORARY SHARED PLAYLIST
+      // -----------------------------------------------
+
+      glctc1SharedPlaylist = {
+
+        id:
+          "shared_temp",
+
+        name:
+          glctc1PendingSharedPlaylist.name,
+
+        tracks:
+          sharedTracks.map(
+            track => ({
+              ...track
+            })
+          )
+
+      };
+
+
+      // -----------------------------------------------
+      // START AT FIRST TRACK
+      // -----------------------------------------------
+
+      glctc1PlaylistTrackIndex =
+        0;
+
+
+      // -----------------------------------------------
+      // UPDATE PLAYER
+      // -----------------------------------------------
+
+      await glctc1UpdatePlaylistPlayer();
+
+
+      // -----------------------------------------------
+      // AUTOMATICALLY PLAY FIRST TRACK
+      // -----------------------------------------------
+
+      await glctc1PlayPlaylistIndex(
+        0
+      );
+
+
+      console.log(
+        "🔗 GLCTC1 SHARED PLAYLIST PLAYING:",
+        glctc1SharedPlaylist.name,
+        glctc1SharedPlaylist.tracks.length,
+        "tracks"
+      );
+
+
+      // -----------------------------------------------
+      // REMOVE SHARED DATA FROM ADDRESS BAR
+      // -----------------------------------------------
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+
+
+    } else {
+
+      console.warn(
+        "⚠️ GLCTC1 SHARED PLAYLIST: NO MATCHING MASTER LIBRARY TRACKS."
+      );
+
+    }
+
+
+  } catch (error) {
+
+    console.error(
+      "❌ GLCTC1 SHARED PLAYLIST ERROR:",
+      error
+    );
+
+  }
+
+}
 
 // ===================================================
 // 🔗 OPEN TRACK FROM SHARED URL

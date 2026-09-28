@@ -14302,7 +14302,7 @@ if (glctc1PlaylistShareTrack) {
 
 
 // -----------------------------------------------------
-// 🔗 SHARE ENTIRE PLAYLIST — SHORT SUPABASE LINK
+// 🔗 SHARE ENTIRE PLAYLIST
 // -----------------------------------------------------
 
 if (glctc1PlaylistSharePlaylist) {
@@ -14337,134 +14337,51 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       // -----------------------------------------------
-      // 🔐 GET LOGGED-IN USER
+      // CREATE SMALL SHARE PAYLOAD
       // -----------------------------------------------
 
-      const {
-        data: {
-          user
-        },
-        error: userError
-      } =
-        await supabaseClient.auth.getUser();
+      const shareData = {
 
+  name:
+    playlist.name,
 
-      if (userError || !user) {
+  // 🖼️ PLAYLIST ARTWORK
+  // Use the first track's artwork as the
+  // shared playlist artwork reference.
+  artwork:
+    playlist.tracks[0]?.cover_art ||
+    playlist.tracks[0]?.["Cover Art"] ||
+    "",
 
-        alert(
-          "🔐 Please sign in before sharing a playlist."
-        );
+  tracks:
+    playlist.tracks
+      .map(track =>
+        track.id ||
+        track.id_cat_no ||
+        track["ID Cat No"]
+      )
+      .filter(Boolean)
 
-        return;
-      }
+};
 
 
       // -----------------------------------------------
-      // 🎵 COLLECT VALID TRACK IDS
+      // ENCODE PLAYLIST INTO URL
       // -----------------------------------------------
 
-      const trackIds =
-        playlist.tracks
-          .map(track =>
-            track.id ||
-            track.id_cat_no ||
-            track["ID Cat No"]
+      const encodedPlaylist =
+        btoa(
+          encodeURIComponent(
+            JSON.stringify(
+              shareData
+            )
           )
-          .filter(Boolean);
-
-
-      if (!trackIds.length) {
-
-        alert(
-          "This playlist contains no valid tracks."
         );
 
-        return;
-      }
-
-
-      // -----------------------------------------------
-      // 🖼️ PLAYLIST ARTWORK
-      // -----------------------------------------------
-      // Use the first track's artwork as the
-      // shared playlist artwork reference.
-      // -----------------------------------------------
-
-      const artwork =
-        playlist.tracks[0]?.cover_art ||
-        playlist.tracks[0]?.["Cover Art"] ||
-        "";
-
-
-      // -----------------------------------------------
-      // 🔑 CREATE SHORT SHARE CODE
-      // -----------------------------------------------
-
-      const shareCode =
-        crypto.randomUUID()
-          .replace(/-/g, "")
-          .slice(0, 10);
-
-
-      // -----------------------------------------------
-      // ☁️ SAVE SHARED PLAYLIST TO SUPABASE
-      // -----------------------------------------------
-
-      const {
-        error: shareError
-      } =
-        await supabaseClient
-          .from("playlist_shares")
-          .insert([{
-
-            share_code:
-              shareCode,
-
-            playlist_name:
-              playlist.name,
-
-            artwork:
-              artwork,
-
-            track_ids:
-              trackIds
-
-          }]);
-
-
-      if (shareError) {
-
-        console.error(
-          "❌ GLCTC1 PLAYLIST SHARE SAVE ERROR:",
-          shareError
-        );
-
-        alert(
-          "❌ Could not create playlist share link.\n\n" +
-          shareError.message
-        );
-
-        return;
-      }
-
-
-      // -----------------------------------------------
-      // 🔗 CREATE SHORT SHARE URL
-      // -----------------------------------------------
 
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?share=${shareCode}`;
+        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
 
-
-      console.log(
-        "🔗 GLCTC1 PLAYLIST SHARE URL:",
-        shareUrl
-      );
-
-
-      // -----------------------------------------------
-      // 📤 SHARE / COPY LINK
-      // -----------------------------------------------
 
       try {
 
@@ -14477,8 +14394,8 @@ if (glctc1PlaylistSharePlaylist) {
             title:
               playlist.name,
 
-            text:
-              playlist.name,
+text:
+  playlist.name,
 
             url:
               shareUrl
@@ -14510,97 +14427,66 @@ if (glctc1PlaylistSharePlaylist) {
 
 }
 
-
 // -----------------------------------------------------
-// 🔗 LOAD SHARED PLAYLIST DATA — SHORT SUPABASE LINK
+// 🔗 LOAD SHARED PLAYLIST DATA
 // -----------------------------------------------------
 // IMPORTANT:
-//
 // This does NOT touch glctc1Playlists.
 // This does NOT call glctc1SavePlaylists().
-// This does NOT write to localStorage.
-//
-// The shared playlist exists only temporarily in memory.
-// The Master Library resolves the track IDs later.
+// This only stores the shared URL data temporarily.
+// The Master Library will resolve the track IDs later,
+// after Supabase has finished loading the library.
 // -----------------------------------------------------
 
 let glctc1PendingSharedPlaylist = null;
 
-
-const sharedPlaylistCode =
+const sharedPlaylistData =
   new URLSearchParams(
     window.location.search
-  ).get("share");
+  ).get("playlist");
 
 
-if (sharedPlaylistCode) {
+if (sharedPlaylistData) {
 
   try {
 
-    // -----------------------------------------------
-    // ☁️ LOAD SHARE RECORD FROM SUPABASE
-    // -----------------------------------------------
-
-    const {
-      data: sharedData,
-      error: sharedError
-    } =
-      await supabaseClient
-        .from("playlist_shares")
-        .select(
-          "share_code, playlist_name, artwork, track_ids"
+    const decodedPlaylist =
+      JSON.parse(
+        decodeURIComponent(
+          atob(
+            sharedPlaylistData
+          )
         )
-        .eq(
-          "share_code",
-          sharedPlaylistCode
-        )
-        .maybeSingle();
-
-
-    // -----------------------------------------------
-    // ❌ SUPABASE ERROR
-    // -----------------------------------------------
-
-    if (sharedError) {
-
-      console.error(
-        "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
-        sharedError
       );
 
-    }
 
-    // -----------------------------------------------
-    // 🔗 VALID SHARED PLAYLIST
-    // -----------------------------------------------
-
-    else if (
-      sharedData &&
-      sharedData.playlist_name &&
+    if (
+      decodedPlaylist &&
+      decodedPlaylist.name &&
       Array.isArray(
-        sharedData.track_ids
+        decodedPlaylist.tracks
       )
     ) {
 
-      // ---------------------------------------------
-      // STORE ONLY TEMPORARY SHARED DATA
-      // ---------------------------------------------
-      // DO NOT add to glctc1Playlists.
-      // DO NOT save to localStorage.
-      // ---------------------------------------------
+      // -----------------------------------------------
+      // STORE ONLY THE SHARED URL DATA
+      // -----------------------------------------------
+      // DO NOT add this to glctc1Playlists.
+      // DO NOT save it to localStorage.
+      // -----------------------------------------------
 
       glctc1PendingSharedPlaylist = {
 
-        name:
-          sharedData.playlist_name,
+  name:
+    decodedPlaylist.name,
 
-        artwork:
-          sharedData.artwork || "",
+  artwork:
+    decodedPlaylist.artwork || "",
 
-        tracks:
-          sharedData.track_ids.slice()
+  tracks:
+    decodedPlaylist.tracks.slice()
 
-      };
+};
 
 
       console.log(
@@ -14608,21 +14494,13 @@ if (sharedPlaylistCode) {
         glctc1PendingSharedPlaylist
       );
 
-    }
-
-    // -----------------------------------------------
-    // ⚠️ SHARE CODE NOT FOUND
-    // -----------------------------------------------
-
-    else {
+    } else {
 
       console.warn(
-        "⚠️ GLCTC1 SHARED PLAYLIST NOT FOUND:",
-        sharedPlaylistCode
+        "⚠️ Invalid GLCTC1 shared playlist data."
       );
 
     }
-
 
   } catch (error) {
 
@@ -14634,7 +14512,6 @@ if (sharedPlaylistCode) {
   }
 
 }
-
 
 // -----------------------------------------------------
 // INITIAL PLAYLIST

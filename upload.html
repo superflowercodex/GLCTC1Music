@@ -14302,7 +14302,7 @@ if (glctc1PlaylistShareTrack) {
 
 
 // -----------------------------------------------------
-// 🔗 SHARE ENTIRE PLAYLIST
+// 🔗 SHARE ENTIRE PLAYLIST — SHORT SUPABASE LINK
 // -----------------------------------------------------
 
 if (glctc1PlaylistSharePlaylist) {
@@ -14312,6 +14312,7 @@ if (glctc1PlaylistSharePlaylist) {
 
       const playlist =
         glctc1GetPlaylist();
+
 
       if (!playlist) {
 
@@ -14337,51 +14338,132 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       // -----------------------------------------------
-      // CREATE SMALL SHARE PAYLOAD
+      // 🔐 SHARING REQUIRES SIGNED-IN USER
       // -----------------------------------------------
 
-      const shareData = {
-
-  name:
-    playlist.name,
-
-  // 🖼️ PLAYLIST ARTWORK
-  // Use the first track's artwork as the
-  // shared playlist artwork reference.
-  artwork:
-    playlist.tracks[0]?.cover_art ||
-    playlist.tracks[0]?.["Cover Art"] ||
-    "",
-
-  tracks:
-    playlist.tracks
-      .map(track =>
-        track.id ||
-        track.id_cat_no ||
-        track["ID Cat No"]
-      )
-      .filter(Boolean)
-
-};
+      const {
+        data: {
+          user
+        },
+        error: userError
+      } =
+        await supabaseClient.auth.getUser();
 
 
-      // -----------------------------------------------
-      // ENCODE PLAYLIST INTO URL
-      // -----------------------------------------------
+      if (
+        userError ||
+        !user
+      ) {
 
-      const encodedPlaylist =
-        btoa(
-          encodeURIComponent(
-            JSON.stringify(
-              shareData
-            )
-          )
+        alert(
+          "🔐 Please sign in before sharing a playlist."
         );
 
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // 🎵 USE MASTER LIBRARY CAT NUMBERS
+      //
+      // ID Cat No is the stable Master Library
+      // reference.
+      // -----------------------------------------------
+
+      const trackIds =
+        playlist.tracks
+          .map(track =>
+            track.id_cat_no ||
+            track["ID Cat No"] ||
+            track.id
+          )
+          .filter(Boolean);
+
+
+      if (!trackIds.length) {
+
+        alert(
+          "❌ No valid Master Library track IDs found."
+        );
+
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // 🖼️ PLAYLIST ARTWORK
+      // -----------------------------------------------
+
+      const artwork =
+        playlist.tracks[0]?.cover_art ||
+        playlist.tracks[0]?.["Cover Art"] ||
+        "";
+
+
+      // -----------------------------------------------
+      // 🔑 CREATE SHORT SHARE CODE
+      // -----------------------------------------------
+
+      const shareCode =
+        crypto
+          .randomUUID()
+          .replace(/-/g, "")
+          .slice(0, 10);
+
+
+      // -----------------------------------------------
+      // ☁️ SAVE SHARE RECORD
+      // -----------------------------------------------
+
+      const {
+        error: shareError
+      } =
+        await supabaseClient
+          .from("playlist_shares")
+          .insert([{
+
+            share_code:
+              shareCode,
+
+            playlist_name:
+              playlist.name,
+
+            artwork:
+              artwork,
+
+            track_ids:
+              trackIds
+
+          }]);
+
+
+      if (shareError) {
+
+        console.error(
+          "❌ GLCTC1 PLAYLIST SHARE SAVE ERROR:",
+          shareError
+        );
+
+        alert(
+          "❌ Could not create playlist share link.\n\n" +
+          shareError.message
+        );
+
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // 🔗 SHORT SHARE URL
+      // -----------------------------------------------
 
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
+        `${window.location.origin}${window.location.pathname}?share=${shareCode}`;
 
+
+      // -----------------------------------------------
+      // 📤 SHARE / COPY
+      // -----------------------------------------------
 
       try {
 
@@ -14394,8 +14476,8 @@ if (glctc1PlaylistSharePlaylist) {
             title:
               playlist.name,
 
-text:
-  playlist.name,
+            text:
+              playlist.name,
 
             url:
               shareUrl
@@ -14427,91 +14509,130 @@ text:
 
 }
 
+}
+
 // -----------------------------------------------------
-// 🔗 LOAD SHARED PLAYLIST DATA
+// 🔗 LOAD SHARED PLAYLIST DATA — SHORT SUPABASE LINK
 // -----------------------------------------------------
 // IMPORTANT:
 // This does NOT touch glctc1Playlists.
 // This does NOT call glctc1SavePlaylists().
-// This only stores the shared URL data temporarily.
-// The Master Library will resolve the track IDs later,
-// after Supabase has finished loading the library.
+// This does NOT write to localStorage.
+// This only stores the shared playlist temporarily.
 // -----------------------------------------------------
 
 let glctc1PendingSharedPlaylist = null;
 
-const sharedPlaylistData =
-  new URLSearchParams(
-    window.location.search
-  ).get("playlist");
+
+// -----------------------------------------------------
+// ☁️ SHARED PLAYLIST LOAD PROMISE
+// -----------------------------------------------------
+// The actual Supabase request runs asynchronously.
+// Nothing here can break the main Master Library script.
+// -----------------------------------------------------
+
+const glctc1SharedPlaylistLoadPromise =
+  (async function () {
+
+    const sharedPlaylistCode =
+      new URLSearchParams(
+        window.location.search
+      ).get("share");
 
 
-if (sharedPlaylistData) {
+    if (!sharedPlaylistCode) {
 
-  try {
+      return;
 
-    const decodedPlaylist =
-      JSON.parse(
-        decodeURIComponent(
-          atob(
-            sharedPlaylistData
+    }
+
+
+    try {
+
+      // ---------------------------------------------
+      // ☁️ LOAD SHARE RECORD FROM SUPABASE
+      // ---------------------------------------------
+
+      const {
+        data: sharedData,
+        error: sharedError
+      } =
+        await supabaseClient
+          .from("playlist_shares")
+          .select(
+            "share_code, playlist_name, artwork, track_ids"
           )
+          .eq(
+            "share_code",
+            sharedPlaylistCode
+          )
+          .maybeSingle();
+
+
+      if (sharedError) {
+
+        console.error(
+          "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
+          sharedError
+        );
+
+        return;
+
+      }
+
+
+      // ---------------------------------------------
+      // ✅ VALID SHARED PLAYLIST
+      // ---------------------------------------------
+
+      if (
+        sharedData &&
+        sharedData.playlist_name &&
+        Array.isArray(
+          sharedData.track_ids
         )
-      );
+      ) {
+
+        glctc1PendingSharedPlaylist = {
+
+          name:
+            sharedData.playlist_name,
+
+          artwork:
+            sharedData.artwork || "",
+
+          tracks:
+            sharedData.track_ids.slice()
+
+        };
 
 
-    if (
-      decodedPlaylist &&
-      decodedPlaylist.name &&
-      Array.isArray(
-        decodedPlaylist.tracks
-      )
-    ) {
-
-      // -----------------------------------------------
-      // STORE ONLY THE SHARED URL DATA
-      // -----------------------------------------------
-      // DO NOT add this to glctc1Playlists.
-      // DO NOT save it to localStorage.
-      // -----------------------------------------------
-
-      glctc1PendingSharedPlaylist = {
-
-  name:
-    decodedPlaylist.name,
-
-  artwork:
-    decodedPlaylist.artwork || "",
-
-  tracks:
-    decodedPlaylist.tracks.slice()
-
-};
+        console.log(
+          "🔗 GLCTC1 SHARED PLAYLIST DATA READY:",
+          glctc1PendingSharedPlaylist
+        );
 
 
-      console.log(
-        "🔗 GLCTC1 SHARED PLAYLIST DATA READY:",
-        glctc1PendingSharedPlaylist
-      );
+      } else {
 
-    } else {
+        console.warn(
+          "⚠️ GLCTC1 SHARED PLAYLIST NOT FOUND:",
+          sharedPlaylistCode
+        );
 
-      console.warn(
-        "⚠️ Invalid GLCTC1 shared playlist data."
+      }
+
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 SHARED PLAYLIST DATA ERROR:",
+        error
       );
 
     }
 
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 SHARED PLAYLIST DATA ERROR:",
-      error
-    );
-
-  }
-
-}
+  })();
 
 // -----------------------------------------------------
 // INITIAL PLAYLIST
@@ -14545,6 +14666,12 @@ glctc1UpdatePlaylistPlayer();
   
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {
+
+  // ===================================================
+  // 🔗 WAIT FOR SHARED PLAYLIST DATA
+  // ===================================================
+
+  await glctc1SharedPlaylistLoadPromise;
 
   // ===================================================
 // ☁️ LOAD SHARED MASTER LIBRARY FROM SUPABASE

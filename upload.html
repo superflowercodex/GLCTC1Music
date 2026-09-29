@@ -14485,84 +14485,99 @@ if (glctc1PlaylistSharePlaylist) {
 // This does NOT touch glctc1Playlists.
 // This does NOT call glctc1SavePlaylists().
 // This only stores the shared URL data temporarily.
-// The Master Library will resolve the track IDs later,
-// after Supabase has finished loading the library.
+// The Master Library will resolve the track IDs later.
 // -----------------------------------------------------
 
 let glctc1PendingSharedPlaylist = null;
 
-const sharedPlaylistData =
-  new URLSearchParams(
-    window.location.search
-  ).get("playlist");
+const glctc1SharedPlaylistLoadPromise =
+  (async function () {
+
+    const sharedPlaylistCode =
+      new URLSearchParams(
+        window.location.search
+      ).get("share");
 
 
-if (sharedPlaylistData) {
+    if (!sharedPlaylistCode) {
+      return;
+    }
 
-  try {
 
-    const decodedPlaylist =
-      JSON.parse(
-        decodeURIComponent(
-          atob(
-            sharedPlaylistData
-          )
+    try {
+
+      const {
+        data: sharedData,
+        error: sharedError
+      } = await supabaseClient
+        .from("playlist_shares")
+        .select(
+          "share_code, playlist_name, artwork, track_ids"
         )
-      );
+        .eq(
+          "share_code",
+          sharedPlaylistCode
+        )
+        .maybeSingle();
 
 
-    if (
-      decodedPlaylist &&
-      decodedPlaylist.name &&
-      Array.isArray(
-        decodedPlaylist.tracks
-      )
-    ) {
+      if (sharedError) {
 
-      // -----------------------------------------------
-      // STORE ONLY THE SHARED URL DATA
-      // -----------------------------------------------
-      // DO NOT add this to glctc1Playlists.
-      // DO NOT save it to localStorage.
-      // -----------------------------------------------
+        console.error(
+          "❌ GLCTC1 SHARED PLAYLIST LOAD ERROR:",
+          sharedError
+        );
 
-      glctc1PendingSharedPlaylist = {
-
-  name:
-    decodedPlaylist.name,
-
-  artwork:
-    decodedPlaylist.artwork || "",
-
-  tracks:
-    decodedPlaylist.tracks.slice()
-
-};
+        return;
+      }
 
 
-      console.log(
-        "🔗 GLCTC1 SHARED PLAYLIST DATA READY:",
-        glctc1PendingSharedPlaylist
-      );
+      if (
+        sharedData &&
+        sharedData.playlist_name &&
+        Array.isArray(
+          sharedData.track_ids
+        )
+      ) {
 
-    } else {
+        glctc1PendingSharedPlaylist = {
 
-      console.warn(
-        "⚠️ Invalid GLCTC1 shared playlist data."
+          name:
+            sharedData.playlist_name,
+
+          artwork:
+            sharedData.artwork || "",
+
+          tracks:
+            sharedData.track_ids.slice()
+
+        };
+
+
+        console.log(
+          "🔗 GLCTC1 SHARED PLAYLIST DATA READY:",
+          glctc1PendingSharedPlaylist
+        );
+
+      } else {
+
+        console.warn(
+          "⚠️ GLCTC1 SHARED PLAYLIST NOT FOUND:",
+          sharedPlaylistCode
+        );
+
+      }
+
+    } catch (error) {
+
+      console.error(
+        "❌ GLCTC1 SHARED PLAYLIST DATA ERROR:",
+        error
       );
 
     }
 
-  } catch (error) {
-
-    console.error(
-      "❌ GLCTC1 SHARED PLAYLIST DATA ERROR:",
-      error
-    );
-
-  }
-
-}
+  })();
 
 // -----------------------------------------------------
 // INITIAL PLAYLIST

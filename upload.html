@@ -14336,51 +14336,102 @@ if (glctc1PlaylistSharePlaylist) {
       }
 
 
-      // -----------------------------------------------
-      // CREATE SMALL SHARE PAYLOAD
-      // -----------------------------------------------
-
-      const shareData = {
-
-  name:
-    playlist.name,
-
-  // 🖼️ PLAYLIST ARTWORK
-  // Use the first track's artwork as the
-  // shared playlist artwork reference.
-  artwork:
-    playlist.tracks[0]?.cover_art ||
-    playlist.tracks[0]?.["Cover Art"] ||
-    "",
-
-  tracks:
-    playlist.tracks
-      .map(track =>
-        track.id ||
-        track.id_cat_no ||
-        track["ID Cat No"]
-      )
-      .filter(Boolean)
-
-};
+      const {
+        data: { user },
+        error: userError
+      } = await supabaseClient.auth.getUser();
 
 
-      // -----------------------------------------------
-      // ENCODE PLAYLIST INTO URL
-      // -----------------------------------------------
+      if (
+        userError ||
+        !user
+      ) {
 
-      const encodedPlaylist =
-        btoa(
-          encodeURIComponent(
-            JSON.stringify(
-              shareData
-            )
-          )
+        alert(
+          "🔐 Please sign in before sharing a playlist."
         );
+
+        return;
+      }
+
+
+      const trackIds =
+        playlist.tracks
+          .map(track =>
+            track.id_cat_no ||
+            track["ID Cat No"] ||
+            track.id
+          )
+          .filter(Boolean);
+
+
+      if (!trackIds.length) {
+
+        alert(
+          "This playlist contains no shareable tracks."
+        );
+
+        return;
+      }
+
+
+      // 🖼️ PLAYLIST ARTWORK
+      // Use the first track's artwork as the
+      // shared playlist artwork reference.
+
+      const artwork =
+        playlist.tracks[0]?.cover_art ||
+        playlist.tracks[0]?.["Cover Art"] ||
+        "";
+
+
+      // 🔗 SHORT SHARE CODE
+
+      const shareCode =
+        crypto.randomUUID()
+          .replace(/-/g, "")
+          .slice(0, 10);
+
+
+      const {
+        error: shareError
+      } = await supabaseClient
+        .from("playlist_shares")
+        .insert([{
+
+          share_code:
+            shareCode,
+
+          playlist_name:
+            playlist.name,
+
+          artwork:
+            artwork,
+
+          track_ids:
+            trackIds
+
+        }]);
+
+
+      if (shareError) {
+
+        console.error(
+          "❌ GLCTC1 PLAYLIST SHARE SAVE ERROR:",
+          shareError
+        );
+
+        alert(
+          "❌ Could not create playlist share link.\n\n" +
+          shareError.message
+        );
+
+        return;
+      }
 
 
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
+        `${window.location.origin}${window.location.pathname}?share=${shareCode}`;
 
 
       try {
@@ -14394,8 +14445,8 @@ if (glctc1PlaylistSharePlaylist) {
             title:
               playlist.name,
 
-text:
-  playlist.name,
+            text:
+              playlist.name,
 
             url:
               shareUrl

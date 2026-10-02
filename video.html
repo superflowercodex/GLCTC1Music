@@ -1836,8 +1836,9 @@ PSYCHEDELIC FACILITATOR — AUTO
 <div class="auto-description">
 
 AUTO lets the song instruct the image.
-When AUTO is OFF every live FX value returns
-to zero and the image becomes still.
+When AUTO is OFF automatic expression returns
+to zero and the semantic image becomes still.
+Manual FX weights remain available.
 
 </div>
 
@@ -1858,7 +1859,7 @@ AUTO OFF
   class="auto-status"
 >
 
-ALL FX ZERO —
+ALL AUTOMATIC EXPRESSION ZERO —
 FACILITATOR OFF
 
 </div>
@@ -2076,7 +2077,6 @@ const status =
 
 const aiStatus =
   $("aiStatus");
-
 
 const readBass =
   $("readBass");
@@ -2336,6 +2336,14 @@ FX.forEach(
         fx[key].bias =
           +input.value;
 
+        /*
+         * Manual FX values are deliberately
+         * available even when AUTO is OFF.
+         *
+         * The slider remains the user's
+         * maximum FX weight.
+         */
+
       };
 
 
@@ -2411,6 +2419,8 @@ const S = {
 
   semanticReady:false,
 
+  aiGeneration:0,
+
   layers:{
 
     person:null,
@@ -2419,7 +2429,9 @@ const S = {
 
     plant:[],
 
-    structure:[]
+    structure:[],
+
+    body:{}
 
   },
 
@@ -2587,6 +2599,72 @@ function ready(){
 
 
 /* =========================================================
+   RESET SEMANTIC STATE
+========================================================= */
+
+function resetSemanticState(){
+
+  S.aiGeneration++;
+
+  S.semanticReady =
+    false;
+
+  S.objects =
+    [];
+
+  S.personMask =
+    null;
+
+  S.personParts =
+    null;
+
+  S.layers.person =
+    null;
+
+  S.layers.animal =
+    [];
+
+  S.layers.plant =
+    [];
+
+  S.layers.structure =
+    [];
+
+  S.layers.body =
+    {};
+
+  S.scene.person =
+    false;
+
+  S.scene.animal =
+    false;
+
+  S.scene.nature =
+    false;
+
+  S.scene.structure =
+    false;
+
+  S.scene.face =
+    false;
+
+  S.scene.water =
+    false;
+
+  S.scene.geometry =
+    false;
+
+  maskCtx.clearRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+}
+
+
+/* =========================================================
    IMAGE LOAD
 ========================================================= */
 
@@ -2602,6 +2680,9 @@ pictureInput.onchange =
     }
 
 
+    resetSemanticState();
+
+
     if(S.imageURL){
 
       URL.revokeObjectURL(
@@ -2611,10 +2692,14 @@ pictureInput.onchange =
     }
 
 
-    S.imageURL =
+    const url =
       URL.createObjectURL(
         file
       );
+
+
+    S.imageURL =
+      url;
 
 
     const image =
@@ -2623,6 +2708,16 @@ pictureInput.onchange =
 
     image.onload =
       async () => {
+
+        if(
+          url !==
+          S.imageURL
+        ){
+
+          return;
+
+        }
+
 
         S.image =
           image;
@@ -2638,15 +2733,28 @@ pictureInput.onchange =
         );
 
 
+        prepareBaseImage();
+
         analyseImage();
 
-        prepareBaseImage();
 
         status.textContent =
           "IMAGE LOADED — BUILDING VISUAL LAYERS...";
 
 
-        await semanticAI();
+        await semanticAI(
+          url
+        );
+
+
+        if(
+          url !==
+          S.imageURL
+        ){
+
+          return;
+
+        }
 
 
         status.textContent =
@@ -2663,6 +2771,16 @@ pictureInput.onchange =
     image.onerror =
       () => {
 
+        if(
+          url !==
+          S.imageURL
+        ){
+
+          return;
+
+        }
+
+
         status.textContent =
           "IMAGE COULD NOT BE LOADED.";
 
@@ -2670,7 +2788,7 @@ pictureInput.onchange =
 
 
     image.src =
-      S.imageURL;
+      url;
 
   };
 
@@ -2760,11 +2878,23 @@ songInput.onchange =
    LOCAL AI
 ========================================================= */
 
-async function semanticAI(){
+async function semanticAI(
+  imageURL
+){
 
-  if(!S.image){
+  if(
+    !S.image ||
+    imageURL !==
+    S.imageURL
+  ){
+
     return;
+
   }
+
+
+  const generation =
+    S.aiGeneration;
 
 
   S.semanticReady =
@@ -2793,18 +2923,44 @@ async function semanticAI(){
        COCO OBJECT DETECTION
     ===================================================== */
 
-    const model =
-      await cocoSsd.load();
+    if(
+      !S.ai
+    ){
+
+      S.ai =
+        await cocoSsd.load();
+
+    }
 
 
-    S.ai =
-      model;
+    if(
+      generation !==
+      S.aiGeneration ||
+      imageURL !==
+      S.imageURL
+    ){
+
+      return;
+
+    }
 
 
     const detections =
-      await model.detect(
+      await S.ai.detect(
         S.image
       );
+
+
+    if(
+      generation !==
+      S.aiGeneration ||
+      imageURL !==
+      S.imageURL
+    ){
+
+      return;
+
+    }
 
 
     S.objects =
@@ -2828,68 +2984,59 @@ async function semanticAI(){
 
 
     /* =====================================================
-       BODYPix
+       PERSON DETECTION
     ===================================================== */
 
-    S.bodyPix =
-      await bodyPix.load({
-
-        architecture:
-          "MobileNetV1",
-
-        outputStride:
-          16,
-
-        multiplier:
-          .75,
-
-        quantBytes:
-          2
-
-      });
-
-
-    const segmentation =
-      await S.bodyPix.segmentPerson(
-        S.image,
-        {
-
-          internalResolution:
-            "medium",
-
-          segmentationThreshold:
-            .65,
-
-          maxDetections:
-            1,
-
-          scoreThreshold:
-            .35,
-
-          nmsRadius:
-            20
-
-        }
+    const hasPerson =
+      S.objects.some(
+        object =>
+          object.class ===
+          "person"
       );
 
 
-    S.personMask =
-      segmentation;
+    if(
+      hasPerson
+    ){
+
+      if(
+        !S.bodyPix
+      ){
+
+        S.bodyPix =
+          await bodyPix.load({
+
+            architecture:
+              "MobileNetV1",
+
+            outputStride:
+              16,
+
+            multiplier:
+              .75,
+
+            quantBytes:
+              2
+
+          });
+
+      }
 
 
-    buildPersonMask(
-      segmentation
-    );
+      if(
+        generation !==
+        S.aiGeneration ||
+        imageURL !==
+        S.imageURL
+      ){
+
+        return;
+
+      }
 
 
-    /* =====================================================
-       BODY PARTS
-    ===================================================== */
-
-    try{
-
-      const parts =
-        await S.bodyPix.segmentPersonParts(
+      const segmentation =
+        await S.bodyPix.segmentPerson(
           S.image,
           {
 
@@ -2903,22 +3050,78 @@ async function semanticAI(){
         );
 
 
-      S.personParts =
-        parts;
+      if(
+        generation !==
+        S.aiGeneration ||
+        imageURL !==
+        S.imageURL
+      ){
+
+        return;
+
+      }
 
 
-      buildBodyPartLayers(
-        parts
+      S.personMask =
+        segmentation;
+
+
+      buildPersonMask(
+        segmentation
       );
 
-    }
 
-    catch(partError){
+      /* ===================================================
+         BODY PARTS
+      =================================================== */
 
-      console.warn(
-        "Body-part segmentation unavailable:",
-        partError
-      );
+      try{
+
+        const parts =
+          await S.bodyPix.segmentPersonParts(
+            S.image,
+            {
+
+              internalResolution:
+                "medium",
+
+              segmentationThreshold:
+                .65
+
+            }
+          );
+
+
+        if(
+          generation !==
+          S.aiGeneration ||
+          imageURL !==
+          S.imageURL
+        ){
+
+          return;
+
+        }
+
+
+        S.personParts =
+          parts;
+
+
+        buildBodyPartLayers(
+          parts
+        );
+
+      }
+
+      catch(partError){
+
+        console.warn(
+          "Body-part segmentation unavailable:",
+          partError
+        );
+
+      }
 
     }
 
@@ -2930,17 +3133,51 @@ async function semanticAI(){
     buildObjectLayers();
 
 
+    /*
+     * Rebuild the background after all layers exist.
+     * This is what creates a real compositing stage:
+     * foreground can move while the background remains
+     * behind it.
+     */
+
+    rebuildSemanticBackground();
+
+
     S.semanticReady =
       true;
 
 
     aiStatus.textContent =
-      "LOCAL AI — VISUAL LAYERS READY";
+      hasPerson
+
+        ? (
+            Object.keys(
+              S.layers.body
+            ).length
+
+              ? "LOCAL AI — PERSON + BODY LAYERS READY"
+
+              : "LOCAL AI — PERSON LAYER READY"
+          )
+
+        : "LOCAL AI — VISUAL LAYERS READY";
 
 
   }
 
   catch(error){
+
+    if(
+      generation !==
+      S.aiGeneration ||
+      imageURL !==
+      S.imageURL
+    ){
+
+      return;
+
+    }
+
 
     console.warn(
       "LOCAL AI:",
@@ -2957,6 +3194,8 @@ async function semanticAI(){
 
 
     buildFallbackLayers();
+
+    rebuildSemanticBackground();
 
   }
 
@@ -3066,6 +3305,9 @@ function classifyScene(){
 
 function buildObjectLayers(){
 
+  S.layers.person =
+    null;
+
   S.layers.animal =
     [];
 
@@ -3083,6 +3325,30 @@ function buildObjectLayers(){
 
     const type =
       object.class;
+
+
+    if(
+      type ===
+      "person"
+    ){
+
+      /*
+       * BodyPix replaces this with the true
+       * person mask when available.
+       *
+       * This bbox layer is retained as a
+       * local fallback if BodyPix fails.
+       */
+
+      S.layers.person =
+        makeObjectLayer(
+          object,
+          "person"
+        );
+
+      continue;
+
+    }
 
 
     if(
@@ -3110,6 +3376,8 @@ function buildObjectLayers(){
         )
       );
 
+      continue;
+
     }
 
 
@@ -3124,6 +3392,8 @@ function buildObjectLayers(){
           "plant"
         )
       );
+
+      continue;
 
     }
 
@@ -3140,7 +3410,9 @@ function buildObjectLayers(){
         "chair",
         "couch",
         "bed",
-        "tv"
+        "tv",
+        "laptop",
+        "cell phone"
       ].includes(
         type
       )
@@ -3208,7 +3480,29 @@ function makeObjectLayer(
     mapped.h/2;
 
 
+  /*
+   * COCO-SSD supplies a bounding box,
+   * not a pixel-perfect arbitrary-object mask.
+   *
+   * This creates a feathered local cutout
+   * from the detected source region.
+   */
+
   c.save();
+
+
+  c.beginPath();
+
+
+  c.rect(
+    mapped.x,
+    mapped.y,
+    mapped.w,
+    mapped.h
+  );
+
+
+  c.clip();
 
 
   c.drawImage(
@@ -3218,47 +3512,86 @@ function makeObjectLayer(
   );
 
 
-  c.globalCompositeOperation =
-    "destination-in";
+  c.restore();
 
 
-  const g =
-    c.createRadialGradient(
+  /*
+   * Feather the boundary.
+   */
+
+  const feather =
+    Math.max(
+      8,
+      Math.min(
+        mapped.w,
+        mapped.h
+      )*.12
+    );
+
+
+  const alphaMask =
+    document.createElement(
+      "canvas"
+    );
+
+
+  alphaMask.width =
+    W;
+
+  alphaMask.height =
+    H;
+
+
+  const mc =
+    alphaMask.getContext(
+      "2d"
+    );
+
+
+  const gradient =
+    mc.createRadialGradient(
       cx,
       cy,
-      0,
+      Math.max(
+        1,
+        Math.min(
+          mapped.w,
+          mapped.h
+        )/2 -
+        feather
+      ),
       cx,
       cy,
       Math.max(
         mapped.w,
         mapped.h
-      )*.7
+      )*.72
     );
 
 
-  g.addColorStop(
+  gradient.addColorStop(
     0,
+    "rgba(255,255,255,1)"
+  );
+
+
+  gradient.addColorStop(
+    .72,
     "rgba(255,255,255,.98)"
   );
 
 
-  g.addColorStop(
-    .75,
-    "rgba(255,255,255,.95)"
-  );
-
-
-  g.addColorStop(
+  gradient.addColorStop(
     1,
     "rgba(255,255,255,0)"
   );
 
 
-  c.fillStyle =
-    g;
+  mc.fillStyle =
+    gradient;
 
 
-  c.fillRect(
+  mc.fillRect(
     0,
     0,
     W,
@@ -3266,7 +3599,19 @@ function makeObjectLayer(
   );
 
 
-  c.restore();
+  c.globalCompositeOperation =
+    "destination-in";
+
+
+  c.drawImage(
+    alphaMask,
+    0,
+    0
+  );
+
+
+  c.globalCompositeOperation =
+    "source-over";
 
 
   return {
@@ -3297,6 +3642,15 @@ function makeObjectLayer(
 function buildPersonMask(
   segmentation
 ){
+
+  if(
+    !segmentation
+  ){
+
+    return;
+
+  }
+
 
   const maskSource =
     document.createElement(
@@ -3386,6 +3740,35 @@ function buildBodyPartLayers(
     segmentation.height;
 
 
+  /*
+   * BodyPix 24-part map.
+   *
+   * 0  left_face
+   * 1  right_face
+   * 2  left_upper_arm_front
+   * 3  left_upper_arm_back
+   * 4  right_upper_arm_front
+   * 5  right_upper_arm_back
+   * 6  left_lower_arm_front
+   * 7  left_lower_arm_back
+   * 8  right_lower_arm_front
+   * 9  right_lower_arm_back
+   * 10 left_hand
+   * 11 right_hand
+   * 12 torso_front
+   * 13 torso_back
+   * 14 left_upper_leg_front
+   * 15 left_upper_leg_back
+   * 16 right_upper_leg_front
+   * 17 right_upper_leg_back
+   * 18 left_lower_leg_front
+   * 19 left_lower_leg_back
+   * 20 right_lower_leg_front
+   * 21 right_lower_leg_back
+   * 22 left_foot
+   * 23 right_foot
+   */
+
   const groups = {
 
     face:[
@@ -3396,29 +3779,38 @@ function buildBodyPartLayers(
     leftArm:[
       2,
       3,
-      4
+      6,
+      7,
+      10
     ],
 
     rightArm:[
+      4,
       5,
-      6,
-      7
-    ],
-
-    torso:[
-      8
-    ],
-
-    leftLeg:[
+      8,
       9,
-      10,
       11
     ],
 
-    rightLeg:[
+    torso:[
       12,
-      13,
-      14
+      13
+    ],
+
+    leftLeg:[
+      14,
+      15,
+      18,
+      19,
+      22
+    ],
+
+    rightLeg:[
+      16,
+      17,
+      20,
+      21,
+      23
     ]
 
   };
@@ -3519,6 +3911,11 @@ function buildBodyPartLayers(
       );
 
 
+    /*
+     * The same cover transform used for the
+     * source image is used for every mask.
+     */
+
     drawCover(
       oc,
       c
@@ -3576,29 +3973,217 @@ function buildFallbackLayers(){
     {};
 
 
+  S.layers.person =
+    null;
+
+
+  const person =
+    S.objects.find(
+      object =>
+        object.class ===
+        "person"
+    );
+
+
   if(
-    S.scene.person
+    person
   ){
 
     S.layers.person =
-      {
-
-        canvas:
-          sourceCanvas,
-
-        box:{
-          x:0,
-          y:0,
-          w:W,
-          h:H
-        },
-
-        cx:W/2,
-        cy:H/2
-
-      };
+      makeObjectLayer(
+        person,
+        "person"
+      );
 
   }
+
+}
+
+
+/* =========================================================
+   REBUILD SEMANTIC BACKGROUND
+========================================================= */
+
+function rebuildSemanticBackground(){
+
+  backgroundCtx.clearRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+
+  backgroundCtx.drawImage(
+    sourceCanvas,
+    0,
+    0
+  );
+
+
+  /*
+   * True person segmentation gets first priority.
+   */
+
+  if(
+    S.personMask
+  ){
+
+    backgroundCtx.globalCompositeOperation =
+      "destination-out";
+
+
+    backgroundCtx.drawImage(
+      maskCanvas,
+      0,
+      0
+    );
+
+
+    backgroundCtx.globalCompositeOperation =
+      "source-over";
+
+  }
+  else if(
+    S.layers.person
+  ){
+
+    eraseObjectBoxFromBackground(
+      S.layers.person.box
+    );
+
+  }
+
+
+  /*
+   * COCO object layers use feathered
+   * bounding regions.
+   *
+   * This prevents the moving object from
+   * remaining permanently baked into the
+   * background.
+   */
+
+  [
+    ...S.layers.animal,
+    ...S.layers.plant,
+    ...S.layers.structure
+  ].forEach(
+    layer => {
+
+      if(
+        layer &&
+        layer.box
+      ){
+
+        eraseObjectBoxFromBackground(
+          layer.box
+        );
+
+      }
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   ERASE OBJECT BOX
+========================================================= */
+
+function eraseObjectBoxFromBackground(
+  box
+){
+
+  if(!box){
+    return;
+  }
+
+
+  backgroundCtx.save();
+
+
+  const padX =
+    Math.max(
+      6,
+      box.w*.10
+    );
+
+
+  const padY =
+    Math.max(
+      6,
+      box.h*.10
+    );
+
+
+  const x =
+    box.x -
+    padX;
+
+
+  const y =
+    box.y -
+    padY;
+
+
+  const w =
+    box.w +
+    padX*2;
+
+
+  const h =
+    box.h +
+    padY*2;
+
+
+  const gradient =
+    backgroundCtx.createRadialGradient(
+      x+w/2,
+      y+h/2,
+      Math.min(w,h)*.22,
+      x+w/2,
+      y+h/2,
+      Math.max(w,h)*.72
+    );
+
+
+  gradient.addColorStop(
+    0,
+    "rgba(0,0,0,1)"
+  );
+
+
+  gradient.addColorStop(
+    .72,
+    "rgba(0,0,0,.94)"
+  );
+
+
+  gradient.addColorStop(
+    1,
+    "rgba(0,0,0,0)"
+  );
+
+
+  backgroundCtx.globalCompositeOperation =
+    "destination-out";
+
+
+  backgroundCtx.fillStyle =
+    gradient;
+
+
+  backgroundCtx.fillRect(
+    x,
+    y,
+    w,
+    h
+  );
+
+
+  backgroundCtx.restore();
 
 }
 
@@ -3637,25 +4222,81 @@ function prepareBaseImage(){
     0
   );
 
+}
+
+
+/* =========================================================
+   COVER TRANSFORM
+========================================================= */
+
+function getCoverTransform(
+  image
+){
+
+  const iw =
+    image.naturalWidth ||
+    image.videoWidth ||
+    image.width;
+
+
+  const ih =
+    image.naturalHeight ||
+    image.videoHeight ||
+    image.height;
+
 
   if(
-    S.personMask
+    !iw ||
+    !ih
   ){
 
-    backgroundCtx.globalCompositeOperation =
-      "destination-out";
+    return {
+
+      x:0,
+
+      y:0,
+
+      w:W,
+
+      h:H
+
+    };
+
+  }
 
 
-    drawCover(
-      backgroundCtx,
-      maskCanvas
+  const scale =
+    Math.max(
+      W/iw,
+      H/ih
     );
 
 
-    backgroundCtx.globalCompositeOperation =
-      "source-over";
+  const dw =
+    iw *
+    scale;
 
-  }
+
+  const dh =
+    ih *
+    scale;
+
+
+  return {
+
+    x:
+      (W-dw)/2,
+
+    y:
+      (H-dh)/2,
+
+    w:
+      dw,
+
+    h:
+      dh
+
+  };
 
 }
 
@@ -3669,56 +4310,18 @@ function drawCover(
   image
 ){
 
-  const iw =
-    image.naturalWidth ||
-    image.width;
-
-
-  const ih =
-    image.naturalHeight ||
-    image.height;
-
-
-  const r =
-    iw / ih;
-
-
   const t =
-    W / H;
-
-
-  let dw;
-  let dh;
-
-
-  if(
-    r > t
-  ){
-
-    dh =
-      H;
-
-    dw =
-      H*r;
-
-  }
-  else{
-
-    dw =
-      W;
-
-    dh =
-      W/r;
-
-  }
+    getCoverTransform(
+      image
+    );
 
 
   target.drawImage(
     image,
-    (W-dw)/2,
-    (H-dh)/2,
-    dw,
-    dh
+    t.x,
+    t.y,
+    t.w,
+    t.h
   );
 
 }
@@ -3733,17 +4336,29 @@ function imageBoxToCanvas(
 ){
 
   if(
-    !S.image
+    !S.image ||
+    !box
   ){
 
     return {
+
       x:0,
+
       y:0,
+
       w:W,
+
       h:H
+
     };
 
   }
+
+
+  const transform =
+    getCoverTransform(
+      S.image
+    );
 
 
   const iw =
@@ -3754,71 +4369,29 @@ function imageBoxToCanvas(
     S.image.naturalHeight;
 
 
-  const r =
-    iw / ih;
-
-
-  const t =
-    W / H;
-
-
-  let dw;
-  let dh;
-
-
-  if(
-    r > t
-  ){
-
-    dh =
-      H;
-
-    dw =
-      H*r;
-
-  }
-  else{
-
-    dw =
-      W;
-
-    dh =
-      W/r;
-
-  }
-
-
-  const ox =
-    (W-dw)/2;
-
-
-  const oy =
-    (H-dh)/2;
-
-
   return {
 
     x:
-      ox +
+      transform.x +
       box[0] /
       iw *
-      dw,
+      transform.w,
 
     y:
-      oy +
+      transform.y +
       box[1] /
       ih *
-      dh,
+      transform.h,
 
     w:
       box[2] /
       iw *
-      dw,
+      transform.w,
 
     h:
       box[3] /
       ih *
-      dh
+      transform.h
 
   };
 
@@ -3858,13 +4431,10 @@ function alphaBounds(
     H;
 
   let maxX =
-    0;
+    -1;
 
   let maxY =
-    0;
-
-  let found =
-    false;
+    -1;
 
 
   for(
@@ -3888,9 +4458,6 @@ function alphaBounds(
       if(
         a > 20
       ){
-
-        found =
-          true;
 
         minX =
           Math.min(
@@ -3923,8 +4490,13 @@ function alphaBounds(
   }
 
 
-  if(!found){
+  if(
+    maxX < 0 ||
+    maxY < 0
+  ){
+
     return null;
+
   }
 
 
@@ -3935,10 +4507,16 @@ function alphaBounds(
     y:minY,
 
     w:
-      maxX-minX,
+      Math.max(
+        1,
+        maxX-minX+1
+      ),
 
     h:
-      maxY-minY
+      Math.max(
+        1,
+        maxY-minY+1
+      )
 
   };
 
@@ -3994,9 +4572,40 @@ function analyseImage(){
   );
 
 
-  drawCover(
-    a,
-    S.image
+  /*
+   * Analyse the same cover-cropped image
+   * the viewer actually sees.
+   */
+
+  const transform =
+    getCoverTransform(
+      S.image
+    );
+
+
+  const scale =
+    Math.max(
+      n/S.image.naturalWidth,
+      n/S.image.naturalHeight
+    );
+
+
+  const dw =
+    S.image.naturalWidth *
+    scale;
+
+
+  const dh =
+    S.image.naturalHeight *
+    scale;
+
+
+  a.drawImage(
+    S.image,
+    (n-dw)/2,
+    (n-dh)/2,
+    dw,
+    dh
   );
 
 
@@ -4086,7 +4695,9 @@ function analyseImage(){
         );
 
 
-      b += z;
+      b +=
+        z;
+
 
       b2 +=
         z*z;
@@ -4098,11 +4709,14 @@ function analyseImage(){
           : 0;
 
 
-      red += R;
+      red +=
+        R;
 
-      green += G;
+      green +=
+        G;
 
-      blue += B;
+      blue +=
+        B;
 
 
       const nx =
@@ -4122,12 +4736,14 @@ function analyseImage(){
         nx < .5
       ){
 
-        le += q;
+        le +=
+          q;
 
       }
       else{
 
-        re += q;
+        re +=
+          q;
 
       }
 
@@ -4136,12 +4752,14 @@ function analyseImage(){
         ny < .5
       ){
 
-        te += q;
+        te +=
+          q;
 
       }
       else{
 
-        be += q;
+        be +=
+          q;
 
       }
 
@@ -4244,27 +4862,45 @@ function analyseImage(){
   S.V.red =
     red/total;
 
+
   S.V.green =
     green/total;
+
 
   S.V.blue =
     blue/total;
 
 
+  const lr =
+    le+re;
+
+
+  const tb =
+    te+be;
+
+
   S.V.left =
-    le/(le+re);
+    lr
+      ? le/lr
+      : .5;
 
 
   S.V.right =
-    re/(le+re);
+    lr
+      ? re/lr
+      : .5;
 
 
   S.V.top =
-    te/(te+be);
+    tb
+      ? te/tb
+      : .5;
 
 
   S.V.bottom =
-    be/(te+be);
+    tb
+      ? be/tb
+      : .5;
 
 
   S.V.centre =
@@ -4450,7 +5086,7 @@ playButton.onclick =
       status.textContent =
         S.auto
           ? "PSYCHEDELIC SPACE ACTIVE — THE SONG IS THE INSTRUCTION."
-          : "PLAYING — AUTO IS OFF — ALL FX REMAIN AT ZERO.";
+          : "PLAYING — AUTO IS OFF — AUTOMATIC EXPRESSION IS ZERO.";
 
     }
 
@@ -4508,6 +5144,9 @@ function stop(){
   S.lastStrong =
     0;
 
+  S.prevEnergy =
+    0;
+
   S.bpm =
     120;
 
@@ -4546,7 +5185,7 @@ function stop(){
       ? (
           S.auto
             ? "READY — AUTO WILL FACILITATE WHEN PLAY STARTS."
-            : "READY — AUTO OFF — ALL FX ZERO."
+            : "READY — AUTO OFF — AUTOMATIC EXPRESSION ZERO."
         )
 
       : "LOAD ONE IMAGE AND ONE SOUND TO BEGIN.";
@@ -4588,6 +5227,45 @@ function resetAudioExpression(){
 
 
 /* =========================================================
+   ZERO AUTOMATIC SEMANTIC STATE
+========================================================= */
+
+function zeroAutomaticState(){
+
+  S.F = {
+
+    intensity:0,
+
+    motion:0,
+
+    distortion:0,
+
+    symmetry:0,
+
+    colour:0,
+
+    fluidity:0,
+
+    pulse:0,
+
+    dance:0,
+
+    breathe:0,
+
+    drift:0
+
+  };
+
+
+  /*
+   * This is deliberately separate from the
+   * manual FX sliders.
+   */
+
+}
+
+
+/* =========================================================
    AUDIO END
 ========================================================= */
 
@@ -4599,6 +5277,8 @@ sourceAudio.onended =
 
 
     resetAudioExpression();
+
+    zeroAutomaticState();
 
 
     if(S.recording){
@@ -4704,7 +5384,7 @@ autoButton.onclick =
     ){
 
       autoStatus.textContent =
-        "FACILITATOR ACTIVE — IMAGE + MUSIC + SEMANTIC LAYERS EVOLVING.";
+        "FACILITATOR ACTIVE — AUDIO + IMAGE + SEMANTIC LAYERS EVOLVING.";
 
 
       status.textContent =
@@ -4715,16 +5395,21 @@ autoButton.onclick =
     }
     else{
 
-      /* ===================================================
-         HARD RESET
-         AUTO OFF MEANS ZERO.
-      =================================================== */
+      /*
+       * AUTO OFF:
+       *
+       * Automatic expression is hard-zeroed.
+       * Semantic movement returns to the original
+       * static source.
+       *
+       * Manual FX sliders are NOT destroyed.
+       */
 
-      zeroAllFX();
+      zeroAutomaticState();
 
 
       autoStatus.textContent =
-        "ALL FX ZERO — FACILITATOR OFF.";
+        "ALL AUTOMATIC EXPRESSION ZERO — FACILITATOR OFF.";
 
 
       status.textContent =
@@ -4733,57 +5418,6 @@ autoButton.onclick =
     }
 
   };
-
-
-/* =========================================================
-   HARD FX ZERO
-========================================================= */
-
-function zeroAllFX(){
-
-  FX.forEach(
-    ([key]) => {
-
-      fx[key].live =
-        0;
-
-      fx[key].output.textContent =
-        "0";
-
-      fx[key].element.classList.remove(
-        "active",
-        "beat"
-      );
-
-    }
-  );
-
-
-  S.F = {
-
-    intensity:0,
-
-    motion:0,
-
-    distortion:0,
-
-    symmetry:0,
-
-    colour:0,
-
-    fluidity:0,
-
-    pulse:0,
-
-    dance:0,
-
-    breathe:0,
-
-    drift:0
-
-  };
-
-}
 
 
 /* =========================================================
@@ -4817,39 +5451,39 @@ function track(){
     S.an.fftSize;
 
 
-  const low =
+  const measuredLow =
     avg(
       25/bin,
       180/bin
     );
 
 
-  const mid =
+  const measuredMid =
     avg(
       180/bin,
       2200/bin
     );
 
 
-  const high =
+  const measuredHigh =
     avg(
       2200/bin,
       11000/bin
     );
 
 
-  const energy =
+  const measuredEnergy =
     (
-      low*.42 +
-      mid*.34 +
-      high*.24
+      measuredLow*.42 +
+      measuredMid*.34 +
+      measuredHigh*.24
     );
 
 
-  const transient =
+  const measuredTransient =
     clamp(
       (
-        energy -
+        measuredEnergy -
         S.prevEnergy
       )*6,
       0,
@@ -4860,9 +5494,131 @@ function track(){
   S.prevEnergy =
     lerp(
       S.prevEnergy,
-      energy,
+      measuredEnergy,
       .18
     );
+
+
+  /*
+   * External GLCTC1 analysis is now blended into
+   * the actual live expression values.
+   *
+   * This means ANALYSE / another GLCTC1 engine
+   * can genuinely instruct PSYCHEDELIC SPACE.
+   */
+
+  const externalLow =
+    numberOrNull(
+      S.external.bass
+    );
+
+
+  const externalMid =
+    numberOrNull(
+      S.external.mid
+    );
+
+
+  const externalHigh =
+    numberOrNull(
+      S.external.high
+    );
+
+
+  const externalEnergy =
+    numberOrNull(
+      S.external.energy
+    );
+
+
+  const externalTransient =
+    numberOrNull(
+      S.external.transient
+    );
+
+
+  const low =
+    externalLow !== null
+
+      ? lerp(
+          measuredLow,
+          clamp(
+            externalLow,
+            0,
+            1
+          ),
+          .65
+        )
+
+      : measuredLow;
+
+
+  const mid =
+    externalMid !== null
+
+      ? lerp(
+          measuredMid,
+          clamp(
+            externalMid,
+            0,
+            1
+          ),
+          .65
+        )
+
+      : measuredMid;
+
+
+  const high =
+    externalHigh !== null
+
+      ? lerp(
+          measuredHigh,
+          clamp(
+            externalHigh,
+            0,
+            1
+          ),
+          .65
+        )
+
+      : measuredHigh;
+
+
+  const energy =
+    externalEnergy !== null
+
+      ? lerp(
+          measuredEnergy,
+          clamp(
+            externalEnergy,
+            0,
+            1
+          ),
+          .65
+        )
+
+      : (
+          low*.42 +
+          mid*.34 +
+          high*.24
+        );
+
+
+  const transient =
+    externalTransient !== null
+
+      ? lerp(
+          measuredTransient,
+          clamp(
+            externalTransient,
+            0,
+            1
+          ),
+          .65
+        )
+
+      : measuredTransient;
 
 
   S.A.low =
@@ -4898,7 +5654,11 @@ function track(){
 
 
   S.A.transient =
-    transient;
+    lerp(
+      S.A.transient,
+      transient,
+      .40
+    );
 
 
   const now =
@@ -5169,9 +5929,18 @@ function receiveAudioExpression(
     null;
 
 
+  const sourceFrequency =
+    typeof source.frequency ===
+    "object"
+
+      ? source.frequency.value
+
+      : source.frequency;
+
+
   S.external.frequency =
     numberOrNull(
-      source.frequency ||
+      sourceFrequency ||
       source.frequency_hz ||
       source.glctc1Frequency
     );
@@ -5179,13 +5948,23 @@ function receiveAudioExpression(
 
   S.external.chakra =
     source.chakra ||
-    source.frequency?.chakra ||
+    (
+      typeof source.frequency ===
+      "object"
+        ? source.frequency.chakra
+        : null
+    ) ||
     null;
 
 
   S.external.planet =
     source.planet ||
-    source.frequency?.planet ||
+    (
+      typeof source.frequency ===
+      "object"
+        ? source.frequency.planet
+        : null
+    ) ||
     null;
 
 
@@ -5197,8 +5976,9 @@ function receiveAudioExpression(
 
   S.external.bass =
     numberOrNull(
-      source.bass ||
-      source.low
+      source.bass !== undefined
+        ? source.bass
+        : source.low
     );
 
 
@@ -5210,8 +5990,9 @@ function receiveAudioExpression(
 
   S.external.high =
     numberOrNull(
-      source.high ||
-      source.treble
+      source.high !== undefined
+        ? source.high
+        : source.treble
     );
 
 
@@ -5228,7 +6009,7 @@ function receiveAudioExpression(
 
 
   if(
-    S.external.bpm
+    S.external.bpm !== null
   ){
 
     S.bpm =
@@ -5405,11 +6186,19 @@ function getExpressionBPM(){
 
 function facilitator(){
 
+  /*
+   * AUTO OFF is intentionally a hard zero for
+   * automatic expression.
+   *
+   * Manual FX remain controlled separately
+   * inside fxValue().
+   */
+
   if(
     !S.auto
   ){
 
-    zeroAllFX();
+    zeroAutomaticState();
 
     return;
 
@@ -5570,7 +6359,7 @@ function facilitator(){
       A.energy*.18 +
 
       (
-        S.external.frequency
+        S.external.frequency !== null
           ? .12
           : 0
       ),
@@ -5679,6 +6468,24 @@ function facilitator(){
 
 
 /* =========================================================
+   MANUAL FX VALUE
+========================================================= */
+
+function manualFXValue(
+  key
+){
+
+  return clamp(
+    fx[key].bias /
+    100,
+    0,
+    1
+  );
+
+}
+
+
+/* =========================================================
    FX EXPRESSION
 ========================================================= */
 
@@ -5686,11 +6493,21 @@ function fxValue(
   key
 ){
 
+  /*
+   * AUTO OFF:
+   *
+   * The automatic audio expression is zero.
+   * The manual slider is still the direct
+   * FX amount.
+   */
+
   if(
     !S.auto
   ){
 
-    return 0;
+    return manualFXValue(
+      key
+    );
 
   }
 
@@ -5829,7 +6646,11 @@ function fxValue(
     ){
 
       expression +=
-        .12;
+        .12 *
+        (
+          .35 +
+          F.dance*.65
+        );
 
     }
 
@@ -5840,7 +6661,11 @@ function fxValue(
     ){
 
       expression +=
-        .06;
+        .06 *
+        (
+          .35 +
+          F.breathe*.65
+        );
 
     }
 
@@ -5851,7 +6676,11 @@ function fxValue(
     ){
 
       expression +=
-        .05;
+        .05 *
+        (
+          .35 +
+          F.pulse*.65
+        );
 
     }
 
@@ -5868,7 +6697,11 @@ function fxValue(
     ){
 
       expression +=
-        .12;
+        .12 *
+        (
+          .35 +
+          F.dance*.65
+        );
 
     }
 
@@ -5885,7 +6718,11 @@ function fxValue(
     ){
 
       expression +=
-        .14;
+        .14 *
+        (
+          .35 +
+          F.drift*.65
+        );
 
     }
 
@@ -5902,43 +6739,35 @@ function fxValue(
     ){
 
       expression +=
-        .08;
+        .08 *
+        (
+          .35 +
+          F.motion*.65
+        );
 
     }
 
   }
 
 
-  /* =======================================================
-     MUSIC-DRIVEN EVOLUTION
-  ======================================================= */
-
-  const index =
-    FX.findIndex(
-      x =>
-        x[0] === key
-    );
-
-
-  const evolution =
-    .08 *
-    (
-      .5 +
-      .5 *
-      Math.sin(
-        S.time *
-        (
-          .12 +
-          index*.017
-        ) +
-        index*1.37
-      )
-    );
-
-
-  expression +=
-    evolution;
-
+  /*
+   * IMPORTANT:
+   *
+   * There is deliberately NO random/sinusoidal
+   * evolution here.
+   *
+   * Every automatic value comes from:
+   *
+   * audio expression
+   * +
+   * image analysis
+   * +
+   * detected semantic scene
+   * +
+   * facilitator state
+   * +
+   * the user's FX weight.
+   */
 
   const result =
     clamp(
@@ -5972,11 +6801,17 @@ function drawStaticBase(){
   );
 
 
-  ctx.drawImage(
-    sourceCanvas,
-    0,
-    0
-  );
+  if(
+    S.image
+  ){
+
+    ctx.drawImage(
+      sourceCanvas,
+      0,
+      0
+    );
+
+  }
 
 }
 
@@ -5989,6 +6824,11 @@ function drawSemanticScene(
   time
 ){
 
+  /*
+   * AUTO OFF means the semantic layer system
+   * itself becomes completely still.
+   */
+
   if(
     !S.auto
   ){
@@ -6000,7 +6840,11 @@ function drawSemanticScene(
   }
 
 
-  backgroundCtx.clearRect(
+  /*
+   * Start with the reconstructed background.
+   */
+
+  ctx.clearRect(
     0,
     0,
     W,
@@ -6008,23 +6852,11 @@ function drawSemanticScene(
   );
 
 
-  backgroundCtx.drawImage(
-    sourceCanvas,
-    0,
-    0
-  );
-
-
-  /* =======================================================
-     BACKGROUND BREATHING
-  ======================================================= */
-
   const breathe =
     Math.sin(
       time*.00065
     ) *
-    S.F.breathe *
-    4;
+    S.F.breathe;
 
 
   const bgScale =
@@ -6033,37 +6865,29 @@ function drawSemanticScene(
     breathe*.0007;
 
 
-  layerCtx.clearRect(
-    0,
-    0,
-    W,
-    H
-  );
+  ctx.save();
 
 
-  layerCtx.save();
-
-
-  layerCtx.translate(
+  ctx.translate(
     W/2,
     H/2
   );
 
 
-  layerCtx.scale(
+  ctx.scale(
     bgScale,
     bgScale
   );
 
 
-  layerCtx.drawImage(
+  ctx.drawImage(
     backgroundCanvas,
     -W/2,
     -H/2
   );
 
 
-  layerCtx.restore();
+  ctx.restore();
 
 
   /* =======================================================
@@ -6071,13 +6895,40 @@ function drawSemanticScene(
   ======================================================= */
 
   if(
-    S.scene.person &&
-    S.personMask
+    S.scene.person
   ){
 
-    drawPersonScene(
-      time
-    );
+    if(
+      S.personMask &&
+      Object.keys(
+        S.layers.body || {}
+      ).length
+    ){
+
+      drawBodyParts(
+        time
+      );
+
+    }
+    else if(
+      S.personMask
+    ){
+
+      drawPersonWhole(
+        time
+      );
+
+    }
+    else if(
+      S.layers.person
+    ){
+
+      drawFallbackPerson(
+        S.layers.person,
+        time
+      );
+
+    }
 
   }
 
@@ -6152,59 +7003,6 @@ function drawSemanticScene(
     }
 
   }
-
-
-  ctx.clearRect(
-    0,
-    0,
-    W,
-    H
-  );
-
-
-  ctx.drawImage(
-    backgroundCanvas,
-    0,
-    0
-  );
-
-
-  if(
-    S.layers.body
-  ){
-
-    drawBodyParts(
-      time
-    );
-
-  }
-
-
-  /* =======================================================
-     PERSON OVERLAY
-  ======================================================= */
-
-  if(
-    S.scene.person &&
-    !Object.keys(
-      S.layers.body || {}
-    ).length
-  ){
-
-    drawPersonWhole(
-      time
-    );
-
-  }
-
-
-  /* =======================================================
-     ANIMALS / OBJECTS
-  ======================================================= */
-
-  drawObjectLayers(
-    time
-  );
 
 }
 
@@ -6318,6 +7116,24 @@ function drawPersonWhole(
 
 
   ctx.restore();
+
+}
+
+
+/* =========================================================
+   FALLBACK PERSON
+========================================================= */
+
+function drawFallbackPerson(
+  person,
+  time
+){
+
+  drawObjectMotion(
+    person,
+    time,
+    "animal"
+  );
 
 }
 
@@ -6519,6 +7335,15 @@ function drawPart(
     S.F.breathe*.015;
 
 
+  const verticalPulse =
+    1 +
+    Math.cos(
+      time*.0035 +
+      phase
+    ) *
+    S.F.breathe*.008;
+
+
   ctx.save();
 
 
@@ -6535,7 +7360,7 @@ function drawPart(
 
   ctx.scale(
     sx,
-    sx
+    verticalPulse
   );
 
 
@@ -6594,18 +7419,23 @@ function drawObjectMotion(
 
       ? Math.sin(
           time*.004 +
-          object.cy
+          object.cy*.01
         ) *
         S.F.dance*.08
 
       : type === "plant"
 
         ? Math.sin(
-            time*.0015
+            time*.0015 +
+            object.cx*.01
           ) *
           S.F.drift*.04
 
-        : 0;
+        : Math.sin(
+            time*.0008 +
+            object.cx*.004
+          ) *
+          S.F.motion*.012;
 
 
   const scale =
@@ -6614,9 +7444,36 @@ function drawObjectMotion(
 
     Math.sin(
       time*.003 +
-      object.cx
+      object.cx*.01
     ) *
     amplitude;
+
+
+  const vertical =
+    type === "animal"
+
+      ? Math.sin(
+          time*.0045 +
+          object.cx*.01
+        ) *
+        S.F.dance *
+        8
+
+      : type === "plant"
+
+        ? Math.sin(
+            time*.0018 +
+            object.cx*.01
+          ) *
+          S.F.drift *
+          5
+
+        : Math.sin(
+            time*.001 +
+            object.cy*.005
+          ) *
+          S.F.motion *
+          2;
 
 
   ctx.save();
@@ -6624,7 +7481,8 @@ function drawObjectMotion(
 
   ctx.translate(
     object.cx,
-    object.cy
+    object.cy +
+    vertical
   );
 
 
@@ -6655,17 +7513,31 @@ function drawObjectMotion(
    DRAW OBJECT LAYERS
 ========================================================= */
 
-function drawObjectLayers(){
+function drawObjectLayers(
+  time
+){
 
   /*
+   * Kept as a named pipeline hook so future
+   * semantic classes can be added without
+   * changing the render architecture.
+   */
 
-    Object layers are already integrated
-    into drawSemanticScene().
+  [
+    ...S.layers.animal,
+    ...S.layers.plant,
+    ...S.layers.structure
+  ].forEach(
+    object => {
 
-    This function intentionally remains as
-    a semantic pipeline hook.
+      drawObjectMotion(
+        object,
+        time,
+        object.kind
+      );
 
-  */
+    }
+  );
 
 }
 
@@ -6699,13 +7571,23 @@ function render(
     );
 
 
-    zeroAllFX();
+    updateFXUI(
+      {}
+    );
 
 
     return;
 
   }
 
+
+  /*
+   * AUTO OFF:
+   *
+   * Static semantic image.
+   *
+   * Manual FX are still available.
+   */
 
   if(
     !S.auto
@@ -6713,20 +7595,14 @@ function render(
 
     drawStaticBase();
 
-    zeroAllFX();
+  }
+  else{
 
-    return;
+    drawSemanticScene(
+      timestamp
+    );
 
   }
-
-
-  /* =======================================================
-     SEMANTIC SCENE FIRST
-  ======================================================= */
-
-  drawSemanticScene(
-    timestamp
-  );
 
 
   /* =======================================================
@@ -6747,6 +7623,16 @@ function render(
 
     }
   );
+
+
+  /*
+   * If AUTO is OFF and no manual FX weights have
+   * been changed, this is simply the original
+   * still image.
+   *
+   * If a slider is raised, that FX becomes the
+   * manual visual effect.
+   */
 
 
   /* =======================================================
@@ -7890,6 +8776,13 @@ function render(
   );
 
 
+  /*
+   * DRY is always the original image.
+   *
+   * WET is the current semantic + FX
+   * visual field.
+   */
+
   ctx.globalAlpha =
     1-S.wet;
 
@@ -7916,15 +8809,29 @@ function render(
     1;
 
 
-  /* =======================================================
-     LIVE FX UI
-  ======================================================= */
+  updateFXUI(
+    values
+  );
+
+}
+
+
+/* =========================================================
+   FX UI
+========================================================= */
+
+function updateFXUI(
+  values
+){
 
   FX.forEach(
     ([key]) => {
 
       const live =
-        values[key];
+        values[key] ??
+        manualFXValue(
+          key
+        );
 
 
       fx[key].live =
@@ -7945,6 +8852,7 @@ function render(
 
       fx[key].element.classList.toggle(
         "beat",
+        S.auto &&
         S.beat>.55 &&
         live>.03
       );
@@ -8291,6 +9199,20 @@ function finishRecording(){
 function numberOrNull(
   value
 ){
+
+  if(
+    value ===
+    null ||
+    value ===
+    undefined ||
+    value ===
+    ""
+  ){
+
+    return null;
+
+  }
+
 
   const n =
     Number(

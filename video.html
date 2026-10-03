@@ -2248,7 +2248,13 @@ const FX = [
 
   ["mushroom","MUSHROOM",55],
 
-  ["acid","ACID",60]
+  ["acid","ACID",60],
+
+  ["dance","DANCE",78],
+
+  ["lipSync","LIP SYNC",72],
+
+  ["objectFloat","OBJECT FLOAT",82]
 
 ];
 
@@ -2527,33 +2533,33 @@ const S = {
 
   },
 
-  F:{
+F:{
 
-    intensity:0,
+  intensity:0,
 
-    motion:0,
+  motion:0,
 
-    distortion:0,
+  distortion:0,
 
-    symmetry:0,
+  symmetry:0,
 
-    colour:0,
+  colour:0,
 
-    fluidity:0,
+  fluidity:0,
 
-    pulse:0,
+  pulse:0,
 
-    dance:0,
+  dance:0,
 
-    breathe:0,
+  lipSync:0,
 
-    drift:0
+  objectFloat:0,
 
-  },
+  breathe:0,
 
-  time:0
+  drift:0
 
-};
+},
 
 
 /* =========================================================
@@ -6512,7 +6518,7 @@ function facilitator(){
     );
 
 
-  S.F.drift =
+   S.F.drift =
     clamp(
       A.mid*.35 +
 
@@ -6524,6 +6530,64 @@ function facilitator(){
         Q.nature
           ? .20
           : .05
+      ),
+
+      0,
+      1
+    );
+
+
+  /* =======================================================
+     LIP SYNC
+  ======================================================= */
+
+  S.F.lipSync =
+    clamp(
+
+      A.mid*.42 +
+
+      A.high*.18 +
+
+      A.transient*.18 +
+
+      A.energy*.12 +
+
+      A.beat*.10 +
+
+      (
+        Q.face
+          ? .22
+          : 0
+      ),
+
+      0,
+      1
+    );
+
+
+  /* =======================================================
+     OBJECT FLOAT / DEPTH
+  ======================================================= */
+
+  S.F.objectFloat =
+    clamp(
+
+      A.low*.25 +
+
+      A.mid*.18 +
+
+      A.beat*.25 +
+
+      A.transient*.17 +
+
+      energy*.15 +
+
+      (
+        Q.animal ||
+        Q.nature ||
+        Q.structure
+          ? .12
+          : 0
       ),
 
       0,
@@ -7253,26 +7317,40 @@ function drawBodyParts(
   const torso =
     body.torso;
 
+  /* =======================================================
+     DANCE FX WEIGHT
+  ======================================================= */
+
+  const danceFX =
+    fxValue(
+      "dance"
+    );
+
+  const danceAmount =
+    S.F.dance *
+    danceFX;
 
   /* =======================================================
      TORSO
   ======================================================= */
 
-  if(torso){
+   if(torso){
 
     drawPart(
       torso,
       time,
       .18,
+      danceAmount*.055 +
       S.F.breathe*.025,
-      1
+      1 +
+      danceAmount*.018
     );
 
   }
 
 
-  /* =======================================================
-     FACE
+   /* =======================================================
+     FACE + AUDIO-REACTIVE LIP SYNC
   ======================================================= */
 
   if(face){
@@ -7285,6 +7363,12 @@ function drawBodyParts(
       1.01
     );
 
+
+    drawLipSync(
+      face,
+      time
+    );
+
   }
 
 
@@ -7292,27 +7376,36 @@ function drawBodyParts(
      ARMS
   ======================================================= */
 
-  if(leftArm){
+ if(leftArm){
 
     drawPart(
       leftArm,
       time,
       -.9,
-      S.F.dance*.08,
-      1
+      danceAmount*.16,
+      1 +
+      Math.sin(
+        time*.006
+      ) *
+      danceAmount*.018
     );
 
   }
 
 
-  if(rightArm){
+ if(rightArm){
 
     drawPart(
       rightArm,
       time,
       .9,
-      S.F.dance*.08,
-      1
+      -danceAmount*.16,
+      1 +
+      Math.sin(
+        time*.006 +
+        Math.PI
+      ) *
+      danceAmount*.018
     );
 
   }
@@ -7321,15 +7414,18 @@ function drawBodyParts(
   /* =======================================================
      LEGS
   ======================================================= */
-
-  if(leftLeg){
+ if(leftLeg){
 
     drawPart(
       leftLeg,
       time,
       .55,
-      S.F.dance*.045,
-      1
+      danceAmount*.09,
+      1 +
+      Math.sin(
+        time*.007
+      ) *
+      danceAmount*.025
     );
 
   }
@@ -7341,14 +7437,153 @@ function drawBodyParts(
       rightLeg,
       time,
       -.55,
-      S.F.dance*.045,
-      1
+      -danceAmount*.09,
+      1 +
+      Math.sin(
+        time*.007 +
+        Math.PI
+      ) *
+      danceAmount*.025
     );
 
   }
 
-}
+/* =========================================================
+   LIP SYNC
+========================================================= */
 
+function drawLipSync(
+  face,
+  time
+){
+
+  if(
+    !face ||
+    !face.canvas
+  ){
+
+    return;
+
+  }
+
+
+  const lipFX =
+    fxValue(
+      "lipSync"
+    );
+
+
+  const amount =
+    S.F.lipSync *
+    lipFX;
+
+
+  if(
+    amount <= 0
+  ){
+
+    return;
+
+  }
+
+
+  const b =
+    face.box;
+
+
+  if(
+    !b ||
+    b.w <= 0 ||
+    b.h <= 0
+  ){
+
+    return;
+
+  }
+
+
+  /*
+   * BodyPix gives us a face layer rather than
+   * individual mouth landmarks.
+   *
+   * This isolates the lower facial region and
+   * gives it audio-reactive vertical movement.
+   */
+
+  const mouthY =
+    b.y +
+    b.h*.62;
+
+
+  const mouthH =
+    b.h*.38;
+
+
+  const pulse =
+    .5 +
+    .5 *
+    Math.sin(
+      time*.018 +
+      S.A.phase*4
+    );
+
+
+  const opening =
+    amount *
+    (
+      .55 +
+      pulse*.45
+    );
+
+
+  ctx.save();
+
+
+  ctx.beginPath();
+
+
+  ctx.rect(
+    b.x,
+    mouthY,
+    b.w,
+    mouthH
+  );
+
+
+  ctx.clip();
+
+
+  ctx.translate(
+    b.x + b.w/2,
+    mouthY
+  );
+
+
+  ctx.scale(
+    1 +
+    opening*.018,
+
+    1 +
+    opening*.12
+  );
+
+
+  ctx.translate(
+    -(b.x + b.w/2),
+    -mouthY
+  );
+
+
+  ctx.drawImage(
+    face.canvas,
+    0,
+    0
+  );
+
+
+  ctx.restore();
+
+}
 
 /* =========================================================
    DRAW PART
@@ -7466,6 +7701,10 @@ function drawObjectMotion(
   }
 
 
+  /* =======================================================
+     EXISTING SEMANTIC MOTION
+  ======================================================= */
+
   const amplitude =
 
     type === "animal"
@@ -7516,6 +7755,7 @@ function drawObjectMotion(
 
 
   const vertical =
+
     type === "animal"
 
       ? Math.sin(
@@ -7542,8 +7782,11 @@ function drawObjectMotion(
           2;
 
 
-  ctx.save();
+  /*
+   * Draw the normal semantic object first.
+   */
 
+  ctx.save();
 
   ctx.translate(
     object.cx,
@@ -7551,17 +7794,14 @@ function drawObjectMotion(
     vertical
   );
 
-
   ctx.rotate(
     rotation
   );
-
 
   ctx.scale(
     scale,
     scale
   );
-
 
   ctx.drawImage(
     object.canvas,
@@ -7569,8 +7809,147 @@ function drawObjectMotion(
     -object.cy
   );
 
-
   ctx.restore();
+
+
+  /* =======================================================
+     OBJECT FLOAT / DEPTH REPEATER
+  ======================================================= */
+
+  const floatFX =
+    fxValue(
+      "objectFloat"
+    );
+
+
+  const floatAmount =
+    S.F.objectFloat *
+    floatFX;
+
+
+  if(
+    floatAmount <= 0
+  ){
+
+    return;
+
+  }
+
+
+  /*
+   * Three depth copies.
+   *
+   * Copy 1 = close
+   * Copy 2 = closer
+   * Copy 3 = approaching the screen
+   */
+
+  for(
+    let depth = 1;
+    depth <= 3;
+    depth++
+  ){
+
+    const phase =
+      depth *
+      1.73 +
+      object.cx*.003;
+
+
+    const travel =
+      (
+        .5 +
+        .5 *
+        Math.sin(
+          time*.0018 +
+          phase
+        )
+      ) *
+      floatAmount;
+
+
+    const depthScale =
+      1 +
+      travel *
+      (
+        .35 +
+        depth*.32
+      );
+
+
+    const driftX =
+      Math.sin(
+        time*.0014 +
+        phase
+      ) *
+      floatAmount *
+      (
+        12 +
+        depth*9
+      );
+
+
+    const driftY =
+      Math.cos(
+        time*.0011 +
+        phase
+      ) *
+      floatAmount *
+      (
+        9 +
+        depth*7
+      );
+
+
+    const alpha =
+      Math.max(
+        .10,
+        .34 -
+        depth*.055
+      ) *
+      floatAmount;
+
+
+    ctx.save();
+
+
+    ctx.globalAlpha =
+      alpha;
+
+
+    ctx.translate(
+      object.cx +
+      driftX,
+      object.cy +
+      driftY
+    );
+
+
+    ctx.rotate(
+      rotation *
+      (
+        1 +
+        depth*.35
+      )
+    );
+
+
+    ctx.scale(
+      depthScale,
+      depthScale
+    );
+
+
+    ctx.drawImage(
+      object.canvas,
+      -object.cx,
+      -object.cy
+    );
+
+
+    ctx.restore();
+
+  }
 
 }
 

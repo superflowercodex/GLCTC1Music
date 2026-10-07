@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  GLCTC1 — PSYCHEDELIC SPACE
+  Single-file, browser-only visual engine.
+  Load one image + one sound, press play. Nothing is uploaded.
+-->
 <html lang="en">
 
 <head>
@@ -1425,6 +1430,50 @@ button:disabled{
 
   }
 
+}
+
+
+/* =========================================================
+   POLISH — READABILITY / FOCUS / MOTION
+========================================================= */
+
+.readout-label,
+.fx-bias,
+.mix-labels,
+.auto-status{
+  font-size:9px;
+}
+
+.readout-value,
+.fx-name,
+.fx-value{
+  font-size:10px;
+}
+
+.fx-name{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible{
+  outline:2px solid var(--cyan);
+  outline-offset:2px;
+}
+
+@media(max-width:700px){
+  .fx-name{ font-size:8px; }
+}
+
+@media(max-width:390px){
+  .fx-name{ font-size:7px; }
+  .fx-value{ font-size:8px; }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .glctc1-shop-ad{ animation:none; }
 }
 
 </style>
@@ -3929,6 +3978,15 @@ function buildBodyPartLayers(
       c
     );
 
+      /*
+       * Fill the white mask with the real image pixels,
+       * so each body part is a COPY of the photo (not a
+       * white silhouette).
+       */
+      oc.globalCompositeOperation = "source-in";
+      oc.drawImage( sourceCanvas, 0, 0 );
+      oc.globalCompositeOperation = "source-over";
+
 
     const bounds =
       alphaBounds(
@@ -4014,84 +4072,18 @@ function buildFallbackLayers(){
 
 function rebuildSemanticBackground(){
 
-  backgroundCtx.clearRect(
-    0,
-    0,
-    W,
-    H
-  );
-
-
-  backgroundCtx.drawImage(
-    sourceCanvas,
-    0,
-    0
-  );
-
-
   /*
-   * True person segmentation gets first priority.
-   */
-
-  if(
-    S.personMask
-  ){
-
-    backgroundCtx.globalCompositeOperation =
-      "destination-out";
-
-
-    backgroundCtx.drawImage(
-      maskCanvas,
-      0,
-      0
-    );
-
-
-    backgroundCtx.globalCompositeOperation =
-      "source-over";
-
-  }
-  else if(
-    S.layers.person
-  ){
-
-    eraseObjectBoxFromBackground(
-      S.layers.person.box
-    );
-
-  }
-
-
-  /*
-   * COCO object layers use feathered
-   * bounding regions.
+   * COPY, NOT CUT.
    *
-   * This prevents the moving object from
-   * remaining permanently baked into the
-   * background.
+   * The background is always a complete, untouched copy of the
+   * source image. Floating / dancing layers are drawn ON TOP of
+   * it, so nothing is ever left as a black hole behind a moved
+   * person, animal, plant or object.
    */
 
-  [
-    ...S.layers.animal,
-    ...S.layers.plant,
-    ...S.layers.structure
-  ].forEach(
-    layer => {
+  backgroundCtx.clearRect( 0, 0, W, H );
 
-      if(
-        layer &&
-        layer.box
-      ){
-
-        eraseObjectBoxFromBackground(
-          layer.box
-        );
-
-      }
-
-    }
-  );
+  backgroundCtx.drawImage( sourceCanvas, 0, 0 );
 
 }
 
@@ -4100,100 +4092,7 @@ function rebuildSemanticBackground(){
    ERASE OBJECT BOX
 ========================================================= */
 
-function eraseObjectBoxFromBackground(
-  box
-){
 
-  if(!box){
-    return;
-  }
-
-
-  backgroundCtx.save();
-
-
-  const padX =
-    Math.max(
-      6,
-      box.w*.10
-    );
-
-
-  const padY =
-    Math.max(
-      6,
-      box.h*.10
-    );
-
-
-  const x =
-    box.x -
-    padX;
-
-
-  const y =
-    box.y -
-    padY;
-
-
-  const w =
-    box.w +
-    padX*2;
-
-
-  const h =
-    box.h +
-    padY*2;
-
-
-  const gradient =
-    backgroundCtx.createRadialGradient(
-      x+w/2,
-      y+h/2,
-      Math.min(w,h)*.22,
-      x+w/2,
-      y+h/2,
-      Math.max(w,h)*.72
-    );
-
-
-  gradient.addColorStop(
-    0,
-    "rgba(0,0,0,1)"
-  );
-
-
-  gradient.addColorStop(
-    .72,
-    "rgba(0,0,0,.94)"
-  );
-
-
-  gradient.addColorStop(
-    1,
-    "rgba(0,0,0,0)"
-  );
-
-
-  backgroundCtx.globalCompositeOperation =
-    "destination-out";
-
-
-  backgroundCtx.fillStyle =
-    gradient;
-
-
-  backgroundCtx.fillRect(
-    x,
-    y,
-    w,
-    h
-  );
-
-
-  backgroundCtx.restore();
-
-}
 
 
 /* =========================================================
@@ -5479,14 +5378,7 @@ FX.forEach(
       "input",
       () => {
 
-        if(!S.auto){
-
-          manualFX[key] =
-            Number(
-              fx[key].input.value
-            );
-
-        }
+        manualFX[key] = Number( fx[key].input.value );
 
       }
     );
@@ -6252,11 +6144,13 @@ window.addEventListener(
   event => {
 
     if(
-      !event.data
+      !event.data ||
+      (
+        event.origin !== window.location.origin &&
+        window.location.origin !== "null"
+      )
     ){
-
       return;
-
     }
 
 
@@ -6360,7 +6254,13 @@ window.addEventListener(
   event => {
 
     if(
-      event.newValue
+      event.newValue &&
+      [
+        "glctc1_audio_expression",
+        "glctc1_audio_analysis",
+        "glctc1_latest_audio_analysis",
+        "latestAnalysis"
+      ].includes( event.key )
     ){
 
       try{
@@ -7358,29 +7258,7 @@ function autoDecision(){
    MANUAL FX VALUE
 ========================================================= */
 
-function manualFXValue(
-  key
-){
 
-  if(
-    !fx[key]
-  ){
-
-    return 0;
-
-  }
-
-
-  return clamp(
-    Number(
-      fx[key].bias
-    ) /
-    100,
-    0,
-    1
-  );
-
-}
 
 
 /* =========================================================
@@ -8146,194 +8024,7 @@ function drawBodyParts(
    LIP SYNC
 ========================================================= */
 
-function drawLipSync(
-  face,
-  time,
-  amount
-){
 
-  if(
-    !face ||
-    !face.canvas
-  ){
-
-    return;
-
-  }
-
-
-  if(
-    amount <= 0
-  ){
-
-    return;
-
-  }
-
-
-  const b =
-    face.box;
-
-
-  const cx =
-    face.cx;
-
-
-  const cy =
-    face.cy;
-
-
-  if(
-    !b ||
-    b.w <= 0 ||
-    b.h <= 0
-  ){
-
-    return;
-
-  }
-
-
-  /*
-   * BodyPix gives us a segmented face layer
-   * rather than individual mouth landmarks.
-   *
-   * The lower facial region is therefore used
-   * as an expressive audio-reactive mouth area.
-   *
-   * This is visual approximation, not
-   * phoneme-level lip tracking.
-   */
-
-  const pulse =
-    .5 +
-    .5 *
-    Math.sin(
-      time*.018 +
-      S.A.mid*4
-    );
-
-
-  const mouthAmount =
-    clamp(
-      amount *
-      (
-        .35 +
-        pulse*.65
-      ),
-      0,
-      1
-    );
-
-
-  const faceHeight =
-    b &&
-    b.height
-      ? b.height
-      : face.canvas.height;
-
-
-  const mouthY =
-    faceHeight *
-    .67;
-
-
-  const mouthHeight =
-    Math.max(
-      2,
-      faceHeight *
-      .18 *
-      mouthAmount
-    );
-
-
-  const sourceY =
-    Math.max(
-      0,
-      Math.floor(
-        mouthY -
-        mouthHeight/2
-      )
-    );
-
-
-  const sourceH =
-    Math.min(
-      face.canvas.height -
-      sourceY,
-      Math.max(
-        2,
-        Math.floor(
-          mouthHeight
-        )
-      )
-    );
-
-
-  if(
-    sourceH <= 0
-  ){
-
-    return;
-
-  }
-
-
-  const mouthScale =
-    1 +
-    mouthAmount*.16;
-
-
-  const mouthLift =
-    Math.sin(
-      time*.012
-    ) *
-    mouthAmount *
-    2;
-
-
-  ctx.save();
-
-
-  ctx.translate(
-    cx,
-    cy +
-    mouthLift
-  );
-
-
-  ctx.scale(
-    1,
-    mouthScale
-  );
-
-
-  ctx.globalAlpha =
-    .94;
-
-
-  ctx.drawImage(
-    face.canvas,
-
-    0,
-    sourceY,
-
-    face.canvas.width,
-    sourceH,
-
-    -face.canvas.width/2,
-    -face.canvas.height/2 +
-    mouthY -
-    sourceH/2,
-
-    face.canvas.width,
-    sourceH
-  );
-
-
-  ctx.restore();
-
-}
 
 /* =========================================================
    DRAW PART
@@ -8449,167 +8140,79 @@ function drawLipSync(
 
   if(
     !face ||
-    !face.canvas
+    !face.canvas ||
+    !face.box ||
+    amount <= 0
   ){
-
     return;
-
   }
 
-
-  const b =
-    face.box;
-
-
-  const cx =
-    face.cx;
-
-
-  const cy =
-    face.cy;
-
+  const b = face.box;
 
   /*
-   * The face layer is already segmented by
-   * BodyPix.
-   *
-   * We use the lower portion of that face
-   * layer as an audio-reactive mouth region.
-   *
-   * This is deliberately an expressive visual
-   * approximation rather than phoneme detection.
+   * Visual approximation (not phoneme tracking):
+   * the lower part of the segmented face layer is
+   * copied back over itself and stretched vertically
+   * with the music.
    */
 
   const pulse =
-    (
-      .5 +
-      .5 *
-      Math.sin(
-        time*.018 +
-        S.A.mid*4
-      )
+    .5 +
+    .5 * Math.sin(
+      time*.018 +
+      S.A.mid*4
     );
-
 
   const mouthAmount =
     clamp(
       amount *
-      (
-        .35 +
-        pulse*.65
-      ),
+      ( .35 + pulse*.65 ),
       0,
       1
     );
 
+  const mouthCy =
+    b.y + b.h*.72;
 
-  const faceHeight =
-    b && b.height
-      ? b.height
-      : face.canvas.height;
+  const sh =
+    Math.max( 2, b.h*.22 );
 
-
-  const mouthY =
-    faceHeight *
-    .67;
-
-
-  const mouthHeight =
-    Math.max(
-      2,
-      faceHeight *
-      .18 *
-      mouthAmount
-    );
-
-
-  const sourceY =
-    Math.max(
+  const sy =
+    clamp(
+      mouthCy - sh/2,
       0,
-      Math.floor(
-        mouthY -
-        mouthHeight/2
-      )
+      H - sh
     );
 
-
-  const sourceH =
-    Math.min(
-      face.canvas.height -
-      sourceY,
-      Math.max(
-        2,
-        Math.floor(
-          mouthHeight
-        )
-      )
-    );
-
-
-  if(
-    sourceH <= 0
-  ){
-
-    return;
-
-  }
-
-
-  /*
-   * Draw the lower-face region back over
-   * the normal face layer with a small
-   * vertical expression.
-   */
-
-  const mouthScale =
-    1 +
-    mouthAmount*.16;
-
-
-  const mouthLift =
-    Math.sin(
-      time*.012
-    ) *
-    mouthAmount *
-    2;
-
+  const lift =
+    Math.sin( time*.012 ) *
+    mouthAmount * 2;
 
   ctx.save();
 
-
   ctx.translate(
-    cx,
-    cy +
-    mouthLift
+    b.x + b.w/2,
+    mouthCy + lift
   );
-
 
   ctx.scale(
     1,
-    mouthScale
+    1 + mouthAmount*.16
   );
 
-
-  ctx.globalAlpha =
-    .94;
-
+  ctx.globalAlpha = .94;
 
   ctx.drawImage(
     face.canvas,
-
-    0,
-    sourceY,
-    face.canvas.width,
-    sourceH,
-
-    -face.canvas.width/2,
-    -face.canvas.height/2 +
-    mouthY -
-    sourceH/2,
-    face.canvas.width,
-    sourceH
+    b.x,
+    sy,
+    b.w,
+    sh,
+    -b.w/2,
+    -sh/2,
+    b.w,
+    sh
   );
-
 
   ctx.restore();
 
@@ -9055,6 +8658,11 @@ function render(
     values.wobble > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     tempCtx.clearRect(
       0,
       0,
@@ -9131,6 +8739,11 @@ function render(
     values.warp > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalAlpha =
       values.warp*.38;
 
@@ -9180,6 +8793,11 @@ function render(
     values.spin > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.save();
 
 
@@ -9224,6 +8842,11 @@ function render(
   if(
     values.zoom > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.save();
 
@@ -9281,6 +8904,11 @@ function render(
     values.echo > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalCompositeOperation =
       "screen";
 
@@ -9318,6 +8946,11 @@ function render(
   if(
     values.prism > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -9359,6 +8992,11 @@ function render(
   if(
     values.kaleidoscope > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -9460,6 +9098,11 @@ function render(
     values.symmetry > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalCompositeOperation =
       "screen";
 
@@ -9511,6 +9154,11 @@ function render(
   if(
     values.liquid > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -9573,6 +9221,11 @@ function render(
     values.ripple > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalCompositeOperation =
       "screen";
 
@@ -9625,6 +9278,11 @@ function render(
   if(
     values.tunnel > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -9683,6 +9341,11 @@ function render(
   if(
     values.mushroom > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -9756,6 +9419,11 @@ function render(
     values.acid > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalCompositeOperation =
       "screen";
 
@@ -9808,6 +9476,11 @@ function render(
   if(
     values.colour > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     const gradient =
       wetCtx.createRadialGradient(
@@ -9863,6 +9536,11 @@ function render(
     values.glow > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     const glow =
       wetCtx.createRadialGradient(
         W/2,
@@ -9915,6 +9593,11 @@ function render(
   if(
     values.particles > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -10007,6 +9690,11 @@ function render(
   if(
     values.dmt > 0
   ){
+
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
 
     wetCtx.globalCompositeOperation =
       "screen";
@@ -10107,6 +9795,11 @@ function render(
     values.fade > 0
   ){
 
+  wetCtx.globalAlpha = 1;
+  wetCtx.globalCompositeOperation = "source-over";
+  wetCtx.filter = "none";
+
+
     wetCtx.globalCompositeOperation =
       "source-over";
 
@@ -10163,9 +9856,7 @@ function render(
    * visual field.
    */
 
-  ctx.globalAlpha =
-    1-S.wet;
-
+  ctx.globalAlpha = 1;
 
   ctx.drawImage(
     sourceCanvas,
@@ -10561,11 +10252,8 @@ function finishRecording(){
   ){
 
     S.recStream
-      .getTracks()
-      .forEach(
-        track =>
-          track.stop()
-      );
+      .getVideoTracks()
+      .forEach( track => track.stop() );
 
   }
 
@@ -10883,3 +10571,4 @@ render(
 </body>
 
 </html>
+

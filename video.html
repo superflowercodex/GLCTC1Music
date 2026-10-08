@@ -2816,8 +2816,11 @@ pictureInput.onchange =
 
         status.textContent =
           S.songURL
-            ? "IMAGE + SOUND READY — TURN AUTO ON AND PRESS PLAY."
+            ? "IMAGE + SOUND READY — AUTO IS ON — PRESS PLAY."
             : "IMAGE READY — NOW LOAD YOUR SOUND.";
+
+
+        ensureAutoOn();
 
 
         ready();
@@ -2920,8 +2923,11 @@ songInput.onchange =
 
         status.textContent =
           S.image
-            ? "IMAGE + SOUND READY — TURN AUTO ON AND PRESS PLAY."
+            ? "IMAGE + SOUND READY — AUTO IS ON — PRESS PLAY."
             : "SOUND LOADED — NOW LOAD YOUR IMAGE.";
+
+
+        ensureAutoOn();
 
 
         ready();
@@ -5305,87 +5311,115 @@ timeline.oninput =
  *   → manual positions remain stored untouched.
  */
 
-const manualFX = {};
-
 
 /* =========================================================
-   CAPTURE MANUAL FX POSITIONS
+   TWO LOCKED SLIDER PROFILES
 ========================================================= */
-
-function captureManualFX(){
-
-  FX.forEach(
-    ([key]) => {
-
-      manualFX[key] =
-        Number(
-          fx[key].bias
-        );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   RESTORE MANUAL FX POSITIONS
-========================================================= */
-
-function restoreManualFX(){
-
-  FX.forEach(
-    ([key]) => {
-
-      const value =
-        Number.isFinite(
-          manualFX[key]
-        )
-          ? manualFX[key]
-          : 0;
-
-      fx[key].bias =
-        value;
-
-      fx[key].input.value =
-        value;
-
-      fx[key].live =
-        0;
-
-      fx[key].output.textContent =
-        "0";
-
-      fx[key].element.classList.remove(
-        "active",
-        "beat"
-      );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   MANUAL SLIDER TRACKING
-========================================================= */
+/*
+ * AUTO profile   : the slider positions the user sets while AUTO is ON.
+ *                  Starts at the facilitator defaults.
+ * MANUAL profile : the slider positions the user sets while AUTO is OFF.
+ *                  Starts at HOME (zero).
+ *
+ * Each profile is remembered separately. Moving a slider only edits the
+ * profile of the mode you are in, and it stays locked there. Pressing AUTO
+ * swaps the other profile onto the sliders so you can compare them.
+ */
+const profiles = {
+  auto:{},
+  manual:{}
+};
 
 FX.forEach(
-  ([key]) => {
-
-    fx[key].input.addEventListener(
-      "input",
-      () => {
-
-        manualFX[key] = Number( fx[key].input.value );
-
-      }
-    );
-
+  ([key,name,bias]) => {
+    profiles.auto[key] = bias;
+    profiles.manual[key] = 0;
   }
 );
 
+const manualFX = profiles.manual;
+
+function currentMode(){
+  return S.auto ? "auto" : "manual";
+}
+
+function applyProfile(mode){
+
+  FX.forEach(
+    ([key]) => {
+
+      const value = Number.isFinite(profiles[mode][key])
+        ? profiles[mode][key]
+        : 0;
+
+      fx[key].bias = value;
+      fx[key].input.value = value;
+      fx[key].live = 0;
+      fx[key].output.textContent = "0";
+      fx[key].element.classList.remove("active","beat");
+
+    }
+  );
+
+  document.querySelectorAll(".fx-bias").forEach(
+    el => {
+      el.textContent = mode === "auto"
+        ? "FACILITATOR WEIGHT"
+        : "MANUAL AMOUNT";
+    }
+  );
+
+}
+
+/* Slider moves are written into the profile of the current mode. */
+FX.forEach(
+  ([key]) => {
+    fx[key].input.addEventListener(
+      "input",
+      () => {
+        profiles[currentMode()][key] = Number(fx[key].input.value);
+      }
+    );
+  }
+);
+
+function setAuto(on){
+
+  on = !!on;
+
+  if(on === S.auto){
+    return;
+  }
+
+  /* Lock the current positions into the mode we are leaving. */
+  FX.forEach(
+    ([key]) => {
+      profiles[currentMode()][key] = Number(fx[key].input.value);
+    }
+  );
+
+  S.auto = on;
+
+  applyProfile(on ? "auto" : "manual");
+
+  if(!on){
+    resetAudioExpression();
+    S.beat = 0;
+    S.lastBeat = 0;
+    S.lastStrong = 0;
+    status.classList.remove("active");
+  }
+
+  updateAutoUI();
+
+}
+
+/* Image or sound loading always brings AUTO back on. */
+function ensureAutoOn(){
+  if(!S.auto){
+    setAuto(true);
+  }
+}
 
 /* =========================================================
    AUTO UI
@@ -5393,39 +5427,17 @@ FX.forEach(
 
 function updateAutoUI(){
 
-  autoButton.classList.toggle(
-    "on",
-    S.auto
-  );
+  autoButton.classList.toggle("on", S.auto);
 
+  autoButton.textContent = S.auto ? "AUTO ON" : "AUTO OFF";
 
-  autoButton.textContent =
-    S.auto
-      ? "AUTO ON"
-      : "AUTO OFF";
+  autoStatus.classList.toggle("on", S.auto);
 
-
-  autoStatus.classList.toggle(
-    "on",
-    S.auto
-  );
-
-
-  if(S.auto){
-
-    autoStatus.textContent =
-      "FACILITATOR ACTIVE — AUDIO + IMAGE + SEMANTIC LAYERS EVOLVING.";
-
-  }
-  else{
-
-    autoStatus.textContent =
-      "MANUAL MODE — USER FX SETTINGS ACTIVE.";
-
-  }
+  autoStatus.textContent = S.auto
+    ? "FACILITATOR ACTIVE — AUDIO + IMAGE + SEMANTIC LAYERS EVOLVING."
+    : "MANUAL MODE — YOUR OWN FX SETTINGS ARE ACTIVE.";
 
 }
-
 
 /* =========================================================
    AUTO BUTTON
@@ -5434,97 +5446,27 @@ function updateAutoUI(){
 autoButton.onclick =
   () => {
 
-    /*
-     * AUTO ON → AUTO OFF
-     *
-     * Capture nothing here.
-     *
-     * The manual settings have already been
-     * stored whenever the user moved a slider.
-     */
+    setAuto(!S.auto);
 
-    if(S.auto){
-
-      S.auto =
-        false;
-
-
-      restoreManualFX();
-
-
-      resetAudioExpression();
-
-
-      S.beat =
-        0;
-
-      S.lastBeat =
-        0;
-
-      S.lastStrong =
-        0;
-
-
-      updateAutoUI();
-
-
-      status.classList.remove(
-        "active"
-      );
-
-
-      status.textContent =
-        "AUTO OFF — YOUR MANUAL FX SETTINGS ARE BACK.";
-
-      return;
-
-    }
-
-
-    /*
-     * AUTO OFF → AUTO ON
-     *
-     * Do NOT alter the manual settings.
-     *
-     * The audio / DMT / semantic facilitator
-     * now controls the visual output.
-     */
-
-    S.auto =
-      true;
-
-
-    updateAutoUI();
-
-
-    status.textContent =
-      S.playing
-
-        ? "THE SONG IS THE INSTRUCTION."
-
-        : "AUTO ON — AUDIO + IMAGE + SEMANTIC FACILITATOR ACTIVE.";
+    status.textContent = S.auto
+      ? (
+          S.playing
+            ? "THE SONG IS THE INSTRUCTION."
+            : "AUTO ON — YOUR AUTO SETTINGS ARE BACK."
+        )
+      : "AUTO OFF — YOUR MANUAL SETTINGS ARE BACK.";
 
   };
-
 
 /* =========================================================
    AUTO STARTS ON
 ========================================================= */
 
-S.auto =
-  true;
+S.auto = true;
 
-
-/*
- * Start the manual-state store from
- * the current slider positions.
- */
-
-captureManualFX();
-
+applyProfile("auto");
 
 updateAutoUI();
-
 
 /* =========================================================
    LIVE AUDIO TRACK
@@ -6313,13 +6255,7 @@ function facilitator(){
    * inside fxValue().
    */
 
-  if(
-    !S.auto
-  ){
-
-    return;
-
-  }
+  if(!S.auto){ manualFacilitator(); return; }
 
 
   const A =
@@ -7233,9 +7169,10 @@ function autoDecision(){
    * =======================================================
    */
 
-  Object.keys(
-    D
-  ).forEach(
+  D.dance = Math.max(D.dance, F.dance*.85);
+  D.objectFloat = Math.max(D.objectFloat, F.objectFloat*.9);
+
+  Object.keys(D).forEach(
     key => {
 
       D[key] =
@@ -7411,6 +7348,123 @@ function manualFXValue(
 }
 
 
+
+/* =========================================================
+   EXPRESSION HELPERS — DANCE / LIP SYNC / OBJECT FLOAT
+========================================================= */
+
+/*
+ * AUTO ON  : the decision engine has already combined the music,
+ *            the image and the slider weight, so use it directly.
+ * AUTO OFF : slider amount × a live drive (the music if playing,
+ *            a steady pulse if not), so the sliders really work.
+ */
+function expr(key){
+
+  const v = fxValue(key);
+
+  if(S.auto){
+    return clamp(v*1.5, 0, 1);
+  }
+
+  const drive = S.F && Number.isFinite(S.F[key]) ? S.F[key] : 0;
+
+  return clamp(v*drive*1.5, 0, 1);
+
+}
+
+function manualFacilitator(){
+
+  const A = S.A || {};
+
+  const drive = clamp(
+    .55 +
+    (A.energy || 0)*.5 +
+    (A.beat || 0)*.3,
+    0,
+    1
+  );
+
+  S.F = {
+    intensity:0,
+    motion:0,
+    distortion:0,
+    symmetry:0,
+    colour:0,
+    fluidity:0,
+    pulse:0,
+    dance:drive,
+    lipSync:drive,
+    objectFloat:drive,
+    breathe:0,
+    drift:0
+  };
+
+}
+
+/* Depth copies that drift toward the screen. */
+function drawFloatCopies(canvasEl, cx, cy, time, amount, seed, maxAlpha){
+
+  if(!canvasEl || amount <= 0){
+    return;
+  }
+
+  const top = maxAlpha || .34;
+
+  for(let depth = 1; depth <= 3; depth++){
+
+    const phase = depth*1.73 + (seed || 0)*.003;
+
+    const travel = (.5 + .5*Math.sin(time*.0018 + phase)) * amount;
+
+    const depthScale = 1 + travel*(.35 + depth*.32);
+
+    const driftX = Math.sin(time*.0014 + phase) * amount * (12 + depth*9);
+
+    const driftY = Math.cos(time*.0011 + phase) * amount * (9 + depth*7);
+
+    const alpha = Math.max(.10, top - depth*.055) * amount;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.translate(cx + driftX, cy + driftY);
+    ctx.rotate(Math.sin(time*.001 + phase) * amount * .03 * depth);
+    ctx.scale(depthScale, depthScale);
+    ctx.drawImage(canvasEl, -cx, -cy);
+    ctx.restore();
+
+  }
+
+}
+
+/* Used when no person / animal / object layers were found. */
+function drawWholeImageMotion(time){
+
+  const d = expr("dance");
+
+  const f = expr("objectFloat");
+
+  ctx.clearRect(0, 0, W, H);
+
+  const breathe = 1 + Math.sin(time*.00065) * (S.F.breathe || 0) * .008;
+
+  const pulse = breathe + Math.sin(time*.006) * d * .02;
+
+  ctx.save();
+  ctx.translate(W/2, H/2);
+  ctx.rotate(Math.sin(time*.0035) * d * .035);
+  ctx.scale(pulse, pulse);
+  ctx.translate(
+    Math.sin(time*.0018) * d * 14,
+    Math.cos(time*.003) * d * 8
+  );
+  ctx.drawImage(sourceCanvas, -W/2, -H/2);
+  ctx.restore();
+
+  drawFloatCopies(sourceCanvas, W/2, H/2, time, f, 0, .30);
+
+}
+
 /* =========================================================
    DRAW STATIC BASE
 ========================================================= */
@@ -7457,13 +7511,27 @@ function drawSemanticScene(
    */
 
   if(
-    !S.auto
+    !S.auto &&
+    expr("dance") <= 0 &&
+    expr("lipSync") <= 0 &&
+    expr("objectFloat") <= 0
   ){
-
     drawStaticBase();
-
     return;
+  }
 
+  const hasLayers =
+    (
+      S.scene.person &&
+      (S.personMask || S.layers.person)
+    ) ||
+    (S.layers.animal && S.layers.animal.length) ||
+    (S.layers.plant && S.layers.plant.length) ||
+    (S.layers.structure && S.layers.structure.length);
+
+  if(!hasLayers){
+    drawWholeImageMotion(time);
+    return;
   }
 
 
@@ -7658,9 +7726,9 @@ function drawSemanticScene(
    PERSON WHOLE
 ========================================================= */
 
-function drawPersonWhole(
-  time
-){
+function drawPersonWhole(time){
+  const dAmt = expr("dance");
+  const fAmt = expr("objectFloat");
 
   const mask =
     maskCanvas;
@@ -7701,7 +7769,7 @@ function drawPersonWhole(
       time*.005 *
       (
         .7 +
-        S.F.dance
+        dAmt
       )
     );
 
@@ -7710,7 +7778,7 @@ function drawPersonWhole(
     Math.sin(
       time*.0018
     ) *
-    S.F.dance *
+    dAmt *
     12;
 
 
@@ -7734,7 +7802,7 @@ function drawPersonWhole(
 
   ctx.rotate(
     dance *
-    S.F.dance *
+    dAmt *
     .035
   );
 
@@ -7750,7 +7818,7 @@ function drawPersonWhole(
     Math.cos(
       time*.003
     ) *
-    S.F.dance *
+    dAmt *
     5
   );
 
@@ -7763,6 +7831,8 @@ function drawPersonWhole(
 
 
   ctx.restore();
+
+  drawFloatCopies(layerCanvas, W/2, H/2, time, fAmt, 0, .34);
 
 }
 
@@ -7782,7 +7852,36 @@ function drawFallbackPerson(
     "animal"
   );
 
+
+  const lipAmt = expr("lipSync");
+
+  if(
+    lipAmt > 0 &&
+    person &&
+    person.canvas &&
+    person.box
+  ){
+
+    const pb = person.box;
+
+    drawLipSync(
+      {
+        canvas:person.canvas,
+        box:{
+          x:pb.x + pb.w*.30,
+          y:pb.y,
+          w:pb.w*.40,
+          h:pb.h*.16
+        }
+      },
+      time,
+      lipAmt
+    );
+
+  }
+
 }
+
 
 
 /* =========================================================
@@ -7842,14 +7941,23 @@ function drawBodyParts(
    */
 
   const danceFX =
-    fxValue(
-      "dance"
-    );
+    expr("dance");
 
+
+  const _fl = expr("objectFloat");
+
+  if(_fl > 0){
+    [torso, face, leftArm, rightArm, leftLeg, rightLeg].forEach(
+      p => {
+        if(p && p.canvas){
+          drawFloatCopies(p.canvas, p.cx, p.cy, time, _fl, 0, .30);
+        }
+      }
+    );
+  }
 
   const danceAmount =
     clamp(
-      S.F.dance *
       danceFX,
       0,
       1
@@ -7917,14 +8025,11 @@ function drawBodyParts(
      */
 
     const lipFX =
-      fxValue(
-        "lipSync"
-      );
+      expr("lipSync");
 
 
     const lipAmount =
       clamp(
-        S.F.lipSync *
         lipFX,
         0,
         1
@@ -8223,11 +8328,8 @@ function drawLipSync(
    OBJECT MOTION
 ========================================================= */
 
-function drawObjectMotion(
-  object,
-  time,
-  type
-){
+function drawObjectMotion(object, time, type){
+  const dAmt = expr("dance");
 
   if(
     !object ||
@@ -8247,7 +8349,7 @@ function drawObjectMotion(
 
     type === "animal"
 
-      ? S.F.dance*.10
+      ? dAmt*.10
 
       : type === "plant"
 
@@ -8264,7 +8366,7 @@ function drawObjectMotion(
           time*.004 +
           object.cy*.01
         ) *
-        S.F.dance*.08
+        dAmt*.08
 
       : type === "plant"
 
@@ -8300,7 +8402,7 @@ function drawObjectMotion(
           time*.0045 +
           object.cx*.01
         ) *
-        S.F.dance *
+        dAmt *
         8
 
       : type === "plant"
@@ -8355,13 +8457,10 @@ function drawObjectMotion(
   ======================================================= */
 
   const floatFX =
-    fxValue(
-      "objectFloat"
-    );
+    expr("objectFloat");
 
 
   const floatAmount =
-    S.F.objectFloat *
     floatFX;
 
 
@@ -8572,20 +8671,7 @@ function render(
    * Manual FX are still available.
    */
 
-  if(
-    !S.auto
-  ){
-
-    drawStaticBase();
-
-  }
-  else{
-
-    drawSemanticScene(
-      timestamp
-    );
-
-  }
+  drawSemanticScene(timestamp);
 
 
   /* =======================================================

@@ -953,6 +953,31 @@ input[type=file]::file-selector-button{
 }
 
 
+
+/* =========================================================
+   PAUSE CLOCK + VOCAL (LIP SYNC) STATE
+========================================================= */
+
+S.paused = false;
+S.clock = 0;
+S.lastTs = null;
+S.repaint = 0;
+
+S.vocal = {
+  level:0,
+  mouth:0,
+  width:.7,
+  env:0,
+  fluxAvg:0,
+  lastOnset:0,
+  idx:0,
+  seq:[],
+  prevBands:null,
+  shape:{open:.6,width:.8},
+  meterTick:0,
+  presence:0
+};
+
 /* =========================================================
    WET / DRY
 ========================================================= */
@@ -1915,6 +1940,54 @@ FACILITATOR OFF
 
 </div>
 
+
+<!-- =====================================================
+     LIP SYNC — LYRICS + MOUTH
+====================================================== -->
+
+<div class="auto-panel">
+
+<div class="auto-title">
+LIP SYNC — LYRICS &amp; MOUTH
+</div>
+
+<div class="auto-description">
+The mouth follows the singing voice in the song: it opens on every
+syllable and closes in the gaps. Optionally paste the lyrics so the
+vowel shapes (AH, OH, EE, OO) match the words. If the mouth drifts
+from the words, drag the timeline once to re-sync.
+</div>
+
+<textarea
+  id="lyricsInput"
+  rows="4"
+  placeholder="Paste lyrics here (optional)..."
+  style="width:100%;margin-top:10px;padding:10px;border-radius:10px;border:1px solid #00ffff40;background:#04040e;color:#e2e8f0;font:12px/1.5 Arial,sans-serif;resize:vertical;"
+></textarea>
+
+<div class="mix-heading" style="margin-top:12px;">
+<span>MOUTH POSITION</span>
+<span id="mouthPosOut">74</span>
+</div>
+
+<input
+  id="mouthPos"
+  class="mix-range"
+  type="range"
+  min="55"
+  max="90"
+  value="74"
+>
+
+<div
+  id="vocalMeter"
+  class="auto-status"
+  style="margin-top:10px;"
+>
+VOICE — WAITING FOR SONG
+</div>
+
+</div>
 
 <!-- =====================================================
      PLAYER
@@ -4957,6 +5030,27 @@ playButton.onclick =
 
     try{
 
+      /* PAUSE / RESUME — second press pauses, third resumes. */
+      if(S.playing){
+
+        sourceAudio.pause();
+
+        S.playing = false;
+
+        S.paused = true;
+
+        resetAudioExpression();
+
+        playButton.textContent = "▶ RESUME";
+
+        status.classList.remove("active");
+
+        status.textContent = "PAUSED — PRESS RESUME TO CONTINUE.";
+
+        return;
+
+      }
+
       await audio();
 
 
@@ -5027,6 +5121,17 @@ stopButton.onclick =
 
 
 function stop(){
+
+  S.paused = false;
+
+  S.repaint = 6;
+
+  S.vocal.idx = 0;
+
+  S.vocal.mouth = 0;
+
+  S.vocal.env = 0;
+
 
   sourceAudio.pause();
 
@@ -5211,8 +5316,25 @@ function zeroAllFX(){
    AUDIO END
 ========================================================= */
 
+sourceAudio.addEventListener(
+  "play",
+  () => {
+    S.paused = false;
+  }
+);
+
+document.addEventListener(
+  "input",
+  () => {
+    S.repaint = 6;
+  }
+);
+
 sourceAudio.onended =
   () => {
+
+    S.paused = false;
+
 
     S.playing =
       false;
@@ -5384,6 +5506,7 @@ FX.forEach(
 );
 
 function setAuto(on){
+  S.repaint = 6;
 
   on = !!on;
 
@@ -5416,6 +5539,7 @@ function setAuto(on){
 
 /* Image or sound loading always brings AUTO back on. */
 function ensureAutoOn(){
+  S.repaint = 6;
   if(!S.auto){
     setAuto(true);
   }
@@ -7465,6 +7589,274 @@ function drawWholeImageMotion(time){
 
 }
 
+
+/* =========================================================
+   VOICE TRACKING + LYRIC VOWELS
+========================================================= */
+
+/*
+ * Browsers cannot transcribe a song file locally, so the voice is
+ * followed from the audio itself: the 300–3400 Hz speech band is
+ * compared against bass and brightness (is a voice present?), spectral
+ * flux in that band finds every syllable, and the ratio of the first and
+ * second formant regions gives an AH / OO / EE mouth shape.
+ *
+ * If lyrics are pasted, each detected syllable steps through the
+ * vowels of the words so the mouth shapes match the text.
+ */
+
+const VOWEL_SHAPES = {
+  a:{open:.95,width:1.00},
+  e:{open:.60,width:1.15},
+  i:{open:.38,width:1.25},
+  o:{open:.75,width:.72},
+  u:{open:.45,width:.58},
+  y:{open:.38,width:1.20}
+};
+
+function parseLyrics(text){
+
+  const seq = [];
+
+  const words = String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z\s']/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  words.forEach(
+    word => {
+
+      word = word.replace(/'/g, "");
+
+      let groups = word.match(/[aeiouy]+/g) || [];
+
+      if(
+        groups.length > 1 &&
+        /[^aeiouy]e$/.test(word)
+      ){
+        groups = groups.slice(0, -1);
+      }
+
+      if(!groups.length){
+        groups = ["a"];
+      }
+
+      groups.forEach(
+        g => {
+          seq.push(
+            VOWEL_SHAPES[g[0]] || VOWEL_SHAPES.a
+          );
+        }
+      );
+
+    }
+  );
+
+  return seq;
+
+}
+
+(function(){
+
+  const box = document.getElementById("lyricsInput");
+
+  if(box){
+    box.addEventListener(
+      "input",
+      () => {
+        S.vocal.seq = parseLyrics(box.value);
+        S.vocal.idx = 0;
+      }
+    );
+  }
+
+  const pos = document.getElementById("mouthPos");
+
+  const out = document.getElementById("mouthPosOut");
+
+  if(pos && out){
+    pos.addEventListener(
+      "input",
+      () => {
+        out.textContent = pos.value;
+      }
+    );
+  }
+
+  timeline.addEventListener(
+    "input",
+    () => {
+      const V = S.vocal;
+      if(V.seq.length && sourceAudio.duration){
+        V.idx = Math.floor(
+          sourceAudio.currentTime /
+          sourceAudio.duration *
+          V.seq.length
+        );
+      }
+    }
+  );
+
+})();
+
+function vocalTrack(now){
+
+  const V = S.vocal;
+
+  if(
+    !S.an ||
+    !S.playing ||
+    !S.freq
+  ){
+    V.env *= .8;
+    V.mouth *= .75;
+    V.level *= .8;
+    return;
+  }
+
+  const bin = S.ac.sampleRate / S.an.fftSize;
+
+  const band = (lo, hi) => {
+
+    const a = Math.max(1, Math.floor(lo/bin));
+
+    const b = Math.min(S.freq.length - 1, Math.ceil(hi/bin));
+
+    let s = 0;
+
+    for(let i = a; i <= b; i++){
+      s += S.freq[i];
+    }
+
+    return s / Math.max(1, b - a + 1) / 255;
+
+  };
+
+  const low = band(40, 250);
+
+  const vox = band(300, 3400);
+
+  const bright = band(5000, 10000);
+
+  const f1o = band(600, 1100);
+
+  const f1c = band(250, 500);
+
+  const f2h = band(1800, 2800);
+
+  const f2l = band(800, 1500);
+
+  /* Is a voice present? */
+  const presence = clamp(
+    (vox - low*.55 - bright*.25) * 3.2,
+    0,
+    1
+  );
+
+  V.presence = lerp(V.presence, presence, .35);
+
+  /* Syllable onsets: positive spectral flux in the voice band. */
+  const edges = [300,500,700,900,1200,1600,2100,2700,3400];
+
+  const bands = [];
+
+  for(let i = 0; i < edges.length - 1; i++){
+    bands.push(band(edges[i], edges[i+1]));
+  }
+
+  let flux = 0;
+
+  if(V.prevBands){
+    for(let i = 0; i < bands.length; i++){
+      flux += Math.max(0, bands[i] - V.prevBands[i]);
+    }
+  }
+
+  V.prevBands = bands;
+
+  V.fluxAvg = lerp(V.fluxAvg, flux, .05);
+
+  const onset =
+    V.presence > .12 &&
+    flux > V.fluxAvg*1.6 + .012 &&
+    now - V.lastOnset > 110;
+
+  /* Mouth shape from the audio itself. */
+  const openRatio = f1o / (f1o + f1c + .001);
+
+  const spread = f2h / (f2h + f2l + .001);
+
+  let shape = {
+    open: clamp(.35 + (openRatio - .3)*2.2, .3, 1),
+    width: clamp(.6 + spread*.8, .6, 1.2)
+  };
+
+  if(onset){
+
+    V.lastOnset = now;
+
+    V.env = 1;
+
+    if(V.seq.length){
+
+      V.shape = V.seq[Math.min(V.idx, V.seq.length - 1)];
+
+      V.idx = (V.idx + 1) % V.seq.length;
+
+    }
+    else{
+
+      V.shape = shape;
+
+    }
+
+  }
+
+  V.env *= .86;
+
+  const sustain = V.presence * .45;
+
+  const target =
+    V.presence > .1
+      ? clamp(
+          Math.max(V.env, sustain) *
+          V.shape.open *
+          (.6 + V.presence*.6),
+          0,
+          1
+        )
+      : 0;
+
+  V.mouth = lerp(
+    V.mouth,
+    target,
+    target > V.mouth ? .6 : .3
+  );
+
+  V.width = lerp(V.width, V.shape.width, .3);
+
+  V.level = V.presence;
+
+  /* Meter text */
+  V.meterTick++;
+
+  if(V.meterTick % 8 === 0){
+
+    const m = document.getElementById("vocalMeter");
+
+    if(m){
+      m.textContent =
+        V.presence > .1
+          ? "VOICE DETECTED — MOUTH " + Math.round(V.mouth*100) +
+            (V.seq.length ? " — LYRIC SYLLABLE " + V.idx + "/" + V.seq.length : "")
+          : "NO VOICE — MOUTH CLOSED";
+    }
+
+  }
+
+}
+
 /* =========================================================
    DRAW STATIC BASE
 ========================================================= */
@@ -8252,77 +8644,134 @@ function drawLipSync(
     return;
   }
 
+  const V = S.vocal;
+
+  const open = clamp(
+    V.mouth * (.45 + amount*.55),
+    0,
+    1
+  );
+
+  if(open < .03){
+    return;
+  }
+
   const b = face.box;
 
-  /*
-   * Visual approximation (not phoneme tracking):
-   * the lower part of the segmented face layer is
-   * copied back over itself and stretched vertically
-   * with the music.
-   */
+  const posEl = document.getElementById("mouthPos");
 
-  const pulse =
-    .5 +
-    .5 * Math.sin(
-      time*.018 +
-      S.A.mid*4
-    );
+  const frac = (posEl ? +posEl.value : 74) / 100;
 
-  const mouthAmount =
-    clamp(
-      amount *
-      ( .35 + pulse*.65 ),
-      0,
-      1
-    );
+  const cx = b.x + b.w/2;
 
-  const mouthCy =
-    b.y + b.h*.72;
+  const my = b.y + b.h*frac;
 
-  const sh =
-    Math.max( 2, b.h*.22 );
+  /* A small mouth only — never the whole lower face. */
+  const mw = b.w * .30 * clamp(V.width, .55, 1.25);
 
-  const sy =
-    clamp(
-      mouthCy - sh/2,
-      0,
-      H - sh
-    );
+  const drop = b.h * .075 * open;
 
-  const lift =
-    Math.sin( time*.012 ) *
-    mouthAmount * 2;
+  const chinY = b.y + b.h;
+
+  const sy = my + b.h*.015;
+
+  const srcH = Math.max(2, chinY - sy);
+
+  const stripW = mw * 1.7;
+
+  const ry = Math.max(1, drop*.62 + b.h*.006);
+
+  const cyI = my + drop*.38;
 
   ctx.save();
 
-  ctx.translate(
-    b.x + b.w/2,
-    mouthCy + lift
+  /* 1 — dark mouth interior */
+  const g = ctx.createRadialGradient(
+    cx, cyI, 1,
+    cx, cyI, Math.max(mw*.5, 2)
   );
 
-  ctx.scale(
-    1,
-    1 + mouthAmount*.16
-  );
+  g.addColorStop(0, "#14030a");
 
-  ctx.globalAlpha = .94;
+  g.addColorStop(.7, "#2c0710");
+
+  g.addColorStop(1, "#4a1018");
+
+  ctx.fillStyle = g;
+
+  ctx.beginPath();
+
+  ctx.ellipse(cx, cyI, mw*.5, ry, 0, 0, Math.PI*2);
+
+  ctx.fill();
+
+  /* upper teeth + tongue when wide open */
+  if(open > .4){
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.ellipse(cx, cyI, mw*.5, ry, 0, 0, Math.PI*2);
+
+    ctx.clip();
+
+    ctx.fillStyle = "rgba(238,232,222,.88)";
+
+    ctx.fillRect(cx - mw*.5, cyI - ry, mw, ry*.34);
+
+    ctx.fillStyle = "rgba(186,66,88,.85)";
+
+    ctx.beginPath();
+
+    ctx.ellipse(cx, cyI + ry*.45, mw*.26, ry*.45, 0, 0, Math.PI*2);
+
+    ctx.fill();
+
+    ctx.restore();
+
+  }
+
+  /* 2 — the jaw: chin strip drops with the mouth */
+  ctx.save();
+
+  ctx.beginPath();
+
+  ctx.rect(cx - stripW/2, sy + drop, stripW, srcH);
+
+  ctx.clip();
 
   ctx.drawImage(
     face.canvas,
-    b.x,
+    cx - stripW/2,
     sy,
-    b.w,
-    sh,
-    -b.w/2,
-    -sh/2,
-    b.w,
-    sh
+    stripW,
+    srcH,
+    cx - stripW/2,
+    sy + drop,
+    stripW,
+    srcH
   );
 
   ctx.restore();
 
-}
+  /* 3 — soft lip line along the top of the mouth */
+  ctx.strokeStyle = "rgba(70,12,24,.55)";
 
+  ctx.lineWidth = Math.max(1, b.h*.004);
+
+  ctx.beginPath();
+
+  ctx.ellipse(
+    cx, cyI, mw*.5, ry, 0,
+    Math.PI*1.08, Math.PI*1.92
+  );
+
+  ctx.stroke();
+
+  ctx.restore();
+
+}
 
 /* =========================================================
    OBJECT MOTION
@@ -10476,106 +10925,42 @@ function loop(
   timestamp
 ){
 
-  /*
-   * =======================================================
-   * 01 — LISTEN TO THE SONG
-   * =======================================================
-   *
-   * Audio analysis is updated first.
-   *
-   * This gives the facilitator the current:
-   *
-   * BASS
-   * MID
-   * TREBLE
-   * ENERGY
-   * TRANSIENT
-   * BEAT
-   * BPM
-   */
+  if(S.lastTs === null){
+    S.lastTs = timestamp;
+  }
 
-  track();
+  const dt = Math.min(100, timestamp - S.lastTs);
 
+  S.lastTs = timestamp;
 
   /*
-   * =======================================================
-   * 02 — UNDERSTAND THE CURRENT VISUAL MOMENT
-   * =======================================================
-   *
-   * The facilitator combines the audio expression
-   * with the image / semantic scene.
-   *
-   * It calculates the visual behaviour states:
-   *
-   * motion
-   * distortion
-   * symmetry
-   * colour
-   * fluidity
-   * dance
-   * lip sync
-   * object depth
-   * breathe
-   * drift
+   * PAUSE FREEZES EVERYTHING.
+   * The picture holds its last frame; it only repaints briefly
+   * when the user changes a slider, AUTO or loads new media.
    */
+  const frozen = S.paused && !(S.repaint > 0);
 
-  facilitator();
+  if(!frozen){
 
+    if(S.repaint > 0){
+      S.repaint--;
+    }
 
-  /*
-   * =======================================================
-   * 03 — MAKE THE AUTO DECISION
-   * =======================================================
-   *
-   * THIS IS THE IMPORTANT NEW CONNECTION.
-   *
-   * The decision engine now receives the freshly
-   * calculated facilitator state on EVERY FRAME.
-   *
-   * It decides:
-   *
-   *     WHAT SHOULD HAPPEN NOW?
-   *
-   * rather than activating every FX continuously.
-   */
+    if(!S.paused){
+      S.clock += dt;
+    }
 
-  autoDecision();
+    track();
 
+    vocalTrack(S.clock);
 
-  /*
-   * =======================================================
-   * 04 — RENDER THE DECISION
-   * =======================================================
-   *
-   * render() calls fxValue().
-   *
-   * fxValue() now reads S.autoFX.
-   *
-   * Therefore the chain is:
-   *
-   * AUDIO
-   *   ↓
-   * FACILITATOR
-   *   ↓
-   * AUTO DECISION ENGINE
-   *   ↓
-   * S.autoFX
-   *   ↓
-   * FX EXPRESSION
-   *   ↓
-   * VISUAL OUTPUT
-   */
+    facilitator();
 
-  render(
-    timestamp
-  );
+    autoDecision();
 
+    render(S.clock);
 
-  /*
-   * =======================================================
-   * 05 — CONTINUE
-   * =======================================================
-   */
+  }
 
   requestAnimationFrame(
     loop

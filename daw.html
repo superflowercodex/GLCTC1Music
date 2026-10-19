@@ -131,6 +131,8 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{overflow-x:hidden}
 .mod-allbar button{flex:1;min-width:150px;min-height:44px;font-weight:800;letter-spacing:.12em;color:#3cf6ff;border:1px solid #19f7ff;background:#00141c;text-shadow:0 0 8px #19baff;box-shadow:0 0 12px #19baff55,inset 0 0 10px #19baff33;touch-action:manipulation}
 .mod-allbar button:hover{color:#ff7bf6;border-color:#ff3df2;text-shadow:0 0 8px #ff3df2;box-shadow:0 0 12px #ff3df266}
 .solo-btn{color:#7dff5c;border-color:#39ff14!important;text-shadow:0 0 6px #39ff14;box-shadow:0 0 8px #39ff1466}.solo-btn:hover{color:#b6ff9e}.solo-btn.active{background:#0b2a0b;box-shadow:0 0 14px #39ff14aa}.bl-pad.selected{outline:2px solid #3cf6ff;outline-offset:-2px;box-shadow:0 0 14px #19baff88}.bl-pad.hassample::after{content:'♪';position:absolute;top:4px;right:7px;color:#3cf6ff;font-size:12px}.bl-pad{position:relative}
+
+.vx-pad-rec-row{display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;margin-top:3px}.vx-pad-rec-row button{min-width:0;width:100%;padding:5px 2px;font-size:9px;line-height:1.2;white-space:nowrap}.vx-pad-rec{border-color:#a83e83!important;color:#ff9bdc!important}.vx-pad-rec.rec{background:#6c153e!important;color:#fff!important;animation:vxRecPulse 1s infinite}.vx-pad-stop:disabled{opacity:.35;filter:saturate(.3)}@keyframes vxRecPulse{50%{box-shadow:0 0 10px #ff318b}}
 </style>
 </head>
 <body>
@@ -2569,11 +2571,30 @@ async function toggleMidiIn(){if(!navigator.requestMIDIAccess){toast('Web MIDI n
  try{midiAcc=midiAcc||await navigator.requestMIDIAccess();midiIn=!midiIn;let n=0;midiAcc.inputs.forEach(i=>{n++;if(!i.__vox){i.addEventListener('midimessage',onMidi);i.__vox=1}});$('voxMidiIn').classList.toggle('active',midiIn);$('voxMidiIn').textContent=midiIn?'MIDI IN ● '+n:'MIDI IN';toast(midiIn?'MIDI keyboard ready. Notes 36–51 trigger the pads.':'MIDI input off.')}catch(e){toast('MIDI access was blocked.')}}
 
 /* ---------- pads ---------- */
-let padSel=0;const padEls=[];
+let padSel=0;const padEls=[];const padRecorders=Array(16).fill(null);const padRecordStreams=Array(16).fill(null);const padRecordChunks=Array.from({length:16},()=>[]);
 function paintPads(){padEls.forEach((p,i)=>{const d=PADS[i];p.classList.toggle('has',!!d.buf);p.classList.toggle('sel',i===padSel);p.querySelector('.vx-pn').textContent=d.buf?d.name.replace(/\.[^.]+$/,'').slice(0,14):'DROP / TAP';p.querySelector('.vx-pi').textContent=i+1;const load=p.parentElement&&p.parentElement.querySelector('.vx-load');if(load){load.classList.toggle('loaded',!!d.buf);load.textContent=d.buf?'↻ REPLACE SAMPLE':'＋ LOAD SAMPLE'}});paintPadEd()}
 let padEd=null;
 function paintPadEd(){if(!padEd)return;const d=PADS[padSel];padEd.querySelector('.vx-pname').textContent='PAD '+(padSel+1)+' · '+(d.buf?d.name:'EMPTY')}
 async function assignPads(files,start){let i=start,n=0;for(const f of files){if(i>15)break;try{PADS[i].buf=await decodeFile(f);PADS[i].name=f.name;i++;n++}catch(e){console.warn(e)}}paintPads();setStatus(n+' PAD SAMPLE(S) LOADED')}
+async function startPadRecording(i,recBtn,stopBtn){
+ if(padRecorders[i]&&padRecorders[i].state==='recording')return;
+ if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){toast('Microphone recording is not supported in this browser.');return}
+ try{
+  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  const mr=new MediaRecorder(stream);padRecordStreams[i]=stream;padRecordChunks[i]=[];padRecorders[i]=mr;
+  mr.ondataavailable=e=>{if(e.data&&e.data.size)padRecordChunks[i].push(e.data)};
+  mr.onstop=async()=>{
+   stream.getTracks().forEach(t=>t.stop());padRecordStreams[i]=null;padRecorders[i]=null;
+   recBtn.classList.remove('rec');recBtn.textContent='● RECORD';recBtn.disabled=false;stopBtn.disabled=true;
+   const chunks=padRecordChunks[i];padRecordChunks[i]=[];if(!chunks.length){setStatus('PAD '+(i+1)+' RECORDING EMPTY');return}
+   try{const blob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});const ctx=await ensure();const buf=await ctx.c.decodeAudioData(await blob.arrayBuffer());PADS[i].buf=buf;PADS[i].name='PAD '+(i+1)+' Recording';padSel=i;paintPads();repaintAll();setStatus('PAD '+(i+1)+' RECORDED · SAMPLE READY');toast('Recording saved directly to VOX pad '+(i+1)+'.')}
+   catch(err){console.warn(err);toast('Could not decode this pad recording. Try recording again.')}
+  };
+  mr.start();recBtn.classList.add('rec');recBtn.textContent='● RECORDING';recBtn.disabled=true;stopBtn.disabled=false;padSel=i;paintPads();setStatus('RECORDING DIRECTLY TO PAD '+(i+1)+' · PRESS STOP WHEN FINISHED');
+ }catch(err){console.warn(err);toast('Microphone access was blocked. Allow microphone access and try again.')}
+}
+function stopPadRecording(i){const mr=padRecorders[i];if(mr&&mr.state==='recording'){setStatus('FINISHING PAD '+(i+1)+' RECORDING…');mr.stop()}}
+
 function buildPads(){
  const card=$('voxPads');card.innerHTML='<div class="g2-ct"><span>16 VOCAL / SAMPLE PADS</span><small>PADS TRIGGER SAMPLES · LOAD BUTTONS ARE SEPARATE · MAP ANY LOADED PAD TO ANY PIANO KEY</small></div>';
  const wave=el('div','vx-bigscope');wave.innerHTML='<div class="vx-wave-label"><span>GALACTIC VOX · LIVE WAVEFORM / SPECTRUM</span><span id="voxWaveState">READY · RECORD / MONITOR</span></div>';card.appendChild(wave);
@@ -2587,7 +2608,12 @@ function buildPads(){
  act('MAP SELECTED PAD → KEY',()=>{if(selectedMapMidi==null){toast('Tap a piano key first, then select a pad and map it.');return}const p=PADS[padSel];if(!p.buf){toast('Load a sample onto the selected pad first.');return}padKeyMap.set(selectedMapMidi,{pad:padSel,root:selectedMapMidi});buildPiano();setStatus('PAD '+(padSel+1)+' MAPPED TO '+noteName(selectedMapMidi))});
  act('CLEAR KEY MAP',()=>{if(selectedMapMidi==null){toast('Tap a piano key to select it first.');return}padKeyMap.delete(selectedMapMidi);buildPiano();setStatus('KEY MAP CLEARED · '+noteName(selectedMapMidi))});
  const grid=el('div','vx-pads');card.appendChild(grid);
- for(let i=0;i<16;i++){const unit=el('div','vx-pad-unit'),p=el('button','vx-pad','<span class="vx-pi"></span><span class="vx-pn"></span>');p.type='button';p.tabIndex=0;padEls[i]=p;unit.appendChild(p);const load=el('button','vx-load','＋ LOAD SAMPLE');load.type='button';load.onclick=()=>{padSel=i;$('voxPadIn').click();paintPads()};unit.appendChild(load);grid.appendChild(unit);
+ for(let i=0;i<16;i++){const unit=el('div','vx-pad-unit'),p=el('button','vx-pad','<span class="vx-pi"></span><span class="vx-pn"></span>');p.type='button';p.tabIndex=0;padEls[i]=p;unit.appendChild(p);const load=el('button','vx-load','＋ LOAD SAMPLE');load.type='button';load.onclick=()=>{padSel=i;$('voxPadIn').click();paintPads()};unit.appendChild(load);
+ const recRow=el('div','vx-pad-rec-row');
+ const recBtn=el('button','vx-pad-rec','● RECORD');recBtn.type='button';recBtn.dataset.pad=i;
+ const stopBtn=el('button','vx-pad-stop','■ STOP');stopBtn.type='button';stopBtn.dataset.pad=i;stopBtn.disabled=true;
+ recBtn.onclick=()=>startPadRecording(i,recBtn,stopBtn);stopBtn.onclick=()=>stopPadRecording(i);
+ recRow.append(recBtn,stopBtn);unit.appendChild(recRow);grid.appendChild(unit);
  p.addEventListener('pointerdown',e=>{e.preventDefault();padSel=i;paintPads();if(!PADS[i].buf){setStatus('PAD '+(i+1)+' EMPTY · USE LOAD SAMPLE BELOW');return}p.setPointerCapture(e.pointerId);p.classList.add('hit');ensure().then(()=>padOn(i,cl(.5+.5*((e.clientY-p.getBoundingClientRect().top)/p.getBoundingClientRect().height),.3,1)))});
  const rel=()=>{p.classList.remove('hit');padOff(i)};p.addEventListener('pointerup',rel);p.addEventListener('pointercancel',rel);
  p.addEventListener('dragover',e=>{e.preventDefault();p.classList.add('drop')});p.addEventListener('dragleave',()=>p.classList.remove('drop'));

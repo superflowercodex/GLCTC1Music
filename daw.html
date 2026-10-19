@@ -1895,9 +1895,10 @@ function buildPiano(w){
  let wi=0;for(let i=0;i<25;i++){const pc=i%12,m=base+i,blk=BLACK.includes(pc),k=el('div','pk '+(blk?'b':'w'),blk?'':(pc===0?NN[pc]+(Math.floor(m/12)-1):''));k.dataset.m=m;
   if(blk)k.style.left=(wi*100/whites-2.1)+'%';else wi++;box.appendChild(k);keyEls[w][m]=k}
  const ptr=new Map();
+ box.querySelectorAll('.pk').forEach(k=>{k.addEventListener('contextmenu',e=>e.preventDefault());k.addEventListener('dragstart',e=>e.preventDefault())});
  const keyAt=(x,y)=>{const e=document.elementFromPoint(x,y);return e&&e.classList&&e.classList.contains('pk')&&box.contains(e)?e:null};
  const vOf=(k,y)=>{const r=k.getBoundingClientRect();return cl(.3+.7*((y-r.top)/r.height),.2,1)*(.5+ST.vel*.6)};
- const on=(id,k,y)=>{const m=+k.dataset.m;selectedMapMidi=m;keyOn(id+'|'+m,m,cl(vOf(k,y),.05,1),w);ptr.set(id,{k,src:id+'|'+m});k.classList.add('on')};
+ const on=(id,k,y)=>{const m=+k.dataset.m;selectedMapMidi=m;try{const c=ensureAudio();if(c.state==='suspended')c.resume()}catch(err){console.warn('GALACTIC ONE audio unlock failed',err)}keyOn(id+'|'+m,m,cl(vOf(k,y),.05,1),w);ptr.set(id,{k,src:id+'|'+m});k.classList.add('on')};
  const off=id=>{const p=ptr.get(id);if(p){keyOff(p.src);p.k.classList.remove('on');ptr.delete(id)}};
  box.addEventListener('pointerdown',e=>{const k=keyAt(e.clientX,e.clientY);if(!k)return;e.preventDefault();box.setPointerCapture(e.pointerId);on(e.pointerId,k,e.clientY)});
  box.addEventListener('pointermove',e=>{const p=ptr.get(e.pointerId);if(!p)return;const k=keyAt(e.clientX,e.clientY);if(k&&k!==p.k){off(e.pointerId);on(e.pointerId,k,e.clientY)}});
@@ -2354,7 +2355,7 @@ function pianoNote(midi,vel,when,dur,live){
 function fallbackTone(midi,vel,when,dur,live){const c=V.c,t0=Math.max(when,c.currentTime+.003),o=c.createOscillator(),g=gn(c,0);o.type='triangle';o.frequency.value=mtof(midi);o.connect(g);g.connect(V.pianoBus);const env=makeEnv(g.gain,t0,.004,.6,.2,vel*.4,.3,dur!=null?t0+dur:null);o.start(t0);const v=mkVoice(c,[o],[o,g],env,.3,live);if(dur!=null){v.released=true;v.finish(t0+dur+1)}return v}
 /* ----- multi-sampler (keyboard) ----- */
 const KM=new Map(),PADS=Array.from({length:16},()=>({buf:null,name:'',vol:1,pitch:0,mode:0}));
-const padKeyMap=new Map();let selectedMapMidi=null,reversePads=false,allFxOn=true,globalPadLoop=false;const reversedCache=new WeakMap();
+const padKeyMap=new Map();let selectedMapMidi=null,reversePads=false,allFxOn=true;const reversedCache=new WeakMap();
 function reversedBuffer(buf){if(reversedCache.has(buf))return reversedCache.get(buf);const c=V.c,b=c.createBuffer(buf.numberOfChannels,buf.length,buf.sampleRate);for(let ch=0;ch<buf.numberOfChannels;ch++){const src=buf.getChannelData(ch),dst=b.getChannelData(ch);for(let i=0,j=src.length-1;i<src.length;i++,j--)dst[i]=src[j]}reversedCache.set(buf,b);return b}
 const rootMidi=()=>(S.spOct+1)*12+S.spRoot;
 function sampNote(midi,vel,when,dur,live){
@@ -2365,7 +2366,7 @@ function sampNote(midi,vel,when,dur,live){
 /* ----- pads ----- */
 const padV=Array(16).fill(null);
 function padOn(i,vel,live){const p=PADS[i];if(!p.buf||!V)return;const old=padV[i];if(old)old.kill();
- const v=playBuf(p.buf,Math.pow(2,p.pitch/12),vel||1,V.c.currentTime,p.mode===0?p.buf.duration:null,.001,p.mode===0?.05:.06,p.mode===2,18000,V.pianoBus,true,p.vol);padV[i]=v;return v}
+ const looping=(p.mode===2);const v=playBuf(p.buf,Math.pow(2,p.pitch/12),vel||1,V.c.currentTime,looping?null:p.buf.duration,.001,p.mode===0?.05:.06,looping,18000,V.pianoBus,true,p.vol);padV[i]=v;return v}
 function padOff(i){const p=PADS[i],v=padV[i];if(v&&p.mode!==0){v.release();padV[i]=null}}
 async function decodeFile(file){const v=await ensure();return await v.c.decodeAudioData(await file.arrayBuffer())}
 /* ----- dispatch ----- */
@@ -2373,7 +2374,7 @@ function instOn(target,midi,vel,when,dur,live){const a=[];if(ALLV.size>90){let n
 function keyOn(src,midi,vel){
  if(held.has(src))return;held.set(src,{midi,vel});lightKey(midi,true);
  ensure().then(()=>{if(!held.has(src))return;let vs;const map=padKeyMap.get(midi);
- if(map&&PADS[map.pad]&&PADS[map.pad].buf){const p=PADS[map.pad],buf=reversePads?reversedBuffer(p.buf):p.buf,rate=Math.pow(2,(midi-map.root+p.pitch)/12);vs=[playBuf(buf,rate,vel,V.c.currentTime,null,.003,.08,globalPadLoop||p.mode===2,18000,V.pianoBus,true,p.vol)]}
+ if(map&&PADS[map.pad]&&PADS[map.pad].buf){const p=PADS[map.pad],buf=reversePads?reversedBuffer(p.buf):p.buf,rate=Math.pow(2,(midi-map.root+p.pitch)/12),looping=p.mode===2;vs=[playBuf(buf,rate,vel,V.c.currentTime,looping?null:p.buf.duration,.003,.08,looping,18000,V.pianoBus,true,p.vol)]}
  else vs=instOn(S.kbTarget,midi,vel,V.c.currentTime,null,true);
  liveV.set(src,vs);capLive(midi,vel,true);setStatus((map?'PAD '+(map.pad+1)+' → ':'PLAYING · ')+noteName(midi))});
 }
@@ -2596,12 +2597,11 @@ async function startPadRecording(i,recBtn,stopBtn){
 function stopPadRecording(i){const mr=padRecorders[i];if(mr&&mr.state==='recording'){setStatus('FINISHING PAD '+(i+1)+' RECORDING…');mr.stop()}}
 
 function buildPads(){
- const card=$('voxPads');card.innerHTML='<div class="g2-ct"><span>16 VOCAL / SAMPLE PADS</span><small>PADS TRIGGER SAMPLES · LOAD BUTTONS ARE SEPARATE · MAP ANY LOADED PAD TO ANY PIANO KEY</small></div>';
+ const card=$('voxPads');card.innerHTML='<div class="g2-ct"><span>16 VOCAL / SAMPLE PADS</span><small>PADS TRIGGER SAMPLES · LOAD / RECORD PER PAD · SET EACH PAD TO LOOP IN PLAY MODE</small></div>';
  const wave=el('div','vx-bigscope');wave.innerHTML='<div class="vx-wave-label"><span>GALACTIC VOX · LIVE WAVEFORM / SPECTRUM</span><span id="voxWaveState">READY · RECORD / MONITOR</span></div>';card.appendChild(wave);
  const big=el('canvas');big.width=1400;big.height=260;big.style.cssText='display:block;width:100%;height:180px;background:#06030c;border:1px solid #311947;border-radius:7px';big.id='voxBigWave';wave.appendChild(big);
  const tools=el('div','vx-pad-tools');card.appendChild(tools);
  const act=(txt,fn)=>{const b=el('button',null,txt);b.type='button';b.onclick=fn;tools.appendChild(b);return b};
- const loopBtn=act('⟲ PAD LOOP OFF',()=>{globalPadLoop=!globalPadLoop;loopBtn.classList.toggle('active',globalPadLoop);loopBtn.textContent=globalPadLoop?'⟲ PAD LOOP ON':'⟲ PAD LOOP OFF'});
  const revBtn=act('↶ REVERSE OFF',()=>{reversePads=!reversePads;revBtn.classList.toggle('active',reversePads);revBtn.textContent=reversePads?'↶ REVERSE ON':'↶ REVERSE OFF'});
  const fxBtn=act('✧ ALL FX ON',()=>{allFxOn=!allFxOn;fxBtn.classList.toggle('active',allFxOn);fxBtn.textContent=allFxOn?'✧ ALL FX ON':'✧ ALL FX BYPASSED';applyAll()});
  act('✦ SPACE FX',()=>{const t=document.querySelector('#voxSound .g2-tabs button:last-child');if(t)t.click();$('voxSound').scrollIntoView({behavior:'smooth',block:'start'})});

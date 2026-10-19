@@ -133,6 +133,12 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{overflow-x:hidden}
 .solo-btn{color:#7dff5c;border-color:#39ff14!important;text-shadow:0 0 6px #39ff14;box-shadow:0 0 8px #39ff1466}.solo-btn:hover{color:#b6ff9e}.solo-btn.active{background:#0b2a0b;box-shadow:0 0 14px #39ff14aa}.bl-pad.selected{outline:2px solid #3cf6ff;outline-offset:-2px;box-shadow:0 0 14px #19baff88}.bl-pad.hassample::after{content:'♪';position:absolute;top:4px;right:7px;color:#3cf6ff;font-size:12px}.bl-pad{position:relative}
 
 .vx-pad-rec-row{display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;margin-top:3px}.vx-pad-rec-row button{min-width:0;width:100%;padding:5px 2px;font-size:9px;line-height:1.2;white-space:nowrap}.vx-pad-rec{border-color:#a83e83!important;color:#ff9bdc!important}.vx-pad-rec.rec{background:#6c153e!important;color:#fff!important;animation:vxRecPulse 1s infinite}.vx-pad-stop:disabled{opacity:.35;filter:saturate(.3)}@keyframes vxRecPulse{50%{box-shadow:0 0 10px #ff318b}}
+
+/* GLCTC1 unified touch-performance behaviour: avoid Android long-press menus and text selection on controls while keeping page scrolling and form fields usable. */
+button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.g2-grid,.gs-on,.gs-lane,.mstrip,.fader,.volume,.lee303-key,.s101-key,.pl-keys,.bl-pad,[role="slider"]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.pk,.g2-piano,.g2-whtrack,.gk-dial,.vx-pad,.pad,.lee303-key,.s101-key,.bl-pad,.pl-keys,.g2-grid,.gs-on,.gs-lane{touch-action:none}
+button{touch-action:manipulation}
+input,select,textarea{ -webkit-user-select:text;user-select:text;touch-action:manipulation }
 </style>
 </head>
 <body>
@@ -779,7 +785,7 @@ window.plugUi=function(){const el=$('plugDyn');if(!el)return;el.innerHTML='';con
 const bx=h('div',{className:'pl-box'});bx.append(h('b',{textContent:'TRACK: '+t.name.toUpperCase()}));
 if(t.type==='midi'){const s=h('select',{className:'field'});s.style.marginTop='5px';[['','Basic synth'],...Object.keys(PRE).map(k=>[k,k])].forEach(([v,n])=>s.append(new Option(n,v)));if(t.wamInst)s.append(new Option('🔌 '+t.wamInst.name,'wam'));s.value=t.inst||'';s.onchange=()=>{t.inst=s.value;markDirty()};bx.append(h('label',{textContent:'Instrument'}),s);
 if(t.inst==='wam'&&t.wamInst){const o=h('button',{textContent:wamLive[t.wamInst.id]?'Open editor':'⟳ Reload plugin'});o.onclick=()=>wamLive[t.wamInst.id]?wamShow(t.wamInst.id,t.wamInst.name):loadWam(t.wamInst.url,t.wamInst.id,t);bx.append(o)}
-const k=h('div',{className:'pl-keys'});for(let i=0;i<13;i++){const b=h('button',{textContent:'♪',title:'Test note'});const p=60+i;b.onpointerdown=()=>liveOn(p,.8);b.onpointerup=b.onpointerleave=()=>liveOff(p);k.append(b)}bx.append(k)}
+const k=h('div',{className:'pl-keys'});for(let i=0;i<13;i++){const b=h('button',{textContent:'♪',title:'Test note'});const p=60+i;b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);liveOn(p,.8)};b.onpointerup=b.onpointercancel=()=>liveOff(p);k.append(b)}bx.append(k)}
 (window.PLUG&&PLUG.ensureAll(t));bx.append(h('label',{textContent:'Effects chain (top → bottom)',style:'margin-top:8px'}));
 (t.plugs||[]).forEach((e,i)=>{const d=FX[e.type],f=h('div',{className:'pl-fx'}),top=h('div',{className:'controls-row'});top.append(h('b',{textContent:d?d.n:e.name}));const by=h('button',{className:'tiny'+(e.off?'':' active'),textContent:e.off?'OFF':'ON'}),rm=h('button',{className:'tiny danger',textContent:'×'});by.onclick=()=>{e.off=!e.off;rebuildAll();markDirty();plugUi()};rm.onclick=()=>{t.plugs.splice(i,1);try{wamLive[e.id]?.audioNode.disconnect()}catch(x){}rebuildAll();markDirty();plugUi()};top.append(by);if(e.type==='wam')top.append(rm);
 if(e.type==='wam'){const o=h('button',{className:'tiny',textContent:wamLive[e.id]?'Editor':'⟳ Reload'});o.onclick=()=>wamLive[e.id]?wamShow(e.id,e.name):loadWam(e.url,e.id,t);top.append(o)}f.append(top);
@@ -886,7 +892,7 @@ $('lpFile').onchange=async e=>{const s=cur(),f=e.target.files[0];e.target.value=
 $('lpBars').onchange=e=>{const s=cur();if(s){s.L.bars=+e.target.value;if(s.proc)apply(s);markDirty()}};$('lpWarp').onchange=e=>{const s=cur();if(s){s.L.warp=e.target.checked;if(s.proc)apply(s);markDirty()}};
 T('lpBounce',async(s,L)=>{if(!s.proc)return toast('Record or load a sample first.');status('Bouncing loop…');try{const b=s.proc,r=rate(s),len=(L.end-L.start)*b.duration/r,sr=b.sampleRate,off=new OfflineAudioContext(b.numberOfChannels,Math.ceil((len+1.5)*sr),sr),v=build(off,s,off.destination),sv=L.loop;v.src.loop=false;v.src.playbackRate.value=r;v.g.gain.value=L.vol;v.fx[0].set({cut:L.cut,q:1});v.fx[1].set({amt:L.drive});v.fx[2].set({time:.3,fb:.4,mix:L.dly});v.fx[3].set({mix:L.revb});v.src.start(0,L.start*b.duration,(L.end-L.start)*b.duration);const out=await off.startRendering(),blob=new Blob([audioBufferToWav(out)],{type:'audio/wav'}),a={id:uid(),name:s.t.name+' loop',type:'audio',mime:'audio/wav',size:blob.size,duration:out.duration,blob,audioBuffer:out};project.assets.push(a);addClip(s.t.id,Math.max(0,playheadBeats),Math.max(.25,out.duration/beatSeconds()),a.id);renderAll();markDirty();toast('Loop bounced to '+s.t.name+'.')}catch(e){console.error(e);toast('Bounce failed.')}status('Ready')});
 $('lpCreate').onclick=()=>{const n=project.tracks.filter(t=>t.looper).length+1;addTrack('audio');const t=project.tracks[project.tracks.length-1];t.name='Looper '+n;ensure(t);selectedTrackId=t.id;renderAll();markDirty();$('lpTrack').value=t.id;ui()};
-for(let i=0;i<16;i++){const b=h('button',{className:'pad',textContent:i+1});let dn=false;b.onpointerdown=e=>{e.preventDefault();dn=true;hit(i,true)};b.onpointerup=b.onpointerleave=b.onpointercancel=()=>{if(dn){dn=false;hit(i,false)}};$('lpPads').append(b);pads.push(b)}
+for(let i=0;i<16;i++){const b=h('button',{className:'pad',textContent:i+1});let dn=false;b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);dn=true;hit(i,true)};b.onpointerup=b.onpointercancel=()=>{if(dn){dn=false;hit(i,false)}};$('lpPads').append(b);pads.push(b)}
 $('lpMode').onchange=e=>{const s=cur();if(s){s.L.mode=e.target.value;markDirty()}};
 function lpTransportStart(manual){const s=cur();if(!s||!s.proc){if(manual!==false)toast('Load or record a loop first.');return}stop(s);s.L.loop=true;play(s);ui()}function lpTransportStop(){const s=cur();if(s)stop(s);ui()}GLCTC_HUB.reg('lp',{name:'Looper',can:()=>{const s=cur();return !!(s&&s.proc)},start:m=>lpTransportStart(m),stop:()=>lpTransportStop(),running:()=>{const s=cur();return !!(s&&s.v)},sendEl:'lpSendMaster',bypassEl:'lpBypass',panel:'looperPanel'});$('lpTransportPlay').onclick=()=>GLCTC_HUB.startFrom('lp');$('lpTransportStop').onclick=()=>GLCTC_HUB.stopFrom('lp');
 })();
@@ -2641,7 +2647,7 @@ function buildSound(){
   'PIANO · SAMPLER':()=>{const d=el('div','g2-cols');d.appendChild(group('PIANO / MULTI-SAMPLER',['pnKind','pnBright','pnRel','pnHammer','pnLvl']));d.appendChild(group('SAMPLER ENVELOPE',['spAtk','spRel','spLoop']));return d},
   'FX RACK':()=>{const d=el('div','g2-cols');d.appendChild(group('TONE · DRIVE · CHORUS',['fxDrive','fxLow','fxHigh','fxChor']));d.appendChild(group('PING-PONG DELAY',['dlMix','dlDiv','dlFb']));d.appendChild(group('REVERB · OUTPUT',['rvMix','rvSize','rvDamp','width','outLvl']));return d},
   'SPACE MOD':()=>{const d=el('div','g2-cols');d.appendChild(group('DEEP SPACE REVERB',['spMix','spSize','spPre','spShim','spGrav','spNeb','spNebRate']));d.appendChild(group('ORBIT · RADIATION · COMET',['spOrb','spOrbRate','spRad','spRadRate','spCom','spComRate']));
-   const pf=el('div','g2-sub-card','<h4>SPACE PERFORMANCE</h4>');const r=el('div','g2-row');const hb=el('button',null,'🚀 HYPERSPACE');hb.onclick=hyperspace;const bh=el('button',null,'🕳 BLACK HOLE (HOLD)');bh.id='voxBH';const on=()=>blackHole(true),off=()=>blackHole(false);bh.addEventListener('pointerdown',e=>{e.preventDefault();on()});bh.addEventListener('pointerup',off);bh.addEventListener('pointerleave',()=>{if(perf.bh)off()});bh.addEventListener('pointercancel',off);r.append(hb,bh);pf.appendChild(r);pf.appendChild(el('div','g2-hint','HYPERSPACE fires a 3-second riser into the reverb. BLACK HOLE (press and hold) ducks the dry voice and floods the space with gravity-pitched reverb.'));d.appendChild(pf);return d}
+   const pf=el('div','g2-sub-card','<h4>SPACE PERFORMANCE</h4>');const r=el('div','g2-row');const hb=el('button',null,'🚀 HYPERSPACE');hb.onclick=hyperspace;const bh=el('button',null,'🕳 BLACK HOLE (HOLD)');bh.id='voxBH';const on=()=>blackHole(true),off=()=>blackHole(false);bh.addEventListener('pointerdown',e=>{e.preventDefault();bh.setPointerCapture?.(e.pointerId);on()});bh.addEventListener('pointerup',off);bh.addEventListener('pointercancel',off);bh.addEventListener('lostpointercapture',off);r.append(hb,bh);pf.appendChild(r);pf.appendChild(el('div','g2-hint','HYPERSPACE fires a 3-second riser into the reverb. BLACK HOLE (press and hold) ducks the dry voice and floods the space with gravity-pitched reverb.'));d.appendChild(pf);return d}
  };
  let cur=Object.keys(pages)[0];const bt=[];
  const show=n=>{cur=n;PAINT.length=soundBase;body.innerHTML='';body.appendChild(pages[n]());bt.forEach(b=>b.classList.toggle('on',b.textContent===n))};
@@ -2732,6 +2738,11 @@ init();
   first.el.parentNode.insertBefore(bar,first.el);
  }
 })();
+
+// Mobile DAW interaction guard: suppress browser context menus only on performance controls.
+document.addEventListener('contextmenu',e=>{if(e.target.closest('button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.lee303-key,.s101-key,.bl-pad,.pl-keys,[role="slider"]'))e.preventDefault()},true);
+document.addEventListener('selectstart',e=>{if(e.target.closest('button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.lee303-key,.s101-key,.bl-pad,.pl-keys,[role="slider"]'))e.preventDefault()},true);
+document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.lee303-key,.s101-key,.bl-pad,.pl-keys,[role="slider"]'))e.preventDefault()},true);
 </script>
 </body>
 </html>

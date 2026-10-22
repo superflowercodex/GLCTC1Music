@@ -3882,16 +3882,52 @@ defs.bl.push(
  BL('Ambient · Soft Percussion',.05,d=>{ALL(d,{volume:.5,tone:5200,reverb:.55,delay:.3,decay:.8});A(d,0,{volume:.45,decay:.6,tone:3000,reverb:.3,delay:0});A(d,3,{volume:.3,decay:.2,reverb:.4});A(d,4,{volume:.3,decay:.6});A(d,1,{volume:.4,decay:.5});A(d,2,{volume:.35})}),
  BL('Pop · Radio Kit',.04,d=>{A(d,0,{volume:.95,decay:.3,tone:9000,drive:.1});A(d,1,{volume:.95,decay:.24,reverb:.16});A(d,2,{volume:.85,reverb:.2,delay:.06});A(d,3,{volume:.6,decay:.05,tone:12000});A(d,4,{volume:.6,decay:.25,tone:11000});A(d,5,{volume:.55});A(d,6,{volume:.55});A(d,7,{volume:.6,pan:.14});A(d,8,{volume:.5,pan:-.25});A(d,9,{volume:.55,pan:.28});A(d,10,{volume:.5,pan:-.2});A(d,11,{volume:.5,pan:.2})})
 );
-const MN=(name,o)=>[name,d=>Object.assign(d,o)];
+// DIVINE09 factory voicing: balance the synth engine per voice instead of relying on
+// one hot global level. This keeps kick/sub weight while taming the very loud clap/hat
+// transients and prevents the FX bus from smearing the groove.
+const tuneMine=(d,style='clean')=>{
+ const profilesByStyle={
+  clean:['sub','909','analogue','tight','wide','analogue','analogue','analogue','tight','wide','wide','kit','kit','kit','kit'],
+  techno:['tight','909','analogue','tight','wide','tight','analogue','analogue','tight','wide','wide','kit','kit','kit','kit'],
+  tribal:['sub','analogue','analogue','tight','wide','analogue','analogue','wide','tight','wide','wide','kit','kit','kit','kit'],
+  breaks:['tight','digital','analogue','tight','wide','tight','tight','analogue','tight','wide','wide','kit','kit','kit','kit'],
+  hiphop:['808','808','analogue','tight','wide','sub','analogue','analogue','tight','wide','wide','kit','kit','kit','kit'],
+  ambient:['sub','analogue','analogue','tight','wide','analogue','analogue','wide','tight','wide','wide','kit','kit','kit','kit'],
+  pop:['sub','digital','analogue','tight','wide','analogue','analogue','analogue','tight','wide','wide','kit','kit','kit','kit'],
+  electro:['tight','digital','digital','tight','wide','digital','digital','digital','tight','wide','wide','kit','kit','kit','kit'],
+  industrial:['tight','metallic','metallic','tight','wide','metallic','metallic','metallic','tight','wide','wide','kit','kit','kit','kit']
+ };
+ const levels=style==='ambient'?[.78,.38,.26,.18,.15,.34,.32,.3,.22,.16,.14,1,1,1,1]:
+  style==='hiphop'?[.9,.48,.28,.2,.16,.38,.34,.32,.22,.15,.13,1,1,1,1]:
+  [.88,.48,.28,.2,.16,.38,.34,.32,.22,.16,.14,1,1,1,1];
+ const pans=[0,0,0,-.12,.14,-.2,.08,.24,-.18,.25,-.24,0,0,0,0];
+ const tones=[-.12,-.04,.02,.1,.08,-.08,-.06,-.04,.04,.08,.1,0,0,0,0];
+ const reverbs=[0,.025,.05,.015,.025,.035,.035,.04,.025,.07,.09,0,0,0,0];
+ const delays=[0,0,.015,0,.025,0,0,.015,0,.035,.04,0,0,0,0];
+ d.profiles=profilesByStyle[style]||profilesByStyle.clean;
+ d.channels=(d.channels||[]).map((c,i)=>({...c,level:levels[i]??.2,pan:pans[i]??0,tone:tones[i]??0,reverb:reverbs[i]??0,delay:delays[i]??0}));
+ d.level=style==='ambient'?.72:.82;
+ d.drive=style==='industrial'?.14:style==='techno'?.1:style==='electro'?.08:.045;
+ d.room=style==='ambient'?.22:style==='tribal'?.12:.065;
+ d.hat=style==='ambient'?.48:style==='hiphop'?.5:style==='electro'?.72:.62;
+ d.bitcrush=style==='industrial'?.035:0;
+ d.filter=style==='hiphop'?.78:style==='ambient'?.88:1;
+ return d;
+};
+const MN=(name,o,style='clean')=>[name,d=>{Object.assign(d,o);tuneMine(d,style)}];
+// Refresh the original factory definitions too: otherwise the first six named presets
+// would still load the old, overly hot default voice balance.
+defs.mine=defs.mine.map(([name,mutate])=>[name,d=>{mutate(d);tuneMine(d,
+ name.includes('808')?'hiphop':name.includes('Tribal')?'tribal':name.includes('Industrial')?'industrial':name.includes('Linn')?'ambient':name.includes('707')?'pop':'clean')}]);
 defs.mine.push(
- MN('Techno · Peak Time',{kit:'909',swing:.02,level:.9,drive:.3,room:.1,hat:.7,filter:.95,bitcrush:0}),
- MN('House · Tribal Swing',{kit:'tribal',swing:.12,level:.85,drive:.16,room:.22,hat:.6,filter:.92,bitcrush:0}),
- MN('DnB · Roller Breaks',{kit:'breaks',swing:.03,level:.9,drive:.22,room:.1,hat:.85,filter:1,bitcrush:0}),
- MN('Hip-Hop · 808 Boom',{kit:'808',swing:.16,level:.88,drive:.2,room:.14,hat:.5,filter:.8,bitcrush:.04}),
- MN('Ambient · Linn Air',{kit:'linn',swing:.05,level:.6,drive:.04,room:.42,hat:.4,filter:.7,bitcrush:0}),
- MN('Pop · 707 Clean',{kit:'707',swing:.04,level:.85,drive:.08,room:.16,hat:.72,filter:1,bitcrush:0}),
- MN('Electro · 606 Dry',{kit:'606',swing:.06,level:.82,drive:.14,room:.08,hat:.66,filter:.9,bitcrush:0}),
- MN('Glitch · Broken Hybrid',{kit:'glitch',swing:.08,level:.8,drive:.2,room:.12,hat:.6,filter:.85,bitcrush:.18})
+ MN('Techno · Peak Time',{kit:'909',swing:.02},'techno'),
+ MN('House · Tribal Swing',{kit:'tribal',swing:.12},'tribal'),
+ MN('DnB · Roller Breaks',{kit:'breaks',swing:.03},'breaks'),
+ MN('Hip-Hop · 808 Boom',{kit:'808',swing:.16},'hiphop'),
+ MN('Ambient · Linn Air',{kit:'linn',swing:.05},'ambient'),
+ MN('Pop · 707 Clean',{kit:'707',swing:.04},'pop'),
+ MN('Electro · 606 Dry',{kit:'606',swing:.06},'electro'),
+ MN('Glitch · Broken Hybrid',{kit:'hybrid',swing:.08},'industrial')
 );
 const LE=(name,o,fx)=>[name,d=>{Object.assign(d,o);d.fx=Object.assign({},d.fx,fx)}];
 defs.lee.push(
@@ -3938,6 +3974,21 @@ const libs=read();
 {let mig=false;Object.keys(libs).forEach(k=>['factory','user'].forEach(g=>Object.values((libs[k]&&libs[k][g])||{}).forEach(d=>{if(d&&Array.isArray(d.patterns)&&d.patterns.some(p=>Array.isArray(p)?p.length:p&&p.steps)){slim(k,d);mig=true}})));if(mig)write(libs)}
 function factoryFor(k){if(!libs[k]){libs[k]={factory:{},user:{}};try{const base=adapters[k].get();for(const [name,mutate] of defs[k]||[]){const d=clone(base);mutate(d);libs[k].factory[name]=d}}catch(e){/* lazy module init: factories are seeded when available */}}return libs[k]}
 function seed(k){const lib=factoryFor(k);if(Object.keys(lib.factory||{}).length)return;try{const base=adapters[k].get();for(const [name,mutate] of defs[k]||[]){const d=clone(base);mutate(d);lib.factory[name]=d}write(libs)}catch(e){}}
+// Versioned DIVINE09 factory refresh: replace stale factory sounds once, while keeping
+// all user-created presets and every live pattern/sample untouched.
+try{
+ const marker='glctc1.divine09.factoryVoicingVersion';
+ if(localStorage.getItem(marker)!=='2'){
+  const base=adapters.mine.get(),fresh={};
+  for(const [name,mutate] of defs.mine||[]){
+   const d=clone(base);mutate(d);d.patterns=[[],[],[],[]];fresh[name]=d;
+  }
+  libs.mine=libs.mine||{user:{}};
+  libs.mine.factory=fresh;
+  if(!libs.mine.user)libs.mine.user={};
+  if(write(libs))localStorage.setItem(marker,'2');
+ }
+}catch(e){console.warn('DIVINE09 factory preset refresh deferred',e)}
 function options(k,sel){seed(k);const lib=factoryFor(k);const previous=sel.value;sel.innerHTML='<option value="">— SELECT PRESET —</option>';[['FACTORY',lib.factory||{}],['USER',lib.user||{}]].forEach(([group,obj])=>{const entries=Object.entries(obj);if(!entries.length)return;const og=document.createElement('optgroup');og.label=group+' PRESETS';entries.forEach(([name])=>{const o=document.createElement('option');o.value=name;o.textContent=name;og.appendChild(o)});sel.appendChild(og)});if([...sel.options].some(o=>o.value===previous))sel.value=previous;}
 function status(panel,msg){const el=panel.querySelector('.gpc-status');if(el)el.textContent=msg}
 function load(k,name){const lib=factoryFor(k),d=(lib.user&&lib.user[name])||(lib.factory&&lib.factory[name]);if(!d)throw Error('Preset not found');adapters[k].set(clone(d));const sel=$('gpcPreset_'+k);if(sel)sel.value=name;const panel=$(ids[k][0]);status(panel,'LOADED · '+name);return true}

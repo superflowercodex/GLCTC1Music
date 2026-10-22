@@ -1492,7 +1492,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
 (()=>{
  const $l=id=>document.getElementById(id);
  const defaults=()=>({patterns:Array.from({length:4},(_,pi)=>Array.from({length:16},(_,i)=>({on:pi===0?(i%4===0||i%4===2||i===7||i===11):pi===1?(i%2===0||i===7||i===15):pi===2?(i%4===0||i===5||i===10):Math.random()>.52,note:[36,36,43,36,39,36,46,34,36,36,41,36,39,43,34,36][i],accent:[0,4,7,11,15].includes(i),slide:[3,7,11,14].includes(i),velocity:.78}))),active:0,cutoff:900,resonance:13,envMod:.72,decay:.22,attack:.004,sub:.24,wave:'sawtooth',octave:0,drive:.55,level:.68,accent:.7,slideTime:.09,gate:.72,swing:.08,prob:1,tempo:130,length:16,arpOn:false,arpMode:'up',arpRate:'1/16',arpOct:2,arpGate:.72,stutter:false,freeze:false,tape:false,fx:{delay:.14,feedback:.28,reverb:.12,bitcrush:0,wet:.28,dist:0.55,filter:12000,filterRes:1.5,stereo:0.22}});
- let S=defaults(),running=false,timer=0,next=0,origin=0,selected=0,lastFreq=0,activeNodes=[],arpTimer=0,arpIndex=0,arpLastFreq=0,leeTransportTimer=0;const fxCache=new WeakMap();
+ let S=defaults(),running=false,timer=0,next=0,nextAt=0,selected=0,lastFreq=0,activeNodes=[],arpTimer=0,arpIndex=0,arpLastFreq=0,leeTransportTimer=0;const fxCache=new WeakMap();
  function getState(){if(typeof project!=='undefined'&&project&&project.glctc30lee){S=Object.assign(defaults(),project.glctc30lee);if(!Array.isArray(S.patterns)||S.patterns.length!==4)S=defaults()}}
  function save(){project.glctc30lee=S;try{localStorage.setItem('glctc1_30lee_preset',JSON.stringify(S))}catch(e){}markDirty()}
  function noteName(n){return ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][n%12]+(Math.floor(n/12)-1)}
@@ -1522,8 +1522,40 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
  window.GLCTC_30LEE_PRESET={get:()=>JSON.parse(JSON.stringify(S)),set:d=>{if(!d||!Array.isArray(d.patterns)||d.patterns.length!==4)throw Error('Invalid 30LEE preset');const old=S;S={...defaults(),...JSON.parse(JSON.stringify(d)),patterns:old.patterns,active:old.active};save();renderControls();renderSteps();renderKeys();return true}};
  window.GLCTC_30LEE_PATTERNS={get:()=>JSON.parse(JSON.stringify({patterns:S.patterns,length:S.length,swing:S.swing})),set:d=>{if(!d||!Array.isArray(d.patterns))return false;d.patterns.forEach((p,i)=>{if(!Array.isArray(S.patterns[i])||!Array.isArray(p))return;S.patterns[i]=Array.from({length:16},(_,k)=>Object.assign({on:false,note:36,accent:false,slide:false,velocity:.78},p[k]||{}))});if(d.length)S.length=d.length;if(Number.isFinite(d.swing))S.swing=d.swing;save();$l('lee303Length').value=S.length;renderSteps();selected=0;try{$l('lee303Note').value=current()[0].note;$l('lee303NoteVal').textContent=noteName(current()[0].note)}catch(e){}return true}};
  function stepLen(){return 60/(Number($l('bpm').value)||130)/4}
- function tick(){if(!running)return;const ctx=ensureAudio(),now=ctx.currentTime,sd=stepLen();if(window.__leeLastSd&&Math.abs(window.__leeLastSd-sd)>1e-9)origin+=next*(window.__leeLastSd-sd);window.__leeLastSd=sd;while(origin+next*sd<now+.12){const ix=next%(S.length||16),st=current()[ix];if(st?.on&&origin+next*sd>=now-.03&&Math.random()<=S.prob){const when=origin+next*sd+(ix%2?sd*S.swing:0),dur=Math.max(.035,sd*S.gate);if(S.tape){S.tape=false;$l('lee303Tape').classList.remove('lee-on')}else playNote(st.note,dur,st.accent,st.slide,when);$l('lee303Steps').querySelectorAll('.lee303-step').forEach(b=>b.classList.toggle('playing',+b.dataset.step===ix));}next++} }
- function start(){if(running)stop();ensureAudio().resume();running=true;{const o0=window.__glctcStartStep||0;origin=(window.__glctcMasterStartAt||ensureAudio().currentTime+.06)-o0*stepLen();next=o0;window.__leeLastSd=0}timer=setInterval(tick,20);$l('lee303Play').textContent='Ⅱ PLAYING';$l('lee303Play').classList.add('lee-on');$l('lee303Status').textContent='ACID SEQUENCE RUNNING'}
+ // Stable 30LEE clock: keep the next event's absolute AudioContext time.
+ // Tempo changes affect the interval after the next scheduled step; they never
+ // multiply a cumulative step count into the time anchor.
+ function tick(){
+  if(!running)return;
+  const ctx=ensureAudio(),now=ctx.currentTime,sd=stepLen();
+  // Recover cleanly after a suspended/backgrounded tab instead of processing a
+  // long backlog of stale steps in one callback.
+  if(nextAt<now-.25){
+   const skipped=Math.max(0,Math.floor((now-.03-nextAt)/sd));
+   next+=skipped;
+   nextAt+=skipped*sd;
+  }
+  while(nextAt<now+.12){
+   const ix=next%(S.length||16),st=current()[ix],baseWhen=nextAt;
+   if(st?.on&&baseWhen>=now-.03&&Math.random()<=S.prob){
+    const when=baseWhen+(ix%2?sd*S.swing:0),dur=Math.max(.035,sd*S.gate);
+    if(S.tape){S.tape=false;$l('lee303Tape').classList.remove('lee-on')}
+    else playNote(st.note,dur,st.accent,st.slide,when);
+    $l('lee303Steps').querySelectorAll('.lee303-step').forEach(b=>b.classList.toggle('playing',+b.dataset.step===ix));
+   }
+   next++;
+   nextAt+=sd;
+  }
+ }
+ function start(){
+  if(running)stop();
+  const ctx=ensureAudio();ctx.resume();running=true;
+  next=window.__glctcStartStep||0;
+  nextAt=window.__glctcMasterStartAt||ctx.currentTime+.06;
+  timer=setInterval(tick,20);
+  $l('lee303Play').textContent='Ⅱ PLAYING';$l('lee303Play').classList.add('lee-on');
+  $l('lee303Status').textContent='ACID SEQUENCE RUNNING';
+ }
  function stop(){running=false;clearInterval(timer);clearTimeout(leeTransportTimer);leeTransportTimer=0;timer=0;if(arpTimer)stopArp();$l('lee303Play').textContent='▶ PLAY PATTERN';$l('lee303Play').classList.remove('lee-on');$l('lee303Steps').querySelectorAll('.lee303-step').forEach(b=>b.classList.remove('playing'));$l('lee303Status').textContent='ACID ENGINE READY'}
  function arpNotes(){let notes=current().filter(st=>st&&st.on).map(st=>({note:st.note,accent:st.accent,slide:st.slide}));if(!notes.length)return[];if(S.arpMode!=='played')notes.sort((a,b)=>a.note-b.note);if(S.arpMode==='down')notes.reverse();if(S.arpMode==='random')notes.sort(()=>Math.random()-.5);if(S.arpMode==='updown'&&notes.length>2)notes=notes.concat(notes.slice(1,-1).reverse());const base=notes.slice(),octaves=Math.max(1,Math.min(4,+S.arpOct||1));for(let o=1;o<octaves;o++)base.push(...notes.map(x=>({...x,note:x.note+12*o})));return base}
  function arpInterval(){const bpm=Number($l('bpm').value)||130;const rate={'1/4':1,'1/8':2,'1/8T':3,'1/16':4,'1/16T':6,'1/32':8}[S.arpRate]||4;return 60/bpm*4/rate}

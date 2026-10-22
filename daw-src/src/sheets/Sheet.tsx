@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Icon } from "../ui/Icon";
+import { isCompact, useLayoutMode } from "../ui/layoutMode";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -57,6 +59,8 @@ export function Sheet({
   const titleId = useId();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  // Touch screens have no Escape key and a full-screen sheet leaves no backdrop to tap, so they get a close key.
+  const compact = isCompact(useLayoutMode());
 
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -85,6 +89,11 @@ export function Sheet({
       }}
     >
       <div ref={ref} className="sheet" style={{ "--w": `${width}px` } as React.CSSProperties} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown}>
+        {compact && (
+          <button type="button" className="icon-btn sheet-close" aria-label={`Close ${title}`} onClick={() => closeRef.current()}>
+            <Icon name="close" size={22} />
+          </button>
+        )}
         <h2 id={titleId} className={hideHead ? "sr-only" : "sheet-title"}>
           {title}
           {!hideHead && subtitle && <span className="sheet-sub">{subtitle}</span>}

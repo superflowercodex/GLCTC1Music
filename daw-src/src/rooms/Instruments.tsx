@@ -6,6 +6,7 @@ import { projectStore, uiStore } from "../store/project";
 import { useStore } from "../store/store";
 import { Caption } from "../ui/Caption";
 import { Icon } from "../ui/Icon";
+import { useLayoutMode } from "../ui/layoutMode";
 import { RoomFrame } from "../ui/RoomFrame";
 import "../ui/frost.css";
 import "./instruments.css";
@@ -105,6 +106,7 @@ function Card({ info, trackName }: { info: InstrumentInfo; trackName: string | n
 export default function Instruments() {
   const slots = useStore(projectStore, (p) => p.instruments);
   const tracks = useStore(projectStore, (p) => p.tracks);
+  const phone = useLayoutMode() === "phone";
 
   const trackFor = (kind: InstrumentKind): string | null => {
     const slot = slots.find((s) => s.kind === kind);
@@ -140,7 +142,7 @@ export default function Instruments() {
         <div className="hubx-help">
           <div className="hubx-help-t">
             <strong>Every instrument opens in the same room</strong>
-            <span>Presets left, play surface in the middle, sound on the right, record and bounce along the bottom.</span>
+            <span>{phone ? "Presets, play surface and sound sit one tap apart; record and bounce live in the player." : "Presets left, play surface in the middle, sound on the right, record and bounce along the bottom."}</span>
           </div>
           <a className="btn btn-sm btn-outline" href={instrumentHref("drum80la8")}>See a drum machine</a>
           <a className="btn btn-sm btn-outline" href={instrumentHref("galacticOne")}>See a synth</a>

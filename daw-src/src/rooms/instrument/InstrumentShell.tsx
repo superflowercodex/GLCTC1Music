@@ -1,12 +1,20 @@
 import { useState, type ReactNode } from "react";
 import type { Instrument } from "../../audio/types";
-import { Button, IconButton } from "../../ui/controls";
+import { Button, IconButton, Seg } from "../../ui/controls";
+import { isCompact, useLayoutMode } from "../../ui/layoutMode";
 import { Display, Faceplate } from "../../ui/hardware";
 import { useInstrument } from "../../ui/hooks";
 import { Icon } from "../../ui/Icon";
 import { RoomFrame } from "../../ui/RoomFrame";
 import { ParamPanel } from "./ParamPanel";
 import { PresetList } from "./PresetList";
+
+type Pane = "presets" | "play" | "sound";
+const PANES: ReadonlyArray<{ value: Pane; label: string }> = [
+  { value: "presets", label: "Presets" },
+  { value: "play", label: "Play" },
+  { value: "sound", label: "Sound" },
+];
 
 export interface ShellProps {
   instrument: Instrument;
@@ -33,6 +41,9 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
   useInstrument(instrument);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
+  // Phones and tablets show one pane at a time (Presets / Play / Sound) instead of three side by side; Play first.
+  const phone = isCompact(useLayoutMode());
+  const [pane, setPane] = useState<Pane>("play");
   const presets = instrument.presets;
   const index = presets.findIndex((p) => p.id === instrument.serialize().presetId);
 
@@ -85,7 +96,8 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
         </>
       }
     >
-      <div className="inst">
+      {phone && <Seg label="Instrument section" options={PANES} value={pane} onChange={setPane} className="inst-panes" color="var(--a1)" />}
+      <div className="inst" data-pane={phone ? pane : undefined}>
         <Faceplate as="aside" label="Presets">
           <PresetList instrument={instrument} />
         </Faceplate>

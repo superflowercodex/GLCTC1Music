@@ -1,1 +1,0 @@
-import{j as s}from"./index-Dc0RK_mk.js";function p({children:n,aside:a,as:t="div",id:i,className:o=""}){return s.jsxs(t,{className:`caption ${o}`,id:i,children:[s.jsx("span",{className:"caption-t",children:n}),a!==void 0&&s.jsx("span",{className:"caption-s",children:a})]})}export{p as C};

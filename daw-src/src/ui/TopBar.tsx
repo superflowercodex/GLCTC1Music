@@ -1,5 +1,6 @@
 import { uiStore } from "../store/project";
 import { toggleFullscreen, useFullscreen, fullscreenSupported } from "./appFullscreen";
+import { AudioGate } from "./AudioGate";
 import { Icon } from "./Icon";
 import { SaveIndicator } from "./SaveIndicator";
 
@@ -12,8 +13,27 @@ function open(sheet: "palette" | "export"): void {
   uiStore.set((s) => ({ ...s, sheet }));
 }
 
-export function TopBar() {
+export function TopBar({ compact = false }: { compact?: boolean }) {
   const full = useFullscreen();
+  // Phones and tablets: the brand, a search key that opens the palette, and Export. No full-screen key, no shortcut hints.
+  if (compact)
+    return (
+      <header className="topbar topbar-compact">
+        <span className="brand-mark" aria-hidden="true" />
+        <span className="brand-word">
+          GLCTC1
+          <small>Studio</small>
+        </span>
+        <AudioGate />
+        <span className="spacer" />
+        <button type="button" className="icon-btn tb-search" onClick={() => open("palette")} aria-label="Search rooms, instruments and actions">
+          <Icon name="search" size={22} />
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => open("export")}>
+          Export
+        </button>
+      </header>
+    );
   return (
     <header className="topbar">
       <button type="button" className="search-pill" onClick={() => open("palette")} aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}>

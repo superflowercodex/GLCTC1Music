@@ -1,7 +1,9 @@
-import { memo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { GlassWindow } from "../../../ui/hardware";
 import { peekEngine } from "../../../audio/engine";
 import { useRaf } from "../../../ui/hooks";
+import { useNarrowPhone } from "../../../ui/layoutMode";
+import { stepPages } from "./stepPages";
 import "./drums.css";
 
 export interface GridRow {
@@ -39,6 +41,7 @@ interface Props {
 }
 
 const GROUP = 4;
+const PHONE_PAGE = 8;
 
 /**
  * The step grid shared by the three drum machines. Rows share the available height through CSS
@@ -82,9 +85,23 @@ export const StepGrid = memo(function StepGrid({ rows, cols, label, labelWidth =
     }
   };
 
-  const groups = Array.from({ length: cols / GROUP }, (_, g) => g);
+  // Portrait phones show eight steps at a time (two groups of four) so each cell stays finger-sized; the pager picks the eight.
+  const paged = useNarrowPhone();
+  const pages = paged ? stepPages(cols, PHONE_PAGE) : [{ from: 0, to: cols }];
+  const [pageAt, setPage] = useState(0);
+  const page = pages[Math.min(pageAt, pages.length - 1)];
+  const groups = Array.from({ length: cols / GROUP }, (_, g) => g).filter((g) => g * GROUP >= page.from && g * GROUP < page.to);
   return (
-    <div className="sg" ref={root} role="group" aria-label={label} onKeyDown={move} style={{ "--lw": `${labelWidth}px` } as CSSProperties}>
+    <div className="sg" ref={root} role="group" aria-label={label} onKeyDown={move} style={{ "--lw": `${labelWidth}px`, "--sg-groups": groups.length } as CSSProperties}>
+      {pages.length > 1 && (
+        <div className="sg-pager seg" role="radiogroup" aria-label="Steps shown">
+          {pages.map((p, i) => (
+            <button key={p.from} type="button" role="radio" aria-checked={p === page} className={p === page ? "on" : ""} onClick={() => setPage(i)}>
+              {p.from + 1}–{p.to}
+            </button>
+          ))}
+        </div>
+      )}
       {numbers && (
         <div className="sg-head" aria-hidden="true">
           <span />

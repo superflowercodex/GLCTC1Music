@@ -350,7 +350,7 @@ export default function Stage() {
     >
       <div className="stage-body frost-sheet">
         <section className="stage-main" aria-label="Preview">
-          <div className="stage-view" ref={viewRef}>
+          <div className="stage-view" ref={viewRef} data-aspect={aspect}>
             <div className="stage-frame" style={{ "--ar": frameAspect(aspect) } as React.CSSProperties}>
               <canvas ref={canvasRef} aria-label={`Stage preview, ${wide ? "widescreen" : "phone"} shape`} role="img" />
               {sceneError ? (

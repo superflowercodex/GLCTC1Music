@@ -10,6 +10,8 @@ import { pickTrack, tracksFor } from "./selection";
 import { HeadSlider } from "./HeadSlider";
 import { formatGain, formatPanShort, gainToPos, nudgeGain, nudgePan, panToPos, posToGain, posToPan } from "./trackMix";
 import { FADER_MAX_DB, FADER_MIN_DB } from "../../audio/mixMath";
+import { Slider } from "../../ui/controls";
+import { isCompact, useLayoutMode } from "../../ui/layoutMode";
 import "./mix.css";
 
 interface Props {
@@ -28,6 +30,8 @@ export const TrackHeader = memo(function TrackHeader({ track, icon, detail, sele
   const [editing, setEditing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const [readout, setReadout] = useState<string | null>(null);
+  // Phones hide the header's small sliders; volume and pan move into the track's menu as finger-sized sliders.
+  const compact = isCompact(useLayoutMode());
   const showVolume = useCallback((t: string | null) => setReadout(t && `Volume ${t}`), []);
   const showPan = useCallback((t: string | null) => setReadout(t && `Pan ${t}`), []);
   // The same Track.gainDb / Track.pan the Mixer strip edits, so the two stay one control.
@@ -152,6 +156,12 @@ export const TrackHeader = memo(function TrackHeader({ track, icon, detail, sele
       <span className="arr-resize" role="separator" aria-orientation="vertical" aria-label="Resize track list" />
       {menu && (
         <PopMenu anchor={menu} onClose={closeMenu} label={`${track.name} options`}>
+          {compact && (
+            <div className="pm-mix" style={{ "--c": track.color } as CSSProperties}>
+              <Slider label="Volume" value={track.gainDb} min={FADER_MIN_DB} max={FADER_MAX_DB} step={0.5} format={formatGain} onChange={(gainDb) => mix({ gainDb })} />
+              <Slider label="Pan" value={track.pan} min={-1} max={1} step={0.02} format={formatPanShort} onChange={(pan) => mix({ pan })} />
+            </div>
+          )}
           <button type="button" role="menuitem" onClick={() => (closeMenu(), setEditing(true))}>
             Rename
           </button>

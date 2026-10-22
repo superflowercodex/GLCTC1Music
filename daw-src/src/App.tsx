@@ -11,6 +11,8 @@ import { INSTRUMENTS } from "./audio/instruments/registry";
 import { Cosmos } from "./gfx/Cosmos";
 import { ambienceFor, roomAccent } from "./gfx/ambience";
 import { useProjectPalette } from "./gfx/useProjectPalette";
+import { isCompact, useLayoutMode } from "./ui/layoutMode";
+import { TabBar } from "./ui/TabBar";
 
 type RoomKey = "arrange" | "instruments" | "instrument" | "mix" | "song" | "stage" | "library";
 type AnyRoom = ComponentType<any>;
@@ -124,6 +126,15 @@ export function App() {
   }, []);
 
   const [sideMode, toggleSide] = useSideMode();
+  // Phones and tablets swap the sidebar for a bottom tab bar; desktop renders exactly as before.
+  const layout = useLayoutMode();
+  const compact = isCompact(layout);
+  // On the root, so popovers and dialogs portalled to <body> pick up the phone rules too (ui/mobile.css).
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (compact) root.dataset.layout = layout;
+    else delete root.dataset.layout;
+  }, [compact, layout]);
   const shellRef = useRef<HTMLDivElement>(null);
   const onToggleSide = () => {
     const shell = shellRef.current;
@@ -140,13 +151,14 @@ export function App() {
   return (
     <div ref={shellRef} className="shell" data-side={sideMode} style={accents}>
       <Cosmos ambience={ambience} />
-      <Sidebar route={route} mode={sideMode} onToggle={onToggleSide} onIntent={prefetchRoom} />
-      <TopBar />
+      {!compact && <Sidebar route={route} mode={sideMode} onToggle={onToggleSide} onIntent={prefetchRoom} />}
+      <TopBar compact={compact} />
       <main ref={stageRef} className="stage">
         <Suspense fallback={null}>
           <RoomView route={route} />
         </Suspense>
       </main>
+      {compact && <TabBar route={route} onIntent={prefetchRoom} />}
       <MidiLearnBadge />
       <SheetHost />
     </div>

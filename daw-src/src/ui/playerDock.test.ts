@@ -40,6 +40,15 @@ describe("persistence", () => {
     expect(playerDock.get().minimised).toBe(true);
   });
 
+  it("starts on the mini-player on a phone when nothing is stored, but a stored choice still wins", async () => {
+    vi.stubGlobal("localStorage", fakeStorage());
+    const { readMinimised } = await import("./playerDock");
+    expect(readMinimised(true)).toBe(true);
+    expect(readMinimised(false)).toBe(false);
+    vi.stubGlobal("localStorage", fakeStorage({ "glctc1studio.player.minimised": "false" }));
+    expect(readMinimised(true)).toBe(false);
+  });
+
   it("falls back to expanded for corrupt values", async () => {
     vi.stubGlobal("localStorage", fakeStorage({ "glctc1studio.player.minimised": "{nope" }));
     const { playerDock } = await import("./playerDock");

@@ -7,6 +7,8 @@ import "./styles.css";
 import "./ui/cockpit.css";
 // Frosted-glass utilities (.frost-sheet, .frost-pop, seams) load after the cockpit so they can reuse its scopes.
 import "./ui/frost.css";
+// Phones and tablets: every rule sits behind (max-width: 1000px), so desktop is untouched. Loaded last so it wins ties.
+import "./ui/mobile.css";
 
 void startApp();
 

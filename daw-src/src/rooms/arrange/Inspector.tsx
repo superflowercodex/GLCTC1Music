@@ -6,6 +6,8 @@ import { Knob } from "../../ui/Knob";
 import { deleteSelected, duplicateSelected, splitAtPlayhead } from "./ops";
 import { selectClips } from "./selection";
 import { formatBarPosition } from "./timeline";
+import { Icon } from "../../ui/Icon";
+import { isCompact, useLayoutMode } from "../../ui/layoutMode";
 
 function NumField({ label, value, step, min, onCommit }: { label: string; value: number; step: number; min: number; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -79,6 +81,8 @@ export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
   const spanTo = Math.max(...clips.map(clipEndBar));
 
   const patch = (p: Partial<Omit<Clip, "id" | "startBar" | "lengthBars">>) => projectStore.set((s) => updateClips(s, ids, p));
+  // On phones the inspector is a bottom sheet over the timeline, so it needs its own way out: deselect.
+  const compact = isCompact(useLayoutMode());
 
   return (
     <aside className="arr-inspector" aria-label={single ? "Selected clip" : "Selected clips"} style={{ "--c": color } as CSSProperties}>
@@ -103,6 +107,11 @@ export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
               : `${trackCount} track${trackCount === 1 ? "" : "s"} · Bar ${formatBarPosition(spanFrom)}–${formatBarPosition(spanTo)}`}
           </div>
         </div>
+        {compact && (
+          <button type="button" className="icon-btn insp-close" aria-label="Done, deselect" onClick={() => selectClips([])}>
+            <Icon name="close" size={22} />
+          </button>
+        )}
       </div>
 
       <div className="insp-knobs">

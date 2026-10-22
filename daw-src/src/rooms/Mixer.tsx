@@ -11,20 +11,24 @@ import { EffectsTab } from "./mixer/EffectsTab";
 import { MasterStrip } from "./mixer/MasterStrip";
 import { OutputsTab } from "./mixer/OutputsTab";
 import { Strip } from "./mixer/Strip";
+import { useLayoutMode } from "../ui/layoutMode";
 import "./mixer/mixer.css";
 
-type Tab = "levels" | "effects" | "outputs";
+type Tab = "levels" | "effects" | "outputs" | "master";
 
 const TABS: ReadonlyArray<{ value: Tab; label: string }> = [
   { value: "levels", label: "Levels" },
   { value: "effects", label: "Effects" },
   { value: "outputs", label: "Outputs" },
 ];
+/** Phones have no room for the Master beside the channels, so it becomes its own segment. */
+const PHONE_TABS: ReadonlyArray<{ value: Tab; label: string }> = [...TABS, { value: "master", label: "Master" }];
 
 const TAB_ASIDE: Record<Tab, string> = {
   levels: "Fader, pan, sends",
   effects: "Inserts and sends",
   outputs: "Devices and routing",
+  master: "Master",
 };
 
 function Levels({ onOpenFx }: { onOpenFx: (trackId: string) => void }) {
@@ -49,20 +53,23 @@ export default function Mixer() {
   const [tab, setTab] = useState<Tab>("levels");
   const [fxFocus, setFxFocus] = useState<string | null>(null);
   const count = useStore(projectStore, (p) => p.tracks.length);
+  const phone = useLayoutMode() === "phone";
+  // Leaving the phone layout with Master picked falls back to the channels, where the Master sits beside them.
+  const view: Tab = !phone && tab === "master" ? "levels" : tab;
   const openFx = (trackId: string): void => {
     setFxFocus(trackId);
     setTab("effects");
   };
   return (
-    <RoomFrame title="Mixer" actions={<Seg label="Mixer view" options={TABS} value={tab} onChange={setTab} className="mix-tabs" />}>
-      <div className="mixer-body">
+    <RoomFrame title="Mixer" actions={<Seg label="Mixer view" options={phone ? PHONE_TABS : TABS} value={view} onChange={setTab} className="mix-tabs" />}>
+      <div className="mixer-body" data-view={phone ? (view === "master" ? "master" : "channels") : undefined}>
         <Faceplate className="mixer-main" label="Channels">
-          <Caption className="mixer-cap" aside={`${TAB_ASIDE[tab]} · ${count} ${count === 1 ? "track" : "tracks"}`}>
-            {tab === "levels" ? "Channels" : tab === "effects" ? "Effects" : "Outputs"}
+          <Caption className="mixer-cap" aside={`${TAB_ASIDE[view]} · ${count} ${count === 1 ? "track" : "tracks"}`}>
+            {view === "effects" ? "Effects" : view === "outputs" ? "Outputs" : "Channels"}
           </Caption>
-          {tab === "levels" && <Levels onOpenFx={openFx} />}
-          {tab === "effects" && <EffectsTab focusTrackId={fxFocus} />}
-          {tab === "outputs" && <OutputsTab />}
+          {view === "levels" && <Levels onOpenFx={openFx} />}
+          {view === "effects" && <EffectsTab focusTrackId={fxFocus} />}
+          {view === "outputs" && <OutputsTab />}
         </Faceplate>
         <MasterStrip />
       </div>

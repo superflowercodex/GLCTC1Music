@@ -388,9 +388,17 @@ export class SynthVoice {
   liveFilter(cutoff: number, q: number, hp: number): void {
     const t = this.ctx.currentTime;
     const c = Math.max(20, Math.min(20000, cutoff));
-    for (const f of this.filterNodes) f.frequency.setTargetAtTime(c, t, 0.02);
-    this.filterNodes[this.filterNodes.length - 1]?.Q.setTargetAtTime(q, t, 0.02);
-    if (this.highpass && hp > 25) this.highpass.frequency.setTargetAtTime(hp, t, 0.02);
+    // A short ramp from where the value is now, replacing anything pending: automation calls this every step, and
+    // stacked setTargetAtTime events grow without bound and are evaluated wrongly by some engines.
+    const glide = (param: AudioParam, value: number): void => {
+      param.cancelScheduledValues(t);
+      param.setValueAtTime(param.value, t);
+      param.linearRampToValueAtTime(value, t + 0.03);
+    };
+    for (const f of this.filterNodes) glide(f.frequency, c);
+    const last = this.filterNodes[this.filterNodes.length - 1];
+    if (last) glide(last.Q, q);
+    if (this.highpass && hp > 25) glide(this.highpass.frequency, hp);
   }
 
   sounding(time: number): boolean {

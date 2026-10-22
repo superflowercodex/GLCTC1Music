@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { loadBuffers, showToast } from "../../audio/media";
 import { getPeaks, peekPeaks, reducePeaks, subscribePeaks, type PeakData } from "../../audio/peaks";
+import type { InstrumentState } from "../../audio/types";
 import type { Clip } from "../../project/model";
+import { patternPreview, type PatternPreview } from "./patternPreview";
 
 export function usePeaks(assetId: string | undefined, assetName: string | undefined): PeakData | undefined {
   const peaks = useSyncExternalStore(
@@ -51,12 +53,21 @@ function drawWave(g: CanvasRenderingContext2D, w: number, h: number, peaks: Peak
   const bins = Math.max(1, Math.floor(w / step));
   const values = reducePeaks(peaks, fromSec, toSec, bins);
   g.fillStyle = color;
+  g.globalAlpha = 0.25;
+  g.fillRect(0, h / 2, w, 1);
   for (let i = 0; i < bins; i++) {
     const bar = Math.max(2, Math.pow(values[i], 0.7) * h);
+    const top = (h - bar) / 2;
+    g.globalAlpha = 0.95;
     g.beginPath();
-    g.roundRect(i * step, (h - bar) / 2, 2.5, bar, 1.5);
+    g.roundRect(i * step, top, 2.5, bar / 2 + 1, [1.5, 1.5, 0, 0]);
+    g.fill();
+    g.globalAlpha = 0.5;
+    g.beginPath();
+    g.roundRect(i * step, h / 2, 2.5, bar / 2, [0, 0, 1.5, 1.5]);
     g.fill();
   }
+  g.globalAlpha = 1;
 }
 
 function drawPatternMarks(g: CanvasRenderingContext2D, w: number, h: number, color: string, seed: number, drums: boolean, beatPx: number): void {
@@ -67,18 +78,18 @@ function drawPatternMarks(g: CanvasRenderingContext2D, w: number, h: number, col
       g.fillStyle = color;
       if (pos === 0 || pos === 2 || (pos === 3 && r() > 0.6)) {
         g.beginPath();
-        g.roundRect(x, h * 0.55, 8, h * 0.4, 4);
+        g.roundRect(x, h * 0.55, 6, h * 0.4, 1);
         g.fill();
       }
       if (pos === 1 || pos === 3) {
         g.fillStyle = `${color}cc`;
         g.beginPath();
-        g.roundRect(x, h * 0.1, 8, h * 0.25, 4);
+        g.roundRect(x, h * 0.1, 6, h * 0.25, 1);
         g.fill();
       }
       g.fillStyle = `${color}88`;
       g.beginPath();
-      g.arc(x + beatPx / 2, h * 0.47, 2.5, 0, Math.PI * 2);
+      g.rect(x + beatPx / 2 - 1.5, h * 0.47 - 1.5, 3, 3);
       g.fill();
     }
     return;
@@ -90,9 +101,25 @@ function drawPatternMarks(g: CanvasRenderingContext2D, w: number, h: number, col
     const len = [10, 16, 22, 34][Math.floor(r() * 4)];
     const row = Math.floor(r() * rows);
     g.beginPath();
-    g.roundRect(x, row * (h / rows), len, rowH, 3);
+    g.roundRect(x, row * (h / rows), len, rowH, 1.5);
     g.fill();
     x += len + [4, 8, 14][Math.floor(r() * 3)];
+  }
+}
+
+function drawPreview(g: CanvasRenderingContext2D, w: number, h: number, pv: PatternPreview, pxPerBeat: number, color: string): void {
+  const stepW = pxPerBeat / 4;
+  const passW = pv.steps * stepW;
+  const rowH = h / pv.rows;
+  g.fillStyle = color;
+  for (let x0 = 0; x0 < w; x0 += passW) {
+    for (const hit of pv.hits) {
+      const x = x0 + hit.step * stepW;
+      if (x >= w) continue;
+      g.beginPath();
+      g.roundRect(x, hit.row * rowH + 0.5, Math.max(2, stepW * 0.8), Math.max(3, Math.min(8, rowH - 1.5)), 1);
+      g.fill();
+    }
   }
 }
 
@@ -108,7 +135,7 @@ function drawNotes(g: CanvasRenderingContext2D, w: number, h: number, clip: Clip
     const x = (n.startStep / stepsTotal) * w;
     const y = ((hi - n.pitch + (span - (hi - lo + 1)) / 2) / span) * h;
     g.beginPath();
-    g.roundRect(x, y, Math.max(3, (n.lengthSteps / stepsTotal) * w), Math.max(3, rowH - 1), 2);
+    g.roundRect(x, y, Math.max(3, (n.lengthSteps / stepsTotal) * w), Math.max(3, rowH - 1), 1);
     g.fill();
   }
 }
@@ -124,9 +151,10 @@ export interface ClipArtProps {
   /** CSS pixels per beat, so drum marks line up with the beat grid. */
   pxPerBeat: number;
   assetName: string | undefined;
+  slotState?: InstrumentState;
 }
 
-export function ClipArt({ clip, rate, barSec, beatsPerBar, color, drums, pxPerBeat, assetName }: ClipArtProps) {
+export function ClipArt({ clip, rate, barSec, beatsPerBar, color, drums, pxPerBeat, assetName, slotState }: ClipArtProps) {
   const [ref, size] = useElementSize<HTMLCanvasElement>();
   const peaks = usePeaks(clip.kind === "audio" ? clip.assetId : undefined, assetName);
 
@@ -144,11 +172,13 @@ export function ClipArt({ clip, rate, barSec, beatsPerBar, color, drums, pxPerBe
     if (clip.kind === "audio" && peaks) {
       drawWave(g, size.w, size.h, peaks, clip.offsetSec, clip.offsetSec + clip.lengthBars * barSec * rate, color);
     } else if (clip.kind === "pattern") {
-      drawPatternMarks(g, size.w, size.h, color, (clip.patternIndex ?? 0) * 977 + 13, drums, pxPerBeat);
+      const pv = patternPreview(slotState, clip.patternIndex ?? 0);
+      if (pv) drawPreview(g, size.w, size.h, pv, pxPerBeat, color);
+      else drawPatternMarks(g, size.w, size.h, color, (clip.patternIndex ?? 0) * 977 + 13, drums, pxPerBeat);
     } else if (clip.kind === "midi") {
       drawNotes(g, size.w, size.h, clip, clip.lengthBars * beatsPerBar * 4, color);
     }
-  }, [ref, size, peaks, clip, color, drums, pxPerBeat, barSec, rate, beatsPerBar]);
+  }, [ref, size, peaks, clip, color, drums, pxPerBeat, barSec, rate, beatsPerBar, slotState]);
 
   return <canvas ref={ref} className="clip-art" aria-hidden="true" />;
 }

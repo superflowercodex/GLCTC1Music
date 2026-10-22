@@ -63,7 +63,7 @@ const PARAMS: readonly ParamDef[] = [
   { id: "arpGate", label: "Arp gate", group: "Arp", min: 0.15, max: 1, def: 0.72, unit: "%" },
 ];
 
-const PRESETS = factoryPresets("acid", [
+export const PRESETS = factoryPresets("acid", [
   ["Squelch Machine", "Acid", {}],
   ["Rubber Sub", "Bass", { cutoff: 420, resonance: 0.3, envMod: 0.35, decay: 380, sub: 0.6, subWave: 1, drive: 0.25, delay: 0.04, reverb: 0.04, accent: 0.4 }],
   ["Devil Walk", "Acid", { wave: 1, cutoff: 1400, resonance: 0.8, envMod: 0.9, decay: 160, accent: 1, drive: 0.7, delay: 0.22, delayFb: 0.4, slideTime: 130 }],

@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 
 export interface WheelProps {
   label: string;
@@ -8,7 +8,7 @@ export interface WheelProps {
   color: string;
 }
 
-const THUMB = 36;
+const THUMB = 40;
 
 export function Wheel({ label, spring, onChange, color }: WheelProps) {
   const track = useRef<HTMLDivElement>(null);
@@ -47,6 +47,7 @@ export function Wheel({ label, spring, onChange, color }: WheelProps) {
       <div
         ref={track}
         className="go-wheel-track"
+        style={{ "--k": color } as CSSProperties}
         role="slider"
         tabIndex={0}
         aria-label={label}
@@ -65,7 +66,7 @@ export function Wheel({ label, spring, onChange, color }: WheelProps) {
         onPointerUp={end}
         onPointerCancel={end}
       >
-        <div className={`go-wheel-thumb ${spring ? "spring" : ""}`} style={{ bottom: `calc(${frac} * (100% - ${THUMB}px))`, boxShadow: `0 0 16px ${color}` }} />
+        <div className={`go-wheel-thumb ${spring ? "spring" : ""}`} style={{ bottom: `calc(${frac} * (100% - ${THUMB}px))` }} />
       </div>
       <span className="sy-label">{label}</span>
     </div>

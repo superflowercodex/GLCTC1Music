@@ -1,27 +1,27 @@
 import { metronomeStore } from "../../audio/arrangementPlayback";
 import { setLoop } from "../../project/actions";
 import { redo, undo, useCanRedo, useCanUndo } from "../../project/history";
-import { projectStore, uiStore } from "../../store/project";
+import { projectStore } from "../../store/project";
 import { useStore } from "../../store/store";
 import { IconButton } from "../../ui/controls";
 import { MetronomeIcon, ZoomIcon } from "./icons";
 import { arrangeSettings, setZoom } from "./settings";
 import { GRID_OPTIONS, TIME_SIGNATURES, ZOOM } from "./timeline";
 
-/** Undo, snap, grid, time signature, zoom and export: the controls that live in the room header. */
+/** Undo, snap, grid, time signature and zoom: the controls that live in the room header. */
 export function HeaderTools() {
   const canUndo = useCanUndo();
   const canRedo = useCanRedo();
-  const { snap, gridBeats, pxPerBeat } = useStore(arrangeSettings, (s) => s);
+  const { snap, gridBeats, pxPerBeat, avoidOverlaps } = useStore(arrangeSettings, (s) => s);
   const beatsPerBar = useStore(projectStore, (p) => p.beatsPerBar);
 
   return (
-    <div className="arr-tools">
+    <div className="arr-tools" role="toolbar" aria-label="Arrange tools">
       <div className="tool-group">
-        <button type="button" className="icon-btn" aria-label="Undo" title="Undo (Cmd/Ctrl-Z)" disabled={!canUndo} onClick={() => undo()}>
+        <button type="button" className="tb-btn" aria-label="Undo" title="Undo (Cmd/Ctrl-Z)" disabled={!canUndo} onClick={() => undo()}>
           <svg
-            width="22"
-            height="22"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -33,10 +33,10 @@ export function HeaderTools() {
             <path d="M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3" />
           </svg>
         </button>
-        <button type="button" className="icon-btn" aria-label="Redo" title="Redo (Shift-Cmd/Ctrl-Z)" disabled={!canRedo} onClick={() => redo()}>
+        <button type="button" className="tb-btn" aria-label="Redo" title="Redo (Shift-Cmd/Ctrl-Z)" disabled={!canRedo} onClick={() => redo()}>
           <svg
-            width="22"
-            height="22"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -52,12 +52,26 @@ export function HeaderTools() {
       <div className="tool-group">
         <button
           type="button"
-          className={`chip${snap ? " on" : ""}`}
+          className={`tb-btn tb-snap${snap ? " on" : ""}`}
           role="switch"
           aria-checked={snap}
           onClick={() => arrangeSettings.set((s) => ({ ...s, snap: !s.snap }))}
         >
           Snap
+        </button>
+        <button
+          type="button"
+          className={`tb-btn${avoidOverlaps ? " on" : ""}`}
+          role="switch"
+          aria-checked={avoidOverlaps}
+          aria-label="Avoid overlaps"
+          title="Avoid overlaps: drags and pastes slide to the nearest free spot"
+          onClick={() => arrangeSettings.set((s) => ({ ...s, avoidOverlaps: !s.avoidOverlaps }))}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <rect x="2.5" y="7" width="8" height="10" rx="2" />
+            <rect x="13.5" y="7" width="8" height="10" rx="2" />
+          </svg>
         </button>
         <label className="tool-select">
           <span className="sr-only">Grid size</span>
@@ -91,7 +105,7 @@ export function HeaderTools() {
       <div className="tool-group">
         <button
           type="button"
-          className="icon-btn"
+          className="tb-btn"
           aria-label="Zoom out"
           title="Zoom out"
           disabled={pxPerBeat <= ZOOM.min}
@@ -101,7 +115,7 @@ export function HeaderTools() {
         </button>
         <button
           type="button"
-          className="icon-btn"
+          className="tb-btn"
           aria-label="Zoom in"
           title="Zoom in"
           disabled={pxPerBeat >= ZOOM.max}
@@ -109,10 +123,10 @@ export function HeaderTools() {
         >
           <ZoomIcon plus />
         </button>
+        <button type="button" className="tb-btn tool-fit" title="Zoom to fit the whole song" onClick={() => window.dispatchEvent(new Event("arrange-fit"))}>
+          Fit
+        </button>
       </div>
-      <button type="button" className="btn btn-primary" onClick={() => uiStore.set((s) => ({ ...s, sheet: "export" }))}>
-        Export
-      </button>
     </div>
   );
 }

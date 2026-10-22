@@ -4,6 +4,7 @@ import { useRaf } from "../../../ui/hooks";
 
 export const PAD_KEYS = ["1", "2", "3", "4", "q", "w", "e", "r", "a", "s", "d", "f", "z", "x", "c", "v"] as const;
 const PALETTE = ["#7cf0c0", "#79ebff", "#8e7cff", "#ff63d8", "#ffd36a"];
+const LEVEL_LEDS = 5;
 const MODE_LABEL = { loop: "Loop", shot: "Shot", gate: "Hold" } as const;
 
 /**
@@ -48,7 +49,7 @@ export function PadGrid({
               refs.current[i] = el;
             }}
             type="button"
-            className={`pad ${i === selected ? "sel" : ""} ${loaded ? "" : "empty"}`}
+            className={`hw-pad ${i === selected ? "sel" : ""} ${loaded ? "loaded" : "empty"}`}
             style={{ "--c": color } as CSSProperties}
             aria-label={`Pad ${i + 1} ${loaded ? pad.name : "empty"}${loaded ? `, ${MODE_LABEL[pad.mode]}` : ""}`}
             onPointerDown={(e) => {
@@ -69,6 +70,13 @@ export function PadGrid({
           >
             <span className="pad-key mono">{PAD_KEYS[i].toUpperCase()}</span>
             {loaded && <span className="pad-mode">{MODE_LABEL[pad.mode]}</span>}
+            {loaded && (
+              <span className="pad-leds" aria-hidden="true">
+                {Array.from({ length: LEVEL_LEDS }, (_, k) => (
+                  <i key={k} className={pad.volume * (LEVEL_LEDS / 1.5) > k + 0.2 ? "on" : ""} />
+                ))}
+              </span>
+            )}
             <span className="pad-name">{loaded ? pad.name || `Pad ${i + 1}` : "Empty"}</span>
             {recordingPad === i && <span className="pad-rec" aria-hidden="true" />}
           </button>

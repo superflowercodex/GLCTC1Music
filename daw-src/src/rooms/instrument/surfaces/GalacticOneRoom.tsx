@@ -1,14 +1,18 @@
 import { useRef, useState, type CSSProperties } from "react";
+import { GlassWindow } from "../../../ui/hardware";
 import { ARP_MODES } from "../../../audio/instruments/synth/arp";
 import { GalacticOne, type GeneratorName } from "../../../audio/instruments/galacticOne";
 import { BANK_COUNT, patchGroup } from "../../../audio/instruments/synth/galacticParams";
 import { degreeOfOffset, offsetOfDegree, type GStep } from "../../../audio/instruments/synth/patternGen";
 import { NOTE_NAMES, SCALE_NAMES, noteName } from "../../../audio/instruments/synth/scales";
 import type { Instrument } from "../../../audio/types";
-import { Button, Ring, Seg, Switch } from "../../../ui/controls";
+import { Caption } from "../../../ui/Caption";
+import { Knob } from "../../../ui/Knob";
+import { useEdgeFade } from "../../../ui/useEdgeFade";
 import { useInstrument } from "../../../ui/hooks";
 import { InstrumentShell } from "../InstrumentShell";
 import { BAR_CHOICES, bounceToTrack } from "../synth/bounceToTrack";
+import { HwChoice } from "../synth/HwChoice";
 import { ParamControl, ParamSlider } from "../synth/ParamControls";
 import { LOWER_ROW, UPPER_ROW, useComputerKeys, useMidiInput } from "../synth/inputs";
 import { lightKey, PianoKeys } from "../synth/PianoKeys";
@@ -22,7 +26,7 @@ const ROWS = 8;
 const COLS = 16;
 const MACROS = [
   ["macro.bright", "Bright"],
-  ["macro.motion", "Movement"],
+  ["macro.motion", "Motion"],
   ["macro.space", "Space"],
   ["macro.grit", "Grit"],
 ] as const;
@@ -74,7 +78,7 @@ export default function GalacticOneRoom({ instrument }: { instrument: Instrument
       onBounce={() => void onBounce()}
       bounceBusy={busy}
       footerExtra={
-        <select className="sy-select inline" aria-label="Bounce length" value={bars} onChange={(e) => synth.setParam("seq.bars", BAR_CHOICES.indexOf(Number(e.target.value) as (typeof BAR_CHOICES)[number]))}>
+        <select className="hw-select" aria-label="Bounce length" value={bars} onChange={(e) => synth.setParam("seq.bars", BAR_CHOICES.indexOf(Number(e.target.value) as (typeof BAR_CHOICES)[number]))}>
           {BAR_CHOICES.map((b) => (
             <option key={b} value={b}>
               {b} {b === 1 ? "bar" : "bars"}
@@ -94,13 +98,15 @@ function SoundPanel({ synth }: { synth: GalacticOne }) {
   useInstrument(synth);
   const [edit, setEdit] = useState<0 | 1>(0);
   const [open, setOpen] = useState<string | null>("Oscillators");
+  const scroller = useRef<HTMLDivElement>(null);
+  useEdgeFade(scroller, "y");
   const letter = edit === 0 ? "a" : "b";
   const sections = [...SECTIONS.map((s) => ({ key: s, group: patchGroup(letter, s) })), { key: "Effects", group: "Effects" }];
 
   return (
-    <div className="sy-panel sy-cyan">
-      <Seg label="Keys play" value={Math.round(synth.getParam("key.mode"))} onChange={(v) => synth.setParam("key.mode", v)} options={["Whole", "Split", "Dual"].map((label, value) => ({ value, label }))} className="go-wide" />
-      <Seg
+    <div className="sy-panel sy-cyan hw-plate">
+      <HwChoice label="Keys play" value={Math.round(synth.getParam("key.mode"))} onChange={(v) => synth.setParam("key.mode", v)} options={["Whole", "Split", "Dual"].map((label, value) => ({ value, label }))} className="go-wide" />
+      <HwChoice
         label="Patch being edited"
         value={edit}
         onChange={setEdit}
@@ -112,30 +118,32 @@ function SoundPanel({ synth }: { synth: GalacticOne }) {
       />
       <div className="go-macros">
         {MACROS.map(([id, label]) => (
-          <Ring key={id} label={label} value={synth.getParam(id) * 100} min={0} max={100} onChange={(v) => synth.setParam(id, v / 100)} />
+          <Knob key={id} label={label} value={synth.getParam(id)} min={0} max={1} defaultValue={synth.params.find((p) => p.id === id)?.def} onChange={(v) => synth.setParam(id, v)} format={(v) => `${Math.round(v * 100)}%`} />
         ))}
       </div>
-      <div className="sy-params scroll-y">
-        {sections.map(({ key, group }) => {
-          const isOpen = open === key;
-          const defs = synth.params.filter((p) => p.group === group);
-          return (
-            <div className="group" key={key}>
-              <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : key)}>
-                <span>{key}</span>
-                <span className="eyebrow">{defs.length}</span>
-              </button>
-              {isOpen && (
-                <div className="group-body">
-                  {defs.map((def) => (
-                    <ParamControl key={def.id} instrument={synth} def={def} />
-                  ))}
-                  {key === "Oscillators" && <PatchTools synth={synth} patch={edit} />}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div ref={scroller} className="sy-params scroll-y fade-y">
+        <div className="go-secs">
+          {sections.map(({ key, group }) => {
+            const isOpen = open === key;
+            const defs = synth.params.filter((p) => p.group === group);
+            return (
+              <section key={key}>
+                <button type="button" className="go-sec-head hw-title" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : key)}>
+                  {key}
+                  <em>{defs.length}</em>
+                </button>
+                {isOpen && (
+                  <div className="go-sec-body knob-grid">
+                    {defs.map((def) => (
+                      <ParamControl key={def.id} instrument={synth} def={def} />
+                    ))}
+                    {key === "Oscillators" && <PatchTools synth={synth} patch={edit} />}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
       </div>
       <div className="sy-foot">
         <PresetFileButtons instrument={synth} />
@@ -147,9 +155,15 @@ function SoundPanel({ synth }: { synth: GalacticOne }) {
 function PatchTools({ synth, patch }: { synth: GalacticOne; patch: 0 | 1 }) {
   return (
     <div className="go-tools">
-      <Button onClick={() => synth.copyPatch(patch, patch === 0 ? 1 : 0)}>Copy to {patch === 0 ? "B" : "A"}</Button>
-      <Button onClick={() => synth.swapPatches()}>Swap A and B</Button>
-      <Button onClick={() => synth.initPatch(patch)}>Init patch</Button>
+      <button type="button" className="hw-key" onClick={() => synth.copyPatch(patch, patch === 0 ? 1 : 0)}>
+        Copy to {patch === 0 ? "B" : "A"}
+      </button>
+      <button type="button" className="hw-key" onClick={() => synth.swapPatches()}>
+        Swap A and B
+      </button>
+      <button type="button" className="hw-key" onClick={() => synth.initPatch(patch)}>
+        Init patch
+      </button>
     </div>
   );
 }
@@ -201,20 +215,20 @@ function Surface({ synth }: { synth: GalacticOne }) {
   };
 
   return (
-    <div className="go sy-cyan">
+    <div className="go sy-cyan hw-plate">
       <div className="go-top">
         <div className="go-top-row">
-          <Seg label="View" value={view} onChange={setView} options={[{ value: "seq" as View, label: "Sequence" }, { value: "keys" as View, label: "Keys" }, { value: "arp" as View, label: "Arp" }]} />
+          <HwChoice label="View" value={view} onChange={setView} options={[{ value: "seq" as View, label: "Sequence" }, { value: "keys" as View, label: "Keys" }, { value: "arp" as View, label: "Arp" }]} className="go-views" wrap />
           {view === "seq" && (
             <>
-              <select className="sy-select inline key" aria-label="Key" value={Math.round(synth.getParam("seq.root"))} onChange={(e) => synth.setParam("seq.root", Number(e.target.value))}>
+              <select className="hw-select key" aria-label="Key" value={Math.round(synth.getParam("seq.root"))} onChange={(e) => synth.setParam("seq.root", Number(e.target.value))}>
                 {NOTE_NAMES.map((n, i) => (
                   <option key={n} value={i}>
                     {n}
                   </option>
                 ))}
               </select>
-              <select className="sy-select inline" aria-label="Scale" value={scale} onChange={(e) => synth.setParam("seq.scale", Number(e.target.value))}>
+              <select className="hw-select" aria-label="Scale" value={scale} onChange={(e) => synth.setParam("seq.scale", Number(e.target.value))}>
                 {SCALE_NAMES.map((n, i) => (
                   <option key={n} value={i}>
                     {n}
@@ -225,26 +239,26 @@ function Surface({ synth }: { synth: GalacticOne }) {
           )}
         </div>
         <div className="go-top-row">
-          <div className="sy-chips go-banks" role="radiogroup" aria-label="Pattern bank">
+          <div className="hw-keys tight go-banks" role="radiogroup" aria-label="Pattern bank">
             {Array.from({ length: BANK_COUNT }, (_, i) => (
-              <button key={i} type="button" role="radio" aria-checked={synth.activePattern === i} className={`sy-square go-bank ${synth.activePattern === i ? "on" : ""}`} onClick={() => synth.setPattern(i)}>
+              <button key={i} type="button" role="radio" aria-checked={synth.activePattern === i} className={`hw-key ${synth.activePattern === i ? "on" : ""}`} onClick={() => synth.setPattern(i)}>
                 {i + 1}
               </button>
             ))}
-            <button type="button" role="radio" aria-checked={synth.activePattern === null} className={`sy-pill ${synth.activePattern === null ? "on" : ""}`} onClick={() => synth.setPattern(null)} title="Stop the sequencer; the keys still play">
+            <button type="button" role="radio" aria-checked={synth.activePattern === null} className={`hw-key off ${synth.activePattern === null ? "on" : ""}`} onClick={() => synth.setPattern(null)} data-tip="Stop the sequencer; the keys still play">
               Off
             </button>
           </div>
           {view === "seq" && (
             <>
-              <select className="sy-select inline steps" aria-label="Steps in pattern" value={pattern.len} onChange={(e) => synth.setLength(bank, Number(e.target.value))}>
+              <select className="hw-select steps" aria-label="Steps in pattern" value={pattern.len} onChange={(e) => synth.setLength(bank, Number(e.target.value))}>
                 {[4, 8, 16, 32].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
               </select>
-              <select className="sy-select inline tools" aria-label="Pattern tools" value="" onChange={(e) => e.target.value && applyTool(e.target.value)}>
+              <select className="hw-select tools" aria-label="Pattern tools" value="" onChange={(e) => e.target.value && applyTool(e.target.value)}>
                 <option value="">Tools…</option>
                 {TOOLS.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -256,14 +270,15 @@ function Surface({ synth }: { synth: GalacticOne }) {
           )}
         </div>
       </div>
+      <div className="hw-seam" />
 
       {view === "seq" && <SequenceView synth={synth} bank={bank} scale={scale} />}
       {view === "keys" && (
         <div className="go-keys">
           <div className="go-keys-main">
             <div className="go-wheels">
-              <Wheel label="Pitch" spring color="rgba(121,235,255,.6)" onChange={(v) => synth.setBend(v)} />
-              <Wheel label="Mod" spring={false} color="rgba(255,99,216,.6)" onChange={(v) => synth.setModWheel(v)} />
+              <Wheel label="Pitch" spring color="#79ebff" onChange={(v) => synth.setBend(v)} />
+              <Wheel label="Mod" spring={false} color="#ff63d8" onChange={(v) => synth.setModWheel(v)} />
             </div>
             <div className="go-boards">
               <Board
@@ -291,17 +306,17 @@ function Surface({ synth }: { synth: GalacticOne }) {
             </div>
           </div>
           <div className="go-keys-foot">
-            <span className="sy-label" style={{ color: "var(--text)", fontSize: 16 }}>
-              Keys play
-            </span>
-            <Seg label="Keys play" value={Math.round(synth.getParam("key.mode"))} onChange={(v) => synth.setParam("key.mode", v)} options={["Split", "Whole", "Dual"].map((label) => ({ value: ["Whole", "Split", "Dual"].indexOf(label), label }))} />
-            <span className="spacer" />
-            <Button variant={synth.getParam("perf.hold") === 1 ? "primary" : "ghost"} onClick={() => synth.setParam("perf.hold", synth.getParam("perf.hold") === 1 ? 0 : 1)}>
+            <span className="hw-title" style={{ flex: "0 0 auto" }}>Keys play</span>
+            <HwChoice label="Keys play" value={Math.round(synth.getParam("key.mode"))} onChange={(v) => synth.setParam("key.mode", v)} options={["Split", "Whole", "Dual"].map((label) => ({ value: ["Whole", "Split", "Dual"].indexOf(label), label }))} />
+            <span className="spacer" style={{ flex: 1 }} />
+            <button type="button" role="switch" aria-checked={synth.getParam("perf.hold") === 1} className="hw-key led" onClick={() => synth.setParam("perf.hold", synth.getParam("perf.hold") === 1 ? 0 : 1)}>
               Hold
-            </Button>
-            <Button onClick={() => synth.allNotesOff()}>Panic</Button>
+            </button>
+            <button type="button" className="hw-key" onClick={() => synth.allNotesOff()}>
+              Panic
+            </button>
           </div>
-          <span className="eyebrow">Your computer keyboard (Q and Z rows) and any MIDI keyboard work too</span>
+          <span className="hw-note">Your computer keyboard (Q and Z rows) and any MIDI keyboard work too</span>
         </div>
       )}
       {view === "arp" && <ArpView synth={synth} />}
@@ -313,18 +328,19 @@ function Board({ title, subtitle, color, octave, onOctave, rootRef, start, onDow
   return (
     <div>
       <div className="go-board-head">
-        <span style={{ fontWeight: 700 }}>{title}</span>
-        <span className="eyebrow">{subtitle}</span>
-        <span className="spacer" />
-        <button type="button" className="icon-btn" aria-label={`${title} octave down`} onClick={() => onOctave(Math.max(0, octave - 1))}>
+        <span className="hw-title">
+          {title}
+          <em>{subtitle}</em>
+        </span>
+        <button type="button" className="hw-key sq sm" aria-label={`${title} octave down`} onClick={() => onOctave(Math.max(0, octave - 1))}>
           −
         </button>
-        <button type="button" className="icon-btn" aria-label={`${title} octave up`} onClick={() => onOctave(Math.min(6, octave + 1))}>
+        <button type="button" className="hw-key sq sm" aria-label={`${title} octave up`} onClick={() => onOctave(Math.min(6, octave + 1))}>
           +
         </button>
       </div>
       <div ref={rootRef}>
-        <PianoKeys start={start} whites={15} height={104} color={color} label={`${title} keyboard`} onDown={onDown} onUp={onUp} />
+        <PianoKeys start={start} whites={15} height="var(--kh)" color={color} label={`${title} keyboard`} onDown={onDown} onUp={onUp} />
       </div>
     </div>
   );
@@ -365,15 +381,9 @@ function SequenceView({ synth, bank, scale }: { synth: GalacticOne; bank: number
   return (
     <>
       {pages > 1 && (
-        <div className="sy-chips" role="radiogroup" aria-label="Page">
-          {Array.from({ length: pages }, (_, p) => (
-            <button key={p} type="button" role="radio" aria-checked={shownPage === p} className={`sy-pill ${shownPage === p ? "on" : ""}`} onClick={() => setPage(p)}>
-              Steps {p * COLS + 1}–{(p + 1) * COLS}
-            </button>
-          ))}
-        </div>
+        <HwChoice label="Page" value={shownPage} onChange={setPage} size="sm" className="go-pages" options={Array.from({ length: pages }, (_, p) => ({ value: p, label: `Steps ${p * COLS + 1}–${(p + 1) * COLS}` }))} />
       )}
-      <div className="go-grid">
+      <GlassWindow className="go-grid">
         <div className="go-rows" aria-hidden="true">
           {labels.map((l, r) => (
             <span key={r}>{l}</span>
@@ -415,24 +425,28 @@ function SequenceView({ synth, bank, scale }: { synth: GalacticOne; bank: number
             }}
           />
         </div>
-      </div>
+      </GlassWindow>
 
       <StepDetail synth={synth} bank={bank} index={index} step={step} />
 
       <div className="go-chain">
-        <span className="sy-label">Song chain</span>
-        <button type="button" role="switch" aria-checked={synth.getParam("seq.chain") === 1} className={`sy-pill ${synth.getParam("seq.chain") === 1 ? "on" : ""}`} onClick={() => synth.setParam("seq.chain", synth.getParam("seq.chain") === 1 ? 0 : 1)}>
+        <span className="hw-title">Song chain</span>
+        <button type="button" role="switch" aria-checked={synth.getParam("seq.chain") === 1} className="hw-key led sm" onClick={() => synth.setParam("seq.chain", synth.getParam("seq.chain") === 1 ? 0 : 1)}>
           {synth.getParam("seq.chain") === 1 ? "On" : "Off"}
         </button>
         {chain.map((b, i) => (
           <span className={`go-chain-item ${i === 0 ? "first" : ""}`} key={i}>
-            <button type="button" className="go-chain-step" title="Remove from the chain" aria-label={`Remove bank ${b + 1} at position ${i + 1}`} onClick={() => synth.setChain(chain.filter((_, k) => k !== i))}>
+            <button type="button" className="hw-key sm go-chain-step" data-tip="Remove from the chain" aria-label={`Remove bank ${b + 1} at position ${i + 1}`} onClick={() => synth.setChain(chain.filter((_, k) => k !== i))}>
               {b + 1}
             </button>
-            {i < chain.length - 1 && <span className="eyebrow">→</span>}
+            {i < chain.length - 1 && (
+              <span className="go-chain-arrow" aria-hidden="true">
+                ›
+              </span>
+            )}
           </span>
         ))}
-        <button type="button" className="go-chain-add" aria-label={`Add bank ${bank + 1} to the chain`} disabled={chain.length >= 16} onClick={() => synth.setChain([...chain, bank])}>
+        <button type="button" className="hw-key sq sm" aria-label={`Add bank ${bank + 1} to the chain`} disabled={chain.length >= 16} onClick={() => synth.setChain([...chain, bank])}>
           +
         </button>
       </div>
@@ -442,41 +456,32 @@ function SequenceView({ synth, bank, scale }: { synth: GalacticOne; bank: number
 
 function StepDetail({ synth, bank, index, step }: { synth: GalacticOne; bank: number; index: number; step: GStep }) {
   const set = (change: Partial<GStep>) => synth.updateStep(bank, index, change);
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
   return (
     <div className="go-detail">
-      <div>
-        <div className="eyebrow">Step</div>
-        <div className="mono go-stepno">{String(index + 1).padStart(2, "0")}</div>
+      <div className="hw-display" role="status" aria-label="Selected step">
+        <small>Step</small>
+        <b>{String(index + 1).padStart(2, "0")}</b>
       </div>
-      <MiniRange label="Chance" text={`${Math.round(step.p * 100)}%`} min={0} max={1} step={0.05} value={step.p} onChange={(v) => set({ p: v })} />
-      <MiniRange label="Ratchet" text={`${step.r}×`} min={1} max={4} step={1} value={step.r} onChange={(v) => set({ r: v })} />
-      <MiniRange label="Length" text={`${Math.round(step.g * 100)}%`} min={0.1} max={1.05} step={0.05} value={step.g} onChange={(v) => set({ g: v })} />
-      <span className="go-detail-break" />
-      <MiniRange label="Filter jump" text={`${step.c > 0 ? "+" : ""}${Math.round(step.c * 100)}%`} min={-1} max={1} step={0.05} value={step.c} onChange={(v) => set({ c: v })} />
-      <button type="button" className={`sy-pill ${step.slide ? "on" : ""}`} role="switch" aria-checked={step.slide} onClick={() => set({ slide: !step.slide })}>
-        Slide {step.slide ? "on" : "off"}
-      </button>
-      <button type="button" className={`sy-pill ${step.accent ? "on" : ""}`} role="switch" aria-checked={step.accent} onClick={() => set({ accent: !step.accent })}>
-        Accent {step.accent ? "on" : "off"}
-      </button>
+      <Knob size="sm" layout="row" label="Chance" value={step.p} min={0} max={1} step={0.05} defaultValue={1} onChange={(v) => set({ p: v })} format={pct} />
+      <Knob size="sm" layout="row" label="Ratchet" value={step.r} min={1} max={4} step={1} defaultValue={1} onChange={(v) => set({ r: v })} format={(v) => `${v}×`} />
+      <Knob size="sm" layout="row" label="Length" value={step.g} min={0.1} max={1.05} step={0.05} defaultValue={0.6} onChange={(v) => set({ g: v })} format={pct} />
+      <Knob size="sm" layout="row" label="Filter jump" value={step.c} min={-1} max={1} step={0.05} defaultValue={0} onChange={(v) => set({ c: v })} format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}%`} />
+      <div className="go-detail-keys">
+        <button type="button" className={`hw-key led ${step.slide ? "on" : ""}`} role="switch" aria-checked={step.slide} onClick={() => set({ slide: !step.slide })}>
+          Slide
+        </button>
+        <button type="button" className={`hw-key led ${step.accent ? "on" : ""}`} role="switch" aria-checked={step.accent} style={{ "--lit": "#f2c14e" } as CSSProperties} onClick={() => set({ accent: !step.accent })}>
+          Accent
+        </button>
+      </div>
     </div>
-  );
-}
-
-function MiniRange({ label, text, min, max, step, value, onChange }: { label: string; text: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void }) {
-  return (
-    <label className="go-prop">
-      <span className="go-prop-head">
-        <span>{label}</span>
-        <span className="mono">{text}</span>
-      </span>
-      <input type="range" min={min} max={max} step={step} value={value} style={{ "--pct": `${((value - min) / (max - min)) * 100}%` } as CSSProperties} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
   );
 }
 
 function ArpView({ synth }: { synth: GalacticOne }) {
   const arpOn = Math.round(synth.getParam("seq.mode")) === 1;
+  const latch = synth.getParam("arp.latch") === 1;
   const find = (id: string) => {
     const def = synth.params.find((p) => p.id === id);
     if (!def) throw new RangeError(`Missing parameter ${id}`);
@@ -484,27 +489,27 @@ function ArpView({ synth }: { synth: GalacticOne }) {
   };
   return (
     <div className="go-arp">
-      <Switch label="Arpeggiator" checked={arpOn} onChange={(on) => synth.setParam("seq.mode", on ? 1 : 0)} />
-      <div>
-        <div className="sy-label" style={{ marginBottom: 10 }}>
-          Pattern
-        </div>
-        <div className="sy-chips" role="radiogroup" aria-label="Arp pattern">
-          {ARP_MODES.map((m, i) => (
-            <button key={m.id} type="button" role="radio" aria-checked={Math.round(synth.getParam("arp.mode")) === i} className={`sy-pill ${Math.round(synth.getParam("arp.mode")) === i ? "on" : ""}`} onClick={() => synth.setParam("arp.mode", i)}>
-              {m.label}
-            </button>
-          ))}
-        </div>
+      <div className="hw-keys">
+        <button type="button" role="switch" aria-checked={arpOn} className="hw-key led" onClick={() => synth.setParam("seq.mode", arpOn ? 0 : 1)}>
+          Arpeggiator
+        </button>
+        <button type="button" role="switch" aria-checked={latch} className="hw-key led" data-tip="Keep playing after you let go" onClick={() => synth.setParam("arp.latch", latch ? 0 : 1)}>
+          Latch
+        </button>
       </div>
-      <div className="go-arp-sliders">
+      <div>
+        <Caption as="div" className="sy-fieldhead">
+          Pattern
+        </Caption>
+        <HwChoice label="Arp pattern" value={Math.round(synth.getParam("arp.mode"))} onChange={(v) => synth.setParam("arp.mode", v)} options={ARP_MODES.map((m, i) => ({ value: i, label: m.label }))} size="sm" wrap />
+      </div>
+      <div className="go-arp-sliders knob-grid">
         <ParamSlider instrument={synth} def={find("seq.rate")} label="Rate" />
         <ParamSlider instrument={synth} def={find("arp.oct")} label="Range" />
         <ParamSlider instrument={synth} def={find("arp.gate")} label="Gate" />
         <ParamSlider instrument={synth} def={find("seq.swing")} label="Swing" />
       </div>
-      <Switch label="Latch · keep playing after you let go" checked={synth.getParam("arp.latch") === 1} onChange={(on) => synth.setParam("arp.latch", on ? 1 : 0)} />
-      <span className="eyebrow">{arpOn ? "Hold keys on the Keys view; the sequence steps set the rhythm." : "Turn it on, then hold keys to arpeggiate them."}</span>
+      <span className="hw-note">{arpOn ? "Hold keys on the Keys view; the sequence steps set the rhythm." : "Turn it on, then hold keys to arpeggiate them."}</span>
     </div>
   );
 }

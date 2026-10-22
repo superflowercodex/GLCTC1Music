@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
+import { GlassWindow } from "../../../ui/hardware";
 import { Acid30lee, ACID_PATTERNS, ACID_STEPS } from "../../../audio/instruments/acid30lee";
 import { noteName } from "../../../audio/instruments/synth/scales";
 import type { Instrument } from "../../../audio/types";
-import { Button, Seg, Switch } from "../../../ui/controls";
 import { useInstrument, useRaf } from "../../../ui/hooks";
 import { InstrumentShell } from "../InstrumentShell";
 import { bounceToTrack } from "../synth/bounceToTrack";
 import { BarsSelect } from "../synth/BarsSelect";
+import { HwChoice } from "../synth/HwChoice";
 import { SynthTabsPanel, type SynthTab } from "../synth/SynthTabsPanel";
 import "../synth/synth.css";
 
@@ -59,7 +60,7 @@ function FreezeButton({ synth }: { synth: Acid30lee }) {
   return (
     <button
       type="button"
-      className="sy-hold"
+      className="hw-key sy-hold"
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         synth.setFreeze(true);
@@ -79,6 +80,7 @@ function FreezeButton({ synth }: { synth: Acid30lee }) {
 function Surface({ synth }: { synth: Acid30lee }) {
   useInstrument(synth);
   const columns = useRef<(HTMLDivElement | null)[]>([]);
+  const readout = useRef<HTMLSpanElement>(null);
   const lastNow = useRef(-1);
   const active = synth.activePattern;
   const pattern = active ?? 0;
@@ -91,41 +93,57 @@ function Surface({ synth }: { synth: Acid30lee }) {
     columns.current[lastNow.current]?.classList.remove("now");
     columns.current[now]?.classList.add("now");
     lastNow.current = now;
+    const el = readout.current;
+    if (!el) return;
+    if (now < 0) {
+      el.textContent = "—";
+      el.className = "off";
+    } else {
+      const st = synth.getStep(synth.activePattern ?? 0, now);
+      el.textContent = st.on ? `${noteName(st.note + st.oct * 12)}${st.accent ? " ·ACC" : ""}${st.slide ? " ·SLD" : ""}` : "rest";
+      el.className = st.on ? "" : "off";
+    }
   });
 
   const preview = (note: number) => synth.noteOn({ note, velocity: 0.8, duration: 0.2 });
 
   return (
-    <div className="ac">
+    <div className="ac hw-plate">
       <div className="ac-bar">
-        <div className="sy-chips" role="radiogroup" aria-label="Pattern">
-          {PATTERN_NAMES.slice(0, ACID_PATTERNS).map((name, i) => (
-            <button key={name} type="button" role="radio" aria-checked={active === i} className={`sy-square ${active === i ? "on" : ""}`} onClick={() => synth.setPattern(i)}>
-              {name}
-            </button>
-          ))}
-          <button type="button" role="radio" aria-checked={active === null} className={`sy-pill ${active === null ? "on" : ""}`} onClick={() => synth.setPattern(null)} title="Stop the pattern; the keys still play">
-            Off
+        <HwChoice
+          label="Pattern"
+          value={active ?? -1}
+          onChange={(v) => synth.setPattern(v < 0 ? null : v)}
+          options={[...PATTERN_NAMES.slice(0, ACID_PATTERNS).map((name, i) => ({ value: i, label: name })), { value: -1, label: "Off" }]}
+          className="ac-patterns"
+        />
+        <div className="hw-display" role="status" aria-label="Playing step">
+          <small>Step</small>
+          <span ref={readout} className="off">
+            —
+          </span>
+        </div>
+        <div className="ac-tools">
+          <button type="button" className="hw-key" onClick={() => synth.randomise(pattern)}>
+            Random
+          </button>
+          <button type="button" className="hw-key sq" aria-label="Shift left" data-tip="Shift the pattern one step left" onClick={() => synth.shiftPattern(pattern, -1)}>
+            ←
+          </button>
+          <button type="button" className="hw-key sq" aria-label="Shift right" data-tip="Shift the pattern one step right" onClick={() => synth.shiftPattern(pattern, 1)}>
+            →
           </button>
         </div>
-        <span className="spacer" />
-        <Button onClick={() => synth.randomise(pattern)}>Random</Button>
-        <button type="button" className="btn sq" aria-label="Shift left" title="Shift the pattern one step left" onClick={() => synth.shiftPattern(pattern, -1)}>
-          ←
-        </button>
-        <button type="button" className="btn sq" aria-label="Shift right" title="Shift the pattern one step right" onClick={() => synth.shiftPattern(pattern, 1)}>
-          →
-        </button>
       </div>
 
-      <div className="ac-grid">
-        <div className="ac-labels" aria-hidden="true">
-          <span className="ac-l-num">Step</span>
-          <span className="ac-l-play">Play</span>
-          <span className="ac-l-note">Note</span>
-          <span className="ac-l-oct">Octave</span>
-          <span className="ac-l-small">Accent</span>
-          <span className="ac-l-small">Slide</span>
+      <GlassWindow className="ac-grid">
+        <div className="ac-labels hw-legend" aria-hidden="true">
+          <span data-s="Stp">Step</span>
+          <span data-s="Ply">Play</span>
+          <span data-s="Nte">Note</span>
+          <span data-s="Oct">Octave</span>
+          <span data-s="Acc">Accent</span>
+          <span data-s="Sld">Slide</span>
         </div>
         <div className="ac-cols">
           {Array.from({ length: ACID_STEPS }, (_, i) => {
@@ -133,11 +151,11 @@ function Surface({ synth }: { synth: Acid30lee }) {
             const n = String(i + 1).padStart(2, "0");
             return (
               <div key={i} className={`ac-col ${st.on ? "on" : ""}`} ref={(el) => void (columns.current[i] = el)}>
-                <span className="ac-num mono">{n}</span>
+                <span className="ac-num">{n}</span>
                 <button type="button" className={`ac-play ${st.on ? "on" : ""}`} aria-pressed={st.on} aria-label={`Step ${n} play`} onClick={() => synth.setStep(pattern, i, { on: !st.on })} />
                 <button
                   type="button"
-                  className="ac-note mono"
+                  className="ac-note"
                   aria-label={`Step ${n} note ${noteName(st.note)}; click to raise, shift-click to lower`}
                   onClick={(e) => {
                     const note = Math.max(24, Math.min(60, st.note + (e.shiftKey ? -1 : 1)));
@@ -157,7 +175,7 @@ function Surface({ synth }: { synth: Acid30lee }) {
                 >
                   {noteName(st.note)}
                 </button>
-                <button type="button" className="ac-oct mono" aria-label={`Step ${n} octave ${OCT_LABEL[st.oct]}; click to change`} onClick={() => synth.setStep(pattern, i, { oct: NEXT_OCT[st.oct] })}>
+                <button type="button" className="ac-oct" aria-label={`Step ${n} octave ${OCT_LABEL[st.oct]}; click to change`} onClick={() => synth.setStep(pattern, i, { oct: NEXT_OCT[st.oct] })}>
                   {OCT_LABEL[st.oct]}
                 </button>
                 <button type="button" className={`ac-flag accent ${st.accent ? "on" : ""}`} aria-pressed={st.accent} aria-label={`Step ${n} accent`} onClick={() => synth.setStep(pattern, i, { accent: !st.accent })} />
@@ -166,20 +184,24 @@ function Surface({ synth }: { synth: Acid30lee }) {
             );
           })}
         </div>
-      </div>
+      </GlassWindow>
 
       <div className="ac-arp">
-        <div className="ac-arp-switch">
-          <Switch label="Arpeggiator" checked={arpOn} onChange={(on) => synth.setParam("arpOn", on ? 1 : 0)} />
+        <div className="hw-title">Arpeggiator</div>
+        <div className="ac-arp-row">
+          <button type="button" role="switch" aria-checked={arpOn} className="hw-key led" onClick={() => synth.setParam("arpOn", arpOn ? 0 : 1)}>
+            {arpOn ? "On" : "Off"}
+          </button>
+          <HwChoice
+            label="Arpeggiator pattern"
+            value={Math.round(synth.getParam("arpMode"))}
+            onChange={(v) => synth.setParam("arpMode", v)}
+            options={["Up", "Down", "Up and down", "As played", "Random"].map((label, value) => ({ value, label }))}
+            size="sm"
+            wrap
+          />
         </div>
-        <Seg
-          label="Arpeggiator pattern"
-          value={Math.round(synth.getParam("arpMode"))}
-          onChange={(v) => synth.setParam("arpMode", v)}
-          options={["Up", "Down", "Up and down", "As played", "Random"].map((label, value) => ({ value, label }))}
-          className="sy-seg-compact"
-        />
-        <span className="eyebrow">{arpOn ? "Hold keys to play chords; with none held it walks the pattern" : "Turn it on to play chords from the keys"}</span>
+        <div className="hw-note ac-hint">{arpOn ? "Hold keys to play chords; with none held it walks the pattern." : "Turn it on to play chords from the keys."}</div>
       </div>
     </div>
   );

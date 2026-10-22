@@ -258,7 +258,13 @@ async function renderOnce(
         const time = (step - plan.startStep) * stepSec;
         if (automated) applyAutomationStep(mix, step, time, { engine, instrumentFor });
         for (const runner of runners) {
-          if (runner.drivenPattern) runner.instrument.setPattern(source === "song" ? songPatternAt(mix, runner.slotId, step) : patternAtStep(mix, runner.slotId, step));
+          if (runner.drivenPattern) {
+            const pattern = source === "song" ? songPatternAt(mix, runner.slotId, step) : patternAtStep(mix, runner.slotId, step);
+            // Steps are scheduled seconds ahead of the render, and a synth's setPattern(null) silences every note it
+            // has scheduled, so switching off here would cut the last seconds before a gap. Not stepping it is enough.
+            if (pattern === null) continue;
+            runner.instrument.setPattern(pattern);
+          }
           runner.instrument.onStep(step, time, stepSec);
         }
         while (nextNote < notes.length && notes[nextNote].step <= step) {

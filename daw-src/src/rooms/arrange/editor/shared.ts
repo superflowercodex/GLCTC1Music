@@ -42,3 +42,10 @@ export function fadeLabel(steps: number): string {
 export function formatSeconds(sec: number): string {
   return sec < 10 ? `${sec.toFixed(2)} s` : `${sec.toFixed(1)} s`;
 }
+
+/** The clip's track colour, read from the editor's --a1, with an alpha for the waveform body. */
+export function accent(el: HTMLElement, alpha: string): string {
+  const c = getComputedStyle(el).getPropertyValue("--a1").trim();
+  if (/^#[0-9a-f]{6}$/i.test(c)) return `${c}${alpha}`;
+  return c ? `color-mix(in srgb, ${c} ${Math.round((parseInt(alpha, 16) / 255) * 100)}%, transparent)` : "rgba(121,235,255,0.7)";
+}

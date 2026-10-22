@@ -25,7 +25,9 @@ import type { TrackKind } from "../../project/model";
 import { projectStore, uiStore } from "../../store/project";
 import type { InstrumentKind } from "../../audio/types";
 import { importMedia, placeAsset } from "../../project/importMedia";
+import { freeDelta } from "./overlap";
 import { arrangeSettings } from "./settings";
+import type { Project } from "../../project/model";
 import { clipboard, selectClips, selectionStore, setClipboard } from "./selection";
 import { gridInBars } from "./timeline";
 
@@ -94,11 +96,18 @@ export function deleteSelected(): void {
   selectClips([]);
 }
 
+/** With "Avoid overlaps" on, clips that just landed slide to the nearest spot where they cover nothing. */
+function settle(project: Project, ids: readonly string[]): Project {
+  if (!arrangeSettings.get().avoidOverlaps || ids.length === 0) return project;
+  const d = freeDelta(project, ids, 0, 0);
+  return d === 0 ? project : moveClips(project, ids, { deltaBars: d, deltaTracks: 0 });
+}
+
 export function duplicateSelected(): void {
   const ids = selected();
   if (ids.length === 0) return;
   const result = duplicateClips(projectStore.get(), ids);
-  projectStore.set(result.project);
+  projectStore.set(settle(result.project, result.ids));
   selectClips(result.ids);
 }
 
@@ -124,7 +133,7 @@ export function pasteAtPlayhead(): void {
   guard(() => {
     const { selectedTrackId } = uiStore.get();
     const result = pasteClips(projectStore.get(), clipboard, playheadBarExact(), selectedTrackId ?? undefined);
-    projectStore.set(result.project);
+    projectStore.set(settle(result.project, result.ids));
     selectClips(result.ids);
   });
 }
@@ -133,13 +142,26 @@ export function selectAllClips(): void {
   selectClips(projectStore.get().tracks.flatMap((t) => t.clips.map((c) => c.id)));
 }
 
-/** Arrow keys move the selection by one grid step. */
-export function nudgeSelected(direction: -1 | 1): void {
+/** Arrow keys move the selection: left/right by a grid step (a whole bar with Shift), up/down by a track. */
+export function nudgeSelected(direction: -1 | 1, opts: { bar?: boolean } = {}): void {
   const ids = selected();
   if (ids.length === 0) return;
   const { beatsPerBar } = projectStore.get();
   const { gridBeats } = arrangeSettings.get();
-  guard(() => projectStore.set((p) => moveClips(p, ids, { deltaBars: direction * gridInBars(gridBeats, beatsPerBar), deltaTracks: 0 })));
+  const step = opts.bar ? 1 : gridInBars(gridBeats, beatsPerBar);
+  guard(() => projectStore.set((p) => moveClips(p, ids, { deltaBars: direction * step, deltaTracks: 0 })));
+}
+
+export function nudgeSelectedTracks(direction: -1 | 1): void {
+  const ids = selected();
+  if (ids.length === 0) return;
+  projectStore.set((p) => moveClips(p, ids, { deltaBars: 0, deltaTracks: direction }));
+}
+
+/** Every clip on the given tracks (the selected ones by default). */
+export function selectTrackClips(trackIds: readonly string[]): void {
+  const set = new Set(trackIds);
+  selectClips(projectStore.get().tracks.filter((t) => set.has(t.id)).flatMap((t) => t.clips.map((c) => c.id)));
 }
 
 export function addPlainTrack(kind: Exclude<TrackKind, "instrument" | "fx">): void {
@@ -166,8 +188,15 @@ export async function addInstrumentTrack(kind: InstrumentKind): Promise<void> {
 }
 
 export function deleteTrack(trackId: string): void {
-  projectStore.set((p) => removeTrack(p, trackId));
-  uiStore.set((s) => (s.selectedTrackId === trackId ? { ...s, selectedTrackId: null } : s));
+  deleteTracks([trackId]);
+}
+
+/** One undo step, however many tracks. */
+export function deleteTracks(trackIds: readonly string[]): void {
+  const gone = new Set(trackIds);
+  projectStore.set((p) => [...gone].reduce((acc, id) => removeTrack(acc, id), p));
+  uiStore.set((s) => (s.selectedTrackId && gone.has(s.selectedTrackId) ? { ...s, selectedTrackId: null } : s));
+  selectionStore.set((s) => ({ ...s, trackIds: s.trackIds.filter((id) => !gone.has(id)) }));
 }
 
 export function shiftTrack(trackId: string, by: -1 | 1): void {
@@ -177,11 +206,18 @@ export function shiftTrack(trackId: string, by: -1 | 1): void {
   });
 }
 
-export function toggleTrackFlag(trackId: string, flag: "muted" | "solo"): void {
+/** Flips a flag on every given track to one shared value, so a mixed selection ends up uniform. */
+export function toggleTrackFlag(trackId: string, flag: "muted" | "solo", all: readonly string[] = [trackId]): void {
   projectStore.set((p) => {
     const t = p.tracks.find((x) => x.id === trackId);
-    return t ? updateTrack(p, trackId, { [flag]: !t[flag] }) : p;
+    if (!t) return p;
+    const value = !t[flag];
+    return all.reduce((acc, id) => updateTrack(acc, id, { [flag]: value }), p);
   });
+}
+
+export function colorTracks(trackIds: readonly string[], color: string): void {
+  projectStore.set((p) => trackIds.reduce((acc, id) => updateTrack(acc, id, { color }), p));
 }
 
 /** A new empty pattern clip for an instrument track, four bars long, at a bar. */

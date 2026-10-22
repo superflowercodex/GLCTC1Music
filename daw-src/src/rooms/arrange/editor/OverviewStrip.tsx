@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as Rea
 import type { Clip } from "../../../project/model";
 import { clipSeconds, stepSeconds, type TimeBase } from "./clipEdits";
 import { peaksForRange, type PeakIndex } from "./peaks";
+import { accent } from "./shared";
 import type { View } from "./WaveformView";
 
 interface Props {
@@ -51,7 +52,7 @@ export function OverviewStrip({ clip, buffer, index, ratio, time, view, onTrim }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, width, height);
     const peaks = peaksForRange(index, buffer, 0, buffer.length, width);
-    g.fillStyle = "rgba(121,235,255,0.5)";
+    g.fillStyle = accent(el, "99");
     const mid = height / 2;
     for (let x = 0; x < width; x++) {
       const top = Math.max(1, peaks.max[x] * mid * 0.9);

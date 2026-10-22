@@ -2,8 +2,8 @@ import { useEffect } from "react";
 import { togglePlay } from "../../audio/transport";
 import { redo, undo } from "../../project/history";
 import { uiStore } from "../../store/project";
-import { copySelected, cutSelected, deleteSelected, duplicateSelected, nudgeSelected, pasteAtPlayhead, selectAllClips, splitAtPlayhead } from "./ops";
-import { selectClips, selectionStore } from "./selection";
+import { copySelected, cutSelected, deleteSelected, duplicateSelected, nudgeSelected, nudgeSelectedTracks, pasteAtPlayhead, selectAllClips, selectTrackClips, splitAtPlayhead } from "./ops";
+import { clearTrackSelection, selectClips, selectionStore } from "./selection";
 
 function typing(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -26,6 +26,13 @@ export function useArrangeKeys(onEscape: () => boolean): void {
         fn();
       };
 
+      // With the clip editor open, keys belong to it: only play, undo and redo still reach the arrangement.
+      if (document.querySelector(".ce-modal")) {
+        if (mod && key === "z") return run(e.shiftKey ? () => redo() : () => undo());
+        if (mod && key === "y") return run(() => redo());
+        if (!mod && !e.altKey && e.key === " ") return run(() => void togglePlay());
+        return;
+      }
       if (mod) {
         if (key === "z") return run(e.shiftKey ? () => redo() : () => undo());
         if (key === "y") return run(() => redo());
@@ -33,17 +40,23 @@ export function useArrangeKeys(onEscape: () => boolean): void {
         if (key === "c") return run(copySelected);
         if (key === "x") return run(cutSelected);
         if (key === "v") return run(pasteAtPlayhead);
-        if (key === "a") return run(selectAllClips);
+        if (key === "a") return run(e.shiftKey ? () => selectTrackClips(selectionStore.get().trackIds) : selectAllClips);
         return;
       }
       if (e.altKey) return;
       if (e.key === " ") return run(() => void togglePlay());
       if (key === "s") return run(splitAtPlayhead);
       if (e.key === "Delete" || e.key === "Backspace") return run(deleteSelected);
-      if (e.key === "ArrowLeft" && selectionStore.get().ids.length > 0) return run(() => nudgeSelected(-1));
-      if (e.key === "ArrowRight" && selectionStore.get().ids.length > 0) return run(() => nudgeSelected(1));
+      if (selectionStore.get().ids.length > 0) {
+        if (e.key === "ArrowLeft") return run(() => nudgeSelected(-1, { bar: e.shiftKey }));
+        if (e.key === "ArrowRight") return run(() => nudgeSelected(1, { bar: e.shiftKey }));
+        if (e.key === "ArrowUp") return run(() => nudgeSelectedTracks(-1));
+        if (e.key === "ArrowDown") return run(() => nudgeSelectedTracks(1));
+      }
       if (e.key === "Escape") {
-        if (!onEscape() && selectionStore.get().ids.length > 0) run(() => selectClips([]));
+        if (onEscape()) return;
+        if (selectionStore.get().ids.length > 0) run(() => selectClips([]));
+        else if (selectionStore.get().trackIds.length > 1) run(clearTrackSelection);
       }
     };
     // Space on a focused button would also click it on key-up.

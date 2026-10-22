@@ -19,7 +19,9 @@ export type IconName =
   | "song"
   | "stage"
   | "library"
-  | "fullscreen";
+  | "fullscreen"
+  | "chevron-down"
+  | "chevron-up";
 
 const PATHS: Record<IconName, { d: string; fill?: boolean; extra?: string }> = {
   play: { d: "M8 5l11 7-11 7z", fill: true },
@@ -43,6 +45,8 @@ const PATHS: Record<IconName, { d: string; fill?: boolean; extra?: string }> = {
   stage: { d: "M10 9.5l5 2.5-5 2.5z", extra: "rect:3,5,18,14,3" },
   library: { d: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" },
   fullscreen: { d: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" },
+  "chevron-down": { d: "M6 9l6 6 6-6" },
+  "chevron-up": { d: "M6 15l6-6 6 6" },
 };
 
 export function Icon({ name, size = 24 }: { name: IconName; size?: number }) {

@@ -39,7 +39,7 @@ export function VoxProcess({ vox, module, onModule }: { vox: Vox; module: Module
         <PitchView vox={vox} status={status(vox)} dropping={dropping} />
         <LevelRow vox={vox} />
         <SignalChain instrument={vox} selected={module} onSelect={onModule} />
-        <div className="voice-note">
+        <div className="hw-note">
           Tuning to {NOTE_NAMES[vox.key.root]} {vox.key.scale}. Change the key in the project settings.
         </div>
       </div>

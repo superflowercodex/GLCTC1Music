@@ -5,12 +5,15 @@ import { hasSample, type PadMode } from "../../../audio/instruments/voice/padPla
 import type { Instrument } from "../../../audio/types";
 import { projectStore } from "../../../store/project";
 import { useStore } from "../../../store/store";
-import { Button, Seg, Slider } from "../../../ui/controls";
+import { Caption } from "../../../ui/Caption";
+import { Knob } from "../../../ui/Knob";
 import { InstrumentShell } from "../InstrumentShell";
+import { HwChoice } from "../synth/HwChoice";
 import { bounceLooper } from "../voice/bounce";
 import { useComputerKeys } from "../voice/hooks";
 import { PAD_KEYS, PadGrid } from "../voice/PadGrid";
 import { ParamControl } from "../voice/ParamControl";
+import { SidePlate } from "../voice/SidePlate";
 import { Waveform } from "../voice/Waveform";
 import "../voice/voice.css";
 
@@ -69,72 +72,64 @@ export default function LooperRoom({ instrument }: { instrument: Instrument }) {
   const recording = looper.recordingPad;
 
   const right = (
-    <>
+    <SidePlate eyebrow={`Pad ${selected + 1}`} title={loaded ? pad.name || `Pad ${selected + 1}` : "Empty pad"}>
       <div>
-        <div className="voice-label">Pad {selected + 1}</div>
-        <div className="module-title">{loaded ? pad.name || `Pad ${selected + 1}` : "Empty pad"}</div>
-      </div>
-      <div className="module-body scroll-y amber-sliders" style={{ flex: 1 }}>
-        <div>
-          <div className="voice-label" style={{ marginBottom: 8 }}>
-            When you press it
-          </div>
-          <div className="voice-seg-amber">
-            <Seg label="Pad mode" value={pad.mode} options={MODES} onChange={(mode) => looper.setPad(selected, { mode })} />
-          </div>
-          <div className="voice-note" style={{ marginTop: 10 }}>
-            {HELP[pad.mode]}
-          </div>
+        <Caption as="div" className="sy-fieldhead">
+          When you press it
+        </Caption>
+        <HwChoice label="Pad mode" value={pad.mode} options={MODES} onChange={(mode) => looper.setPad(selected, { mode })} wrap />
+        <div className="hw-note" style={{ marginTop: 10 }}>
+          {HELP[pad.mode]}
         </div>
-        <Slider label="Volume" value={pad.volume} min={0} max={1.5} step={0.01} onChange={(volume) => looper.setPad(selected, { volume })} format={dB} />
-        <Slider label="Pitch" value={pad.pitch} min={-24} max={24} step={1} onChange={(pitch) => looper.setPad(selected, { pitch })} format={(v) => `${v > 0 ? "+" : ""}${v} st`} />
-        <Slider
-          label="Start trim"
-          value={pad.start}
+      </div>
+      <Knob label="Volume" value={pad.volume} min={0} max={1.5} step={0.01} defaultValue={1} onChange={(volume) => looper.setPad(selected, { volume })} format={dB} />
+      <Knob label="Pitch" value={pad.pitch} min={-24} max={24} step={1} onChange={(pitch) => looper.setPad(selected, { pitch })} format={(v) => `${v > 0 ? "+" : ""}${v} st`} />
+      <Knob
+        label="Start trim"
+        value={pad.start}
+        min={0}
+        max={0.95}
+        step={0.005}
+        onChange={(start) => looper.setPad(selected, { start: Math.min(start, pad.end - 0.01) })}
+        format={(v) => `${(v * (looper.padBuffer(selected)?.duration ?? 0)).toFixed(2)} s`}
+      />
+      <Knob label="Fade out" value={pad.fadeOut} min={0} max={2} step={0.01} defaultValue={0.02} onChange={(fadeOut) => looper.setPad(selected, { fadeOut })} format={(v) => `${Math.round(v * 1000)} ms`} />
+      <Knob label="Filter" value={pad.filter} min={0} max={1} step={0.01} defaultValue={1} onChange={(filter) => looper.setPad(selected, { filter })} format={(v) => (v > 0.97 ? "Open" : `${Math.round(v * 100)}%`)} />
+      <Knob label="Reverb send" value={pad.reverb} min={0} max={1} step={0.01} onChange={(reverb) => looper.setPad(selected, { reverb })} format={(v) => `${Math.round(v * 100)}%`} />
+      {pad.mode === "loop" && (
+        <Knob
+          label="Loop length"
+          value={pad.bars}
           min={0}
-          max={0.95}
-          step={0.005}
-          onChange={(start) => looper.setPad(selected, { start: Math.min(start, pad.end - 0.01) })}
-          format={(v) => `${(v * (looper.padBuffer(selected)?.duration ?? 0)).toFixed(2)} s`}
+          max={16}
+          step={1}
+          onChange={(bars) => looper.setPad(selected, { bars })}
+          format={(v) => (v === 0 ? "Auto" : `${v} ${v === 1 ? "bar" : "bars"}`)}
         />
-        <Slider label="Fade out" value={pad.fadeOut} min={0} max={2} step={0.01} onChange={(fadeOut) => looper.setPad(selected, { fadeOut })} format={(v) => `${Math.round(v * 1000)} ms`} />
-        <Slider label="Filter" value={pad.filter} min={0} max={1} step={0.01} onChange={(filter) => looper.setPad(selected, { filter })} format={(v) => (v > 0.97 ? "Open" : `${Math.round(v * 100)}%`)} />
-        <Slider label="Reverb send" value={pad.reverb} min={0} max={1} step={0.01} onChange={(reverb) => looper.setPad(selected, { reverb })} format={(v) => `${Math.round(v * 100)}%`} />
-        {pad.mode === "loop" && (
-          <Slider
-            label="Loop length"
-            value={pad.bars}
-            min={0}
-            max={16}
-            step={1}
-            onChange={(bars) => looper.setPad(selected, { bars })}
-            format={(v) => (v === 0 ? "Auto" : `${v} ${v === 1 ? "bar" : "bars"}`)}
-          />
-        )}
-        <div>
-          <div className="voice-label" style={{ marginBottom: 8 }}>
-            Plays in scene
-          </div>
-          <div className="scene-chips" role="group" aria-label="Scenes this pad plays in">
-            {SCENE_NAMES.map((name, s) => {
-              const on = looper.scenes[s][selected];
-              return (
-                <button key={name} type="button" aria-pressed={on} className={`voice-chip ${on ? "on" : ""}`} onClick={() => looper.setSceneMember(s, selected, !on)}>
-                  {name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="kit-group">
-          <div className="voice-label">Kit</div>
-          <ParamControl instrument={looper} id="level" />
-          <ParamControl instrument={looper} id="launch" label="Loops start on" />
-          <ParamControl instrument={looper} id="reverb" />
-          <ParamControl instrument={looper} id="bounceBars" />
+      )}
+      <div>
+        <Caption as="div" className="sy-fieldhead">
+          Plays in scene
+        </Caption>
+        <div className="scene-chips" role="group" aria-label="Scenes this pad plays in">
+          {SCENE_NAMES.map((name, s) => {
+            const on = looper.scenes[s][selected];
+            return (
+              <button key={name} type="button" aria-pressed={on} className={`hw-key sq ${on ? "on" : ""}`} onClick={() => looper.setSceneMember(s, selected, !on)}>
+                {name}
+              </button>
+            );
+          })}
         </div>
       </div>
-    </>
+      <div className="kit-group knob-grid">
+        <div className="hw-title">Kit</div>
+        <ParamControl instrument={looper} id="level" />
+        <ParamControl instrument={looper} id="launch" label="Loops start on" />
+        <ParamControl instrument={looper} id="reverb" />
+        <ParamControl instrument={looper} id="bounceBars" />
+      </div>
+    </SidePlate>
   );
 
   return (
@@ -150,41 +145,45 @@ export default function LooperRoom({ instrument }: { instrument: Instrument }) {
       bounceBusy={busy}
       footerExtra={
         <>
-          <Button variant={recording === selected ? "primary" : "ghost"} onClick={() => void looper.togglePadRecording(selected)}>
-            <span style={{ width: 12, height: 12, borderRadius: "50%", background: "var(--pink)" }} aria-hidden="true" />
-            {recording === selected ? "Stop recording" : "Record into pad"}
-          </Button>
-          <Button
-            variant={looper.performanceRecording ? "primary" : "ghost"}
+          <button type="button" className={`hw-key sm led ${recording === selected ? "on" : ""}`} aria-label={recording === selected ? "Stop recording" : "Record into pad"} style={{ "--lit": "var(--live)" } as React.CSSProperties} aria-pressed={recording === selected} onClick={() => void looper.togglePadRecording(selected)}>
+            {recording === selected ? "Stop rec" : "Rec pad"}
+          </button>
+          <button
+            type="button"
+            className={`hw-key sm led ${looper.performanceRecording ? "on" : ""}`}
+            aria-label={looper.performanceRecording ? "Stop performance" : "Record performance"}
+            style={{ "--lit": "var(--live)" } as React.CSSProperties}
+            aria-pressed={looper.performanceRecording}
             onClick={() => (looper.performanceRecording ? looper.stopPerformanceRecord() : looper.startPerformanceRecord())}
           >
-            {looper.performanceRecording ? "Stop performance" : "Record performance"}
-          </Button>
+            {looper.performanceRecording ? "Stop perf" : "Rec performance"}
+          </button>
           {looper.performance.length > 0 && !looper.performanceRecording && (
-            <Button variant="outline" onClick={() => looper.clearPerformance()}>
-              Clear performance
-            </Button>
+            <button type="button" className="hw-key sm" onClick={() => looper.clearPerformance()}>
+              Clear
+            </button>
           )}
-          <span className="voice-note" style={{ marginLeft: "auto" }}>
+          <span className="hw-note foot-note" style={{ marginLeft: "auto" }}>
             Samples saved with the project
           </span>
         </>
       }
     >
-      <div className="voice-surface" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+      <div className="voice-surface hw-plate" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
         <div className="voice-bar">
-          <div className="scene-seg voice-seg-amber">
+          <div className="scene-seg">
             <span className="voice-label">Scene</span>
-            <Seg
+            <HwChoice
               label="Scene"
               value={scene ?? -1}
               options={[...Array.from({ length: SCENES }, (_, s) => ({ value: s, label: SCENE_NAMES[s] })), { value: -1, label: "Off" }]}
               onChange={(s) => looper.setPattern(s < 0 ? null : s)}
+              className="lp-scenes"
             />
           </div>
           <span className="spacer" />
           <span className="key-badge">
-            <i aria-hidden="true" />
+            <i className="hw-led on" style={{ "--lit": "var(--a1)" } as React.CSSProperties} aria-hidden="true" />
             Computer keys play pads while this room is open
           </span>
         </div>
@@ -203,20 +202,22 @@ export default function LooperRoom({ instrument }: { instrument: Instrument }) {
         <div className="wave-card">
           <div className="wave-head">
             <span className="wave-title">{loaded ? pad.name || `Pad ${selected + 1}` : "Empty pad"}</span>
-            <span className="mono voice-note">
+            <span className="hw-note">
               {loaded ? `${seconds.toFixed(2)} s · ${pad.slices.length > 0 ? `${pad.slices.length + 1} slices` : "no slices"}` : "Drop a sample here or record into it"}
             </span>
             <span style={{ flex: 1 }} />
-            <Button onClick={() => picker.current?.click()}>Load sample</Button>
-            <Button onClick={() => looper.sliceAuto(selected)} disabled={!loaded}>
+            <button type="button" className="hw-key sm" onClick={() => picker.current?.click()}>
+              Load sample
+            </button>
+            <button type="button" className="hw-key sm" onClick={() => looper.sliceAuto(selected)} disabled={!loaded}>
               Auto-slice
-            </Button>
-            <Button onClick={() => looper.toggleReverse(selected)} disabled={!loaded}>
-              {pad.reverse ? "Forward" : "Reverse"}
-            </Button>
-            <Button variant="danger" onClick={() => looper.clearPad(selected)} disabled={!loaded}>
+            </button>
+            <button type="button" className={`hw-key sm ${pad.reverse ? "on" : ""}`} aria-pressed={pad.reverse} onClick={() => looper.toggleReverse(selected)} disabled={!loaded}>
+              Reverse
+            </button>
+            <button type="button" className="hw-key sm" onClick={() => looper.clearPad(selected)} disabled={!loaded}>
               Clear pad
-            </Button>
+            </button>
           </div>
           <Waveform buffer={looper.padBuffer(selected)} pad={pad} color={color} onChange={(patch) => looper.setPad(selected, patch)} />
         </div>

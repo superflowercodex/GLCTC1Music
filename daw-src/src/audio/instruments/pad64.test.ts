@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PAD_COUNT, PARAMS_PAD64, Pad64, PRESETS_PAD64 } from "./pad64";
 import { cacheSample } from "./drums/samples";
+import { PAD_KINDS } from "./drums/voicesPad";
+import { detectPitch } from "./voice/yin";
 import { makeContext, nodeOffline, peakOf, renderSteps, rmsBetween } from "./drums/testing";
 import { bounceInstrument } from "../bounce";
 
@@ -86,8 +88,8 @@ describe("Pad64", () => {
     }
   });
 
-  it("every one of the 16 synth voices makes sound", async () => {
-    for (let kind = 0; kind < 16; kind++) {
+  it("every one of the synth voices makes sound", async () => {
+    for (let kind = 0; kind < PAD_KINDS.length; kind++) {
       const { buffer } = await renderSteps(make, 1, {
         tail: 1.5,
         setup: (i) => {
@@ -98,6 +100,25 @@ describe("Pad64", () => {
         },
       });
       expect(peakOf(buffer), `kind ${kind}`).toBeGreaterThan(0.01);
+    }
+  });
+
+  it("the warm bass sounds its sub on D2 at zero tune, follows the tune control, and stays dark", async () => {
+    for (const [tune, hz] of [[0, 73.42], [-5, 55], [7, 110]] as const) {
+      const { buffer } = await renderSteps(make, 4, {
+        tail: 0.5,
+        setup: (i) => {
+          kickOnly(i as Pad64, []);
+          i.setParam("v5.kind", PAD_KINDS.indexOf("Warm bass"));
+          i.setParam("v5.tune", tune);
+          i.setParam("v5.level", 1);
+          (i as Pad64).cycleStep(5, 0);
+        },
+      });
+      const d = buffer.getChannelData(0);
+      const est = detectPitch(d.subarray(Math.floor(0.08 * buffer.sampleRate), Math.floor(0.2 * buffer.sampleRate)), buffer.sampleRate, 30, 400, 0.3);
+      expect(est).not.toBeNull();
+      expect(Math.abs(1200 * Math.log2((est?.freq ?? 0) / hz))).toBeLessThan(15);
     }
   });
 

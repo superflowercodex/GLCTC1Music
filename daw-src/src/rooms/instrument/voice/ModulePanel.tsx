@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import type { Vox } from "../../../audio/instruments/vox";
 import { NOTE_NAMES } from "../../../audio/instruments/voice/scales";
-import { Button } from "../../../ui/controls";
 import { ParamControl } from "./ParamControl";
+import { SidePlate } from "./SidePlate";
 import { MODULES, type ModuleId } from "./SignalChain";
 
 const FX_MORE = ["delayDiv", "delayFb", "reverbSize", "reverbDamp", "spaceSize", "spacePre", "shimmer", "gravity", "nebula", "nebulaRate", "orbit", "orbitRate", "radiation", "radRate", "comet", "cometRate", "drive", "low", "high", "chorus"];
@@ -11,14 +11,16 @@ function InputActions({ vox }: { vox: Vox }) {
   const picker = useRef<HTMLInputElement>(null);
   return (
     <div className="module-actions">
-      <Button variant={vox.micActive ? "primary" : "ghost"} onClick={() => (vox.micActive ? vox.stopMic() : void vox.startMic())}>
+      <button type="button" className={`hw-key led ${vox.micActive ? "on" : ""}`} aria-pressed={vox.micActive} onClick={() => (vox.micActive ? vox.stopMic() : void vox.startMic())}>
         {vox.micActive ? "Stop mic" : "Start mic"}
-      </Button>
-      <Button onClick={() => picker.current?.click()}>Load file</Button>
+      </button>
+      <button type="button" className="hw-key" onClick={() => picker.current?.click()}>
+        Load file
+      </button>
       {vox.hasFile && (
-        <Button variant={vox.filePlaying ? "primary" : "ghost"} onClick={() => (vox.filePlaying ? vox.stopFile() : void vox.playFile())}>
+        <button type="button" className={`hw-key led ${vox.filePlaying ? "on" : ""}`} aria-pressed={vox.filePlaying} onClick={() => (vox.filePlaying ? vox.stopFile() : void vox.playFile())}>
           {vox.filePlaying ? "Stop file" : "Play file"}
-        </Button>
+        </button>
       )}
       <input
         ref={picker}
@@ -47,13 +49,7 @@ export function ModulePanel({ vox, module }: { vox: Vox; module: ModuleId }) {
   const blurb = module === "tune" ? `Snaps your voice to the project key, ${keyName}. Pitch and formant apply even when auto-tune is off.` : info.blurb;
 
   return (
-    <>
-      <div>
-        <div className="voice-label">Editing</div>
-        <div className="module-title">{info.name}</div>
-        <div className="module-blurb">{blurb}</div>
-      </div>
-      <div className="module-body scroll-y mint-sliders" style={{ flex: 1 }}>
+    <SidePlate eyebrow="Editing" title={info.name} blurb={blurb}>
         {module === "input" && (
           <>
             <InputActions vox={vox} />
@@ -92,9 +88,9 @@ export function ModulePanel({ vox, module }: { vox: Vox; module: ModuleId }) {
             <ParamControl instrument={vox} id="harmI2" />
             <ParamControl instrument={vox} id="harmI3" />
             <ParamControl instrument={vox} id="harmMix" />
-            <div className="module-sub">Levels and stereo position</div>
+            <div className="hw-title module-sub">Levels and stereo position</div>
             {[1, 2, 3].map((n) => (
-              <div key={n} style={{ display: "grid", gap: 16 }}>
+              <div key={n} style={{ display: "contents" }}>
                 <ParamControl instrument={vox} id={`harmL${n}`} />
                 <ParamControl instrument={vox} id={`harmP${n}`} />
               </div>
@@ -118,13 +114,12 @@ export function ModulePanel({ vox, module }: { vox: Vox; module: ModuleId }) {
             <ParamControl instrument={vox} id="delayMix" />
             <ParamControl instrument={vox} id="reverbMix" />
             <ParamControl instrument={vox} id="spaceMix" />
-            <div className="module-sub">Shape each effect</div>
+            <div className="hw-title module-sub">Shape each effect</div>
             {FX_MORE.map((id) => (
               <ParamControl key={id} instrument={vox} id={id} />
             ))}
           </>
         )}
-      </div>
-    </>
+    </SidePlate>
   );
 }

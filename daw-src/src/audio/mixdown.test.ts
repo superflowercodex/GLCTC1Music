@@ -283,3 +283,31 @@ describe("song source", () => {
     expect(rms(out, 0, 2.1, 3.9)).toBeLessThan(0.001);
   });
 });
+
+describe("instruments that drop out", () => {
+  it("never switches an instrument off mid-render, which would silence the notes it has already scheduled ahead", async () => {
+    const { project, instTrackId } = build();
+    const switches: (number | null)[] = [];
+    const watching: Partial<MixdownDeps> = {
+      ...deps,
+      createInstrument: async (_kind, ctx): Promise<Instrument> => {
+        const blip = new Blip(ctx);
+        const set = blip.setPattern.bind(blip);
+        blip.setPattern = (index) => {
+          switches.push(index);
+          set(index);
+        };
+        return blip;
+      },
+    };
+    const song: Project = {
+      ...project,
+      tracks: project.tracks.filter((t) => t.id === instTrackId),
+      song: { sections: [{ id: "s1", name: "A", bars: 1 }, { id: "s2", name: "B", bars: 1 }], matrix: { "slot-1": [1, 0] }, levels: { "slot-1": 1 } },
+    };
+    const out = await mixdownProject(song, { ...base, deps: watching, source: "song" });
+    expect(switches).not.toContain(null);
+    expect(rms(out, 0, 1.5, 1.9)).toBeGreaterThan(0.01);
+    expect(rms(out, 0, 2.1, 3.9)).toBeLessThan(0.001);
+  });
+});

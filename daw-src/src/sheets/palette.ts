@@ -2,6 +2,7 @@ import { ROOMS } from "../rooms";
 import type { InstrumentInfo } from "../audio/instruments/registry";
 import type { AppAction } from "../shortcuts";
 import { displayKeys } from "./shortcutList";
+import { setSkyMode, SKY_MODE_LABEL, SKY_MODES, skyStore } from "../gfx/skySettings";
 
 export type PaletteGroup = "Actions" | "Go to" | "Instruments" | "Presets";
 
@@ -74,6 +75,8 @@ export function buildPaletteItems(ctx: PaletteContext): PaletteItem[] {
     act("rewind", "Back to start", "rewind", keys("enter"), "rewind stop"),
     act("loop", ctx.loopOn ? "Turn loop off" : "Turn loop on", "loop", keys("l"), "repeat cycle"),
     act("metronome", ctx.metronomeOn ? "Turn metronome off" : "Turn metronome on", "metronome", keys("m"), "click"),
+    act("player-dock", "Minimise or expand the player", "player-dock", keys("mod+."), "transport pill collapse hide"),
+    act("fullscreen", "Enter or leave full screen", "fullscreen", keys("shift+mod+f"), "immersive maximise window"),
     act("record", "Record…", "record", keys("r"), "mic microphone capture take"),
     act("performance", "Performance recorder", "performance", undefined, "automation knobs gestures layers take"),
     act("undo", "Undo", "undo", keys("mod+z")),
@@ -82,6 +85,10 @@ export function buildPaletteItems(ctx: PaletteContext): PaletteItem[] {
     act("export", "Export…", "export", keys("shift+mod+e"), "wav bounce mixdown render stems"),
     act("shortcuts", "Keyboard shortcuts", "shortcuts", keys("mod+/"), "keys help"),
   );
+  const sky = skyStore.get().mode;
+  for (const mode of SKY_MODES) {
+    items.push({ id: `background-${mode}`, group: "Actions", label: `Background: ${SKY_MODE_LABEL[mode]}`, hint: mode === sky ? "On" : undefined, keywords: "sky nebula stars motion animation settings", run: () => setSkyMode(mode) });
+  }
   ROOMS.forEach((room, i) => {
     items.push({ id: `room-${room.id}`, group: "Go to", label: room.title, hint: keys(`mod+${i + 1}`), keywords: room.label, run: () => ctx.run(`room-${i}`) });
   });

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Relative base keeps the build working under /daw/ and on any preview host.
@@ -6,5 +6,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "./",
   plugins: [react()],
+  // The offline-audio tests contend for CPU when files run in parallel and fail intermittently.
+  test: { fileParallelism: false },
   build: { outDir: "../daw", emptyOutDir: true, target: "es2022" },
 });

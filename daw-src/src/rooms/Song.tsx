@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { peekEngine, getEngine } from "../audio/engine";
 import { getSongPlayer } from "../audio/songPlayer";
 import { instrumentInfo } from "../audio/instruments/registry";
@@ -7,9 +7,14 @@ import { ensureInstrument } from "../project/instruments";
 import type { Song as SongData, SongPattern } from "../project/model";
 import { projectStore, uiStore } from "../store/project";
 import { useStore } from "../store/store";
-import { Button, Seg } from "../ui/controls";
+import { Button, InfoChip, Seg, BPM_CHIP_SLOT } from "../ui/controls";
+import { ProjectHeader } from "../ui/ProjectHeader";
+import { Caption } from "../ui/Caption";
+import { Knob } from "../ui/Knob";
+import { LedMeter } from "../ui/LedMeter";
 import { Icon } from "../ui/Icon";
 import { RoomFrame } from "../ui/RoomFrame";
+import { useEdgeFade } from "../ui/useEdgeFade";
 import { setProjectBpm } from "../audio/transport";
 import { compose } from "./song/composer";
 import "./song/song.css";
@@ -36,6 +41,15 @@ interface Lane {
   patternCount: number;
 }
 
+// masterLevel() is RMS; the transport lifts it by sqrt(2) so the LEDs sit near true peak.
+const masterPeak = (): number => (peekEngine()?.masterLevel() ?? 0) * Math.SQRT2;
+
+function curvePath(values: readonly number[], close: boolean): string {
+  const n = values.length - 1;
+  const pts = values.map((v, k) => `${((k / n) * 100).toFixed(2)},${(100 - v * 88).toFixed(2)}`);
+  return close ? `M0,100 L${pts.join(" L")} L100,100 Z` : `M${pts.join(" L")}`;
+}
+
 function toast(text: string): void {
   uiStore.set((s) => ({ ...s, toast: { id: Date.now(), text } }));
 }
@@ -60,13 +74,15 @@ export default function Song() {
   const bpm = useStore(projectStore, (p) => p.bpm);
   const beatsPerBar = useStore(projectStore, (p) => p.beatsPerBar);
   const key = useStore(projectStore, (p) => p.key);
-  const name = useStore(projectStore, (p) => p.name);
   const player = getSongPlayer();
   const playState = useSyncExternalStore((l) => player.subscribe(l), () => player.getState());
 
   const [ready, setReady] = useState(0);
   const [selected, setSelected] = useState(0);
   const [prompt, setPrompt] = useState("");
+  const matrixRef = useRef<HTMLDivElement>(null);
+  const hscrollRef = useRef<HTMLDivElement>(null);
+  useEdgeFade(matrixRef, "y");
   const [note, setNote] = useState<string | null>(null);
   const [undo, setUndo] = useState<SongData | null>(null);
 
@@ -101,6 +117,7 @@ export default function Song() {
   }, [song.sections.length]);
 
   const sections = song.sections;
+  useEdgeFade(hscrollRef, "x", lanes.length > 0);
   const counts = useMemo(() => Object.fromEntries(lanes.map((l) => [l.slotId, l.patternCount])), [lanes]);
   const activeTemplate = TEMPLATES.find((t) => sameShape(song, t.id))?.id ?? "";
   const safeSelected = Math.min(selected, Math.max(0, sections.length - 1));
@@ -170,17 +187,33 @@ export default function Song() {
   }
 
   const totalSec = songDurationSec(song, bpm, beatsPerBar);
-  const columns = sections.map((s) => `minmax(0, ${s.bars}fr)`).join(" ");
+  // Room for the longest thing the preview readout can show (a section name or the length), capped.
+  const nowSlot = Math.min(14, Math.max(formatDuration(totalSec).length, ...sections.map((s) => [...s.name].length)));
+  // Columns stay proportional to their bars but never narrower than a full section name; the matrix scrolls sideways instead of clipping.
+  const columns = sections.map((s) => `minmax(var(--min-col), ${s.bars}fr)`).join(" ");
   const hasAnyCell = lanes.some((l) => (song.matrix[l.slotId] ?? []).some((v) => v > 0));
+  const selSection = sections[safeSelected];
+  const statusText = note ?? "Tap a pad to cycle its pattern A to D or off. Tap a section card to hear it alone.";
 
   return (
     <RoomFrame
-      eyebrow={`${name} · ${Math.round(bpm * 10) / 10} BPM · ${key}`}
       title="Song"
+      head={
+        <ProjectHeader
+          room="Song"
+          chips={
+            <>
+              <InfoChip>{key}</InfoChip>
+              <InfoChip color="var(--a2)" slot={BPM_CHIP_SLOT}>{Math.round(bpm * 10) / 10} BPM</InfoChip>
+              {sections.length > 0 && <InfoChip color="var(--a3)" slot={5}>{formatDuration(totalSec)}</InfoChip>}
+            </>
+          }
+        />
+      }
       hideTransport
       actions={<Seg label="Song length" className="song-templates" options={TEMPLATES.map((t) => ({ value: t.id, label: t.label }))} value={activeTemplate as TemplateId} onChange={chooseTemplate} />}
     >
-      <div className="song-body">
+      <div className="song-body frost-sheet">
         <form
           className="song-compose"
           onSubmit={(e) => {
@@ -188,46 +221,82 @@ export default function Song() {
             runCompose();
           }}
         >
-          <Icon name="song" size={22} />
-          <input type="text" aria-label="Describe your track" placeholder="Dark techno, 128 bpm, slow build, big drop, then ease out" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-          <span className="tag" title="Keywords for genre, scale, tempo, length and which instruments sit out choose the arrangement. No AI model is involved.">
-            Rule-based, not AI
-          </span>
-          {undo && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                updateSong(() => undo);
-                setUndo(null);
-                setNote("Brought back your arrangement from before Compose.");
-              }}
-            >
-              Undo
-            </Button>
-          )}
-          <button type="submit" className="btn btn-compose" disabled={lanes.length === 0}>
-            Compose
-          </button>
+          <div className="song-compose-row">
+            <span className="song-compose-ic">
+              <Icon name="song" size={20} />
+            </span>
+            <input type="text" aria-label="Describe your track" placeholder="Dark techno, 128 bpm, slow build, big drop, then ease out" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            {undo && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  updateSong(() => undo);
+                  setUndo(null);
+                  setNote("Brought back your arrangement from before Compose.");
+                }}
+              >
+                Undo
+              </Button>
+            )}
+            <button type="submit" className="btn btn-primary" disabled={lanes.length === 0}>
+              Compose
+            </button>
+          </div>
+          <div className="song-status" role="status">
+            <span className="tag" title="Keywords for genre, scale, tempo, length and which instruments sit out choose the arrangement. No AI model is involved.">
+              Rule-based
+            </span>
+            <span className="song-status-t">{statusText}</span>
+          </div>
         </form>
 
         <section className="song-panel" aria-label="Sections">
+          <div className="song-scroll fade-y" ref={matrixRef}>
           {lanes.length === 0 ? (
             <div className="song-empty">
-              <p style={{ margin: 0, maxWidth: 520 }}>
-                Add an instrument with patterns, such as the 80LA8 drum machine or 30LEE, and it gets a row here. Each row picks which pattern plays in each section.
-              </p>
+              <span className="song-empty-ic">
+                <Icon name="song" size={28} />
+              </span>
+              <Caption>The stage is set, the band is missing</Caption>
+              <p>Add an instrument with patterns, such as the 80LA8 drum machine or 30LEE, and it gets a row here. Each row picks which pattern plays in each section.</p>
               <a className="btn btn-primary" href="#/play">
                 Open Play
               </a>
             </div>
           ) : (
             <>
-              <div className="song-grid">
-                <div />
+              <div className="song-matrix" style={{ "--cols": sections.length, "--rows": lanes.length } as React.CSSProperties}>
+              <div className="song-corner">
+                <Caption>Arrangement</Caption>
+              </div>
+              {lanes.map((lane, r) => {
+                const level = song.levels?.[lane.slotId] ?? DEFAULT_LEVEL;
+                return (
+                  <div className="song-name" key={lane.slotId} role="group" aria-label={lane.name} style={{ "--c": lane.color, gridRow: r + 2 } as React.CSSProperties}>
+                    <span className="song-dot" />
+                    <span className="t">{lane.name}</span>
+                    <Knob
+                      label={`${lane.name} level`}
+                      hideLabel
+                      size="sm"
+                      color={lane.color}
+                      value={level}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      defaultValue={DEFAULT_LEVEL}
+                      format={(v) => `${Math.round(v * 100)}`}
+                      onChange={(v) => setLevel(lane.slotId, v)}
+                    />
+                  </div>
+                );
+              })}
+              <div className="song-hscroll fade-x" ref={hscrollRef} role="group" aria-label="Pattern matrix">
                 <div className="song-lane" style={{ gridTemplateColumns: columns }}>
                   {sections.map((s, i) => {
                     const c = KIND_COLOR[s.kind ?? "drop"];
-                    const curve = energyCurve(s, s.bars * 3);
+                    const curve = energyCurve(s, 24);
+                    const alone = playState.mode === "section" && playState.section === i;
                     const live = playing && playState.section === i;
                     return (
                       <button
@@ -235,81 +304,76 @@ export default function Song() {
                         type="button"
                         className={`song-ribbon ${i === safeSelected ? "sel" : ""} ${live ? "live" : ""}`}
                         style={{ "--c": c } as React.CSSProperties}
-                        aria-pressed={playState.mode === "section" && playState.section === i}
-                        aria-label={`${s.name}, ${s.bars} bars. ${playState.mode === "section" && playState.section === i ? "Stop" : "Play this section alone"}`}
+                        aria-pressed={alone}
+                        aria-label={`${s.name}, ${s.bars} bars. ${alone ? "Stop" : "Play this section alone"}`}
+                        data-tip={`${s.name} · ${s.bars} bars`}
                         onClick={() => pickSection(i)}
                       >
-                        <span className="song-curve" aria-hidden="true">
-                          {curve.map((h, k) => (
-                            <i key={k} style={{ height: `${Math.round(h * 78)}%` }} />
-                          ))}
-                        </span>
+                        <svg className="song-curve" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                          <defs>
+                            <linearGradient id={`sg-${s.id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0" stopColor={c} stopOpacity="0.5" />
+                              <stop offset="1" stopColor={c} stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d={curvePath(curve, true)} fill={`url(#sg-${s.id})`} />
+                          <path d={curvePath(curve, false)} fill="none" stroke={c} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                        </svg>
                         <span className="song-ribbon-text">
-                          <div className="song-ribbon-name">{s.name}</div>
-                          <div className="song-ribbon-bars">{s.bars} bars</div>
+                          <span className="song-ribbon-name">{s.name}</span>
+                          <span className="song-ribbon-bars">{s.bars}<span className="song-bars-u"> bars</span></span>
+                        </span>
+                        <span className="song-ribbon-go" aria-hidden="true">
+                          <Icon name={alone ? "stop" : "play"} size={14} />
                         </span>
                       </button>
                     );
                   })}
                 </div>
+                {lanes.map((lane, r) => (
+                  <div className="song-cells" key={lane.slotId} style={{ "--c": lane.color, gridRow: r + 2, gridTemplateColumns: columns } as React.CSSProperties}>
+                    {sections.map((s, i) => {
+                      const v = song.matrix[lane.slotId]?.[i] ?? 0;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`song-cell ${v ? "on" : ""} ${i === safeSelected ? "col" : ""}`}
+                          aria-label={`${lane.name}, ${s.name}, ${v ? `pattern ${PATTERN_LETTERS[v]}` : "off"}`}
+                          onClick={() => cycle(lane.slotId, i, lane.patternCount)}
+                        >
+                          {v ? PATTERN_LETTERS[v] : <span className="song-off" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-
-              <div className="song-rows scroll-y" role="group" aria-label="Pattern matrix">
-                {lanes.map((lane) => {
-                  const level = song.levels?.[lane.slotId] ?? DEFAULT_LEVEL;
-                  return (
-                    <div className="song-row" key={lane.slotId} style={{ "--c": lane.color } as React.CSSProperties}>
-                      <div className="song-name">
-                        <span className="song-dot" />
-                        <span className="t">{lane.name}</span>
-                        <input
-                          className="song-level"
-                          type="range"
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={level}
-                          aria-label={`${lane.name} level`}
-                          style={{ "--pct": `${level * 100}%` } as React.CSSProperties}
-                          onChange={(e) => setLevel(lane.slotId, Number(e.target.value))}
-                        />
-                      </div>
-                      <div className="song-cells" style={{ gridTemplateColumns: columns }}>
-                        {sections.map((s, i) => {
-                          const v = song.matrix[lane.slotId]?.[i] ?? 0;
-                          return (
-                            <button
-                              key={s.id}
-                              type="button"
-                              className={`song-cell ${v ? "on" : ""} ${i === safeSelected ? "col" : ""}`}
-                              aria-label={`${lane.name}, ${s.name}, ${v ? `pattern ${PATTERN_LETTERS[v]}` : "off"}`}
-                              onClick={() => cycle(lane.slotId, i, lane.patternCount)}
-                            >
-                              {PATTERN_LETTERS[v]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="song-note" role="status">
-                {note ?? "Tap a cell to cycle its pattern: A, B, C, D, off. Tap a section above to hear it alone."}
               </div>
             </>
           )}
+          </div>
         </section>
 
-        <footer className="song-foot">
-          <button type="button" className="play-btn" aria-label={playState.mode === "song" ? "Stop preview" : "Preview whole song"} disabled={lanes.length === 0} onClick={() => (playState.mode === "song" ? player.stop() : void startPreview())}>
-            <Icon name={playState.mode === "song" ? "stop" : "play"} size={22} />
-          </button>
-          <strong style={{ fontSize: 16 }}>{playState.mode === "section" ? "Stop section preview" : "Preview whole song"}</strong>
-          <span className="mono" style={{ fontSize: 16, color: "var(--muted)" }}>
-            {formatDuration(totalSec)}
-          </span>
-          <span className="note">Sections stay in time even when this tab is in the background</span>
+        <footer className={`transport song-transport ${playing ? "is-playing" : ""}`}>
+          <div className="tp-ctrls">
+            <button type="button" className="play-btn" aria-label={playState.mode === "song" ? "Stop preview" : "Preview whole song"} disabled={lanes.length === 0} onClick={() => (playState.mode === "song" ? player.stop() : void startPreview())}>
+              <Icon name={playState.mode === "song" ? "stop" : "play"} size={20} />
+            </button>
+          </div>
+          <div className="tp-readout song-now" style={{ "--slot": nowSlot } as CSSProperties}>
+            <span className="tp-cap tp-cap-swap">
+              <span aria-hidden={playState.mode === "section" ? undefined : true}>Section preview</span>
+              <span aria-hidden={playState.mode === "section" ? true : undefined}>Song preview</span>
+            </span>
+            <span className="mono transport-pos" title={playState.mode === "section" && selSection ? selSection.name : undefined}>{playState.mode === "section" && selSection ? selSection.name : formatDuration(totalSec)}</span>
+          </div>
+          <div className="tp-readout">
+            <span className="tp-cap">Length</span>
+            <span className="mono transport-pos">{formatDuration(totalSec)}</span>
+          </div>
+          <LedMeter getLevel={masterPeak} label="Master output level" horizontal className="tp-meter" scale={{ segments: 20 }} />
+          <span className="spacer" />
           <Button
             disabled={!hasAnyCell}
             onClick={() => {

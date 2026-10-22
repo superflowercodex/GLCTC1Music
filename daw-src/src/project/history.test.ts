@@ -133,3 +133,63 @@ describe("history", () => {
     );
   });
 });
+
+describe("history: instrument slot edits", () => {
+  function withSlot() {
+    let clockMs = 0;
+    const base = newProject();
+    const slot = { id: "slot-1", kind: "acid30lee" as const, trackId: "trk-1", state: { kind: "acid30lee" as const, values: {}, data: { patterns: [[0]] } } };
+    const store = createStore<Project>({ ...base, instruments: [slot] });
+    const history = createHistory(store, { now: () => clockMs });
+    const setPattern = (v: number) => store.set((p) => ({ ...p, instruments: p.instruments.map((s) => ({ ...s, state: { ...s.state, data: { patterns: [[v]] } } })) }));
+    const pattern = () => (store.get().instruments[0].state.data as { patterns: number[][] }).patterns[0][0];
+    return { store, history, setPattern, pattern, advance: (ms: number) => (clockMs += ms) };
+  }
+
+  it("leaves plain instrument changes out of undo", () => {
+    const { history, setPattern } = withSlot();
+    setPattern(1);
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it("undoes and redoes a recorded slot edit, telling listeners which slots rolled back", () => {
+    const { history, setPattern, pattern, advance } = withSlot();
+    const seen: string[][] = [];
+    history.onSlotsRestored((ids) => seen.push([...ids]));
+    history.recordSlots(["slot-1"], () => setPattern(1));
+    advance(1000);
+    history.recordSlots(["slot-1"], () => setPattern(2));
+    expect(history.undo()).toBe(true);
+    expect(pattern()).toBe(1);
+    expect(history.undo()).toBe(true);
+    expect(pattern()).toBe(0);
+    expect(history.redo()).toBe(true);
+    expect(pattern()).toBe(1);
+    expect(history.redo()).toBe(true);
+    expect(pattern()).toBe(2);
+    expect(seen).toEqual([["slot-1"], ["slot-1"], ["slot-1"], ["slot-1"]]);
+  });
+
+  it("keeps a recorded slot edit and a later untracked instrument change apart", () => {
+    const { history, setPattern, pattern, advance } = withSlot();
+    history.recordSlots(["slot-1"], () => setPattern(1));
+    advance(100);
+    setPattern(5);
+    advance(1000);
+    history.recordSlots(["slot-1"], () => setPattern(6));
+    history.undo();
+    expect(pattern()).toBe(5);
+    history.undo();
+    expect(pattern()).toBe(0);
+  });
+
+  it("joins taps in quick succession into one step", () => {
+    const { history, setPattern, pattern, advance } = withSlot();
+    history.recordSlots(["slot-1"], () => setPattern(1));
+    advance(100);
+    history.recordSlots(["slot-1"], () => setPattern(2));
+    history.undo();
+    expect(pattern()).toBe(0);
+    expect(history.canUndo()).toBe(false);
+  });
+});

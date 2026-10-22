@@ -27,17 +27,19 @@ export function Button({
   variant = "ghost",
   disabled,
   title,
+  size,
   className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
   variant?: ButtonVariant;
+  size?: "sm";
   disabled?: boolean;
   title?: string;
   className?: string;
 }) {
   return (
-    <button type="button" className={`btn btn-${variant} ${className}`} onClick={onClick} disabled={disabled} title={title}>
+    <button type="button" className={`btn btn-${variant} ${size ? `btn-${size}` : ""} ${className}`} onClick={onClick} disabled={disabled} data-tip={title}>
       {children}
     </button>
   );
@@ -59,7 +61,7 @@ export function IconButton({
   className?: string;
 }) {
   return (
-    <button type="button" className={`icon-btn ${active ? "on" : ""} ${className}`} aria-label={label} title={label} onClick={onClick}>
+    <button type="button" className={`icon-btn ${active ? "on" : ""} ${className}`} aria-label={label} data-tip={label} onClick={onClick}>
       <Icon name={icon} size={size} />
     </button>
   );
@@ -70,16 +72,22 @@ export function Seg<T extends string | number>({
   value,
   onChange,
   label,
+  size,
+  color,
   className = "",
 }: {
   options: ReadonlyArray<{ value: T; label: string }>;
   value: T;
   onChange: (value: T) => void;
   label: string;
+  /** "sm": 28px track for dense panels. */
+  size?: "sm";
+  /** Colour of the lit line under the selected segment (sets --k; defaults to the room accent). */
+  color?: string;
   className?: string;
 }) {
   return (
-    <div className={`seg ${className}`} role="radiogroup" aria-label={label}>
+    <div className={`seg ${size ? `seg-${size}` : ""} ${className}`} role="radiogroup" aria-label={label} style={color ? ({ "--k": color } as CSSProperties) : undefined}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -144,9 +152,33 @@ export function Switch({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
-export function Chip({ children, active, onClick }: { children: ReactNode; active?: boolean; onClick?: () => void }) {
+export function Chip({
+  children,
+  active,
+  onClick,
+  color,
+  size,
+  title,
+  className = "",
+}: {
+  children: ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+  /** Lit colour when active (sets --k; defaults to the room accent). */
+  color?: string;
+  size?: "sm";
+  title?: string;
+  className?: string;
+}) {
   return (
-    <button type="button" className={`chip ${active ? "on" : ""}`} onClick={onClick}>
+    <button
+      type="button"
+      className={`chip ${size ? `chip-${size}` : ""} ${active ? "on" : ""} ${className}`}
+      aria-pressed={active}
+      data-tip={title}
+      onClick={onClick}
+      style={color ? ({ "--k": color } as CSSProperties) : undefined}
+    >
       {children}
     </button>
   );
@@ -236,5 +268,22 @@ export function Ring({
       </div>
       <div className="ring-label">{label}</div>
     </div>
+  );
+}
+
+/**
+ * A small information pill like the platform's frequency chips: a lit dot, a fill tinted in `color`
+ * (default the room accent) and a mono value. Not a control; `tone` uses a fixed status colour instead.
+ */
+/** Fits "120.5 BPM": tap tempo and typed tempos land on tenths. */
+export const BPM_CHIP_SLOT = 9;
+
+/** `slot` reserves room for that many characters, so a chip whose value changes (tempo, length, save state) keeps its width. */
+export function InfoChip({ children, color, tone, title, slot }: { children: ReactNode; color?: string; tone?: "quiet" | "ok" | "warn" | "saving"; title?: string; slot?: number }) {
+  const style = { ...(color ? { "--c": color } : {}), ...(slot ? { "--slot": slot } : {}) } as CSSProperties;
+  return (
+    <span className={`ichip ${tone ?? ""}${slot ? " slotted" : ""}`} data-tip={title} style={color || slot ? style : undefined}>
+      {children}
+    </span>
   );
 }

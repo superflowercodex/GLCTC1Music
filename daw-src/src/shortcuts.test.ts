@@ -41,6 +41,17 @@ describe("playback keys", () => {
   });
 });
 
+describe("player dock", () => {
+  it("minimises with Cmd or Ctrl and a period, and never with a plain letter the keyboard plays", () => {
+    expect(routeShortcut(press(".", { metaKey: true }), none)).toBe("player-dock");
+    expect(routeShortcut(press(".", { ctrlKey: true }), none)).toBe("player-dock");
+    expect(routeShortcut(press("f", { metaKey: true, shiftKey: true }), none)).toBe("fullscreen");
+    expect(routeShortcut(press("F", { ctrlKey: true, shiftKey: true }), none)).toBe("fullscreen");
+    expect(routeShortcut(press("."), none)).toBeNull();
+    expect(routeShortcut(press("p"), none)).toBeNull();
+  });
+});
+
 describe("typing", () => {
   const inputs = [el("INPUT", { type: "text" }), el("INPUT", { type: "number" }), el("INPUT"), el("TEXTAREA"), el("SELECT"), el("DIV", { isContentEditable: true })];
 

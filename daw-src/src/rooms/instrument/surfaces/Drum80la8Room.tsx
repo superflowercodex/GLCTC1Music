@@ -3,11 +3,13 @@ import { Drum80la8, STEPS_80LA8 } from "../../../audio/instruments/drum80la8";
 import { PATTERN_NAMES } from "../../../audio/instruments/drums/drumBase";
 import { VOICES_80LA8 } from "../../../audio/instruments/drums/voices80la8";
 import type { Instrument } from "../../../audio/types";
-import { Button, Pad, Seg, Slider } from "../../../ui/controls";
+import { Seg } from "../../../ui/controls";
+import { PadButton } from "../../../ui/hardware";
+import { Knob } from "../../../ui/Knob";
 import { useInstrument } from "../../../ui/hooks";
-import { tapTempo } from "../../../audio/transport";
 import { InstrumentShell } from "../InstrumentShell";
 import { StepGrid } from "../drums/StepGrid";
+import { DrumLcd } from "../drums/DrumLcd";
 import { VoicePanel } from "../drums/VoicePanel";
 import { useBounce } from "../drums/useBounce";
 import { useSampleSlot } from "../drums/useSampleSlot";
@@ -37,14 +39,14 @@ function SoundRow({ d, voice }: { d: Drum80la8; voice: number }) {
       <button type="button" className={`sg-label ${voice === d.selectedVoice ? "sel" : ""}`} onClick={() => d.selectVoice(voice)}>
         <span className="sg-dot" />
         <span className="sg-name">{v.name}</span>
-        <span style={{ color: "var(--muted)", fontWeight: 500 }}>{s.busy ? "Loading…" : ref ? ref.name : "Synth"}</span>
+        <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>{s.busy ? "Loading…" : ref ? ref.name : "Synth"}</span>
       </button>
-      <div className="drum-tools">
-        <button type="button" className="drum-tool" onClick={s.choose} disabled={s.busy}>
+      <div className="btn-group tools">
+        <button type="button" onClick={s.choose} disabled={s.busy}>
           {ref ? "Replace" : "Load sample"}
         </button>
         {ref && (
-          <button type="button" className="drum-tool" onClick={s.clear}>
+          <button type="button" onClick={s.clear}>
             Clear
           </button>
         )}
@@ -74,7 +76,6 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
       tagline="Drum machine with live tap pads"
       onBounce={() => void bounce.run()}
       bounceBusy={bounce.busy}
-      footerExtra={<Button onClick={tapTempo}>Tap tempo</Button>}
       rightPanel={
         <VoicePanel
           instrument={d}
@@ -87,7 +88,7 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
           swapLabel="Swap sound"
           before={
             tab !== "seq" ? undefined : picked && pickedVel > 0 ? (
-              <Slider label={`${VOICES_80LA8[picked.v].name} step ${picked.c + 1} velocity`} value={pickedVel} min={0.05} max={1} step={0.01} onChange={(x) => d.setStep(picked.v, picked.c, x)} format={(x) => `${Math.round(x * 100)}%`} />
+              <Knob label={`${VOICES_80LA8[picked.v].name} step ${picked.c + 1} velocity`} value={pickedVel} min={0.05} max={1} step={0.01} defaultValue={0.8} onChange={(x) => d.setStep(picked.v, picked.c, x)} format={(x) => `${Math.round(x * 100)}%`} />
             ) : (
               <p className="drum-note">Tap a step to switch it on, then set how hard it hits here.</p>
             )
@@ -97,6 +98,7 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
     >
       <div className="drum">
         <div className="drum-bar">
+          <DrumLcd cells={[{ label: "PTN", value: PATTERN_NAMES[d.editPattern] }]} />
           <Seg
             label="View"
             value={tab}
@@ -108,11 +110,16 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
             ]}
           />
           <span className="drum-spacer" />
-          {PATTERN_NAMES.map((n, i) => (
-            <button key={n} type="button" className={`drum-chip ${d.editPattern === i ? "on" : ""}`} aria-pressed={d.editPattern === i} aria-label={`Pattern ${n}`} onClick={() => d.setPattern(i)}>
-              {n}
-            </button>
-          ))}
+          <div className="drum-grp">
+            <span className="hw-leg">Pattern</span>
+            <div className="btn-group sq" role="group" aria-label="Pattern">
+              {PATTERN_NAMES.map((n, i) => (
+                <button key={n} type="button" className={d.editPattern === i ? "on" : ""} aria-pressed={d.editPattern === i} aria-label={`Pattern ${n}`} onClick={() => d.setPattern(i)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {tab === "seq" && (
@@ -139,38 +146,42 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
                 <button type="button" aria-label="Fewer hits" onClick={() => setHits(Math.max(1, hits - 1))}>
                   −
                 </button>
-                <span>{hits} hits</span>
+                <span>{hits}</span>
                 <button type="button" aria-label="More hits" onClick={() => setHits(Math.min(16, hits + 1))}>
                   +
                 </button>
               </div>
-              <button type="button" className="drum-tool" onClick={() => d.applyTool("euclid", voice, hits)}>
-                Euclid
-              </button>
-              <button type="button" className="drum-tool" aria-label="Shift this sound one step earlier" onClick={() => d.applyTool("left", voice)}>
-                ◀
-              </button>
-              <button type="button" className="drum-tool" aria-label="Shift this sound one step later" onClick={() => d.applyTool("right", voice)}>
-                ▶
-              </button>
-              <button type="button" className="drum-tool" onClick={() => d.randomize()}>
-                Random
-              </button>
-              <button type="button" className="drum-tool" onClick={() => d.clearPattern()}>
-                Clear
-              </button>
-            </div>
-            <div className="drum-bar">
-              <div style={{ width: 210 }}>
-                <Slider label="Swing" value={d.getParam("swing")} min={0} max={0.6} step={0.01} onChange={(x) => d.setParam("swing", x)} format={(x) => `${Math.round(x * 100)}%`} />
+              <div className="btn-group tools" role="group" aria-label="Pattern tools">
+                <button type="button" onClick={() => d.applyTool("euclid", voice, hits)}>
+                  Euclid
+                </button>
+                <button type="button" aria-label="Shift this sound one step earlier" onClick={() => d.applyTool("left", voice)}>
+                  ◀
+                </button>
+                <button type="button" aria-label="Shift this sound one step later" onClick={() => d.applyTool("right", voice)}>
+                  ▶
+                </button>
+              </div>
+              <div className="btn-group tools" role="group" aria-label="Pattern actions">
+                <button type="button" onClick={() => d.randomize()}>
+                  Random
+                </button>
+                <button type="button" onClick={() => d.clearPattern()}>
+                  Clear
+                </button>
               </div>
               <span className="drum-spacer" />
-              <span className="label">Bounce</span>
-              {BOUNCE_LABELS.map((b, i) => (
-                <button key={b} type="button" className={`drum-chip ${d.getParam("bounceBars") === i ? "on" : ""}`} aria-pressed={d.getParam("bounceBars") === i} aria-label={`Bounce ${b} bars`} onClick={() => d.setParam("bounceBars", i)}>
-                  {b}
-                </button>
-              ))}
+              <Knob size="sm" layout="row" label="Swing" value={d.getParam("swing")} min={0} max={0.6} step={0.01} defaultValue={0.08} onChange={(x) => d.setParam("swing", x)} format={(x) => `${Math.round(x * 100)}%`} />
+              <div className="drum-grp">
+                <span className="hw-leg">Bounce</span>
+                <div className="btn-group sq" role="group" aria-label="Bounce length">
+                  {BOUNCE_LABELS.map((b, i) => (
+                    <button key={b} type="button" className={d.getParam("bounceBars") === i ? "on" : ""} aria-pressed={d.getParam("bounceBars") === i} aria-label={`Bounce ${b} bars`} onClick={() => d.setParam("bounceBars", i)}>
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </>
         )}
@@ -178,18 +189,19 @@ export default function Drum80la8Room({ instrument }: { instrument: Instrument }
         {tab === "pads" && (
           <div className="drum-pads" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gridTemplateRows: "repeat(3, minmax(0, 1fr))" }}>
             {VOICES_80LA8.map((v, i) => (
-              <Pad
+              <PadButton
                 key={v.id}
-                name={v.name}
-                keyLabel={String(i + 1).padStart(2, "0")}
+                label={v.name}
+                sub={String(i + 1).padStart(2, "0")}
                 color={v.color}
+                lit
                 selected={i === voice}
                 onPress={() => {
                   pressed.current = true;
                   d.hitVoice(i, 0.92);
                   d.selectVoice(i);
                 }}
-                onSelect={() => {
+                onClick={() => {
                   // Keyboard activation arrives as a click with no pointer press before it.
                   if (!pressed.current) d.hitVoice(i, 0.92);
                   pressed.current = false;

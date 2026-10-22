@@ -5,7 +5,9 @@ import { updateTrack } from "../../project/actions";
 import type { Track } from "../../project/model";
 import { projectStore } from "../../store/project";
 import { useStore } from "../../store/store";
-import { Button, Slider } from "../../ui/controls";
+import { Caption } from "../../ui/Caption";
+import { Button } from "../../ui/controls";
+import { Knob } from "../../ui/Knob";
 import { listOutputDevices, unlockDeviceNames, type AudioDevice } from "./devices";
 import { setMaster } from "./edit";
 
@@ -72,22 +74,41 @@ export function OutputsTab() {
   const edit = (id: string, patch: Partial<Pick<Track, "toMaster" | "cue">>): void => projectStore.set((p) => updateTrack(p, id, patch));
   const unsupported = !support.booth && !support.headphones;
 
+  const volume = (label: string, value: number, onChange: (v: number) => void) => (
+    <Knob label={label} size="lg" value={value} min={0} max={1} step={0.01} defaultValue={1} format={(v) => `${Math.round(v * 100)}%`} onChange={onChange} />
+  );
   return (
     <div className="outputs-tab scroll-y">
       <div className="device-cards">
-        <section className="device-card" aria-label="Headphones">
-          <h3>Headphones</h3>
-          <DevicePicker label="Headphones" value={master.headphoneDeviceId} devices={devices} disabled={!support.headphones} onChange={(id) => projectStore.set((p) => setMaster(p, { headphoneDeviceId: id }))} />
-          <Slider label="Volume" value={master.headphoneVolume} min={0} max={1} step={0.01} onChange={(v) => projectStore.set((p) => setMaster(p, { headphoneVolume: v }))} format={(v) => `${Math.round(v * 100)}%`} />
-          <p className="mixer-note">Plays whatever you switch Cue on for, so you can listen without the audience hearing it.</p>
-          {!support.headphones && <p className="mixer-warn">This browser cannot send the cue mix to a chosen device. It will play on the system output.</p>}
+        <section className="device-card well" aria-label="Headphones">
+          <Caption as="h3" aside="Cue mix">
+            Headphones
+          </Caption>
+          <div className="device-body">
+            <div className="device-fields">
+              <DevicePicker label="Headphones" value={master.headphoneDeviceId} devices={devices} disabled={!support.headphones} onChange={(id) => projectStore.set((p) => setMaster(p, { headphoneDeviceId: id }))} />
+              <p className="mixer-note">Plays whatever you switch Cue on for, so you can listen without the audience hearing it.</p>
+              {!support.headphones && <p className="mixer-warn">This browser cannot send the cue mix to a chosen device. It will play on the system output.</p>}
+            </div>
+            {volume("Volume", master.headphoneVolume, (v) => projectStore.set((p) => setMaster(p, { headphoneVolume: v })))}
+          </div>
         </section>
-        <section className="device-card" aria-label="Booth">
-          <h3>Booth</h3>
-          <DevicePicker label="Booth" value={master.boothDeviceId} devices={devices} disabled={!support.booth} onChange={(id) => projectStore.set((p) => setMaster(p, { boothDeviceId: id }))} />
-          <Slider label="Volume" value={master.boothVolume} min={0} max={1} step={0.01} onChange={(v) => projectStore.set((p) => setMaster(p, { boothVolume: v }))} format={(v) => `${Math.round(v * 100)}%`} />
-          <Button onClick={() => void find()}>Find my devices</Button>
-          {!support.booth && <p className="mixer-warn">This browser cannot choose the main output device (Safari and Firefox do not support it yet). Sound plays on the system output.</p>}
+        <section className="device-card well" aria-label="Booth">
+          <Caption as="h3" aside="Main output">
+            Booth
+          </Caption>
+          <div className="device-body">
+            <div className="device-fields">
+              <DevicePicker label="Booth" value={master.boothDeviceId} devices={devices} disabled={!support.booth} onChange={(id) => projectStore.set((p) => setMaster(p, { boothDeviceId: id }))} />
+              <div>
+                <Button size="sm" onClick={() => void find()}>
+                  Find my devices
+                </Button>
+              </div>
+              {!support.booth && <p className="mixer-warn">This browser cannot choose the main output device (Safari and Firefox do not support it yet). Sound plays on the system output.</p>}
+            </div>
+            {volume("Volume", master.boothVolume, (v) => projectStore.set((p) => setMaster(p, { boothVolume: v })))}
+          </div>
         </section>
       </div>
       {unsupported && <p className="mixer-note">Device choice needs a Chromium browser such as Chrome, Edge or Opera. Cue and send-to-master still work.</p>}
@@ -97,14 +118,14 @@ export function OutputsTab() {
         </p>
       )}
       <div className="route-head">
-        <span>Track</span>
-        <span>Send to master</span>
-        <span>Cue in headphones</span>
+        <span className="caption-t">Track</span>
+        <span className="caption-t">Send to master</span>
+        <span className="caption-t">Cue in headphones</span>
       </div>
       {tracks.length === 0 && <p className="mixer-empty">No tracks yet.</p>}
       {tracks.map((t) => (
         <div key={t.id} className="route-row" style={{ "--c": t.color } as CSSProperties}>
-          <div className="fx-track">
+          <div className="fx-track" data-tip={t.name}>
             <span className="strip-dot" />
             <span className="fx-track-name">{t.name}</span>
           </div>

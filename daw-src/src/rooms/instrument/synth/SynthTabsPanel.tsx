@@ -1,6 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { Instrument } from "../../../audio/types";
+import { Caption } from "../../../ui/Caption";
 import { useInstrument } from "../../../ui/hooks";
+import { useEdgeFade } from "../../../ui/useEdgeFade";
 import { ParamControl } from "./ParamControls";
 import { PresetFileButtons } from "./PresetFileButtons";
 
@@ -13,25 +15,32 @@ export interface SynthTab {
   hide?: readonly string[];
 }
 
+/** The knob panel: lit glass tab keys, knobs grouped by section, and preset file keys under it. */
 export function SynthTabsPanel({ instrument, tabs, initialTab = 0, children }: { instrument: Instrument; tabs: readonly SynthTab[]; initialTab?: number; children?: ReactNode }) {
   useInstrument(instrument);
   const [index, setIndex] = useState(initialTab);
+  const scroller = useRef<HTMLDivElement>(null);
+  useEdgeFade(scroller, "y");
   const tab = tabs[index];
   const labelled = tab.groups.length > 1;
   return (
-    <div className="sy-panel">
+    <div className="sy-panel hw-plate">
       <div className="sy-tabs" role="tablist" aria-label="Sound sections">
         {tabs.map((t, i) => (
-          <button key={t.name} type="button" role="tab" aria-selected={i === index} className={i === index ? "on" : ""} onClick={() => setIndex(i)}>
+          <button key={t.name} type="button" role="tab" aria-selected={i === index} className={`hw-key ${i === index ? "on" : ""}`} onClick={() => setIndex(i)}>
             {t.name}
           </button>
         ))}
       </div>
       {children}
-      <div className="sy-params scroll-y" role="tabpanel" aria-label={tab.name}>
+      <div ref={scroller} className="sy-params scroll-y fade-y" role="tabpanel" aria-label={tab.name}>
         {tab.groups.map((group) => (
-          <section key={group} className="sy-group">
-            {labelled && <h3 className="sy-subhead">{group}</h3>}
+          <section key={group} className="sy-group knob-grid">
+            {labelled && (
+              <Caption as="h3" className="sy-subhead">
+                {group}
+              </Caption>
+            )}
             {instrument.params
               .filter((p) => p.group === group && !tab.hide?.includes(p.id))
               .map((def) => (

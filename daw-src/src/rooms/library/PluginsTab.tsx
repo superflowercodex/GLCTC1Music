@@ -1,12 +1,20 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { midiRouter, midiService, type MidiBinding } from "../../audio/midi";
 import { PluginError, pluginHost } from "../../audio/pluginHost";
 import { useStore } from "../../store/store";
 import { confirmSheet } from "../../sheets/confirm";
+import { Caption } from "../../ui/Caption";
+import { useEdgeFade } from "../../ui/useEdgeFade";
 import { toast } from "./media";
 
 function errorText(error: unknown): string {
   return error instanceof PluginError || error instanceof Error ? error.message : String(error);
+}
+
+function FadeList({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEdgeFade(ref, "y");
+  return <div ref={ref} className="lib-list fade-y">{children}</div>;
 }
 
 function PluginsPanel() {
@@ -30,8 +38,11 @@ function PluginsPanel() {
   };
 
   return (
-    <section className="panel" aria-label="Plugins">
-      <h2>Plugins</h2>
+    <section className="panel lit" aria-label="Plugins">
+      <div className="lib-head">
+        <Caption as="h2" aside="In the browser">Plugins</Caption>
+        <span className="lib-pillstate">{plugins.length} added</span>
+      </div>
       <p>Instruments and effects that run in the browser (Web Audio Modules). Native VST and AU files cannot run here.</p>
       <div className="lib-field">
         <input
@@ -43,10 +54,10 @@ function PluginsPanel() {
             if (e.key === "Enter" && !busy) void run(() => pluginHost.addFromUrl(address));
           }}
         />
-        <button type="button" className="lib-pill primary" disabled={busy || !address.trim()} onClick={() => void run(() => pluginHost.addFromUrl(address))}>
+        <button type="button" className="btn btn-primary" disabled={busy || !address.trim()} onClick={() => void run(() => pluginHost.addFromUrl(address))}>
           {busy ? "Loading..." : "Add"}
         </button>
-        <button type="button" className="lib-pill" disabled={busy} onClick={() => file.current?.click()}>From file</button>
+        <button type="button" className="btn" disabled={busy} onClick={() => file.current?.click()}>From file</button>
         <input
           ref={file}
           type="file"
@@ -62,17 +73,17 @@ function PluginsPanel() {
       <div className="lib-warn">A plugin is code from the address you give. Only add ones you trust.</div>
       {error && <div className="lib-error" role="alert">{error}</div>}
       {saveError && <div className="lib-error" role="alert">{saveError}</div>}
-      <div className="lib-list">
-        {plugins.length === 0 && <div className="lib-empty">No plugins yet.</div>}
+      <FadeList>
+        {plugins.length === 0 && <div className="lib-empty"><span className="lib-empty-glyph" aria-hidden="true" />No plugins yet.</div>}
         {plugins.map((p) => (
           <div key={p.id} className="lib-item">
             <span className="grow" title={p.url}>{p.name}</span>
             <span className="meta">{p.sessionOnly ? "This session only" : p.role === "instrument" ? "Instrument" : "Effect"}</span>
             <span className="dot" aria-label="Loads correctly" />
-            <button type="button" className="lib-pill small" aria-label={`Remove ${p.name}`} onClick={() => pluginHost.remove(p.id)}>Remove</button>
+            <button type="button" className="btn btn-sm" aria-label={`Remove ${p.name}`} onClick={() => pluginHost.remove(p.id)}>Remove</button>
           </div>
         ))}
-      </div>
+      </FadeList>
     </section>
   );
 }
@@ -118,7 +129,7 @@ function BindingRow({ b, available }: { b: MidiBinding; available: boolean }) {
       )}
       {!available && <span className="meta">not on screen</span>}
       <span className="meta">{controlText(b)}</span>
-      <button type="button" className="lib-pill small danger" aria-label={`Clear link ${b.name}`} onClick={() => midiRouter.bindings.clear(b.id)}>Clear</button>
+      <button type="button" className="btn btn-sm btn-danger" aria-label={`Clear link ${b.name}`} onClick={() => midiRouter.bindings.clear(b.id)}>Clear</button>
     </div>
   );
 }
@@ -135,28 +146,28 @@ function MidiPanel() {
     state.status === "unsupported" ? (
       <span className="lib-pillstate">Not supported in this browser</span>
     ) : state.status === "ready" ? (
-      <span className="lib-pillstate ok">{state.devices.length ? `${state.devices.length} device${state.devices.length === 1 ? "" : "s"} connected` : "No devices connected"}</span>
+      <span className={`lib-pillstate ${state.devices.length ? "ok" : ""}`}>{state.devices.length ? `${state.devices.length} device${state.devices.length === 1 ? "" : "s"} connected` : "No devices connected"}</span>
     ) : state.status === "requesting" ? (
       <span className="lib-pillstate">Waiting for permission...</span>
     ) : (
-      <button type="button" className="lib-pill small primary" onClick={() => void midiService.enable()}>Enable MIDI</button>
+      <button type="button" className="btn btn-sm btn-primary" onClick={() => void midiService.enable()}>Enable MIDI</button>
     );
 
   return (
-    <section className="panel" aria-label="MIDI">
+    <section className="panel lit" aria-label="MIDI">
       <div className="lib-head">
-        <h2>MIDI</h2>
+        <Caption as="h2" aside="Keyboards and controllers">MIDI</Caption>
         {pill}
       </div>
       {state.status === "unsupported" && <div className="lib-warn">Web MIDI works in Chrome, Edge and Opera. This browser does not support it, so keyboards and controllers cannot connect.</div>}
       {state.error && <div className="lib-error" role="alert">{state.error}</div>}
       {state.status === "ready" && state.devices.length > 0 && <div className="lib-sub">{state.devices.map((d) => d.name).join(" · ")}</div>}
       <div className="lib-head">
-        <div className="lib-sub">Controls you've linked</div>
+        <Caption as="h3">Controls you've linked</Caption>
         {bindings.length > 1 && (
           <button
             type="button"
-            className="lib-pill small danger"
+            className="btn btn-sm btn-danger"
             onClick={() =>
               void confirmSheet({
                 title: "Clear every MIDI link?",
@@ -172,19 +183,19 @@ function MidiPanel() {
         )}
       </div>
       {saveError && <div className="lib-error" role="alert">{saveError}</div>}
-      <div className="lib-list">
-        {bindings.length === 0 && <div className="lib-empty">Nothing linked yet.</div>}
+      <FadeList>
+        {bindings.length === 0 && <div className="lib-empty"><span className="lib-empty-glyph" aria-hidden="true" />Nothing linked yet.</div>}
         {bindings.map((b) => (
           <BindingRow key={b.id} b={b} available={targets.some((t) => t.id === b.targetId)} />
         ))}
-      </div>
+      </FadeList>
       <div className="lib-field">
         <select className="lib-select" aria-label="Control to link" value={chosen} disabled={learning !== null} onChange={(e) => setPicked(e.target.value)}>
           {targets.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
         <button
           type="button"
-          className="lib-pill primary"
+          className="btn btn-primary"
           disabled={!chosen || learning !== null || state.status !== "ready"}
           title={state.status === "ready" ? "Then move a knob or press a key on your controller" : "Enable MIDI first"}
           onClick={() => {

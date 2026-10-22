@@ -37,7 +37,7 @@ interface Layer {
 }
 
 const RING_SEGMENTS = 192;
-const NAVY = 0x070b1c;
+const SPACE = 0x050507;
 
 /**
  * The Stage's Three.js scene: an audio-reactive galaxy behind, and video and picture clips composited
@@ -85,7 +85,7 @@ export class StageScene {
     const T = three;
     this.pixelRatio = quality.small ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     this.renderer = new T.WebGLRenderer({ canvas, antialias: !quality.small, alpha: false, powerPreference: "high-performance" });
-    this.renderer.setClearColor(NAVY, 1);
+    this.renderer.setClearColor(SPACE, 1);
     this.renderer.autoClear = false;
     this.renderer.setPixelRatio(this.pixelRatio);
 

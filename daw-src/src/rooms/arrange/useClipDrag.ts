@@ -3,6 +3,7 @@ import { findClip, moveClips, resizeClip } from "../../project/actions";
 import { holdHistory } from "../../project/history";
 import type { Clip } from "../../project/model";
 import { projectStore } from "../../store/project";
+import { freeDelta } from "./overlap";
 import { arrangeSettings } from "./settings";
 import { selectClips, selectionStore, toggleClip } from "./selection";
 import { gridInBars, laneIndexAt, pxPerBar, snapBar } from "./timeline";
@@ -55,7 +56,9 @@ export function useClipDrag(): (e: ReactPointerEvent, clip: Clip, mode: DragMode
       if (mode === "move") {
         const target = snapBar(clip.startBar + deltaBars, grid, settings.snap);
         const deltaTracks = originLane < 0 ? 0 : laneIndexAt(ev.clientY, lanes) - originLane;
-        projectStore.set(moveClips(base, ids, { deltaBars: target - clip.startBar, deltaTracks }));
+        const wanted = target - clip.startBar;
+        const shift = settings.avoidOverlaps ? freeDelta(base, ids, wanted, deltaTracks) : wanted;
+        projectStore.set(moveClips(base, ids, { deltaBars: shift, deltaTracks }));
       } else if (mode === "start") {
         projectStore.set(resizeClip(base, clip.id, "start", snapBar(clip.startBar + deltaBars, grid, settings.snap)));
       } else {

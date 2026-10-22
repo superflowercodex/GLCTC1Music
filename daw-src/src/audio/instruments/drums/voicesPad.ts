@@ -1,7 +1,7 @@
 import type { Hit } from "./hit";
 
-export const PAD_KINDS = ["Kick", "Snare", "Clap", "Hat", "Open", "Tom", "Rim", "Conga", "Sub bass", "Pluck", "Stab", "Pad", "Lead", "Zap", "Riser", "Impact"] as const;
-export const PAD_COLORS = ["#79ebff", "#8e7cff", "#ff63d8", "#7cf0c0", "#7cf0c0", "#ffd36a", "#8e7cff", "#ff63d8", "#79ebff", "#ff63d8", "#ffd36a", "#8e7cff", "#7cf0c0", "#79ebff", "#ff63d8", "#ffd36a"];
+export const PAD_KINDS = ["Kick", "Snare", "Clap", "Hat", "Open", "Tom", "Rim", "Conga", "Sub bass", "Pluck", "Stab", "Pad", "Lead", "Zap", "Riser", "Impact", "Warm bass"] as const;
+export const PAD_COLORS = ["#79ebff", "#8e7cff", "#ff63d8", "#7cf0c0", "#7cf0c0", "#ffd36a", "#8e7cff", "#ff63d8", "#79ebff", "#ff63d8", "#ffd36a", "#8e7cff", "#7cf0c0", "#79ebff", "#ff63d8", "#ffd36a", "#79ebff"];
 
 /** The 16 synth voices. `r` is the tune ratio, `dec` the decay multiplier. */
 export function playPad(h: Hit, kind: number, r: number, dec: number): void {
@@ -91,5 +91,14 @@ export function playPad(h: Hit, kind: number, r: number, dec: number): void {
       h.osc(72 * r, "sine", 1.2 * dec, 0.85, 26 * r, 0.18);
       h.noise(0.55 * dec, 0.25, "highpass", 2200);
       break;
+    case 16: {
+      // A round sub on D2 (so ±12 semitones reach F1 to D3) with two detuned saws an octave up through a
+      // gently closing low-pass: the weight of a sine bass plus the harmonics that make it audible on small speakers.
+      const base = 73.42 * r;
+      h.osc(f(base), "sine", 0.7 * dec, 0.7, undefined, undefined, 0.005);
+      h.filtOsc("sawtooth", f(base * 2), 0.45 * dec, 0.2, 1500, 240, 0.8, 0.004, -7);
+      h.filtOsc("sawtooth", f(base * 2), 0.45 * dec, 0.2, 1500, 240, 0.8, 0.004, 7);
+      break;
+    }
   }
 }

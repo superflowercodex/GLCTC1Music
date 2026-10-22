@@ -12,7 +12,7 @@ export interface PianoKeysProps {
   label: string;
   /** Highlight colour for pressed keys. */
   color: string;
-  height: number;
+  height: number | string;
   onDown: (midi: number, velocity: number) => void;
   onUp: (midi: number) => void;
 }

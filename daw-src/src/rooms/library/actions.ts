@@ -1,8 +1,10 @@
 import { flushInstrumentStates } from "../../project/instruments";
 import { describeLegacyExtras, readAndConvertLegacyProject } from "../../project/legacy";
 import { exportProjectPackage, importPackageFile, type Ask, type ImportReport } from "../../project/package";
+import { buildDemoProject } from "../../project/demo";
 import { getAssetBlob, loadProject } from "../../project/db";
 import { migrateProject } from "../../project/migrate";
+import { newId } from "../../project/model";
 import { persistence } from "../../project/persist";
 import { projectStore } from "../../store/project";
 import { createStore } from "../../store/store";
@@ -118,5 +120,18 @@ export async function removeProject(id: string, name: string): Promise<void> {
     toast(`Deleted "${name}".`);
   } catch (error) {
     toast(`Could not delete: ${messageOf(error)}`);
+  }
+}
+
+/** Saves a fresh copy of the demo song as its own project and opens it; the open project is saved first, never replaced. */
+export async function openDemoSong(): Promise<void> {
+  try {
+    const p = persistence();
+    const demo = buildDemoProject({ id: newId("proj"), now: Date.now() });
+    await p.commitImport(demo, new Map(), "add");
+    await p.openProject(demo.id);
+    toast(`"${demo.name}" is all yours. Press Play, or sing over it on the Vocal track.`);
+  } catch (error) {
+    toast(`Could not open the demo song: ${messageOf(error)}`);
   }
 }

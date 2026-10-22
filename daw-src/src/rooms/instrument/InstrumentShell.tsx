@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Instrument } from "../../audio/types";
-import { uiStore } from "../../store/project";
-import { Button, IconButton, Panel } from "../../ui/controls";
+import { Button, IconButton } from "../../ui/controls";
+import { Display, Faceplate } from "../../ui/hardware";
 import { useInstrument } from "../../ui/hooks";
 import { Icon } from "../../ui/Icon";
 import { RoomFrame } from "../../ui/RoomFrame";
@@ -12,7 +12,7 @@ export interface ShellProps {
   instrument: Instrument;
   title: string;
   tagline: string;
-  /** The play surface: sequencer, pads, keys. Fills the middle column. */
+  /** The play surface: sequencer, pads, keys. Fills the middle plate. */
   children: ReactNode;
   /** Replaces the automatic parameter panel when an instrument needs its own right-hand side. */
   rightPanel?: ReactNode;
@@ -24,7 +24,11 @@ export interface ShellProps {
   footerExtra?: ReactNode;
 }
 
-/** The one layout every instrument opens in: presets left, play surface centre, sound right, record and bounce below. */
+/**
+ * The cockpit every instrument sits in: three holographic glass panes (presets, play surface, sound) in the
+ * instrument colour, resting raised over the nebula, a glowing preset readout in the header, record
+ * and bounce in the transport.
+ */
 export function InstrumentShell({ instrument, title, tagline, children, rightPanel, paramGroups, onBounce, bounceBusy, footerExtra }: ShellProps) {
   useInstrument(instrument);
   const [saving, setSaving] = useState(false);
@@ -44,15 +48,17 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
       title={title}
       actions={
         <>
-          <a className="back-link" href="#/play" aria-label="Back to instruments">
-            <Icon name="back" size={22} />
+          <a className="back-link" href="#/play" aria-label="Back to instruments" data-tip="All instruments">
+            <Icon name="back" size={20} />
           </a>
-          <IconButton icon="back" label="Previous preset" onClick={() => step(-1)} />
-          <span style={{ minWidth: 160, textAlign: "center", fontWeight: 700 }}>{presets[index]?.name ?? "Custom"}</span>
-          <IconButton icon="next" label="Next preset" onClick={() => step(1)} />
+          <div className="preset-stepper" role="group" aria-label="Preset">
+            <IconButton icon="back" label="Previous preset" size={18} onClick={() => step(-1)} />
+            <Display size="sm" label={index < 0 ? "Preset · edited" : "Preset"} value={presets[index]?.name ?? "Custom"} dim={index < 0} align="start" className="preset-lcd" />
+            <IconButton icon="next" label="Next preset" size={18} onClick={() => step(1)} />
+          </div>
           {saving ? (
             <form
-              style={{ display: "flex", gap: 8 }}
+              className="preset-save"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (name.trim()) instrument.saveUserPreset(name.trim());
@@ -60,15 +66,7 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
                 setSaving(false);
               }}
             >
-              <input
-                className="btn"
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Preset name"
-                aria-label="Preset name"
-                style={{ background: "rgba(255,255,255,.09)", border: 0, color: "inherit" }}
-              />
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setSaving(false)} placeholder="Preset name" aria-label="Preset name" />
               <button type="submit" className="btn btn-primary">
                 Save
               </button>
@@ -81,7 +79,6 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
       footerExtra={
         <>
           {footerExtra}
-          <Button onClick={() => uiStore.set((s) => ({ ...s, sheet: "record" }))}>Record audio</Button>
           <Button variant="primary" onClick={onBounce} disabled={!onBounce || bounceBusy}>
             {bounceBusy ? "Bouncing…" : "Bounce to track"}
           </Button>
@@ -89,13 +86,15 @@ export function InstrumentShell({ instrument, title, tagline, children, rightPan
       }
     >
       <div className="inst">
-        <Panel as="aside" label="Presets">
+        <Faceplate as="aside" label="Presets">
           <PresetList instrument={instrument} />
-        </Panel>
-        <Panel label="Play surface">{children}</Panel>
-        <Panel as="aside" label="Sound" className="glass">
+        </Faceplate>
+        <Faceplate label="Play surface">
+          {children}
+        </Faceplate>
+        <Faceplate as="aside" label="Sound">
           {rightPanel ?? <ParamPanel instrument={instrument} only={paramGroups} />}
-        </Panel>
+        </Faceplate>
       </div>
     </RoomFrame>
   );

@@ -4,13 +4,14 @@ import { PATTERN_NAMES } from "../../../audio/instruments/drums/drumBase";
 import { notify } from "../../../audio/instruments/drums/notify";
 import { PAD_COLORS, PAD_KINDS } from "../../../audio/instruments/drums/voicesPad";
 import { PAD_COUNT, Pad64, SCENE_COUNT } from "../../../audio/instruments/pad64";
-import { tapTempo } from "../../../audio/transport";
 import type { Instrument } from "../../../audio/types";
-import { Button, Pad, Seg } from "../../../ui/controls";
+import { Seg } from "../../../ui/controls";
+import { PadButton } from "../../../ui/hardware";
 import { useInstrument } from "../../../ui/hooks";
 import { InstrumentShell } from "../InstrumentShell";
 import { SampleDrop } from "../drums/SampleSlot";
 import { StepGrid } from "../drums/StepGrid";
+import { DrumLcd } from "../drums/DrumLcd";
 import { VoicePanel } from "../drums/VoicePanel";
 import { useBounce } from "../drums/useBounce";
 import "../drums/drums.css";
@@ -47,7 +48,6 @@ export default function Pad64Room({ instrument }: { instrument: Instrument }) {
       tagline="Pads and sequencer"
       onBounce={() => void bounce.run()}
       bounceBusy={bounce.busy}
-      footerExtra={<Button onClick={tapTempo}>Tap tempo</Button>}
       rightPanel={
         <VoicePanel
           instrument={d}
@@ -64,18 +64,21 @@ export default function Pad64Room({ instrument }: { instrument: Instrument }) {
       <div className="drum">
         <div className="pads64">
           <div>
-            <div className="drum-bar" style={{ marginBottom: 8 }}>
+            <div className="drum-bar" style={{ marginBottom: 10 }}>
+              <DrumLcd cells={[{ label: "PAD", value: String(sel + 1).padStart(2, "0") }, { label: "SCN", value: d.currentScene >= 0 ? d.sceneName(d.currentScene) : "-" }, { label: "BARS", value: String(loopBars) }]} />
               <Seg label="Pad type" value={mode} onChange={setMode} options={[{ value: "voices" as Mode, label: "Synth voices" }, { value: "samples" as Mode, label: "Samples" }]} />
               <span className="drum-spacer" />
-              <button type="button" className="drum-tool" title="Break the groove for one beat, then hit everything" onClick={() => needPlaying() && d.drop()}>
-                Drop
-              </button>
-              <button type="button" className="drum-tool" title="Two bars of rising snare roll" onClick={() => needPlaying() && d.startBuild()}>
-                Build
-              </button>
-              <button type="button" className={`drum-tool ${d.chaining ? "on" : ""}`} aria-pressed={d.chaining} title="Move through the scenes, two bars each" onClick={() => d.setChain(!d.chaining)}>
-                Chain
-              </button>
+              <div className="btn-group tools" role="group" aria-label="Performance">
+                <button type="button" title="Break the groove for one beat, then hit everything" onClick={() => needPlaying() && d.drop()}>
+                  Drop
+                </button>
+                <button type="button" title="Two bars of rising snare roll" onClick={() => needPlaying() && d.startBuild()}>
+                  Build
+                </button>
+                <button type="button" className={d.chaining ? "on" : ""} aria-pressed={d.chaining} title="Move through the scenes, two bars each" onClick={() => d.setChain(!d.chaining)}>
+                  Chain
+                </button>
+              </div>
             </div>
             <div className="scenes" role="group" aria-label="Scenes">
               {Array.from({ length: SCENE_COUNT }, (_, i) => (
@@ -103,19 +106,19 @@ export default function Pad64Room({ instrument }: { instrument: Instrument }) {
               const ref = d.sampleRef(i);
               const k = d.getParam(`v${i}.kind`);
               return (
-                <Pad
+                <PadButton
                   key={i}
-                  name={ref ? ref.name : PAD_KINDS[k]}
-                  keyLabel={String(i + 1)}
+                  label={ref ? ref.name : PAD_KINDS[k]}
+                  sub={String(i + 1).padStart(2, "0")}
                   color={PAD_COLORS[k]}
+                  lit={!(mode === "samples" && !ref)}
                   selected={i === sel}
-                  empty={mode === "samples" && !ref}
                   onPress={() => {
                     pressed.current = true;
                     d.hitVoice(i, 1);
                     d.selectVoice(i);
                   }}
-                  onSelect={() => {
+                  onClick={() => {
                     if (!pressed.current) d.hitVoice(i, 1);
                     pressed.current = false;
                     d.selectVoice(i);
@@ -128,11 +131,16 @@ export default function Pad64Room({ instrument }: { instrument: Instrument }) {
           {mode === "voices" ? (
             <div className="lanes">
               <div className="drum-tools">
-                {PATTERN_NAMES.map((n, i) => (
-                  <button key={n} type="button" className={`drum-chip ${d.lanePattern(sel) === i ? "on" : ""}`} aria-pressed={d.lanePattern(sel) === i} aria-label={`Pad ${sel + 1} plays pattern ${n}`} onClick={() => d.setLanePattern(sel, i)}>
-                    {n}
-                  </button>
-                ))}
+                <div className="drum-grp">
+                  <span className="hw-leg">Pattern</span>
+                  <div className="btn-group sq" role="group" aria-label="Pad pattern">
+                    {PATTERN_NAMES.map((n, i) => (
+                      <button key={n} type="button" className={d.lanePattern(sel) === i ? "on" : ""} aria-pressed={d.lanePattern(sel) === i} aria-label={`Pad ${sel + 1} plays pattern ${n}`} onClick={() => d.setLanePattern(sel, i)}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="drum-stepper" role="group" aria-label="Euclid hits">
                   <button type="button" aria-label="Fewer hits" onClick={() => setHits(Math.max(1, hits - 1))}>
                     −
@@ -142,24 +150,26 @@ export default function Pad64Room({ instrument }: { instrument: Instrument }) {
                     +
                   </button>
                 </div>
-                <button type="button" className="drum-tool" onClick={() => d.applyTool("euclid", sel, hits)}>
-                  Euclid
-                </button>
-                <button type="button" className="drum-tool" aria-label="Shift this pad one step earlier" onClick={() => d.applyTool("left", sel)}>
-                  ◀
-                </button>
-                <button type="button" className="drum-tool" aria-label="Shift this pad one step later" onClick={() => d.applyTool("right", sel)}>
-                  ▶
-                </button>
-                <button type="button" className="drum-tool" onClick={() => d.randomize(sel)}>
-                  Random
-                </button>
-                <button type="button" className="drum-tool" onClick={() => d.applyTool("clear", sel)}>
-                  Clear
-                </button>
-                <button type="button" className={`drum-tool ${storing ? "on" : ""}`} aria-pressed={storing} title="Then tap a scene to store which pattern each pad plays" onClick={() => setStoring(!storing)}>
-                  Store scene
-                </button>
+                <div className="btn-group tools" role="group" aria-label="Pad tools">
+                  <button type="button" onClick={() => d.applyTool("euclid", sel, hits)}>
+                    Euclid
+                  </button>
+                  <button type="button" aria-label="Shift this pad one step earlier" onClick={() => d.applyTool("left", sel)}>
+                    ◀
+                  </button>
+                  <button type="button" aria-label="Shift this pad one step later" onClick={() => d.applyTool("right", sel)}>
+                    ▶
+                  </button>
+                  <button type="button" onClick={() => d.randomize(sel)}>
+                    Random
+                  </button>
+                  <button type="button" onClick={() => d.applyTool("clear", sel)}>
+                    Clear
+                  </button>
+                  <button type="button" className={storing ? "on" : ""} aria-pressed={storing} title="Then tap a scene to store which pattern each pad plays" onClick={() => setStoring(!storing)}>
+                    Store scene
+                  </button>
+                </div>
               </div>
               <StepGrid
                 rows={laneRows}

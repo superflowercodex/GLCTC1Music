@@ -9,6 +9,7 @@ import { InstrumentShell } from "../InstrumentShell";
 import { ParamControl } from "../drums/ParamControl";
 import { SampleChip } from "../drums/SampleSlot";
 import { StepGrid } from "../drums/StepGrid";
+import { DrumLcd } from "../drums/DrumLcd";
 import { VoicePanel } from "../drums/VoicePanel";
 import { useBounce } from "../drums/useBounce";
 import "../drums/drums.css";
@@ -90,7 +91,7 @@ export default function Divine09Room({ instrument }: { instrument: Instrument })
           <div className="vp-sub">Kit and bus for all 15 voices</div>
         </div>
       </div>
-      <div className="vp-body scroll-y">
+      <div className="vp-body scroll-y knob-grid">
         <div>
           <div className="vp-section">Kit</div>
           <div className="vp-chips">
@@ -125,17 +126,40 @@ export default function Divine09Room({ instrument }: { instrument: Instrument })
     >
       <div className="drum">
         <div className="drum-bar">
-          {PATTERN_NAMES.map((n, i) => (
-            <button key={n} type="button" className={`drum-chip ${d.editPattern === i ? "on" : ""}`} aria-pressed={d.editPattern === i} aria-label={`Pattern ${n}`} onClick={() => d.setPattern(i)}>
-              {n}
-            </button>
-          ))}
+          <DrumLcd cells={[{ label: "PTN", value: PATTERN_NAMES[d.editPattern] }, { label: "LEN", value: String(length) }, { label: "SWG", value: `${Math.round(d.getParam("swing") * 100)}%` }]} />
+          <div className="drum-grp">
+            <span className="hw-leg">Pattern</span>
+            <div className="btn-group sq" role="group" aria-label="Pattern">
+              {PATTERN_NAMES.map((n, i) => (
+                <button key={n} type="button" className={d.editPattern === i ? "on" : ""} aria-pressed={d.editPattern === i} aria-label={`Pattern ${n}`} onClick={() => d.setPattern(i)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
           <span className="drum-spacer" />
-          {LENGTHS.map((n, i) => (
-            <button key={n} type="button" className={`drum-chip wide ${d.getParam("length") === i ? "on" : ""}`} aria-pressed={d.getParam("length") === i} onClick={() => d.setParam("length", i)}>
-              {n}
-            </button>
-          ))}
+          <div className="drum-grp">
+            <span className="hw-leg">Length</span>
+            <div className="btn-group" role="group" aria-label="Length">
+              {LENGTHS.map((n, i) => (
+                <button key={n} type="button" className={d.getParam("length") === i ? "on" : ""} aria-pressed={d.getParam("length") === i} onClick={() => d.setParam("length", i)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          {pages > 1 && (
+            <div className="drum-grp">
+              <span className="hw-leg">Page</span>
+              <div className="btn-group sq" role="group" aria-label="Page">
+                {Array.from({ length: pages }, (_, p) => (
+                  <button key={p} type="button" className={`mono ${shownPage === p ? "on" : ""}`} aria-pressed={shownPage === p} aria-label={`Page ${p + 1}, steps ${p * 16 + 1} to ${p * 16 + 16}`} onClick={() => setPage(p)}>
+                    {p + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="drum-tools">
@@ -148,45 +172,37 @@ export default function Divine09Room({ instrument }: { instrument: Instrument })
               +
             </button>
           </div>
-          <button type="button" className="drum-tool" onClick={() => d.applyTool("euclid", voice, hits)}>
-            Euclid
-          </button>
-          <button type="button" className="drum-tool" onClick={() => d.applyTool("half", voice)}>
-            Half
-          </button>
-          <button type="button" className="drum-tool" onClick={() => d.applyTool("double", voice)}>
-            Double
-          </button>
-          <button type="button" className="drum-tool" onClick={() => d.applyTool("reverse", voice)}>
-            Reverse
-          </button>
-          <button type="button" className="drum-tool" aria-label="Shift this voice one step earlier" onClick={() => d.applyTool("left", voice)}>
-            ◀
-          </button>
-          <button type="button" className="drum-tool" aria-label="Shift this voice one step later" onClick={() => d.applyTool("right", voice)}>
-            ▶
-          </button>
-          <button type="button" className="drum-tool" onClick={() => d.randomize()}>
-            Random
-          </button>
-          <button type="button" className="drum-tool" onClick={() => d.clearPattern()}>
-            Clear
-          </button>
-          <button type="button" className={`drum-tool ${accent ? "on" : ""}`} aria-pressed={accent} title="Taps place loud accent steps. Shift-click does the same." onClick={() => setAccent(!accent)}>
-            Accent
-          </button>
-          {pages > 1 && (
-            <>
-              <span className="label" style={{ marginLeft: 6 }}>
-                Page
-              </span>
-              {Array.from({ length: pages }, (_, p) => (
-                <button key={p} type="button" className={`drum-chip wide mono ${shownPage === p ? "on" : ""}`} style={{ padding: "0 10px" }} aria-pressed={shownPage === p} aria-label={`Page ${p + 1}, steps ${p * 16 + 1} to ${p * 16 + 16}`} onClick={() => setPage(p)}>
-                  {p + 1}
-                </button>
-              ))}
-            </>
-          )}
+          <div className="btn-group tools" role="group" aria-label="Pattern tools">
+            <button type="button" onClick={() => d.applyTool("euclid", voice, hits)}>
+              Euclid
+            </button>
+            <button type="button" onClick={() => d.applyTool("half", voice)}>
+              Half
+            </button>
+            <button type="button" onClick={() => d.applyTool("double", voice)}>
+              Double
+            </button>
+            <button type="button" onClick={() => d.applyTool("reverse", voice)}>
+              Reverse
+            </button>
+            <button type="button" aria-label="Shift this voice one step earlier" onClick={() => d.applyTool("left", voice)}>
+              ◀
+            </button>
+            <button type="button" aria-label="Shift this voice one step later" onClick={() => d.applyTool("right", voice)}>
+              ▶
+            </button>
+          </div>
+          <div className="btn-group tools" role="group" aria-label="Pattern actions">
+            <button type="button" onClick={() => d.randomize()}>
+              Random
+            </button>
+            <button type="button" onClick={() => d.clearPattern()}>
+              Clear
+            </button>
+            <button type="button" className={accent ? "on" : ""} aria-pressed={accent} title="Taps place loud accent steps. Shift-click does the same." onClick={() => setAccent(!accent)}>
+              Accent
+            </button>
+          </div>
         </div>
 
         <StepGrid

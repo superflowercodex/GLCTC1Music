@@ -1,11 +1,11 @@
 import { useRef, useState, type CSSProperties } from "react";
+import { GlassWindow } from "../../../ui/hardware";
 import { Lead0010110, LEAD_MAX_DEGREE, LEAD_STEPS } from "../../../audio/instruments/lead0010110";
 import { NOTE_NAMES, SCALE_NAMES, scaleNote } from "../../../audio/instruments/synth/scales";
 import type { Instrument } from "../../../audio/types";
 import { putAssetBlob } from "../../../project/db";
 import { newId } from "../../../project/model";
 import { projectStore } from "../../../store/project";
-import { Button } from "../../../ui/controls";
 import { useInstrument } from "../../../ui/hooks";
 import { InstrumentShell } from "../InstrumentShell";
 import { BarsSelect } from "../synth/BarsSelect";
@@ -13,6 +13,7 @@ import { bounceToTrack } from "../synth/bounceToTrack";
 import { levelDb } from "../synth/format";
 import { PIANO_ROW, useComputerKeys, useMidiInput } from "../synth/inputs";
 import { lightKey, PianoKeys } from "../synth/PianoKeys";
+import { HwSlider } from "../synth/HwSlider";
 import { PlayheadBand } from "../synth/PlayheadBand";
 import { SynthTabsPanel, type SynthTab } from "../synth/SynthTabsPanel";
 import { messageOf, showToast } from "../synth/toast";
@@ -32,14 +33,14 @@ function asLead(instrument: Instrument): Lead0010110 {
   return instrument;
 }
 
-function shapeBars(wave: number): number[] {
-  return Array.from({ length: 20 }, (_, i) => {
-    const t = i / 19;
-    if (wave === 0) return 6 + t * 16;
-    if (wave === 1) return i % 10 < 5 ? 20 : 6;
-    if (wave === 2) return 4 + (1 - Math.abs(t * 2 - 1)) * 18;
-    return 4 + Math.abs(Math.sin(t * Math.PI * 2)) * 18;
-  });
+const GLYPHS = ["M1 12 L13 2 L13 12 L25 2 L25 12", "M1 12 V3 H13 V12 H25 V3", "M1 12 L7 3 L13 12 L19 3 L25 12", "M1 7 C5 -2 9 -2 13 7 S21 16 25 7"] as const;
+
+function WaveGlyph({ wave }: { wave: number }) {
+  return (
+    <svg viewBox="0 0 26 14" aria-hidden="true">
+      <path d={GLYPHS[wave]} />
+    </svg>
+  );
 }
 
 export default function Lead0010110Room({ instrument }: { instrument: Instrument }) {
@@ -123,23 +124,24 @@ function Surface({ synth }: { synth: Lead0010110 }) {
   };
 
   return (
-    <div className="ld">
-      <div className="ld-layers">
+    <div className="ld hw-plate">
+      <GlassWindow className="ld-layers">
         {[1, 2, 3].map((n) => (
           <LayerCard key={n} synth={synth} n={n} />
         ))}
         <SampleCard synth={synth} />
-      </div>
+      </GlassWindow>
+      <div className="hw-seam" />
 
       <div className="ld-bar" role="group" aria-label="Pattern">
-        <select className="sy-select inline key" aria-label="Key" value={root} onChange={(e) => synth.setParam("root", Number(e.target.value))}>
+        <select className="hw-select key" aria-label="Key" value={root} onChange={(e) => synth.setParam("root", Number(e.target.value))}>
           {NOTE_NAMES.map((name, i) => (
             <option key={name} value={i}>
               {name}
             </option>
           ))}
         </select>
-        <select className="sy-select inline" aria-label="Scale" value={scale} onChange={(e) => synth.setParam("scale", Number(e.target.value))}>
+        <select className="hw-select" aria-label="Scale" value={scale} onChange={(e) => synth.setParam("scale", Number(e.target.value))}>
           {SCALE_NAMES.map((name, i) => (
             <option key={name} value={i}>
               {name}
@@ -147,14 +149,18 @@ function Surface({ synth }: { synth: Lead0010110 }) {
           ))}
         </select>
         <span className="spacer" />
-        <Button onClick={() => synth.setParam("loop", (Math.round(synth.getParam("loop")) + 1) % 4)} title="Cycle the loop length">
+        <button type="button" className="hw-key" onClick={() => synth.setParam("loop", (Math.round(synth.getParam("loop")) + 1) % 4)} data-tip="Cycle the loop length">
           Loop {loop} steps
-        </Button>
-        <Button onClick={() => synth.randomise()}>Random</Button>
-        <Button onClick={() => synth.clearSteps()}>Clear</Button>
+        </button>
+        <button type="button" className="hw-key" onClick={() => synth.randomise()}>
+          Random
+        </button>
+        <button type="button" className="hw-key" onClick={() => synth.clearSteps()}>
+          Clear
+        </button>
       </div>
 
-      <div className="ld-grid">
+      <GlassWindow className="ld-grid">
         <div className="ld-rows" aria-hidden="true">
           {Array.from({ length: LEAD_MAX_DEGREE }, (_, r) => (
             <span key={r}>{LEAD_MAX_DEGREE - r}</span>
@@ -186,26 +192,24 @@ function Surface({ synth }: { synth: Lead0010110 }) {
           })}
           <PlayheadBand columns={LEAD_STEPS} gap={4} read={() => synth.playhead()?.a ?? -1} />
         </div>
-      </div>
+      </GlassWindow>
+      <div className="hw-seam" />
 
       <div className="ld-keys-head">
-        <span className="sy-label" style={{ fontWeight: 700, color: "var(--text)", fontSize: 16 }}>
-          Keys
-        </span>
-        <span className="eyebrow">Tap, or play with your computer keyboard</span>
-        <span className="spacer" />
-        <button type="button" className="icon-btn" aria-label="Octave down" onClick={() => setOctave((o) => Math.max(1, o - 1))}>
+        <span className="hw-title" style={{ flex: "0 0 auto" }}>Keys</span>
+        <span className="hw-note">Tap, or play with your computer keyboard</span>
+        <button type="button" className="hw-key sq sm" aria-label="Octave down" onClick={() => setOctave((o) => Math.max(1, o - 1))}>
           −
         </button>
-        <span className="mono" aria-live="polite">
+        <div className="hw-display" aria-live="polite">
           {octave}–{octave + 2}
-        </span>
-        <button type="button" className="icon-btn" aria-label="Octave up" onClick={() => setOctave((o) => Math.min(6, o + 1))}>
+        </div>
+        <button type="button" className="hw-key sq sm" aria-label="Octave up" onClick={() => setOctave((o) => Math.min(6, o + 1))}>
           +
         </button>
       </div>
       <div ref={keysRoot}>
-        <PianoKeys start={start} whites={17} height={74} color="#ff63d8" label="Keyboard" onDown={play} onUp={stop} />
+        <PianoKeys start={start} whites={17} height="var(--kh)" color="#ff63d8" label="Keyboard" onDown={play} onUp={stop} />
       </div>
     </div>
   );
@@ -219,35 +223,32 @@ function stepNote(synth: Lead0010110, degree: number): number {
 function LayerCard({ synth, n }: { synth: Lead0010110; n: number }) {
   const on = synth.getParam(`l${n}on`) === 1;
   const wave = Math.round(synth.getParam(`l${n}wave`));
-  const level = synth.getParam(`l${n}level`);
   const color = LAYER_COLORS[n - 1];
   return (
-    <div className={`ld-card ${on ? "" : "off"}`} style={{ "--c": color } as CSSProperties} role="group" aria-label={`Layer ${n}`}>
-      <div className="ld-card-head">
-        <span className="ld-card-name">Layer {n}</span>
-        <button type="button" className={`ld-dot ${on ? "on" : ""}`} role="switch" aria-checked={on} aria-label={`Layer ${n} on`} onClick={() => synth.setParam(`l${n}on`, on ? 0 : 1)} />
+    <section className={`ld-sec ${on ? "" : "off"}`} style={{ "--c": color } as CSSProperties} aria-label={`Layer ${n}`}>
+      <div className="ld-head">
+        <button type="button" className="hw-key led ld-power" role="switch" aria-checked={on} aria-label={`Layer ${n} on`} onClick={() => synth.setParam(`l${n}on`, on ? 0 : 1)} />
+        <span className="hw-title">Osc {n}</span>
       </div>
-      <button type="button" className="sy-mini" aria-label={`Layer ${n} wave: ${WAVE_LABELS[wave]}; click for the next`} onClick={() => synth.setParam(`l${n}wave`, (wave + 1) % 4)}>
-        {WAVE_LABELS[wave]}
-      </button>
-      <div className="ld-shape" aria-hidden="true">
-        {shapeBars(wave).map((h, i) => (
-          <span key={i} style={{ height: h * 0.7 }} />
+      <div className="ld-waves" role="radiogroup" aria-label={`Layer ${n} wave`}>
+        {WAVE_LABELS.map((label, w) => (
+          <button key={label} type="button" role="radio" aria-checked={wave === w} aria-label={label} data-tip={label} className={`hw-key ${wave === w ? "on" : ""}`} onClick={() => synth.setParam(`l${n}wave`, w)}>
+            <WaveGlyph wave={w} />
+          </button>
         ))}
       </div>
-      <LevelRow label={`Layer ${n} level`} level={level} onChange={(v) => synth.setParam(`l${n}level`, v)} />
-    </div>
+      <LevelSlider label={`Layer ${n} level`} level={synth.getParam(`l${n}level`)} color={color} onChange={(v) => synth.setParam(`l${n}level`, v)} />
+    </section>
   );
 }
 
-function LevelRow({ label, level, onChange }: { label: string; level: number; onChange: (v: number) => void }) {
+function LevelSlider({ label, level, color, onChange }: { label: string; level: number; color: string; onChange: (v: number) => void }) {
   return (
     <>
-      <div className="ld-level" aria-hidden="true">
-        <span>Level</span>
-        <span className="mono">{levelDb(level)}</span>
-      </div>
-      <input className="ld-range" type="range" min={0} max={1} step={0.01} value={level} aria-label={label} aria-valuetext={levelDb(level)} style={{ "--pct": `${level * 100}%` } as CSSProperties} onChange={(e) => onChange(Number(e.target.value))} />
+      <HwSlider label={label} value={level} min={0} max={1} step={0.01} text={levelDb(level)} color={color} onChange={onChange} />
+      <span className="ld-db" aria-hidden="true">
+        {levelDb(level)}
+      </span>
     </>
   );
 }
@@ -273,37 +274,28 @@ function SampleCard({ synth }: { synth: Lead0010110 }) {
   };
 
   return (
-    <div className="ld-card" style={{ "--c": LAYER_COLORS[3] } as CSSProperties} role="group" aria-label="Sample layer">
-      <div className="ld-card-head">
-        <span className="ld-card-name">Sample</span>
-        <button type="button" className="ld-rev" aria-pressed={reversed} aria-label="Play the sample backwards" title="Play the sample backwards" onClick={() => synth.setParam("sampleReverse", reversed ? 0 : 1)}>
-          ⇄
-        </button>
+    <section className="ld-sec" style={{ "--c": LAYER_COLORS[3] } as CSSProperties} aria-label="Sample layer">
+      <div className="ld-head">
+        <button type="button" className="hw-key led ld-power" aria-pressed={reversed} aria-label="Play the sample backwards" data-tip="Play the sample backwards" onClick={() => synth.setParam("sampleReverse", reversed ? 0 : 1)} />
+        <span className="hw-title">Sample</span>
       </div>
       <div className="ld-sample-row">
-        <button type="button" className="sy-mini" onClick={() => input.current?.click()} title={info.name || "Load an audio file"}>
+        <button type="button" className="hw-key ld-sample-btn" onClick={() => input.current?.click()} data-tip={info.name || "Load an audio file"}>
           {info.status === "loading" ? "Loading…" : info.name || "Load…"}
         </button>
         {info.status !== "none" && (
-          <button type="button" className="sy-mini" style={{ flex: "0 0 auto" }} aria-label="Remove sample" onClick={() => synth.clearSample()}>
+          <button type="button" className="hw-key sq sm" aria-label="Remove sample" onClick={() => synth.clearSample()}>
             ✕
           </button>
         )}
       </div>
       <input ref={input} type="file" accept="audio/*" hidden aria-label="Sample file" onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ""; }} />
-      {info.status === "error" ? (
+      <LevelSlider label="Sample level" level={level} color={LAYER_COLORS[3]} onChange={(v) => synth.setParam("sampleLevel", v)} />
+      {info.status === "error" && (
         <div className="ld-error" role="alert">
           {info.error}
         </div>
-      ) : (
-        <div className="ld-shape" aria-hidden="true">
-          {shapeBars(3).map((h, i) => (
-            <span key={i} style={{ height: h * 0.7 }} />
-          ))}
-        </div>
       )}
-      <LevelRow label="Sample level" level={level} onChange={(v) => synth.setParam("sampleLevel", v)} />
-    </div>
+    </section>
   );
 }
-

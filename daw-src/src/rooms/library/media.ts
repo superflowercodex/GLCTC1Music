@@ -77,7 +77,7 @@ export async function addAssetToTimeline(assetId: string): Promise<void> {
   if (asset.kind !== "midi") {
     const clipId = placeAsset(assetId);
     uiStore.set((s) => ({ ...s, selectedClipId: clipId }));
-    toast(`Added "${asset.name}" to the timeline.`);
+    toast(`"${asset.name}" is on the timeline.`);
     return;
   }
   const blob = await getAssetBlob(asset.id);
@@ -89,7 +89,7 @@ export async function addAssetToTimeline(assetId: string): Promise<void> {
   const planned = planMidiClip(project, asset, parsed, uiStore.get().selectedTrackId, playheadBar(project));
   projectStore.set(planned.project);
   uiStore.set((s) => ({ ...s, selectedClipId: planned.clipId }));
-  toast(`Added "${asset.name}" to the timeline.`);
+  toast(`"${asset.name}" is on the timeline.`);
 }
 
 export function clipsUsingAsset(project: Project, assetId: string): number {

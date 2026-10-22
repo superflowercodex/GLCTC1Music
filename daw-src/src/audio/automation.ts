@@ -96,7 +96,10 @@ export function applyAutomationStep(project: Project, step: number, time: number
           const def = instrument?.params.find((p) => p.id === target.paramId);
           if (!instrument || !def) break;
           const next = def.min + value * (def.max - def.min);
-          if (host.remember) host.remember(instrument, def.id, instrument.getParam(def.id));
+          const current = instrument.getParam(def.id);
+          // A lane holds most of the time; resetting an unchanged value every step only churns the audio graph and the UI.
+          if (current === (def.options ? Math.round(next) : next)) break;
+          if (host.remember) host.remember(instrument, def.id, current);
           instrument.setParam(def.id, next);
           break;
         }

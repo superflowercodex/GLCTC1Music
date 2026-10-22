@@ -1,53 +1,37 @@
-import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
-import { renameTrack } from "../../project/actions";
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { renameTrack, setTrackMix } from "../../project/actions";
 import type { Track } from "../../project/model";
-import { projectStore, uiStore } from "../../store/project";
-import { deleteTrack, shiftTrack, toggleTrackFlag } from "./ops";
-
-export function PopMenu({ anchor, onClose, children, label }: { anchor: DOMRect; onClose: () => void; children: React.ReactNode; label: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const away = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("pointerdown", away, true);
-    window.addEventListener("keydown", esc);
-    ref.current?.querySelector<HTMLElement>("button")?.focus();
-    return () => {
-      window.removeEventListener("pointerdown", away, true);
-      window.removeEventListener("keydown", esc);
-    };
-  }, [onClose]);
-  const below = anchor.bottom + 240 < window.innerHeight;
-  const style: CSSProperties = {
-    left: Math.min(anchor.left, window.innerWidth - 230),
-    ...(below ? { top: anchor.bottom + 6 } : { bottom: window.innerHeight - anchor.top + 6 }),
-  };
-  return createPortal(
-    <div ref={ref} className="pop-menu" role="menu" aria-label={label} style={style}>
-      {children}
-    </div>,
-    document.body,
-  );
-}
+import { TRACK_COLORS } from "../../project/actions";
+import { projectStore } from "../../store/project";
+import { KindIcon, type TrackIconKind } from "./icons";
+import { PopMenu } from "./Popover";
+import { colorTracks, deleteTracks, selectTrackClips, shiftTrack, toggleTrackFlag } from "./ops";
+import { pickTrack, tracksFor } from "./selection";
+import { HeadSlider } from "./HeadSlider";
+import { formatGain, formatPanShort, gainToPos, nudgeGain, nudgePan, panToPos, posToGain, posToPan } from "./trackMix";
+import { FADER_MAX_DB, FADER_MIN_DB } from "../../audio/mixMath";
+import "./mix.css";
 
 interface Props {
   track: Track;
-  subtitle: string;
+  icon: TrackIconKind;
+  /** Only worth a second line when it names something the icon cannot, such as the instrument. */
+  detail?: string;
   selected: boolean;
   index: number;
   count: number;
 }
 
-export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected, index, count }: Props) {
+export const TrackHeader = memo(function TrackHeader({ track, icon, detail, selected, index, count }: Props) {
   const [menu, setMenu] = useState<DOMRect | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const [readout, setReadout] = useState<string | null>(null);
+  const showVolume = useCallback((t: string | null) => setReadout(t && `Volume ${t}`), []);
+  const showPan = useCallback((t: string | null) => setReadout(t && `Pan ${t}`), []);
+  // The same Track.gainDb / Track.pan the Mixer strip edits, so the two stay one control.
+  const mix = (m: { gainDb?: number; pan?: number }) => projectStore.set((p) => setTrackMix(p, track.id, m));
 
   useEffect(() => {
     if (editing) input.current?.select();
@@ -57,6 +41,7 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
     setEditing(false);
     projectStore.set((p) => renameTrack(p, track.id, value));
   };
+  const group = () => tracksFor(track.id);
   const closeMenu = () => {
     setMenu(null);
     setConfirming(false);
@@ -66,9 +51,16 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
     <div
       className={`arr-head${selected ? " sel" : ""}${track.muted ? " muted" : ""}`}
       style={{ "--c": track.color } as CSSProperties}
-      onPointerDown={() => uiStore.set((s) => ({ ...s, selectedTrackId: track.id }))}
+      data-track-head={track.id}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest(".arr-btns, .arr-resize, input, .hs")) return;
+        pickTrack(track.id, e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "only");
+      }}
     >
       <span className="arr-color" aria-hidden="true" />
+      <span className="arr-kind" title={detail}>
+        <KindIcon kind={icon} />
+      </span>
       <div className="arr-meta">
         {editing ? (
           <input
@@ -88,7 +80,41 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
             {track.name}
           </div>
         )}
-        <div className="arr-sub">{subtitle}</div>
+        <div className="arr-sub-swap">
+          <div className="arr-sub" aria-hidden={readout !== null}>
+            {detail && detail !== track.name ? detail : ""}
+          </div>
+          <div className="arr-readout mono" aria-hidden="true">
+            {readout ?? ""}
+          </div>
+        </div>
+        <div className="arr-mix">
+          <HeadSlider
+            className="hs-vol"
+            label={`${track.name} volume`}
+            pos={gainToPos(track.gainDb)}
+            valueText={formatGain(track.gainDb)}
+            onPos={(pos) => mix({ gainDb: posToGain(pos) })}
+            onStep={(d, fine) => mix({ gainDb: nudgeGain(track.gainDb, d, fine) })}
+            onHome={() => mix({ gainDb: FADER_MIN_DB })}
+            onEnd={() => mix({ gainDb: FADER_MAX_DB })}
+            onReset={() => mix({ gainDb: 0 })}
+            onReadout={showVolume}
+          />
+          <HeadSlider
+            className="hs-pan"
+            bipolar
+            label={`${track.name} pan`}
+            pos={panToPos(track.pan)}
+            valueText={formatPanShort(track.pan)}
+            onPos={(pos, dragging) => mix({ pan: posToPan(pos, dragging) })}
+            onStep={(d, fine) => mix({ pan: nudgePan(track.pan, d, fine) })}
+            onHome={() => mix({ pan: -1 })}
+            onEnd={() => mix({ pan: 1 })}
+            onReset={() => mix({ pan: 0 })}
+            onReadout={showPan}
+          />
+        </div>
       </div>
       <div className="arr-btns">
         <button
@@ -96,7 +122,7 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
           className={`mini-btn${track.muted ? " on-mute" : ""}`}
           aria-pressed={track.muted}
           aria-label={`Mute ${track.name}`}
-          onClick={() => toggleTrackFlag(track.id, "muted")}
+          onClick={() => toggleTrackFlag(track.id, "muted", group())}
         >
           M
         </button>
@@ -105,7 +131,7 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
           className={`mini-btn${track.solo ? " on-solo" : ""}`}
           aria-pressed={track.solo}
           aria-label={`Solo ${track.name}`}
-          onClick={() => toggleTrackFlag(track.id, "solo")}
+          onClick={() => toggleTrackFlag(track.id, "solo", group())}
         >
           S
         </button>
@@ -116,9 +142,14 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
           aria-label={`More for ${track.name}`}
           onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}
         >
-          ···
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="19" cy="12" r="2" />
+          </svg>
         </button>
       </div>
+      <span className="arr-resize" role="separator" aria-orientation="vertical" aria-label="Resize track list" />
       {menu && (
         <PopMenu anchor={menu} onClose={closeMenu} label={`${track.name} options`}>
           <button type="button" role="menuitem" onClick={() => (closeMenu(), setEditing(true))}>
@@ -130,13 +161,23 @@ export const TrackHeader = memo(function TrackHeader({ track, subtitle, selected
           <button type="button" role="menuitem" disabled={index === count - 1} onClick={() => (shiftTrack(track.id, 1), closeMenu())}>
             Move down
           </button>
+          <button type="button" role="menuitem" onClick={() => (selectTrackClips(group()), closeMenu())}>
+            Select all clips
+          </button>
+          <hr className="pm-sep" />
+          <div className="pop-swatches" role="group" aria-label="Track colour">
+            {TRACK_COLORS.map((c) => (
+              <button key={c} type="button" role="menuitem" aria-label={`Colour ${c}`} style={{ "--c": c } as CSSProperties} className={c === track.color ? "on" : ""} onClick={() => (colorTracks(group(), c), closeMenu())} />
+            ))}
+          </div>
+          <hr className="pm-sep" />
           {confirming ? (
-            <button type="button" role="menuitem" className="danger" onClick={() => (deleteTrack(track.id), closeMenu())}>
-              {track.clips.length > 0 ? `Delete track and ${track.clips.length} clip${track.clips.length === 1 ? "" : "s"}` : "Delete track"}: confirm
+            <button type="button" role="menuitem" className="danger" onClick={() => (deleteTracks(group()), closeMenu())}>
+              {group().length > 1 ? `Delete ${group().length} tracks` : track.clips.length > 0 ? `Delete track and ${track.clips.length} clip${track.clips.length === 1 ? "" : "s"}` : "Delete track"}: confirm
             </button>
           ) : (
             <button type="button" role="menuitem" className="danger" onClick={() => setConfirming(true)}>
-              Delete track
+              {group().length > 1 ? `Delete ${group().length} tracks` : "Delete track"}
             </button>
           )}
         </PopMenu>

@@ -54,8 +54,8 @@ describe("conversion", () => {
 });
 
 describe("layout helpers", () => {
-  it("shows at least 16 bars and always room past the last clip", () => {
-    expect(visibleBars(newProject())).toBe(16);
+  it("shows at least 8 bars and always room past the last clip", () => {
+    expect(visibleBars(newProject())).toBe(8);
   });
 
   it("formats whole and fractional bars", () => {

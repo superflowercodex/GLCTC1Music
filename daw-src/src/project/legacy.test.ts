@@ -117,7 +117,7 @@ describe("legacy reader is read-only", () => {
     expect(found.projects[0]).toMatchObject({ id: "old-1", trackCount: 5, bpm: 128 });
 
     for (const p of found.projects) await readAndConvertLegacyProject(p.id, factory);
-    await describeLegacyExtras(null, factory);
+    await describeLegacyExtras(null);
 
     expect(await snapshot(factory)).toBe(before);
   });
@@ -193,11 +193,10 @@ describe("old plugin list and extras", () => {
     o.onupgradeneeded = () => o.result.createObjectStore("samples");
     (await wait(o)).close();
     const storage = { getItem: (k: string) => (k === "glctc1.midiBindings" ? "{}" : k === "glctc1.wams" ? JSON.stringify([{ name: "A", url: "https://a/b.js" }]) : null) };
-    const notes = await describeLegacyExtras(storage, factory);
-    expect(notes).toHaveLength(3);
+    const notes = await describeLegacyExtras(storage);
+    expect(notes).toHaveLength(2);
     expect(notes.join(" ")).toMatch(/plugin address/);
     expect(notes.join(" ")).toMatch(/MIDI links/);
-    expect(notes.join(" ")).toMatch(/DIVINE09/);
   });
 });
 

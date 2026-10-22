@@ -20,6 +20,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       { what: "Tap tempo", keys: "t" },
       { what: "Halve or double tempo", keys: "shift+t" },
       { what: "Metronome", keys: "m" },
+      { what: "Minimise or expand the player", keys: "mod+." },
+      { what: "Enter or leave full screen", keys: "shift+mod+f" },
     ],
   },
   {

@@ -1,11 +1,12 @@
 import { memo, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import type { InstrumentState } from "../../audio/types";
 import { clipRate } from "../../project/actions";
 import type { Asset, Clip, Track } from "../../project/model";
-import { uiStore } from "../../store/project";
 import { ClipArt } from "./ClipArt";
-import { addPatternClip, seekToBar } from "./ops";
-import { selectClips } from "./selection";
-import { pxToBar, snapBar } from "./timeline";
+import { addPatternClip } from "./ops";
+import { overlapSpans } from "./overlap";
+import { pickTrack, selectClips } from "./selection";
+import { barStride, pxToBar, snapBar } from "./timeline";
 import type { DragMode } from "./useClipDrag";
 
 interface ClipViewProps {
@@ -19,6 +20,7 @@ interface ClipViewProps {
   barSec: number;
   drums: boolean;
   assetName: string | undefined;
+  slotState: InstrumentState | undefined;
   onDrag: (e: ReactPointerEvent, clip: Clip, mode: DragMode) => void;
   onOpen: (clipId: string) => void;
 }
@@ -42,6 +44,7 @@ const ClipView = memo(function ClipView({
   barSec,
   drums,
   assetName,
+  slotState,
   onDrag,
   onOpen,
 }: ClipViewProps) {
@@ -58,7 +61,7 @@ const ClipView = memo(function ClipView({
   };
   return (
     <div
-      className={`clip k-${clip.kind}${selected ? " sel" : ""}`}
+      className={`clip k-${clip.kind}${selected ? " sel" : ""}${width < 96 ? " narrow" : ""}`}
       style={{ left, width, "--c": color } as CSSProperties}
       role="button"
       tabIndex={0}
@@ -76,7 +79,8 @@ const ClipView = memo(function ClipView({
       }}
     >
       <span className="clip-name">{clip.name}</span>
-      {clip.kind === "pattern" && <span className="clip-badge">{String.fromCharCode(65 + (clip.patternIndex ?? 0))}</span>}
+      {clip.kind === "pattern" && !/^Pattern [A-Z]$/.test(clip.name) && <span className="clip-badge">{String.fromCharCode(65 + (clip.patternIndex ?? 0))}</span>}
+      {clip.kind === "midi" && !clip.notes?.length && <span className="clip-empty">No notes yet</span>}
       {!visual && (
         <ClipArt
           clip={clip}
@@ -87,6 +91,7 @@ const ClipView = memo(function ClipView({
           drums={drums}
           pxPerBeat={pxPerBeat}
           assetName={assetName}
+          slotState={slotState}
         />
       )}
       {fadeIn > 1 && <span className="fade fade-in" style={{ width: fadeIn }} />}
@@ -110,11 +115,27 @@ interface LaneProps {
   bpm: number;
   assets: readonly Asset[];
   drums: boolean;
+  slotState: InstrumentState | undefined;
+  endBars: number;
+  selectedTrack: boolean;
   selectedIds: readonly string[];
   snapOn: boolean;
   gridBars: number;
   onDrag: (e: ReactPointerEvent, clip: Clip, mode: DragMode) => void;
   onOpen: (clipId: string) => void;
+  onBackdrop: (e: ReactPointerEvent<HTMLElement>) => void;
+}
+
+/** Grid variables a lane (or the empty space under the last one) needs to draw its bar and beat lines. */
+export function laneVars(ppb: number, beatsPerBar: number, endBars: number): CSSProperties {
+  return {
+    "--bar": `${ppb}px`,
+    "--stride": `${ppb * barStride(ppb)}px`,
+    "--beat": `${ppb / beatsPerBar}px`,
+    "--beat-a": ppb / beatsPerBar >= 20 ? 1 : 0,
+    "--bar-a": ppb >= 24 ? 1 : 0,
+    "--end": endBars > 0 ? `${endBars * ppb}px` : "100%",
+  } as CSSProperties;
 }
 
 export const Lane = memo(function Lane({
@@ -126,11 +147,15 @@ export const Lane = memo(function Lane({
   bpm,
   assets,
   drums,
+  slotState,
+  endBars,
+  selectedTrack,
   selectedIds,
   snapOn,
   gridBars,
   onDrag,
   onOpen,
+  onBackdrop,
 }: LaneProps) {
   const atPointer = (e: { clientX: number; currentTarget: HTMLElement }): number => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -138,14 +163,15 @@ export const Lane = memo(function Lane({
   };
   return (
     <div
-      className={`arr-lane${track.muted ? " muted" : ""}`}
+      className={`arr-lane${track.muted ? " muted" : ""}${selectedTrack ? " sel" : ""}`}
+      data-hint={track.clips.length === 0 ? (track.kind === "instrument" ? "Double-click to add a pattern" : track.kind === "video" ? "Drop a video or image here" : "Drop an audio file here") : undefined}
       data-lane={track.id}
-      style={{ "--ppb": `${ppb}px`, "--beat": `${ppb / beatsPerBar}px` } as CSSProperties}
+      style={laneVars(ppb, beatsPerBar, endBars)}
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
-        uiStore.set((s) => ({ ...s, selectedTrackId: track.id }));
-        if (!e.shiftKey) selectClips([]);
-        seekToBar(atPointer(e));
+        e.preventDefault();
+        pickTrack(track.id, "only");
+        onBackdrop(e);
       }}
       onDoubleClick={(e) => {
         if (e.target === e.currentTarget && track.kind === "instrument") addPatternClip(track.id, atPointer(e));
@@ -164,9 +190,14 @@ export const Lane = memo(function Lane({
           barSec={barSec}
           drums={drums}
           assetName={clip.assetId ? assets.find((a) => a.id === clip.assetId)?.name : undefined}
+          slotState={slotState}
           onDrag={onDrag}
           onOpen={onOpen}
         />
+      ))}
+      {overlapSpans(track.clips).map((o) => (
+        // Where clips cover each other: a faint hatch over the shared bars, so a hidden clip never goes unnoticed.
+        <span key={o.startBar} className="clip-overlap" aria-hidden="true" style={{ left: (o.startBar - 1) * ppb, width: Math.max(2, (o.endBar - o.startBar) * ppb) }} />
       ))}
     </div>
   );

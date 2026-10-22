@@ -1,5 +1,6 @@
 import type { Instrument, ParamDef } from "../../../audio/types";
-import { Seg, Slider } from "../../../ui/controls";
+import { Seg } from "../../../ui/controls";
+import { Knob } from "../../../ui/Knob";
 
 export function formatParam(def: ParamDef, value: number): string {
   if (def.options) return def.options[value] ?? String(value);
@@ -10,7 +11,7 @@ export function formatParam(def: ParamDef, value: number): string {
 }
 
 /** One slider or segmented control for a parameter, in the same style as the shell's automatic panel. */
-export function ParamControl({ instrument, id }: { instrument: Instrument; id: string }) {
+export function ParamControl({ instrument, id, color }: { instrument: Instrument; id: string; color?: string }) {
   const def = instrument.params.find((p) => p.id === id);
   if (!def) throw new RangeError(`${instrument.kind} has no parameter "${id}"`);
   const value = instrument.getParam(id);
@@ -41,14 +42,16 @@ export function ParamControl({ instrument, id }: { instrument: Instrument; id: s
     );
   }
   return (
-    <Slider
+    <Knob
       label={def.label}
       value={value}
       min={def.min}
       max={def.max}
-      step={def.step ?? (def.max - def.min) / 200}
+      step={def.step}
+      defaultValue={def.def}
       onChange={(v) => instrument.setParam(id, v)}
       format={(v) => formatParam(def, v)}
+      color={color}
     />
   );
 }
@@ -59,10 +62,10 @@ export function MuteSolo({ instrument, voice }: { instrument: Instrument; voice:
   const solo = instrument.getParam(`v${voice}.solo`) === 1;
   return (
     <div className="vp-chips">
-      <button type="button" className={`chip ${mute ? "on" : ""}`} aria-pressed={mute} onClick={() => instrument.setParam(`v${voice}.mute`, mute ? 0 : 1)}>
+      <button type="button" className={`chip mute ${mute ? "on" : ""}`} aria-pressed={mute} onClick={() => instrument.setParam(`v${voice}.mute`, mute ? 0 : 1)}>
         Mute
       </button>
-      <button type="button" className={`chip ${solo ? "on" : ""}`} aria-pressed={solo} onClick={() => instrument.setParam(`v${voice}.solo`, solo ? 0 : 1)}>
+      <button type="button" className={`chip solo ${solo ? "on" : ""}`} aria-pressed={solo} onClick={() => instrument.setParam(`v${voice}.solo`, solo ? 0 : 1)}>
         Solo
       </button>
     </div>

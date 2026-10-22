@@ -4,6 +4,7 @@ import { getAssetBlob } from "../../project/db";
 import type { Asset } from "../../project/model";
 import { projectStore } from "../../store/project";
 import { useStore } from "../../store/store";
+import { Caption } from "../../ui/Caption";
 import { Icon } from "../../ui/Icon";
 import { addAssetToTimeline, deleteAsset, importLibraryFiles, toast, type MediaFilter } from "./media";
 
@@ -16,8 +17,8 @@ const FILTERS: ReadonlyArray<{ id: MediaFilter; label: string }> = [
 ];
 
 const KIND_LABEL: Record<Asset["kind"], string> = { audio: "Audio", midi: "MIDI", video: "Video", image: "Image" };
-const KIND_COLOR: Record<Asset["kind"], string> = { audio: "#7cf0c0", midi: "#8e7cff", video: "#ffd36a", image: "#79ebff" };
-const BARS = 40;
+export const KIND_COLOR: Record<Asset["kind"], string> = { audio: "#5fe3a1", midi: "#8e7cff", video: "#f2c14e", image: "#79ebff" };
+const BARS = 48;
 
 function formatDuration(seconds: number): string {
   const s = Math.round(seconds);
@@ -40,6 +41,15 @@ function hash(text: string): number {
   let h = 0;
   for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
   return h;
+}
+
+export function UploadGlyph({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 16V4M7 9l5-5 5 5" />
+      <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
 }
 
 function ImageThumb({ id, onSize }: { id: string; onSize: (size: string) => void }) {
@@ -84,30 +94,36 @@ function useWaveform(asset: Asset): Float32Array | null | "unreadable" {
 }
 
 function Thumb({ asset, wave, onSize }: { asset: Asset; wave: Float32Array | null | "unreadable"; onSize: (size: string) => void }) {
-  const color = KIND_COLOR[asset.kind];
   let body: React.ReactNode = null;
-  let bg = `color-mix(in srgb, ${color} 12%, transparent)`;
   if (asset.kind === "audio") {
     // Faint stubs hold the place while the waveform decodes.
-    const heights = wave && wave !== "unreadable" ? Array.from(wave, (p) => 8 + p * 78) : Array.from({ length: BARS }, () => 8);
-    body = heights.map((h, i) => <i key={i} style={{ height: `${h}%`, background: color, opacity: wave && wave !== "unreadable" ? 1 : 0.3 }} />);
+    const ready = wave && wave !== "unreadable";
+    const heights = ready ? Array.from(wave, (p) => 8 + p * 84) : Array.from({ length: BARS }, () => 8);
+    body = (
+      <span className={`wave ${ready ? "" : "wait"}`}>
+        {heights.map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}
+      </span>
+    );
   } else if (asset.kind === "midi") {
     const h = hash(asset.id);
     body = (
       <span className="notes">
-        {Array.from({ length: 16 }, (_, i) => (
-          <b key={i} style={{ left: 10 + i * 14, top: 10 + ((i * 37 + h) % 6) * 12, width: 8 + (i % 3) * 4, background: color }} />
+        {Array.from({ length: 18 }, (_, i) => (
+          <b key={i} style={{ left: `${4 + i * 5.2}%`, top: `${6 + ((i * 37 + h) % 7) * 12.5}%`, width: `${3 + (i % 3) * 2.2}%` }} />
         ))}
       </span>
     );
   } else if (asset.kind === "image") {
-    bg = `linear-gradient(135deg, ${color}66, #7cf0c066)`;
     body = <ImageThumb id={asset.id} onSize={onSize} />;
-  } else if (asset.kind === "video") {
-    bg = "linear-gradient(135deg, #ffd36a55, #ff63d855, #8e7cff55)";
+  } else {
+    body = (
+      <span className="play" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z" /></svg>
+      </span>
+    );
   }
   return (
-    <div className="lib-thumb" style={{ background: bg }} aria-hidden="true">
+    <div className={`lib-thumb ${asset.kind}`} aria-hidden="true">
       {body}
       <span className="lib-kind">{KIND_LABEL[asset.kind]}</span>
     </div>
@@ -120,19 +136,19 @@ function AssetCard({ asset }: { asset: Asset }) {
   const chips = chipsFor(asset, size);
   if (wave === "unreadable") chips.push("can't read file");
   return (
-    <article className="lib-card" aria-label={asset.name}>
+    <article className="lib-card" aria-label={asset.name} style={{ "--k": KIND_COLOR[asset.kind] } as React.CSSProperties}>
       <Thumb asset={asset} wave={wave} onSize={setSize} />
-      <div>
+      <div className="lib-info">
         <div className="lib-name" title={asset.name}>{asset.name}</div>
         <div className="lib-chips">{chips.map((c) => <span key={c}>{c}</span>)}</div>
       </div>
       <div className="lib-actions">
-        <button type="button" className="lib-pill" onClick={() => void addAssetToTimeline(asset.id).catch((e: unknown) => toast(`Could not add it: ${e instanceof Error ? e.message : String(e)}`))}>
+        <button type="button" className="btn btn-sm" onClick={() => void addAssetToTimeline(asset.id).catch((e: unknown) => toast(`Could not add it: ${e instanceof Error ? e.message : String(e)}`))}>
           Add to timeline
         </button>
         <button
           type="button"
-          className="lib-round"
+          className="icon-btn lib-del"
           aria-label={`Delete ${asset.name}`}
           title={`Delete ${asset.name}`}
           onClick={() => void deleteAsset(asset.id).catch((e: unknown) => toast(`Could not delete it: ${e instanceof Error ? e.message : String(e)}`))}
@@ -144,9 +160,30 @@ function AssetCard({ asset }: { asset: Asset }) {
   );
 }
 
+function DropZone({ openPicker, big }: { openPicker: () => void; big?: boolean }) {
+  return (
+    <button type="button" className={`lib-drop-zone ${big ? "big" : ""}`} onClick={openPicker}>
+      <span className="glyph"><UploadGlyph size={big ? 34 : 26} /></span>
+      <strong>Import files</strong>
+      <span className="hint">Drop audio, MIDI, video, images or a project anywhere on this page</span>
+      {big && (
+        <span className="formats" aria-hidden="true">
+          {["WAV", "MP3", "MID", "MP4", "PNG"].map((f) => <em key={f}>{f}</em>)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function MediaTab({ query, openPicker }: { query: string; openPicker: () => void }) {
   const assets = useStore(projectStore, (p) => p.assets);
   const [filter, setFilter] = useState<MediaFilter>("all");
+
+  const counts = useMemo(() => {
+    const c: Record<MediaFilter, number> = { all: assets.length, audio: 0, midi: 0, video: 0, image: 0 };
+    for (const a of assets) c[a.kind] += 1;
+    return c;
+  }, [assets]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -155,29 +192,34 @@ export function MediaTab({ query, openPicker }: { query: string; openPicker: () 
       .sort((a, b) => b.addedAt - a.addedAt);
   }, [assets, filter, query]);
 
+  if (assets.length === 0) {
+    return (
+      <div className="lib-pane empty">
+        <DropZone openPicker={openPicker} big />
+      </div>
+    );
+  }
+
   return (
     <div className="lib-pane">
       <div className="lib-bar" role="group" aria-label="Filter by type">
         {FILTERS.map((f) => (
           <button key={f.id} type="button" className={`chip ${filter === f.id ? "on" : ""}`} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
             {f.label}
+            <span className="count">{counts[f.id]}</span>
           </button>
         ))}
         <span className="spacer" />
-        <span className="eyebrow">Sorted by recently added</span>
+        <Caption aside={`${shown.length} of ${assets.length}`}>Recently added</Caption>
       </div>
       <div className="lib-scroll">
         <div className="lib-grid">
-          <button type="button" className="lib-tile" onClick={openPicker}>
-            <span className="plus" aria-hidden="true">+</span>
-            <strong>Import files</strong>
-            <span className="hint">Drop audio, MIDI, video, images or a project anywhere on this page</span>
-          </button>
+          <DropZone openPicker={openPicker} />
           {shown.map((a) => (
             <AssetCard key={a.id} asset={a} />
           ))}
         </div>
-        {shown.length === 0 && assets.length > 0 && <div className="lib-empty">Nothing matches. Clear the search or pick All.</div>}
+        {shown.length === 0 && <div className="lib-empty">Nothing matches. Clear the search or pick All.</div>}
       </div>
     </div>
   );

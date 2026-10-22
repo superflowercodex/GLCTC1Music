@@ -4,7 +4,8 @@ import { getEngine, peekEngine } from "../../../audio/engine";
 import { setProjectBpm } from "../../../audio/transport";
 import type { Asset, Clip } from "../../../project/model";
 import { projectStore } from "../../../store/project";
-import { Button, Slider, Switch } from "../../../ui/controls";
+import { Button,  Switch } from "../../../ui/controls";
+import { Knob } from "../../../ui/Knob";
 import { AudioLoadError, loadAssetBuffer } from "./audioSource";
 import {
   barSeconds,
@@ -280,29 +281,35 @@ export function AudioTab({ clip, asset, time }: Props) {
               <span className="ce-badge ce-badge-pink mono">{keyLabel}</span>
             </div>
             <Switch label="Keep the key when tempo changes" checked={clip.keyLock} onChange={(on) => edit((c) => ({ ...c, keyLock: on }))} />
-            <Slider
+          </section>
+
+          <section className="ce-card ce-tune" aria-label="Level">
+            <h3>Pitch and level</h3>
+            <div className="knob-grid ce-knobs">
+            <Knob
               label="Pitch"
               min={-12}
               max={12}
               step={1}
               value={clip.pitchSemitones}
               format={(v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)} st`}
+              defaultValue={0}
               onChange={(v) => edit((c) => setPitch(c, v, c.fineCents))}
             />
-            <Slider
+            <Knob
               label="Fine tune"
               min={-50}
               max={50}
               step={1}
               value={clip.fineCents}
               format={(v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)} ct`}
+              defaultValue={0}
               onChange={(v) => edit((c) => setPitch(c, c.pitchSemitones, v))}
             />
-          </section>
-
-          <section className="ce-card" aria-label="Level">
-            <Slider
+            <Knob
+              size="lg"
               label="Gain"
+              defaultValue={0}
               min={-24}
               max={12}
               step={0.5}
@@ -310,6 +317,7 @@ export function AudioTab({ clip, asset, time }: Props) {
               format={(v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)} dB`}
               onChange={(v) => edit((c) => ({ ...c, gainDb: v }))}
             />
+            </div>
           </section>
         </div>
       </div>

@@ -48,7 +48,7 @@ describe("Arrange room", () => {
   it("renders an empty project with the add-track chips and an invitation", () => {
     projectStore.set(newProject("Empty"));
     const html = renderToString(<Arrange />);
-    expect(html).toContain("Nothing here yet");
+    expect(html).toContain("A blank canvas");
     for (const label of ["Audio", "Instrument", "Drums", "Video"]) expect(html).toContain(`>${label}</button>`);
   });
 
@@ -61,6 +61,16 @@ describe("Arrange room", () => {
       expect(html).toContain(`${name} clip`);
     }
     expect(html).toContain('aria-label="Loop start bar"');
+  });
+
+  it("gives every track header a volume slider tied to the track's gain, and offers Avoid overlaps", () => {
+    const p = seeded();
+    p.tracks[0] = { ...p.tracks[0], gainDb: -6 };
+    projectStore.set(p);
+    const html = renderToString(<Arrange />);
+    for (const name of ["Drums", "Bass", "Lead", "Vocal", "Visuals"]) expect(html).toContain(`aria-label="${name} volume"`);
+    expect(html).toContain('aria-valuetext="−6.0 dB"');
+    expect(html).toContain('aria-label="Avoid overlaps"');
   });
 
   it("shows the floating inspector for a selected clip", () => {

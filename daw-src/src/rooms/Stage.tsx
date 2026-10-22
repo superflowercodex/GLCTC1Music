@@ -7,7 +7,10 @@ import type { Asset, Clip } from "../project/model";
 import { lsGet, lsSet } from "../storage";
 import { projectStore, uiStore } from "../store/project";
 import { useStore } from "../store/store";
-import { Button, Seg, Slider, Switch } from "../ui/controls";
+import { Button, Seg } from "../ui/controls";
+import { Caption } from "../ui/Caption";
+import { Knob } from "../ui/Knob";
+import { LedMeter } from "../ui/LedMeter";
 import { prefersReducedMotion, useRaf } from "../ui/hooks";
 import { Icon } from "../ui/Icon";
 import { RoomFrame } from "../ui/RoomFrame";
@@ -16,6 +19,7 @@ import "./stage/stage.css";
 import {
   addStageClip,
   barSeconds,
+  clipRangeSec,
   formatClock,
   frameAspect,
   MAX_SHOW_BARS,
@@ -27,6 +31,9 @@ import {
   updateStageClip,
 } from "./stage/stageModel";
 import type { StageScene } from "./stage/stageScene";
+
+// masterLevel() is RMS; the transport lifts it by sqrt(2) so the LEDs sit near true peak.
+const masterPeak = (): number => (peekEngine()?.masterLevel() ?? 0) * Math.SQRT2;
 
 function toast(text: string): void {
   uiStore.set((s) => ({ ...s, toast: { id: Date.now(), text } }));
@@ -97,11 +104,13 @@ function ClipCard({ clip, selected, onPick }: { clip: Clip; selected: boolean; o
   const thumb = useThumb(clip.assetId, clip.kind === "image" ? "image" : "video");
   return (
     <button type="button" className={`stage-clip ${selected ? "sel" : ""}`} aria-pressed={selected} onClick={onPick}>
-      <span className="stage-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined} />
+      <span className="stage-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
+        <span className="tag">{clip.kind === "image" ? "Image" : "Video"}</span>
+      </span>
       <span className="stage-clip-text">
         <b>{clip.name}</b>
         <small>
-          {clip.kind === "image" ? "Image" : "Video"} · bar {clip.startBar}–{clip.startBar + clip.lengthBars}
+          bar {clip.startBar} to {clip.startBar + clip.lengthBars}
         </small>
       </span>
     </button>
@@ -215,8 +224,11 @@ export default function Stage() {
     const step = engine ? engine.clock.position() : 0;
     const sec = step * stepDuration(p.bpm);
     const total = (Math.max(timelineEndBar(p), 9) - 1) * barSeconds(p.bpm, p.beatsPerBar);
-    if (timeRef.current) timeRef.current.textContent = formatClock(sec);
-    if (endRef.current) endRef.current.textContent = formatClock(total);
+    // Only write when the text changes: a repaint under the glass transport re-runs its blur.
+    const now = formatClock(sec);
+    const end = formatClock(total);
+    if (timeRef.current && timeRef.current.textContent !== now) timeRef.current.textContent = now;
+    if (endRef.current && endRef.current.textContent !== end) endRef.current.textContent = end;
     const scrub = scrubRef.current;
     if (scrub && !scrubbing.current) {
       scrub.max = String(total);
@@ -299,10 +311,13 @@ export default function Stage() {
   const options = selected ? stageOptions(selected) : undefined;
   const mediaAssets = assets.filter((a) => a.kind === "video" || a.kind === "image");
   const wide = aspect === "wide";
+  const bpm = projectStore.get().bpm;
+  const span = Math.max(1, endBar - 1);
+  const selThumb = useThumb(selected?.assetId, selected?.kind === "image" ? "image" : "video");
 
   return (
     <RoomFrame
-      eyebrow={`${name} · visuals follow the playhead`}
+      eyebrow="Visuals follow the playhead"
       title="Stage"
       hideTransport
       actions={
@@ -312,24 +327,28 @@ export default function Stage() {
             value={aspect}
             onChange={(v) => projectStore.set((p) => ({ ...p, stageAspect: v }))}
             options={[
-              { value: "wide", label: "Widescreen" },
-              { value: "phone", label: "Phone" },
+              { value: "wide", label: "16:9" },
+              { value: "phone", label: "9:16" },
             ]}
           />
-          <div style={{ width: 170 }}>
-            <Switch label="Visuals" checked={visuals} onChange={setVisuals} />
+          <div className="stage-rail" role="toolbar" aria-label="Stage controls">
+            <button type="button" className={`stage-rail-b ${visuals ? "on" : ""}`} aria-pressed={visuals} title="Galaxy visuals that listen to the music" onClick={() => setVisuals(!visuals)}>
+              <span className="stage-led" />
+              Visuals
+            </button>
+            <button type="button" className={`stage-rail-b ${recording ? "rec" : ""}`} aria-pressed={recording} onClick={() => void toggleCapture()}>
+              <span className="stage-recdot" />
+              {recording ? "Stop and save" : "Capture"}
+            </button>
+            <button type="button" className="stage-rail-b" onClick={() => void toggleFullscreen()}>
+              <Icon name="fullscreen" size={18} />
+              Fullscreen
+            </button>
           </div>
-          <Button onClick={() => void toggleCapture()}>
-            <span className={recording ? "stage-rec" : undefined}>{recording ? "Stop and save" : "Capture video"}</span>
-          </Button>
-          <Button onClick={() => void toggleFullscreen()}>
-            <Icon name="fullscreen" size={20} />
-            Fullscreen
-          </Button>
         </div>
       }
     >
-      <div className="stage-body">
+      <div className="stage-body frost-sheet">
         <section className="stage-main" aria-label="Preview">
           <div className="stage-view" ref={viewRef}>
             <div className="stage-frame" style={{ "--ar": frameAspect(aspect) } as React.CSSProperties}>
@@ -343,11 +362,16 @@ export default function Stage() {
               ) : (
                 clips.length === 0 && (
                   <div className="stage-title">
+                    <span className="stage-eyebrow">Now showing</span>
                     <strong>{name.toUpperCase()}</strong>
-                    <span>ADD A VIDEO OR PICTURE BELOW</span>
+                    <button type="button" className="btn btn-primary stage-title-cta" onClick={() => setPicker(true)}>
+                      <Icon name="plus" size={18} />
+                      Add a video or picture
+                    </button>
                   </div>
                 )
               )}
+              {recording && <span className="stage-live">REC</span>}
             </div>
             {fullscreen && (
               <button type="button" className="btn stage-fs-exit" onClick={() => void toggleFullscreen()}>
@@ -356,30 +380,40 @@ export default function Stage() {
             )}
           </div>
 
-          <div className="stage-bar">
+          <div className={`transport stage-bar ${playing ? "is-playing" : ""}`}>
             <button type="button" className="play-btn" aria-label={playing ? "Pause" : "Play preview"} onClick={() => void togglePlay()}>
-              <Icon name={playing ? "pause" : "play"} size={22} />
+              <Icon name={playing ? "pause" : "play"} size={20} />
             </button>
-            <span className="mono" ref={timeRef}>
+            <span className="mono transport-pos" ref={timeRef}>
               00:00
             </span>
-            <input
-              ref={scrubRef}
-              className="stage-scrub"
-              type="range"
-              min={0}
-              max={(endBar - 1) * 2}
-              step={0.01}
-              defaultValue={0}
-              aria-label="Position"
-              onPointerDown={() => (scrubbing.current = true)}
-              onPointerUp={() => (scrubbing.current = false)}
-              onBlur={() => (scrubbing.current = false)}
-              onChange={(e) => seekTo(Number(e.target.value))}
-            />
-            <span className="mono" ref={endRef}>
+            <div className="stage-scrub-wrap">
+              <div className="stage-marks" aria-hidden="true">
+                {clips.map((c) => {
+                  const { start, end } = clipRangeSec(c, bpm, projectStore.get().beatsPerBar);
+                  const total = span * barSeconds(bpm, projectStore.get().beatsPerBar);
+                  return <i key={c.id} className={c.id === selected?.id ? "sel" : ""} style={{ left: `${(start / total) * 100}%`, width: `${Math.max(0.5, ((Math.min(end, total) - start) / total) * 100)}%` }} />;
+                })}
+              </div>
+              <input
+                ref={scrubRef}
+                className="stage-scrub"
+                type="range"
+                min={0}
+                max={(endBar - 1) * 2}
+                step={0.01}
+                defaultValue={0}
+                aria-label="Position"
+                onPointerDown={() => (scrubbing.current = true)}
+                onPointerUp={() => (scrubbing.current = false)}
+                onBlur={() => (scrubbing.current = false)}
+                onChange={(e) => seekTo(Number(e.target.value))}
+              />
+            </div>
+            <span className="mono tp-end" ref={endRef}>
               00:00
             </span>
+            <LedMeter getLevel={masterPeak} label="Master output level" horizontal className="tp-meter" scale={{ segments: 20 }} />
           </div>
 
           <div className="stage-strip" aria-label="Clips">
@@ -387,7 +421,8 @@ export default function Stage() {
               <ClipCard key={c.id} clip={c} selected={c.id === selected?.id} onPick={() => uiStore.set((s) => ({ ...s, selectedClipId: c.id }))} />
             ))}
             <button type="button" className="stage-add" aria-expanded={picker} onClick={() => setPicker((v) => !v)}>
-              <span style={{ fontSize: 26, lineHeight: 1 }}>+</span>Add
+              <Icon name="plus" size={20} />
+              Add
             </button>
             {picker && (
               <div className="stage-picker" role="menu" aria-label="Add a video or picture">
@@ -399,9 +434,7 @@ export default function Stage() {
                   mediaAssets.map((a) => (
                     <button key={a.id} type="button" role="menuitem" onClick={() => addAsset(a)}>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
-                      <span className="mono" style={{ color: "var(--muted)" }}>
-                        {a.kind}
-                      </span>
+                      <span className="tag">{a.kind}</span>
                     </button>
                   ))
                 )}
@@ -411,17 +444,20 @@ export default function Stage() {
         </section>
 
         <aside className="stage-side" aria-label="Clip">
+          <Caption aside={selected ? (selected.kind === "image" ? "Image" : "Video") : "None selected"}>Clip</Caption>
           {selected && options ? (
             <>
-              <div>
-                <div className="label">Selected</div>
-                <h2>{selected.name}</h2>
-                <div className="mono" style={{ fontSize: 15, color: "var(--muted)", marginTop: 4 }}>
-                  {selected.kind === "image" ? "Image" : "Video"} · bar {selected.startBar}–{selected.startBar + selected.lengthBars}
+              <div className="stage-sel">
+                <span className="stage-sel-thumb" style={selThumb ? { backgroundImage: `url(${selThumb})` } : undefined} />
+                <div className="stage-sel-t">
+                  <h2>{selected.name}</h2>
+                  <span className="mono">
+                    bar {selected.startBar} to {selected.startBar + selected.lengthBars}
+                  </span>
                 </div>
               </div>
-              <div>
-                <div className="label">Fit</div>
+              <div className="stage-field">
+                <Caption>Fit</Caption>
                 <Seg
                   label="Fit"
                   value={options.fit}
@@ -433,20 +469,25 @@ export default function Stage() {
                   ]}
                 />
               </div>
-              <Slider label="Opacity" value={options.opacity} min={0} max={1} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => edit((c) => ({ ...c, stage: { ...stageOptions(c), opacity } }))} />
-              {selected.kind === "video" && (
-                <Slider label="Speed" value={options.speed} min={MIN_SPEED} max={MAX_SPEED} step={0.05} format={(v) => `${v.toFixed(2)}×`} onChange={(speed) => edit((c) => ({ ...c, stage: { ...stageOptions(c), speed } }))} />
-              )}
-              <Slider label="Show for" value={selected.lengthBars} min={1} max={MAX_SHOW_BARS} step={1} format={(v) => `${v} bar${v === 1 ? "" : "s"}`} onChange={(lengthBars) => edit((c) => ({ ...c, lengthBars }))} />
+              <div className="well stage-knobs">
+                <Knob label="Opacity" size="lg" value={options.opacity} min={0} max={1} step={0.01} defaultValue={1} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => edit((c) => ({ ...c, stage: { ...stageOptions(c), opacity } }))} />
+                <Knob label="Speed" size="lg" disabled={selected.kind !== "video"} value={options.speed} min={MIN_SPEED} max={MAX_SPEED} step={0.05} defaultValue={1} format={(v) => `${v.toFixed(2)}×`} onChange={(speed) => edit((c) => ({ ...c, stage: { ...stageOptions(c), speed } }))} />
+                <Knob label="Show for" size="lg" value={selected.lengthBars} min={1} max={MAX_SHOW_BARS} step={1} defaultValue={4} format={(v) => `${v} bar${v === 1 ? "" : "s"}`} onChange={(lengthBars) => edit((c) => ({ ...c, lengthBars }))} />
+              </div>
+              <p className="hint">{selected.kind === "image" ? "Pictures stay on screen for as long as their clip lasts on the timeline." : "Videos play in time with the transport and loop if the clip is longer than the file."}</p>
               <Button variant="danger" onClick={removeSelected}>
                 Remove from stage
               </Button>
-              <p className="hint">{selected.kind === "image" ? "Pictures stay on screen for as long as their clip lasts on the timeline." : "Videos play in time with the transport and loop if the clip is longer than the file."}</p>
             </>
           ) : (
-            <p className="hint" style={{ margin: 0 }}>
-              Pick a clip below to change how it fills the stage, how see-through it is and how long it shows. The glowing galaxy behind it listens to the music.
-            </p>
+            <div className="stage-side-empty">
+              <div className="well stage-knobs ghost" aria-hidden="true">
+                <Knob label="Opacity" size="lg" disabled value={1} min={0} max={1} onChange={() => undefined} format={() => "100%"} />
+                <Knob label="Speed" size="lg" disabled value={1} min={MIN_SPEED} max={MAX_SPEED} onChange={() => undefined} format={() => "1.00×"} />
+                <Knob label="Show for" size="lg" disabled value={4} min={1} max={MAX_SHOW_BARS} onChange={() => undefined} format={() => "4 bars"} />
+              </div>
+              <p className="hint">Pick a clip below to change how it fills the stage, how see-through it is and how long it shows. The galaxy behind it listens to the music.</p>
+            </div>
           )}
         </aside>
       </div>

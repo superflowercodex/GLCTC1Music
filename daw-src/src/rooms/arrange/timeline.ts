@@ -1,7 +1,7 @@
 import type { Project } from "../../project/model";
 import { timelineEndBar } from "../../project/actions";
 
-export const ZOOM = { min: 10, max: 64, step: 4, default: 22 } as const;
+export const ZOOM = { min: 4, max: 64, step: 4, default: 22 } as const;
 
 /** Grid sizes in beats; 0 stands for one whole bar, whatever the time signature. */
 export const GRID_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
@@ -11,6 +11,12 @@ export const GRID_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 2, label: "1/2" },
   { value: 0, label: "Bar" },
 ];
+
+export const HEAD_W = { min: 176, max: 420, default: 264 } as const;
+
+export function clampHeadWidth(px: number): number {
+  return Math.min(HEAD_W.max, Math.max(HEAD_W.min, Math.round(px)));
+}
 
 export const TIME_SIGNATURES: readonly number[] = [2, 3, 4, 5, 6, 7];
 
@@ -41,9 +47,19 @@ export function snapBar(bar: number, gridBars: number, snapOn: boolean): number 
   return Math.max(1, 1 + Math.round((clamped - 1) / gridBars) * gridBars);
 }
 
-/** How many bars the canvas shows: the work plus room to keep going, and never fewer than 16. */
+/** Bars of the song itself: from bar 1 to the end of the last clip. */
+export function songBars(project: Project): number {
+  return Math.max(0, Math.ceil(timelineEndBar(project) - 1 - 1e-9));
+}
+
+/** How many bars the canvas shows: the song plus a little room, never fewer than 8. */
 export function visibleBars(project: Project): number {
-  return Math.max(16, Math.ceil(timelineEndBar(project)) + 4, Math.ceil(project.loop.endBar) + 1);
+  return Math.max(8, songBars(project) + 2, Math.ceil(project.loop.endBar) - 1);
+}
+
+/** Pixels per beat that make `bars` bars exactly fill `widthPx`. */
+export function fitZoom(widthPx: number, bars: number, beatsPerBar: number): number {
+  return clampZoom(widthPx / (Math.max(1, bars) * beatsPerBar));
 }
 
 export function formatBarPosition(bar: number): string {
@@ -58,4 +74,10 @@ export function laneIndexAt(y: number, lanes: ReadonlyArray<{ top: number; botto
   const i = lanes.findIndex((l) => y >= l.top && y < l.bottom);
   if (i >= 0) return i;
   return y < lanes[0].top ? 0 : lanes.length - 1;
+}
+
+/** Bars between labelled ticks so that neighbouring labels never sit closer than ~56px. */
+export function barStride(ppb: number): number {
+  for (const n of [1, 2, 4, 8, 16, 32]) if (ppb * n >= 56) return n;
+  return 64;
 }

@@ -1,3 +1,5 @@
+import type { InstrumentState } from "../audio/types";
+import { FADER_MAX_DB, FADER_MIN_DB } from "../audio/mixMath";
 import { newId, type Asset, type Clip, type ClipKind, type Project, type Track, type TrackKind } from "./model";
 
 export class ArrangeError extends Error {
@@ -208,6 +210,23 @@ export function updateTrack(project: Project, trackId: string, patch: Partial<Om
   return touch(project, { tracks: project.tracks.map((t) => (t.id === trackId ? { ...t, ...patch } : t)) });
 }
 
+/** Track volume and pan as the Mixer fader and pan knob set them: gain clamped to the fader's -60..+6 dB, pan to -1..1. */
+export function setTrackMix(project: Project, trackId: string, mix: { gainDb?: number; pan?: number }): Project {
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track) return project;
+  const gainDb = mix.gainDb === undefined ? track.gainDb : Math.round(clamp(mix.gainDb, FADER_MIN_DB, FADER_MAX_DB) * 10) / 10;
+  const pan = mix.pan === undefined ? track.pan : Math.round(clamp(mix.pan, -1, 1) * 100) / 100;
+  if (gainDb === track.gainDb && pan === track.pan) return project;
+  return updateTrack(project, trackId, { gainDb, pan });
+}
+
+/** Replaces an instrument slot's saved state (its patterns, knobs and samples). */
+export function setSlotState(project: Project, slotId: string, state: InstrumentState): Project {
+  const slot = project.instruments.find((s) => s.id === slotId);
+  if (!slot || slot.state === state) return project;
+  return touch(project, { instruments: project.instruments.map((s) => (s.id === slotId ? { ...s, state } : s)) });
+}
+
 export function renameTrack(project: Project, trackId: string, name: string): Project {
   const trimmed = name.trim();
   return trimmed ? updateTrack(project, trackId, { name: trimmed }) : project;
@@ -260,6 +279,14 @@ export function moveClip(project: Project, clipId: string, to: { startBar?: numb
   return touch(project, { tracks });
 }
 
+/** Clamps a vertical drag so the topmost and bottommost clips stay on real tracks and keep the rows between them. */
+export function groupTrackShift(trackIndexes: readonly number[], deltaTracks: number, trackCount: number): number {
+  if (trackIndexes.length === 0) return 0;
+  const lo = -Math.min(...trackIndexes);
+  const hi = trackCount - 1 - Math.max(...trackIndexes);
+  return clamp(Math.round(deltaTracks), Math.min(lo, 0), Math.max(hi, 0));
+}
+
 /**
  * Drags a selection: all clips shift together by `deltaBars` (never before bar 1) and by
  * `deltaTracks` rows where the destination track accepts them.
@@ -271,10 +298,10 @@ export function moveClips(project: Project, clipIds: readonly string[], delta: {
   const minStart = Math.min(...located.map((l) => l.clip.startBar));
   const deltaBars = Math.max(delta.deltaBars, 1 - minStart);
   const dest = new Map<string, string>();
-  for (const l of located) {
-    const candidate = project.tracks[clamp(l.trackIndex + delta.deltaTracks, 0, project.tracks.length - 1)];
-    dest.set(l.clip.id, trackAccepts(candidate, l.clip.kind) ? candidate.id : l.track.id);
-  }
+  const rows = groupTrackShift(located.map((l) => l.trackIndex), delta.deltaTracks, project.tracks.length);
+  // All or nothing: a group that cannot land whole stays on its tracks, so the rows between its clips never collapse.
+  const fits = located.every((l) => trackAccepts(project.tracks[l.trackIndex + rows], l.clip.kind));
+  for (const l of located) dest.set(l.clip.id, project.tracks[l.trackIndex + (fits ? rows : 0)].id);
   const tracks = project.tracks.map((t) => {
     const stay = t.clips.filter((c) => !ids.has(c.id));
     const arriving = located

@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { noteName } from "../../../audio/instruments/voice/scales";
-import { IconButton } from "../../../ui/controls";
 import { useComputerKeys } from "./hooks";
 
 const ROW = "q2w3er5t6y7ui9o0p";
@@ -53,11 +52,15 @@ export function PianoStrip({
   return (
     <div className="piano">
       <div className="piano-octave">
-        <IconButton icon="back" label="Octave down" onClick={() => setOctave((o) => Math.max(0, o - 1))} />
-        <span className="mono" aria-live="polite">
+        <button type="button" className="hw-key sq sm" aria-label="Octave down" onClick={() => setOctave((o) => Math.max(0, o - 1))}>
+          −
+        </button>
+        <span className="hw-display" style={{ height: 30, padding: "0 10px", fontSize: 15 }} aria-live="polite">
           C{octave}
         </span>
-        <IconButton icon="next" label="Octave up" onClick={() => setOctave((o) => Math.min(6, o + 1))} />
+        <button type="button" className="hw-key sq sm" aria-label="Octave up" onClick={() => setOctave((o) => Math.min(6, o + 1))}>
+          +
+        </button>
       </div>
       <div className="piano-keys" role="group" aria-label="Keyboard">
         {Array.from({ length: count }, (_, i) => {

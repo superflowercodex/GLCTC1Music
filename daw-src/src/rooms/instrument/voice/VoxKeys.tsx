@@ -2,7 +2,6 @@ import { useRef } from "react";
 import type { Vox } from "../../../audio/instruments/vox";
 import { describeRange, zoneRanges } from "../../../audio/instruments/voice/sampler";
 import { noteName } from "../../../audio/instruments/voice/scales";
-import { Button, IconButton } from "../../../ui/controls";
 import { PianoStrip } from "./PianoStrip";
 
 const COLORS = ["#8e7cff", "#7cf0c0", "#79ebff", "#ff63d8", "#ffd36a"];
@@ -25,7 +24,7 @@ export function VoxKeys({ vox }: { vox: Vox }) {
         if (files.length > 0) void vox.addSamples(files);
       }}
     >
-      <div className="voice-label">Each sample plays across the keys it covers</div>
+      <div className="hw-title">Each sample plays across the keys it covers</div>
       <div className="zone-strip" role="img" aria-label="Key zones of your samples">
         {zones.length === 0 && <div className="wave-empty">No samples yet. The piano plays the keys.</div>}
         {zones.map((zone, i) => {
@@ -46,27 +45,35 @@ export function VoxKeys({ vox }: { vox: Vox }) {
       <div className="sample-list scroll-y">
         {zones.map((zone, i) => (
           <div className="sample-row" key={zone.assetId + i}>
-            <span className="dot" style={{ background: COLORS[i % COLORS.length] }} />
+            <span className="dot" style={{ background: COLORS[i % COLORS.length], color: COLORS[i % COLORS.length] }} />
             <span className="name">{zone.name}</span>
-            <span className="range mono">{describeRange(ranges[i])}</span>
+            <span className="range">{describeRange(ranges[i])}</span>
             <div className="stepper" role="group" aria-label={`Root key of ${zone.name}`}>
-              <IconButton icon="back" label="Root note down" onClick={() => vox.setZoneRoot(i, zone.root - 1)} />
-              <span className="root mono">{noteName(zone.root)}</span>
-              <IconButton icon="next" label="Root note up" onClick={() => vox.setZoneRoot(i, zone.root + 1)} />
+              <button type="button" className="hw-key sq sm" aria-label="Root note down" onClick={() => vox.setZoneRoot(i, zone.root - 1)}>
+                −
+              </button>
+              <span className="root">{noteName(zone.root)}</span>
+              <button type="button" className="hw-key sq sm" aria-label="Root note up" onClick={() => vox.setZoneRoot(i, zone.root + 1)}>
+                +
+              </button>
             </div>
-            <IconButton icon="trash" label={`Remove ${zone.name}`} onClick={() => vox.removeZone(i)} />
+            <button type="button" className="hw-key sq sm" aria-label={`Remove ${zone.name}`} onClick={() => vox.removeZone(i)}>
+              ✕
+            </button>
           </div>
         ))}
       </div>
       <div className="voice-bar">
-        <Button onClick={() => picker.current?.click()}>+ Add a sample</Button>
+        <button type="button" className="hw-key" onClick={() => picker.current?.click()}>
+          Add a sample
+        </button>
         {zones.length > 0 && (
-          <Button variant="danger" onClick={() => vox.clearZones()}>
+          <button type="button" className="hw-key" onClick={() => vox.clearZones()}>
             Clear key samples
-          </Button>
+          </button>
         )}
         <span className="spacer" />
-        <span className="voice-note">Drop audio files here. The root key is detected; correct it with the arrows.</span>
+        <span className="hw-note">Drop audio files here. The root key is detected; correct it with the arrows.</span>
         <input
           ref={picker}
           className="voice-hidden-input"

@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import type { Instrument } from "../../../audio/types";
 import { exportPresetText, importPresetText } from "../../../audio/instruments/synth/presetFile";
-import { Button } from "../../../ui/controls";
 import { messageOf, showToast } from "./toast";
 
 function download(filename: string, text: string): void {
@@ -45,12 +44,12 @@ export function PresetFileButtons({ instrument }: { instrument: Instrument }) {
           e.target.value = "";
         }}
       />
-      <Button className="sy-file" onClick={() => input.current?.click()} title="Load a preset from a file">
+      <button type="button" className="hw-key sy-file" onClick={() => input.current?.click()} title="Load a preset from a file">
         Import
-      </Button>
-      <Button className="sy-file" onClick={onExport} title="Save this sound to a file">
+      </button>
+      <button type="button" className="hw-key sy-file" onClick={onExport} title="Save this sound to a file">
         Export
-      </Button>
+      </button>
     </>
   );
 }

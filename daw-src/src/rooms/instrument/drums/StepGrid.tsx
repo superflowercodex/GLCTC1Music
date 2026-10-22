@@ -1,4 +1,5 @@
 import { memo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { GlassWindow } from "../../../ui/hardware";
 import { peekEngine } from "../../../audio/engine";
 import { useRaf } from "../../../ui/hooks";
 import "./drums.css";
@@ -96,7 +97,7 @@ export const StepGrid = memo(function StepGrid({ rows, cols, label, labelWidth =
           </div>
         </div>
       )}
-      <div className="sg-rows" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))` }}>
+      <GlassWindow className="sg-rows" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(var(--sg-row-min), 1fr))` }}>
         {rows.map((row, r) => (
           <div className={`sg-row ${row.dim ? "dim" : ""}`} key={row.key} style={{ "--c": row.color } as CSSProperties}>
             {row.onSelect ? (
@@ -138,7 +139,7 @@ export const StepGrid = memo(function StepGrid({ rows, cols, label, labelWidth =
             </div>
           </div>
         ))}
-      </div>
+      </GlassWindow>
     </div>
   );
 });

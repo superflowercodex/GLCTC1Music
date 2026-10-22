@@ -63,7 +63,7 @@ describe("mixer room renders", () => {
     expect(html).toContain("Compressor");
     expect(html).toContain("Filter");
     expect(html).toContain("+ Add");
-    expect(html).toContain("Reverb");
+    expect(html).toContain("Track 1 reverb send");
   });
 
   it("outputs tab explains missing browser support and lists routes", () => {

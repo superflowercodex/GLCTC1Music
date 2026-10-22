@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { getEngine, peekEngine } from "../../../audio/engine";
 import { togglePlay } from "../../../audio/transport";
 import type { Instrument } from "../../../audio/types";
 import { ensureInstrument } from "../../../project/instruments";
 import type { Clip, Note, Track } from "../../../project/model";
 import { projectStore } from "../../../store/project";
-import { Button, Chip } from "../../../ui/controls";
+import { Button, Seg } from "../../../ui/controls";
 import { useRaf } from "../../../ui/hooks";
 import {
   addNote,
@@ -32,12 +33,17 @@ interface Props {
   clip: Clip;
   track: Track | undefined;
   time: TimeBase;
+  /** Where the editor header wants this tab's controls, so they share one calm toolbar with the tab switch. */
+  toolbar: HTMLElement | null;
 }
 
 const HIGH = 107;
 const LOW = 24;
 const ROWS = HIGH - LOW + 1;
-const VISIBLE_ROWS = 12;
+/** Tall enough to hit and read, short enough that two octaves fit even in a 720px window. */
+const ROW_H = 20;
+const RULER_H = 28;
+const MIDDLE_C = 60;
 const GRIDS: ReadonlyArray<{ value: NoteGrid; label: string }> = [
   { value: 1, label: "1/16" },
   { value: 2, label: "1/8" },
@@ -61,11 +67,11 @@ function isTypingTarget(t: EventTarget | null): boolean {
   return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 }
 
-export function NotesTab({ clip, track, time }: Props) {
+export function NotesTab({ clip, track, time, toolbar }: Props) {
   const [grid, setGrid] = useState<NoteGrid>(1);
   const [recording, setRecording] = useState(false);
   const [status, setStatus] = useState(KEYBOARD_HINT);
-  const [rowH, setRowH] = useState(26);
+  const rowH = ROW_H;
   const [cursor, setCursor] = useState<{ pitch: number; step: number } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const gridEl = useRef<HTMLDivElement>(null);
@@ -73,7 +79,6 @@ export function NotesTab({ clip, track, time }: Props) {
   const lane = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const centred = useRef(false);
-  const measuredRowH = useRef(0);
   const instrumentRef = useRef<Instrument | undefined>(undefined);
   const recorderRef = useRef<{ recorder: NoteRecorder; startedTransport: boolean; midi?: MidiConnection } | null>(null);
 
@@ -116,30 +121,24 @@ export function NotesTab({ clip, track, time }: Props) {
     [getInstrument],
   );
 
-  // Row height follows the panel so exactly twelve rows are visible whatever the window height.
+  // Open on the clip's own note range (or around middle C when empty); waits for the first real height.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const measure = () => {
-      const next = Math.max(16, Math.min(34, Math.floor(el.clientHeight / VISIBLE_ROWS)));
-      measuredRowH.current = next;
-      setRowH(next);
+    const place = () => {
+      if (centred.current || el.clientHeight <= RULER_H) return;
+      centred.current = true;
+      const pitches = notes.map((n) => n.pitch);
+      const middle = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : MIDDLE_C;
+      const rowTop = rowOf(Math.round(middle)) * ROW_H;
+      el.scrollTop = Math.max(0, rowTop + ROW_H / 2 - (el.clientHeight - RULER_H) / 2);
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+    place();
+    const ro = new ResizeObserver(place);
     ro.observe(el);
     return () => ro.disconnect();
+    // Only the first open centres; later note edits must not move the view under the user's hands.
   }, []);
-
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    // Wait for the render that uses the measured row height, or the scroll offset would be computed for the wrong size.
-    if (!el || centred.current || measuredRowH.current !== rowH) return;
-    centred.current = true;
-    const pitches = notes.map((n) => n.pitch).sort((a, b) => a - b);
-    const middle = pitches.length ? pitches[Math.floor(pitches.length / 2)] : 65;
-    el.scrollTop = Math.max(0, rowOf(Math.min(HIGH, middle + Math.floor(VISIBLE_ROWS / 2))) * rowH);
-  }, [rowH, notes]);
 
   const pointer = (e: { clientX: number; clientY: number }) => {
     const rect = gridEl.current!.getBoundingClientRect();
@@ -220,7 +219,7 @@ export function NotesTab({ clip, track, time }: Props) {
       if (el) {
         const top = rowOf(next.pitch) * rowH;
         if (top < el.scrollTop) el.scrollTop = top;
-        else if (top + rowH > el.scrollTop + el.clientHeight) el.scrollTop = top + rowH - el.clientHeight;
+        else if (top + rowH > el.scrollTop + el.clientHeight - RULER_H) el.scrollTop = top + rowH - (el.clientHeight - RULER_H);
       }
     };
     if (e.key === "ArrowUp") move(1, 0);
@@ -396,44 +395,64 @@ export function NotesTab({ clip, track, time }: Props) {
   const stepsLabel = `${total} steps`;
   const barLines = Math.round(time.beatsPerBar * 4);
 
-  return (
-    <>
-      <div className="ce-actions" role="group" aria-label="Piano roll controls">
-        <span className="ce-label">Grid</span>
-        {GRIDS.map((g) => (
-          <Chip key={g.value} active={grid === g.value} onClick={() => setGrid(g.value)}>
-            {g.label}
-          </Chip>
-        ))}
-        <span className="ce-label ce-gap">Length</span>
-        {LENGTHS.map((bars) => (
-          <Chip key={bars} active={clip.lengthBars === bars} onClick={() => projectStore.set((p) => {
+  const controls = (
+    <div className="ce-tools-inner" role="group" aria-label="Piano roll controls">
+      <span className="ce-label">Grid</span>
+      <Seg<NoteGrid> label="Grid" className="ce-seg" value={grid} onChange={setGrid} options={GRIDS} />
+      <span className="ce-label">Bars</span>
+      <Seg<number>
+        label="Clip length in bars"
+        className="ce-seg"
+        value={LENGTHS.includes(clip.lengthBars as (typeof LENGTHS)[number]) ? clip.lengthBars : 0}
+        onChange={(bars) =>
+          projectStore.set((p) => {
             const c = findClip(p, clip.id)?.clip;
             return c ? replaceClip(p, clip.id, [setMidiLength(c, bars, time)]) : p;
-          })}>
-            {bars === 1 ? "1 bar" : `${bars} bars`}
-          </Chip>
-        ))}
-        <Button onClick={() => writeNotes((cur, t) => quantize(cur, grid, t))} title="Snap every note to the grid">
-          Quantize
-        </Button>
-        <Button onClick={() => writeNotes(() => [])} disabled={!notes.length} variant="danger">
-          Clear notes
-        </Button>
-        <Button variant={recording ? "primary" : "ghost"} onClick={() => (recording ? void stopRecording() : void startRecording())}>
-          {recording ? "Stop recording" : "Record from keys"}
-        </Button>
-      </div>
-      <p className="ce-status" role="status">{status}</p>
+          })
+        }
+        options={LENGTHS.map((bars) => ({ value: bars, label: String(bars) }))}
+      />
+      <Button className="ce-btn" onClick={() => writeNotes((cur, t) => quantize(cur, grid, t))} title="Snap every note to the grid">
+        Quantize
+      </Button>
+      <Button className="ce-btn" onClick={() => writeNotes(() => [])} disabled={!notes.length} variant="danger">
+        Clear
+      </Button>
+      <Button
+        className="ce-btn"
+        variant={recording ? "primary" : "ghost"}
+        title={`Record notes as you play. ${KEYBOARD_HINT}`}
+        onClick={() => (recording ? void stopRecording() : void startRecording())}
+      >
+        {recording ? "Stop" : "Record"}
+      </Button>
+    </div>
+  );
+  const barLabels = Array.from({ length: Math.ceil(total / barLines) }, (_, i) => i);
+
+  return (
+    <>
+      {toolbar && createPortal(controls, toolbar)}
+      {recording && <p className="ce-status" role="status">{status}</p>}
 
       <div className="ce-roll">
         <div ref={scroller} className="ce-roll-scroll">
+          <div className="ce-ruler" style={{ height: RULER_H, "--steps": total, "--bar": barLines } as CSSProperties}>
+            <div className="ce-ruler-corner" />
+            <div className="ce-ruler-bars">
+              {barLabels.map((i) => (
+                <span key={i} style={{ left: `${((i * barLines) / total) * 100}%` }}>
+                  {i + 1}
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="ce-roll-inner" style={{ height: ROWS * rowH }}>
             <div className="ce-keys" aria-hidden="true">
               {Array.from({ length: ROWS }, (_, r) => {
                 const pitch = HIGH - r;
                 const black = isBlackKey(pitch);
-                const label = pitch % 12 === 0 || rowH >= 20 ? noteName(pitch) : "";
+                const label = pitch % 12 === 0 ? noteName(pitch) : "";
                 return (
                   <div key={pitch} className={`ce-key ${black ? "black" : ""}`} style={{ height: rowH }}>
                     {label}

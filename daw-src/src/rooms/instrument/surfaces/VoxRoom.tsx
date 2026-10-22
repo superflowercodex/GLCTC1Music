@@ -3,11 +3,12 @@ import { Vox } from "../../../audio/instruments/vox";
 import type { Instrument } from "../../../audio/types";
 import { projectStore } from "../../../store/project";
 import { useStore } from "../../../store/store";
-import { Button, Seg } from "../../../ui/controls";
 import { InstrumentShell } from "../InstrumentShell";
+import { HwChoice } from "../synth/HwChoice";
 import { bounceVox } from "../voice/bounce";
 import { ParamControl } from "../voice/ParamControl";
 import { ModulePanel } from "../voice/ModulePanel";
+import { SidePlate } from "../voice/SidePlate";
 import type { ModuleId } from "../voice/SignalChain";
 import { VoxChoir } from "../voice/VoxChoir";
 import { VoxKeys } from "../voice/VoxKeys";
@@ -29,18 +30,11 @@ const INPUTS = [
 
 function SidePanel({ title, blurb, ids, vox }: { title: string; blurb: string; ids: readonly string[]; vox: Vox }) {
   return (
-    <>
-      <div>
-        <div className="voice-label">Editing</div>
-        <div className="module-title">{title}</div>
-        <div className="module-blurb">{blurb}</div>
-      </div>
-      <div className="module-body scroll-y mint-sliders" style={{ flex: 1 }}>
-        {ids.map((id) => (
-          <ParamControl key={id} instrument={vox} id={id} />
-        ))}
-      </div>
-    </>
+    <SidePlate eyebrow="Editing" title={title} blurb={blurb}>
+      {ids.map((id) => (
+        <ParamControl key={id} instrument={vox} id={id} />
+      ))}
+    </SidePlate>
   );
 }
 
@@ -89,24 +83,25 @@ export default function VoxRoom({ instrument }: { instrument: Instrument }) {
       bounceBusy={busy}
       footerExtra={
         <>
-          <Button variant={vox.midiRecording ? "primary" : "ghost"} onClick={() => (vox.midiRecording ? vox.stopMidiRecord() : vox.startMidiRecord())}>
+          <button type="button" className={`hw-key led ${vox.midiRecording ? "on" : ""}`} style={{ "--lit": "var(--live)" } as React.CSSProperties} aria-pressed={vox.midiRecording} onClick={() => (vox.midiRecording ? vox.stopMidiRecord() : vox.startMidiRecord())}>
             {vox.midiRecording ? "Stop MIDI" : "Record MIDI"}
-          </Button>
+          </button>
           {vox.take.length > 0 && !vox.midiRecording && (
-            <Button variant="outline" onClick={() => vox.clearTake()} title="Remove the recorded MIDI take">
+            <button type="button" className="hw-key" onClick={() => vox.clearTake()} data-tip="Remove the recorded MIDI take">
               Clear take ({vox.take.length})
-            </Button>
+            </button>
           )}
-          <span className="voice-note" style={{ marginLeft: "auto" }}>
+          <span className="hw-note foot-note" style={{ marginLeft: "auto" }}>
             Pads and key samples saved to project
           </span>
         </>
       }
     >
-      <div className="voice-bar voice-seg-mint">
-        <Seg label="View" value={view} options={VIEWS} onChange={setView} />
+    <div className="vx hw-plate">
+      <div className="voice-bar">
+        <HwChoice label="View" value={view} options={VIEWS} onChange={setView} className="vx-views" />
         <span className="spacer" />
-        <Seg
+        <HwChoice
           label="Input"
           value={vox.getParam("source")}
           options={INPUTS}
@@ -122,6 +117,7 @@ export default function VoxRoom({ instrument }: { instrument: Instrument }) {
       {view === "choir" && <VoxChoir vox={vox} />}
       {view === "pads" && <VoxPads vox={vox} selected={pad} onSelect={setPad} />}
       {view === "keys" && <VoxKeys vox={vox} />}
+    </div>
     </InstrumentShell>
   );
 }

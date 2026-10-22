@@ -4,7 +4,7 @@ import type { Clip } from "../../../project/model";
 import { useRaf } from "../../../ui/hooks";
 import { clipSeconds, stepSeconds, barSeconds, type TimeBase } from "./clipEdits";
 import { peaksForRange, type PeakIndex } from "./peaks";
-import { fadeLabel, formatSeconds } from "./shared";
+import { accent, fadeLabel, formatSeconds } from "./shared";
 
 export interface Range {
   a: number;
@@ -32,7 +32,7 @@ interface Props {
 
 const HANDLE_ZONE = 30;
 const HANDLE_SIZE = 14;
-const COLORS = { wave: "rgba(121,235,255,0.55)", waveSel: "#bff6ff", amber: "#ffd36a" };
+const COLORS = { waveSel: "rgba(255,255,255,0.92)", amber: "#ffd36a" };
 
 type Drag = { kind: "select"; anchor: number; startX: number; moved: boolean } | { kind: "fade"; side: "in" | "out" };
 
@@ -78,8 +78,15 @@ export function WaveformView({ clip, buffer, index, ratio, time, view, selection
 
     // Beat lines first so the waveform sits on top of them.
     const beatSec = 60 / time.bpm;
-    g.fillStyle = "rgba(255,255,255,0.06)";
-    for (let t = Math.ceil(view.start / beatSec) * beatSec; t < view.start + view.span; t += beatSec) g.fillRect(Math.round(toX(t)), 0, 1, size.h);
+    // Beat ticks are the warp grid: bar lines brighter, beat lines faint, and only while there is room between them.
+    const barSec = beatSec * time.beatsPerBar;
+    const beatPx = toX(beatSec) - toX(0);
+    for (let t = Math.ceil(view.start / beatSec - 1e-6) * beatSec; t < view.start + view.span; t += beatSec) {
+      const isBar = Math.abs(t / barSec - Math.round(t / barSec)) < 1e-4;
+      if (!isBar && beatPx < 10) continue;
+      g.fillStyle = isBar ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.07)";
+      g.fillRect(Math.round(toX(t)), 0, 1, size.h);
+    }
     g.fillStyle = "rgba(255,255,255,0.12)";
     g.fillRect(0, Math.round(mid), size.w, 1);
 
@@ -94,18 +101,19 @@ export function WaveformView({ clip, buffer, index, ratio, time, view, selection
     const selA = selection ? Math.floor(toX(selection.a)) : 0;
     const selB = selection ? Math.ceil(toX(selection.b)) : -1;
     const amp = (size.h / 2) * 0.92;
+    const waveColor = accent(el, "c0");
     for (let x = 0; x < size.w; x++) {
       const bin = clip.reversed ? size.w - 1 - x : x;
       const top = Math.max(1, peaks.max[bin] * amp);
       const bottom = Math.max(1, -peaks.min[bin] * amp);
-      g.fillStyle = x >= selA && x <= selB ? COLORS.waveSel : COLORS.wave;
+      g.fillStyle = x >= selA && x <= selB ? COLORS.waveSel : waveColor;
       g.fillRect(x, mid - top, 1, top + bottom);
     }
 
     // Fade ramps darken the part that is quieter than the clip's full level.
     const fadeInSec = clip.fadeInSteps * stepSec;
     const fadeOutSec = clip.fadeOutSteps * stepSec;
-    g.fillStyle = "rgba(7,11,28,0.72)";
+    g.fillStyle = "rgba(0,0,0,0.62)";
     if (fadeInSec > 0) {
       const x0 = toX(0);
       const x1 = toX(fadeInSec);

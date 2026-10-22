@@ -2,8 +2,9 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { clipEndBar, GAIN_DB_RANGE, minClipBars, moveClip, PITCH_RANGE, resizeClip, updateClip, updateClips } from "../../project/actions";
 import type { Clip, Project, Track } from "../../project/model";
 import { projectStore } from "../../store/project";
-import { Slider } from "../../ui/controls";
+import { Knob } from "../../ui/Knob";
 import { deleteSelected, duplicateSelected, splitAtPlayhead } from "./ops";
+import { selectClips } from "./selection";
 import { formatBarPosition } from "./timeline";
 
 function NumField({ label, value, step, min, onCommit }: { label: string; value: number; step: number; min: number; onCommit: (v: number) => void }) {
@@ -43,6 +44,12 @@ function fadeLabel(steps: number): string {
   return `${Math.round(beats * 100) / 100} beat${beats === 1 ? "" : "s"}`;
 }
 
+/** The value every item shares, or null when they differ. */
+export function sharedValue<T>(items: readonly T[], read: (item: T) => number): number | null {
+  const first = read(items[0]);
+  return items.every((i) => read(i) === first) ? first : null;
+}
+
 interface Props {
   project: Project;
   clips: readonly Clip[];
@@ -50,7 +57,7 @@ interface Props {
   onOpenEditor: (clipId: string) => void;
 }
 
-/** Floats over the bottom of the timeline. Sliders act on every selected clip; the numeric fields on a single one. */
+/** Sits under the timeline. Knobs act on every selected clip; the numeric fields on a single one. */
 export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
   const first = clips[0];
   const single = clips.length === 1;
@@ -60,14 +67,21 @@ export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
   const color = track?.color ?? "#79ebff";
   const hasPitch = clips.every((c) => c.kind === "audio");
   const hasGain = clips.every((c) => c.kind === "audio" || c.kind === "video");
-  const maxFade = Math.max(1, Math.min(spb, (first.lengthBars * spb) / 2));
+  const maxFade = Math.max(1, Math.min(spb, ...clips.map((c) => (c.lengthBars * spb) / 2)));
   const editable = single && first.kind !== "video" && first.kind !== "image";
   const grid = Math.max(0.0625, minClipBars(project));
+
+  const gain = sharedValue(clips, (c) => c.gainDb);
+  const pitch = sharedValue(clips, (c) => c.pitchSemitones);
+  const fade = sharedValue(clips, (c) => Math.max(c.fadeInSteps, c.fadeOutSteps));
+  const trackCount = new Set(tracks.filter((t) => t.clips.some((c) => ids.includes(c.id))).map((t) => t.id)).size;
+  const spanFrom = Math.min(...clips.map((c) => c.startBar));
+  const spanTo = Math.max(...clips.map(clipEndBar));
 
   const patch = (p: Partial<Omit<Clip, "id" | "startBar" | "lengthBars">>) => projectStore.set((s) => updateClips(s, ids, p));
 
   return (
-    <aside className="arr-inspector" aria-label="Selected clip" style={{ "--c": color } as CSSProperties}>
+    <aside className="arr-inspector" aria-label={single ? "Selected clip" : "Selected clips"} style={{ "--c": color } as CSSProperties}>
       <div className="insp-id">
         <span className="insp-dot" />
         <div>
@@ -81,47 +95,56 @@ export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
               onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             />
           ) : (
-            <div className="insp-name">{clips.length} clips</div>
+            <div className="insp-name">{clips.length} clips selected</div>
           )}
           <div className="mono insp-meta">
             {single
               ? `${track?.name ?? ""} · Bar ${formatBarPosition(first.startBar)}–${formatBarPosition(clipEndBar(first))}`
-              : "Edits apply to all"}
+              : `${trackCount} track${trackCount === 1 ? "" : "s"} · Bar ${formatBarPosition(spanFrom)}–${formatBarPosition(spanTo)}`}
           </div>
         </div>
       </div>
 
-      <div className="insp-sliders">
+      <div className="insp-knobs">
         {hasGain && (
-          <Slider
+          <Knob
+            size="sm"
             label="Gain"
-            value={first.gainDb}
+            color={color}
+            value={gain ?? first.gainDb}
             min={GAIN_DB_RANGE.min}
             max={GAIN_DB_RANGE.max}
             step={0.5}
+            defaultValue={0}
             onChange={(v) => patch({ gainDb: v })}
-            format={(v) => (v <= GAIN_DB_RANGE.min ? "Off" : `${v > 0 ? "+" : ""}${v} dB`)}
+            format={(v) => (gain === null ? "Mixed" : v <= GAIN_DB_RANGE.min ? "Off" : `${v > 0 ? "+" : ""}${v} dB`)}
           />
         )}
         {hasPitch && (
-          <Slider
+          <Knob
+            size="sm"
             label="Pitch"
-            value={first.pitchSemitones}
+            color={color}
+            value={pitch ?? first.pitchSemitones}
             min={PITCH_RANGE.min}
             max={PITCH_RANGE.max}
             step={1}
+            defaultValue={0}
             onChange={(v) => patch({ pitchSemitones: v })}
-            format={(v) => `${v > 0 ? "+" : ""}${v} st`}
+            format={(v) => (pitch === null ? "Mixed" : `${v > 0 ? "+" : ""}${v} st`)}
           />
         )}
-        <Slider
+        <Knob
+          size="sm"
           label="Fade"
-          value={Math.min(maxFade, Math.max(first.fadeInSteps, first.fadeOutSteps))}
+          color={color}
+          value={Math.min(maxFade, fade ?? Math.max(first.fadeInSteps, first.fadeOutSteps))}
           min={0}
           max={maxFade}
           step={1}
+          defaultValue={0}
           onChange={(v) => patch({ fadeInSteps: v, fadeOutSteps: v })}
-          format={fadeLabel}
+          format={(v) => (fade === null ? "Mixed" : fadeLabel(v))}
         />
       </div>
 
@@ -154,13 +177,18 @@ export function Inspector({ project, clips, tracks, onOpenEditor }: Props) {
         >
           Open editor
         </button>
-        <button type="button" className="btn" onClick={splitAtPlayhead}>
+        {!single && (
+          <button type="button" className="btn btn-sm" onClick={() => selectClips([])}>
+            Deselect
+          </button>
+        )}
+        <button type="button" className="btn btn-sm" onClick={splitAtPlayhead}>
           Split
         </button>
-        <button type="button" className="btn" onClick={duplicateSelected}>
+        <button type="button" className="btn btn-sm" onClick={duplicateSelected}>
           Duplicate
         </button>
-        <button type="button" className="btn btn-danger" onClick={deleteSelected}>
+        <button type="button" className="btn btn-danger btn-sm" onClick={deleteSelected}>
           Delete
         </button>
       </div>

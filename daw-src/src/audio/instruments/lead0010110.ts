@@ -81,7 +81,7 @@ const PARAMS: readonly ParamDef[] = [
   { id: "tapeStop", label: "Tape stop", group: "Glitch", min: 0, max: 1, def: 0, unit: "%" },
 ];
 
-const PRESETS = factoryPresets("lead", [
+export const PRESETS = factoryPresets("lead", [
   ["Neon Arp", "Lead", { cutoff: 2400, resonance: 0.3, filterEnv: 0.6, attack: 0.004, decay: 0.32, sustain: 0.55, release: 0.42, chorus: 0.34, delay: 0.26, reverb: 0.4, drive: 0.12, l2level: 0.52 }],
   ["Glass Pluck", "Pluck", { cutoff: 5200, filterEnv: 0.8, attack: 0.002, decay: 0.16, sustain: 0.1, release: 0.3, sub: 0.2, l1wave: 2, l2on: 0, l3on: 1, l3level: 0.5, l3oct: 1, chorus: 0.2, delay: 0.3, delayFb: 0.38, reverb: 0.3, drive: 0 }],
   ["Heat Haze", "Pad", { cutoff: 1800, resonance: 0.2, filterEnv: 0.25, attack: 0.55, decay: 0.8, sustain: 0.85, release: 1.4, sub: 0.3, l2wave: 0, l2oct: 0, l2detune: -11, l2level: 0.7, l3on: 1, l3wave: 0, l3oct: 0, l3detune: 12, l3level: 0.6, chorus: 0.6, delay: 0.2, reverb: 0.55, lfoDepth: 0.2, lfoRate: 0.4 }],

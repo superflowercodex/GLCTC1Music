@@ -4,11 +4,13 @@ import { projectStore } from "../store/project";
 import { useStore } from "../store/store";
 import { RoomFrame } from "../ui/RoomFrame";
 import { Icon } from "../ui/Icon";
-import { handleMediaFiles, MediaTab } from "./library/MediaTab";
+import { Caption } from "../ui/Caption";
+import { handleMediaFiles, KIND_COLOR, MediaTab, UploadGlyph } from "./library/MediaTab";
 import { PluginsTab } from "./library/PluginsTab";
 import { openProjectFromInput, ProjectsTab } from "./library/ProjectsTab";
 import { openProjectFile } from "./library/actions";
 import { PROJECT_FILE } from "./library/media";
+import "../ui/frost.css";
 import "./library/library.css";
 
 type Tab = "media" | "projects" | "plugins";
@@ -26,8 +28,17 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
+const KINDS = [
+  { kind: "audio", label: "Audio" },
+  { kind: "midi", label: "MIDI" },
+  { kind: "video", label: "Video" },
+  { kind: "image", label: "Images" },
+] as const;
+
+/** A segmented meter like the platform's: the fill is split by media kind, so it reads as a breakdown and not only a percentage. */
 function StorageBar() {
-  const assetCount = useStore(projectStore, (p) => p.assets.length);
+  const assets = useStore(projectStore, (p) => p.assets);
+  const assetCount = assets.length;
   const [used, setUsed] = useState<number | null>(null);
   const [quota, setQuota] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,11 +53,25 @@ function StorageBar() {
     void navigator.storage?.estimate?.().then((e) => setQuota(e.quota ?? null), () => setQuota(null));
   }, [assetCount]);
   const pct = used !== null && quota ? Math.min(100, (used / quota) * 100) : 0;
+  const perKind = KINDS.map((k) => ({ ...k, bytes: assets.filter((a) => a.kind === k.kind).reduce((n, a) => n + a.bytes, 0) })).filter((k) => k.bytes > 0);
+  const total = perKind.reduce((n, k) => n + k.bytes, 0);
+  const fill = used ? Math.max(pct, 1.5) : 0;
   return (
-    <div className="lib-storage">
-      <strong>{error ? "Could not read storage use" : used === null ? "Checking storage..." : `${formatBytes(used)} used on this device`}</strong>
-      <div className="bar" aria-hidden="true"><div style={{ width: `${pct}%` }} /></div>
-      <span>Files stay here unless you export or publish them</span>
+    <div className="lib-storage frost-seam-h">
+      <Caption>Storage</Caption>
+      <strong className="lib-used">{error ? "Could not read storage use" : used === null ? "Checking storage..." : `${formatBytes(used)} used on this device`}</strong>
+      <div className="lib-meter" role="img" aria-label={`${pct.toFixed(2)} percent of the browser's storage`}>
+        <div className="fill" style={{ width: `${fill}%` }}>
+          {perKind.map((k) => <i key={k.kind} style={{ flexGrow: k.bytes / (total || 1), background: KIND_COLOR[k.kind] }} />)}
+        </div>
+        <span className="mask" />
+      </div>
+      <div className="lib-legend">
+        {perKind.map((k) => (
+          <span key={k.kind}><i style={{ background: KIND_COLOR[k.kind] }} />{k.label} <b>{formatBytes(k.bytes)}</b></span>
+        ))}
+        {perKind.length === 0 && <span>Files stay here unless you export or publish them</span>}
+      </div>
     </div>
   );
 }
@@ -72,7 +97,7 @@ export default function Library() {
       title="Library"
       actions={
         <>
-          <div className="lib-tabs" role="tablist" aria-label="Library sections">
+          <div className="seg lib-tabs" role="tablist" aria-label="Library sections">
             {TABS.map((t) => (
               <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
                 {t.label}
@@ -81,7 +106,7 @@ export default function Library() {
           </div>
           {tab !== "plugins" && (
             <label className="lib-search">
-              <Icon name="search" size={20} />
+              <Icon name="search" size={18} />
               <input type="search" aria-label={tab === "media" ? "Search media" : "Search projects"} placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
             </label>
           )}
@@ -89,7 +114,7 @@ export default function Library() {
       }
     >
       <div
-        className="lib"
+        className="lib frost-sheet"
         onDragEnter={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
           depth.current += 1;
@@ -115,7 +140,15 @@ export default function Library() {
           {tab === "plugins" && <PluginsTab />}
         </div>
         <StorageBar />
-        {dragging && <div className="lib-drop">Drop to import</div>}
+        {dragging && (
+          <div className="lib-drop" aria-hidden="true">
+            <div className="lib-drop-card">
+              <UploadGlyph size={40} />
+              <strong>Drop to import</strong>
+              <span>Audio, MIDI, video, images or a project file</span>
+            </div>
+          </div>
+        )}
         <input
           ref={mediaInput}
           type="file"

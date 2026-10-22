@@ -5,6 +5,8 @@ import { setProjectBpm, stopAndRewind, tapTempo, togglePlay } from "./audio/tran
 import { redo, undo } from "./project/history";
 import { persistence } from "./project/persist";
 import { ROOMS } from "./rooms";
+import { toggleFullscreen } from "./ui/appFullscreen";
+import { dispatchDock } from "./ui/playerDock";
 import { projectStore, uiStore, type UiState } from "./store/project";
 
 export type AppAction =
@@ -23,6 +25,8 @@ export type AppAction =
   | "palette"
   | "shortcuts"
   | "performance"
+  | "player-dock"
+  | "fullscreen"
   | `room-${number}`;
 
 export interface KeyLike {
@@ -81,7 +85,10 @@ export function routeShortcut(event: KeyLike, ctx: RouteContext): AppAction | nu
     if (key === "k" && !event.shiftKey) return "palette";
     if (key === "/" || (key === "?" && event.shiftKey)) return "shortcuts";
     if (key === "s" && !event.shiftKey) return "save";
+    // A chord, not a letter: the computer keyboard plays notes in the instrument rooms.
+    if (key === "." && !event.shiftKey) return "player-dock";
     if (key === "e" && event.shiftKey) return "export";
+    if (key === "f" && event.shiftKey) return "fullscreen";
     if (typing) return null;
     if (key === "z") return event.shiftKey ? "redo" : "undo";
     if (key === "y" && event.ctrlKey && !event.metaKey) return "redo";
@@ -200,6 +207,12 @@ export function runAppAction(action: AppAction): void {
       return;
     case "performance":
       openSheet("performance");
+      return;
+    case "player-dock":
+      dispatchDock("toggle");
+      return;
+    case "fullscreen":
+      void toggleFullscreen();
       return;
     default: {
       const index = Number(action.slice("room-".length));

@@ -5,9 +5,11 @@
  * the old database is opened without a version (so it can never be upgraded), only read-only
  * transactions are used, and a database that does not exist is never opened (opening would create it).
  */
+import type { InstrumentKind } from "../audio/types";
 import { PackageError, base64ToBytes } from "./binary";
+import { filledPatterns, NO_GLOBALS, mapAcid, mapBeatLab, mapDivine, mapGalacticOne, mapLead, moduleKindOf, MODULE_LABEL, type LegacyGlobals, type ModuleResult, type SampleRef } from "./legacyModules";
 import { remapAssetIds } from "./migrate";
-import { newId, newProject, type Asset, type Clip, type Note, type Project, type Track, type TrackKind } from "./model";
+import { newId, newProject, type Asset, type Clip, type InstrumentSlot, type Note, type Project, type Track, type TrackKind } from "./model";
 import type { ImportReport, ParsedImport } from "./package";
 
 export const LEGACY_DB_NAME = "glctc1-sequencer-local";
@@ -186,12 +188,63 @@ function assetKind(asset: Raw): Asset["kind"] {
   return "audio";
 }
 
+function sniffAudioMime(bytes: Uint8Array): string {
+  const tag = (at: number, text: string): boolean => text.split("").every((ch, i) => bytes[at + i] === ch.charCodeAt(0));
+  if (tag(0, "RIFF") && tag(8, "WAVE")) return "audio/wav";
+  if (tag(0, "OggS")) return "audio/ogg";
+  if (tag(0, "fLaC")) return "audio/flac";
+  if (tag(4, "ftyp")) return "audio/mp4";
+  if (tag(0, "FORM")) return "audio/aiff";
+  return "audio/mpeg";
+}
+
+interface ModuleOutcome {
+  result: ModuleResult | null;
+  why: string;
+  /** True when the settings came from the old studio's global storage instead of the project itself. */
+  global: boolean;
+}
+
+/** Builds a new instrument's state from whatever the old studio kept for one module. Never throws. */
+function convertModule(kind: InstrumentKind, project: Raw, globals: LegacyGlobals | null, env: Parameters<typeof mapBeatLab>[1]): ModuleOutcome {
+  const g = globals ?? NO_GLOBALS;
+  const guard = (build: () => ModuleResult | null, why: string, global = false): ModuleOutcome => {
+    try {
+      const result = build();
+      return result ? { result, why, global } : { result: null, why, global };
+    } catch (error) {
+      return { result: null, why: `${why} (it could not be read: ${error instanceof Error ? error.message : "damaged data"}).`, global };
+    }
+  };
+  const unavailable = globals
+    ? "the old studio has no saved settings for this module in this browser, so the new instrument starts from its defaults."
+    : "this module's settings live in the old studio's browser storage, which a package does not include. Import from the old studio to bring them.";
+  switch (kind) {
+    case "drum80la8":
+      return guard(() => mapBeatLab(project.beatLab, env), "this project holds no 80LA8 patterns or settings, so the new 80LA8 starts from its defaults.");
+    case "divine09":
+      return guard(() => mapDivine(g.mine, g.divineSamples, env), `DIVINE09 (90MINE) ${unavailable}`, true);
+    case "acid30lee": {
+      const own = guard(() => mapAcid(project.glctc30lee), "");
+      return own.result ? own : guard(() => mapAcid(g.lee), `30LEE ${unavailable}`, true);
+    }
+    case "lead0010110":
+      return guard(() => mapLead(project.s101Settings, env.bpm), "this project holds no 0010110 settings, so the new 0010110 starts from its defaults.");
+    case "galacticOne": {
+      const own = guard(() => mapGalacticOne(project.galacticOne), "");
+      return own.result ? own : guard(() => mapGalacticOne(g.galacticOne), `GALACTIC ONE ${unavailable}`, true);
+    }
+    default:
+      return { result: null, why: "the Looper's pad settings are not carried over: they tune samples the old studio never saved, and the new Looper starts with its own kit. Load or record samples again.", global: false };
+  }
+}
+
 /**
  * Converts one old-studio project (IndexedDB record or package, with each asset's media as `blob`) into a new project.
  * The result always has fresh project and asset ids, so it can never overwrite anything. Whatever has no equivalent
  * is listed in the report.
  */
-export function convertLegacyProject(raw: Raw, now: number = Date.now()): ParsedImport {
+export function convertLegacyProject(raw: Raw, now: number = Date.now(), globals: LegacyGlobals | null = null): ParsedImport {
   if (!Array.isArray(raw.tracks) || !Array.isArray(raw.assets)) {
     throw new PackageError("This is not an old-studio project: it has no tracks or media list.");
   }
@@ -235,6 +288,21 @@ export function convertLegacyProject(raw: Raw, now: number = Date.now()): Parsed
   let automation = 0;
   let inserts = 0;
   const tracks: Track[] = [];
+  const instruments: InstrumentSlot[] = [];
+  const extraAssets: Asset[] = [];
+  const extraMedia = new Map<string, Blob>();
+  const builtModules = new Set<InstrumentKind>();
+  const bpmForModules = Math.min(300, Math.max(30, num(raw.bpm, 130)));
+  const env = {
+    bpm: bpmForModules,
+    addSample(bytes: Uint8Array, name: string): SampleRef {
+      const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: sniffAudioMime(bytes) });
+      const id = newId("asset");
+      extraAssets.push({ id, kind: "audio", name, mime: blob.type, bytes: blob.size, addedAt: now });
+      extraMedia.set(id, blob);
+      return { assetId: id, name };
+    },
+  };
   for (const t of raw.tracks) {
     const lt = rec(t);
     if (!lt) continue;
@@ -285,11 +353,54 @@ export function convertLegacyProject(raw: Raw, now: number = Date.now()): Parsed
       skipped.push(`Automation track "${name}" (automation is not carried over).`);
       continue;
     }
-    if (/module track/i.test(name) && clips.length === 0) {
+    const trackId = str(lt.id, newId("trk"));
+    let slotId: string | undefined;
+    let trackName = name;
+    let trackColor: string | undefined;
+    const moduleKind = clips.length === 0 ? moduleKindOf(name) : null;
+    if (moduleKind) {
+      if (builtModules.has(moduleKind)) {
+        skipped.push(`"${name}": the new studio has one ${MODULE_LABEL[moduleKind]?.name ?? "Looper"} per project and this project already has it.`);
+        continue;
+      }
+      const made = convertModule(moduleKind, raw, globals, env);
+      if (made.result === null) {
+        skipped.push(`"${name}": ${made.why}`);
+        continue;
+      }
+      builtModules.add(moduleKind);
+      slotId = newId("slot");
+      trackName = MODULE_LABEL[moduleKind]?.name ?? name;
+      trackColor = MODULE_LABEL[moduleKind]?.color;
+      instruments.push({ id: slotId, kind: moduleKind, trackId, state: made.result.state });
+      // The old studio looped these sequencers live; placing each filled pattern in order puts them on the timeline.
+      let at = 1;
+      for (const pat of filledPatterns(made.result.state)) {
+        clips.push({
+          id: newId("clip"),
+          kind: "pattern",
+          name: `Pattern ${String.fromCharCode(65 + pat.index)}`,
+          startBar: at,
+          lengthBars: pat.bars,
+          offsetSec: 0,
+          gainDb: 0,
+          pitchSemitones: 0,
+          fineCents: 0,
+          warp: false,
+          keyLock: false,
+          fadeInSteps: 0,
+          fadeOutSteps: 0,
+          patternIndex: pat.index,
+        });
+        at += pat.bars;
+      }
+      imported.push(...made.result.carried.map((c) => (made.global ? `${c} (taken from the old studio's saved settings at import time; the old studio keeps them outside projects)` : c)));
+      skipped.push(...made.result.notes);
+    } else if (/module track/i.test(name) && clips.length === 0) {
       skipped.push(`"${name}": module settings live in the old studio's own storage and are not part of a project.`);
       continue;
     }
-    if (lt.looper) skipped.push(`"${name}": looper pad settings (the old studio never saved the sample audio).`);
+    if (lt.looper && !moduleKind) skipped.push(`"${name}": looper pad settings (the old studio never saved the sample audio).`);
     if (lt.inst && type === "midi") skipped.push(`"${name}": its built-in "${str(lt.inst, "synth")}" voice. Give the track an instrument in the Play room.`);
     if (lt.wamInst) skipped.push(`"${name}": its plugin instrument. Add the plugin again from the Library.`);
     const fx = rec(lt.fx);
@@ -297,12 +408,13 @@ export function convertLegacyProject(raw: Raw, now: number = Date.now()): Parsed
     if (fxOn && fx?.flt === true) inserts += 1;
     inserts += list(lt.plugs).filter((p) => rec(p)?.on === true).length;
 
-    const kind: TrackKind = type === "midi" ? "instrument" : type === "video" ? "video" : "audio";
+    const kind: TrackKind = slotId || type === "midi" ? "instrument" : type === "video" ? "video" : "audio";
     tracks.push({
-      id: str(lt.id, newId("trk")),
-      name,
+      id: trackId,
+      name: trackName,
       kind,
-      color: str(lt.color, DEFAULT_COLORS[tracks.length % DEFAULT_COLORS.length] ?? "#79ebff"),
+      ...(slotId ? { slotId } : {}),
+      color: trackColor ?? str(lt.color, DEFAULT_COLORS[tracks.length % DEFAULT_COLORS.length] ?? "#79ebff"),
       muted: lt.mute === true,
       solo: lt.solo === true,
       gainDb: dbOf(num(lt.volume, 0.8)),
@@ -318,7 +430,7 @@ export function convertLegacyProject(raw: Raw, now: number = Date.now()): Parsed
   if (automation) skipped.push(`${automation} automation object${automation === 1 ? "" : "s"} on clips.`);
   if (inserts) skipped.push(`${inserts} track effect${inserts === 1 ? "" : "s"} (filter and insert effects) were not carried over; sends were.`);
   if (customRate) skipped.push(`${customRate} clip${customRate === 1 ? "" : "s"} used a custom playback rate and will play at normal speed.`);
-  if (rec(raw.beatLab)) skipped.push("80LA8 patterns and samples (the drum lab's state is not carried over).");
+  if (rec(raw.beatLab) && !builtModules.has("drum80la8")) skipped.push("80LA8 patterns and samples: this project has no 80LA8 module track to put them on.");
 
   const loop = rec(raw.loop);
   const mfx = rec(raw.mfx);
@@ -354,30 +466,102 @@ export function convertLegacyProject(raw: Raw, now: number = Date.now()): Parsed
       boothDeviceId: device(mixer?.boothDev),
     },
     stageAspect: raw.stage === "phone" ? "phone" : "wide",
+    instruments,
   };
 
   const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
-  imported.push(`${tracks.length} tracks, ${clipCount} clips, ${assets.length} media files, ${bpm} BPM`);
+  imported.unshift(`${tracks.length} tracks, ${clipCount} clips, ${assets.length} media files, ${bpm} BPM`);
   const fresh = remapAssetIds(project);
   const remappedMedia = new Map<string, Blob>();
   for (const [oldId, blob] of media) {
     const id = fresh.idMap.get(oldId);
     if (id) remappedMedia.set(id, blob);
   }
+  // Sample audio from module state already has fresh ids and is referenced by the instrument slots, not by clips.
+  const withSamples: Project = { ...fresh.project, assets: [...fresh.project.assets, ...extraAssets] };
+  for (const [id, blob] of extraMedia) remappedMedia.set(id, blob);
   const report: ImportReport = { imported, skipped };
-  return { project: fresh.project, media: remappedMedia, report };
-}
-
-/** Reads one project from the old studio's database and converts it. Nothing in the old database changes. */
-export async function readAndConvertLegacyProject(id: string, idb: IDBFactory = indexedDB): Promise<ParsedImport> {
-  return convertLegacyProject(await readLegacyProjectRecord(id, idb));
+  return { project: withSamples, media: remappedMedia, report };
 }
 
 export const LEGACY_DIVINE_DB = "glctc1_divine09_samples";
 const LEGACY_MIDI_KEY = "glctc1.midiBindings";
+export const LEGACY_KEYS = { mine: "glctc1_90mine_state", galacticOne: "glctc1_galactic_one_v2", lee: "glctc1_30lee_preset" } as const;
+
+function readJsonKey(storage: Pick<Storage, "getItem"> | null, key: string): unknown {
+  if (!storage) return null;
+  try {
+    const text = storage.getItem(key);
+    return text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the DIVINE09 sample slots from the old studio's separate database. Read-only like everything here:
+ * no version (never upgraded), a readonly transaction, and nothing is opened unless the database already exists.
+ */
+async function readDivineSamples(idb: IDBFactory): Promise<LegacyGlobals["divineSamples"]> {
+  const none: LegacyGlobals["divineSamples"] = [null, null, null, null];
+  try {
+    if (typeof idb.databases !== "function") return none;
+    if (!(await idb.databases()).some((d) => d.name === LEGACY_DIVINE_DB)) return none;
+    const db = await new Promise<IDBDatabase | null>((resolve) => {
+      const req = idb.open(LEGACY_DIVINE_DB);
+      req.onupgradeneeded = () => req.transaction?.abort();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    });
+    if (!db) return none;
+    try {
+      if (!db.objectStoreNames.contains("samples")) return none;
+      const store = db.transaction("samples", "readonly").objectStore("samples");
+      const out = [...none];
+      for (let i = 0; i < 4; i++) {
+        const item = rec(await requestResult(store.get(String(i))));
+        const bytes = item?.bytes;
+        let view: Uint8Array | null = null;
+        if (bytes instanceof ArrayBuffer) view = new Uint8Array(bytes.slice(0));
+        else if (ArrayBuffer.isView(bytes)) view = new Uint8Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        if (view && view.byteLength > 0) out[i] = { name: str(item?.name, `Sample ${i + 1}`), bytes: view };
+      }
+      return out;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return none;
+  }
+}
+
+/** The old studio's settings that are not stored with a project. Reads only, and never throws. */
+export async function readLegacyGlobals(storage: Pick<Storage, "getItem"> | null, idb: IDBFactory = indexedDB): Promise<LegacyGlobals> {
+  return {
+    mine: readJsonKey(storage, LEGACY_KEYS.mine),
+    galacticOne: readJsonKey(storage, LEGACY_KEYS.galacticOne),
+    lee: readJsonKey(storage, LEGACY_KEYS.lee),
+    divineSamples: await readDivineSamples(idb),
+  };
+}
+
+function browserStorage(): Pick<Storage, "getItem"> | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads one project from the old studio's database and converts it, with the module settings the old studio kept outside projects. Nothing in the old storage changes. */
+export async function readAndConvertLegacyProject(id: string, idb: IDBFactory = indexedDB, storage: Pick<Storage, "getItem"> | null = browserStorage()): Promise<ParsedImport> {
+  const record = await readLegacyProjectRecord(id, idb);
+  return convertLegacyProject(record, Date.now(), await readLegacyGlobals(storage, idb));
+}
 
 /** Notes about old-studio data that lives outside projects and is not carried over, so the import report can say so. */
-export async function describeLegacyExtras(storage: Pick<Storage, "getItem"> | null, idb: IDBFactory = indexedDB): Promise<string[]> {
+export async function describeLegacyExtras(storage: Pick<Storage, "getItem"> | null): Promise<string[]> {
   const notes: string[] = [];
   const plugins = readLegacyPlugins(storage);
   if (plugins.length) notes.push(`${plugins.length} saved plugin address${plugins.length === 1 ? "" : "es"}. Add them again under Plugins and MIDI.`);
@@ -385,10 +569,6 @@ export async function describeLegacyExtras(storage: Pick<Storage, "getItem"> | n
     if (storage?.getItem(LEGACY_MIDI_KEY)) notes.push("MIDI links (they were tied to the old studio's control ids).");
   } catch {
     // Unreadable storage means there is nothing to report.
-  }
-  if (typeof idb.databases === "function") {
-    const names = (await idb.databases()).map((d) => d.name);
-    if (names.includes(LEGACY_DIVINE_DB)) notes.push("DIVINE09 sample slots (the old studio kept them outside projects).");
   }
   return notes;
 }

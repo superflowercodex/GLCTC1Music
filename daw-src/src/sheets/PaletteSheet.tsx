@@ -110,8 +110,8 @@ export function PaletteSheet({ onClose }: { onClose: () => void }) {
         />
         <span className="kbd">esc</span>
       </div>
-      <div id="palette-list" ref={listRef} className="palette-list" role="listbox" aria-label="Results">
-        {results.length === 0 && <div className="palette-empty">Nothing matches “{query}”.</div>}
+      <div id="palette-list" ref={listRef} className="palette-list" role="listbox" aria-label="Results" tabIndex={-1}>
+        {results.length === 0 && <div className="palette-empty">Nothing answers to “{query}”. Try another word?</div>}
         {results.map((item, i) => {
           const heading = item.group !== lastGroup;
           lastGroup = item.group;

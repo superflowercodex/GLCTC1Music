@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#08090c">
 <meta name="description" content="GLCTC1 MUSIC browser DAW: record, arrange audio, MIDI and video clips, mix, and export WAV.">
-<title>GLCTC1 MUSIC — DAW v31 Master Sync</title>
+<title>GLCTC1 MUSIC — DAW v32 Master Sync</title>
 <style>
 :root{--bg:#07080b;--panel:#101116;--panel2:#171820;--line:#34333a;--gold:#ffd36a;--gold2:#a97820;--text:#f4f1e8;--muted:#a6a4ad;--blue:#19baff;--purple:#bd54ff;--green:#4af59b;--orange:#ff8a2a;--red:#ff4568}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}body{background:radial-gradient(ellipse at 70% -15%,#17253b 0,transparent 36%),#07080b}
@@ -1847,6 +1847,7 @@ function makeChain(c,live){
  M.connect(wm,0,0);Sd.connect(wm,0,0);M.connect(wm,0,1);Sn.connect(wm,0,1);wm.connect(lim);lim.connect(out);
  let analyser=null;if(live){analyser=c.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=.7;out.connect(analyser)}
  let irSec=0;
+ const LK={};function lnk(k,on,a,b){on=!!on;if(LK[k]===on)return;LK[k]=on;try{on?a.connect(b):a.disconnect(b)}catch(e){}}
  function apply(F,bpm,mac){
   const beat=60/(bpm||130);mac=mac||{bright:0,motion:0,space:0,grit:0};
   const drive=cl(F.fxDrive+mac.grit*.55,0,1),crush=cl(F.fxCrush+mac.grit*.35,0,1);
@@ -1859,6 +1860,8 @@ function makeChain(c,live){
   const dm=cl(F.dlMix+mac.space*.32,0,1);S(dlWet.gain,dm,.03);dlInR.gain.value=F.dlPing?0:1;const fb=F.dlFb;S(sL.gain,F.dlPing?0:fb,.05);S(sR.gain,F.dlPing?0:fb,.05);S(xLR.gain,F.dlPing?fb:0,.05);S(xRL.gain,F.dlPing?fb:0,.05);S(lpL.frequency,F.dlTone,.05);S(lpR.frequency,F.dlTone,.05);
   S(rvWet.gain,cl(F.rvMix+mac.space*.4,0,1)*1.3,.04);S(rvLp.frequency,F.rvDamp,.05);
   if(irSec!==RVSEC[F.rvSize]){irSec=RVSEC[F.rvSize];conv.buffer=makeIR(c,irSec)}
+  {const _gd=GATEB[F.gRate]?F.gDepth:0,_cm=cl(F.chMix+mac.motion*.3,0,1),_dm=cl(F.dlMix+mac.space*.32,0,1),_rv=cl(F.rvMix+mac.space*.4,0,1),chOn=!!F.chMode&&_cm>.002,phOn=F.phMix>.002;
+   lnk('gt',_gd>.001,gOsc,gAmt);lnk('ch1',chOn,gate,dL);lnk('ch2',chOn,gate,dR);lnk('ch3',chOn,chL,chGl);lnk('ch4',chOn,chL,chGr);lnk('ph1',phOn,chOut,aps[0]);lnk('ph2',phOn,phL,phLg);lnk('dl1',_dm>.002,phOut,dlIn);lnk('dl2',_dm>.002,phOut,dlInR);lnk('rv',_rv>.002,sumD,rvPre);lnk('ap',F.apDepth>.001,apL,apG)}
   apL.frequency.value=F.apRate;S(apG.gain,F.apDepth,.05);
   Sd.gain.value=F.width;S(out.gain,F.outLvl,.03);
  }
@@ -2791,13 +2794,13 @@ function route(){if(!V)return;try{V.tap.disconnect()}catch(e){}const c=V.c;if($(
 
 /* ----- vocoder bands ----- */
 function rebuildVoc(){
- if(!V)return;const c=V.c;V.vb.forEach(b=>b.nodes.forEach(n=>{try{n.disconnect()}catch(e){}}));V.vb=[];
+ if(!V)return;const c=V.c;if(!V.vcIn){V.vcIn=gn(c,1);V.vcCarIn=gn(c,1)}V.vb.forEach(b=>b.nodes.forEach(n=>{try{n.disconnect()}catch(e){}}));V.vb=[];
  const n=[8,12,16,24][S.vcBands]||16,lo=90,hi=8500;
  for(let i=0;i<n;i++){
   const f=lo*Math.pow(hi/lo,i/(n-1)),mb=c.createBiquadFilter(),cb=c.createBiquadFilter(),ws=c.createWaveShaper(),sm=c.createBiquadFilter(),mk=gn(c,16),vca=gn(c,0);
   mb.type='bandpass';cb.type='bandpass';mb.frequency.value=f;cb.frequency.value=f;ws.curve=ABS;sm.type='lowpass';sm.Q.value=.5;
-  V.vocal.connect(mb);mb.connect(ws);ws.connect(sm);sm.connect(mk);mk.connect(vca.gain);
-  V.carBus.connect(cb);cb.connect(vca);vca.connect(V.vocOut);
+  V.vcIn.connect(mb);mb.connect(ws);ws.connect(sm);sm.connect(mk);mk.connect(vca.gain);
+  V.vcCarIn.connect(cb);cb.connect(vca);vca.connect(V.vocOut);
   V.vb.push({f,mb,cb,sm,nodes:[mb,cb,ws,sm,mk,vca]});
  }
  applyVoc();
@@ -2816,7 +2819,7 @@ function applyAll(){
  else V.dryG.gain.value=S.dry;
  V.vocOut.gain.setTargetAtTime(S.vcOn?S.vcLvl:0,c.currentTime,.03);V.sibG.gain.value=S.vcSib*.8;
  applyVoc();
- const car=S.vcCar,vo=!!S.vcOn;
+ const car=S.vcCar,vo=!!S.vcOn;wire(V.vocal,V.vcIn,vo,'vcv');wire(V.carBus,V.vcCarIn,vo,'vcc');
  V.nzG.gain.setTargetAtTime(car===2?1.4:0,c.currentTime,.03);V.pianoCar.gain.value=car===3?1:0;V.choirCar.gain.value=car===4?1:0;
  V.pianoDirect.gain.value=(vo&&car===3)?0:1;V.choirDirect.gain.value=(vo&&car===4)?0:1;V.synthDirect.gain.value=vo?0:.5;
  // FX

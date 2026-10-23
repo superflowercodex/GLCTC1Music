@@ -1,1 +1,0 @@
-function n(c,o){const e=URL.createObjectURL(c),t=document.createElement("a");t.href=e,t.download=o,document.body.appendChild(t),t.click(),t.remove(),setTimeout(()=>URL.revokeObjectURL(e),1e4)}function l(c,o="GLCTC1 project"){const e=c.replace(/[\\/:*?"<>|\u0000-\u001f]+/g,"-").replace(/\s+/g," ").trim();return e.length>0?e.slice(0,80):o}export{n as d,l as s};

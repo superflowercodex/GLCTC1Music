@@ -1164,7 +1164,7 @@ localStorage.setItem(
 
 });
 
-</script>  <!DOCTYPE html>  <html lang="en">  
+</script>    <!DOCTYPE html>  <html lang="en">  
 <head>  
 <meta charset="UTF-8">  
 <title>GLCTC1 Cosmic Decks</title>  <style>  
@@ -16819,5 +16819,450 @@ if (sharedTrackId) {
 }
 
 </script>
+
+<!-- =====================================================
+     ✨ GLCTC1 — NEON MODULE HIDE / SHOW TABS
+     Same system as the GLCTC1 DAW.
+     • Every module gets a neon tab: ▼ HIDE / ▲ SHOW
+     • Hidden modules KEEP PLAYING (audio is never stopped)
+     • State is remembered between visits (localStorage)
+     • HIDE ALL / SHOW ALL buttons sit above the first module
+     This block is self-contained: it only adds tabs around the
+     existing modules and does not change any module code.
+     ===================================================== -->
+
+<style>
+
+/* ===== NEON MODULE HIDE TABS ===== */
+
+.mod-wrap {
+  display: block;
+  box-sizing: border-box;
+  margin: 14px 0;
+}
+
+.mod-wrap > .mod-first {
+  margin-top: 0 !important;
+}
+
+.mod-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 14px;
+  margin: 0 0 8px 0;
+  box-sizing: border-box;
+  border: 1px solid #19f7ff;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #001a24, #12002a 60%, #001a24);
+  color: #3cf6ff;
+  font-family: 'Orbitron', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-align: left;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px #19baff, 0 0 16px #19baff;
+  box-shadow: inset 0 0 14px #19baff55, 0 0 12px #19baff44;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mod-toggle:hover,
+.mod-toggle:focus-visible {
+  outline: none;
+  border-color: #ff3df2;
+  color: #ff7bf6;
+  text-shadow: 0 0 6px #ff3df2, 0 0 16px #ff3df2;
+  box-shadow: inset 0 0 14px #ff3df255, 0 0 14px #ff3df266;
+}
+
+.mod-toggle .mt-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-toggle .mt-run {
+  display: none;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #7dff5c;
+  text-shadow: 0 0 8px #39ff14;
+}
+
+.mod-toggle .mt-run.on {
+  display: inline;
+}
+
+.mod-toggle .mt-act {
+  flex: none;
+  padding: 5px 14px;
+  border: 1px solid #ff3df2;
+  border-radius: 999px;
+  color: #ff8cf7;
+  font-size: 12px;
+  text-shadow: 0 0 8px #ff3df2;
+  box-shadow: 0 0 10px #ff3df2aa, inset 0 0 8px #ff3df255;
+}
+
+.mod-wrap.mod-collapsed > .mod-toggle {
+  margin-bottom: 0;
+}
+
+.mod-wrap.mod-collapsed > .mod-toggle .mt-act {
+  border-color: #39ff14;
+  color: #8bff6b;
+  text-shadow: 0 0 8px #39ff14;
+  box-shadow: 0 0 10px #39ff14aa, inset 0 0 8px #39ff1455;
+}
+
+.mod-wrap.mod-collapsed > *:not(.mod-toggle) {
+  display: none !important;
+}
+
+/* DECKS sit side by side — keep the same flex behaviour as the original .deck */
+.mod-wrap.mod-deck {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 480px;
+  margin: 0;
+}
+
+.mod-wrap.mod-deck > .deck {
+  flex: none;
+  max-width: none;
+}
+
+/* HIDE ALL / SHOW ALL bar */
+.mod-allbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px 0;
+}
+
+.mod-allbar .mod-allbtn {
+  flex: 1;
+  min-width: 150px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid #19f7ff;
+  border-radius: 10px;
+  background: #00141c;
+  color: #3cf6ff;
+  font-family: 'Orbitron', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px #19baff;
+  box-shadow: 0 0 12px #19baff55, inset 0 0 10px #19baff33;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mod-allbar .mod-allbtn:hover,
+.mod-allbar .mod-allbtn:focus-visible {
+  outline: none;
+  color: #ff7bf6;
+  border-color: #ff3df2;
+  text-shadow: 0 0 8px #ff3df2;
+  box-shadow: 0 0 12px #ff3df266;
+}
+
+</style>
+
+<script>
+
+/* ===== NEON HIDE / SHOW TAB FOR EVERY MODULE ===== */
+(function () {
+
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // Saved state key prefix (separate from the DAW's keys)
+  var KEY_PREFIX = "glctc1.collapse.play.";
+
+  var store = {
+    get: function (k) {
+      try { return localStorage.getItem(KEY_PREFIX + k) === "1"; }
+      catch (e) { return false; }
+    },
+    set: function (k, v) {
+      try { localStorage.setItem(KEY_PREFIX + k, v ? "1" : "0"); }
+      catch (e) { /* storage unavailable — tab still works, just not remembered */ }
+    }
+  };
+
+  var items = [];
+
+
+  // -----------------------------------------------------
+  // Playlist Master was nested inside the Master Library box.
+  // Lift it out (just above the library) so it gets its own
+  // HIDE / SHOW tab and keeps playing when the library is hidden.
+  // Nothing else about it changes — same ids, same code.
+  // -----------------------------------------------------
+  (function liftPlaylistMaster() {
+    var pm = $("glctc1PlaylistMasterModule");
+    var ml = $("masterLibraryModule");
+    if (pm && ml && ml.contains(pm) && ml.parentNode) {
+      ml.parentNode.insertBefore(pm, ml);
+    }
+  })();
+
+
+  // -----------------------------------------------------
+  // Wrap one element (or a run of sibling elements) in a
+  // module wrapper and put a neon tab on top of it.
+  // -----------------------------------------------------
+  function makeModule(def) {
+
+    var start = def.start;
+    var end = def.end || def.start;
+
+    if (!start || !start.parentNode) return null;
+    if (end.parentNode !== start.parentNode) end = start;
+
+    var parent = start.parentNode;
+    var wrap = document.createElement("div");
+    wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "");
+    parent.insertBefore(wrap, start);
+
+    // Move start … end (and anything between) into the wrapper
+    var stop = end.nextSibling;
+    var nodes = [];
+    for (var n = start; n && n !== stop; n = n.nextSibling) nodes.push(n);
+    nodes.forEach(function (x) { wrap.appendChild(x); });
+
+    // The tab
+    var tab = document.createElement("div");
+    tab.className = "mod-toggle";
+    tab.setAttribute("role", "button");
+    tab.setAttribute("tabindex", "0");
+
+    var nm = document.createElement("span");
+    nm.className = "mt-name";
+    nm.textContent = def.name;
+
+    var run = document.createElement("span");
+    run.className = "mt-run";
+    run.textContent = "● PLAYING";
+
+    var act = document.createElement("span");
+    act.className = "mt-act";
+
+    tab.appendChild(nm);
+    tab.appendChild(run);
+    tab.appendChild(act);
+    wrap.insertBefore(tab, wrap.firstChild);
+
+    // First real element after the tab: drop its top margin so the
+    // tab sits snugly on top of the module
+    for (var i = 0; i < wrap.children.length; i++) {
+      if (wrap.children[i] !== tab) {
+        wrap.children[i].classList.add("mod-first");
+        break;
+      }
+    }
+
+    var it = {
+      key: def.key,
+      name: def.name,
+      el: wrap,
+      tab: tab,
+      act: act,
+      run: run,
+      live: def.live || null,
+      onShow: def.onShow || null
+    };
+
+    function toggle() {
+      apply(it, !it.el.classList.contains("mod-collapsed"), true);
+    }
+
+    tab.addEventListener("click", toggle);
+    tab.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    items.push(it);
+    apply(it, store.get(def.key), false);
+    return it;
+  }
+
+
+  function apply(it, collapsed, save) {
+    it.el.classList.toggle("mod-collapsed", collapsed);
+    it.tab.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    it.act.textContent = collapsed ? "▲ SHOW" : "▼ HIDE";
+    it.tab.title =
+      (collapsed ? "Show " : "Hide ") + it.name +
+      (it.live ? " (keeps playing while hidden)" : "");
+    if (save) store.set(it.key, collapsed);
+    if (!collapsed) {
+      setTimeout(function () {
+        window.dispatchEvent(new Event("resize"));
+        if (it.onShow) { try { it.onShow(); } catch (e) { console.warn(e); } }
+      }, 30);
+    }
+  }
+
+
+  // -----------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------
+  function isPlaying(id) {
+    return function () {
+      var a = $(id);
+      return !!(a && !a.paused && !a.ended);
+    };
+  }
+
+  // A deck's waveform is drawn at the canvas's on-screen width.
+  // If a track was loaded while the deck was hidden, redraw it now.
+  function deckRedraw(deck) {
+    return function () {
+      var cv = $(deck === "A" ? "waveA" : "waveB");
+      var a = $(deck === "A" ? "audioA" : "audioB");
+      if (cv && a && a.src && cv.width === 0 &&
+          typeof window.drawWaveform === "function") {
+        window.drawWaveform(deck);
+      }
+    };
+  }
+
+
+  // -----------------------------------------------------
+  // The modules (in page order)
+  // -----------------------------------------------------
+  var banksTitle = $("banksGrid") ? $("banksGrid").previousElementSibling : null;
+
+  [
+    { start: document.querySelector("a.glctc1-shop-ad"),
+      key: "shop", name: "GLCTC1 SHOP" },
+
+    { start: document.querySelector("section.glctc1-add-track-welcome"),
+      end: $("addTrackBtn"),
+      key: "playspace", name: "PLAY SPACE · ADD TRACK" },
+
+    { start: $("deckA"), key: "deckA", name: "DECK A", cls: "mod-deck",
+      live: isPlaying("audioA"), onShow: deckRedraw("A") },
+
+    { start: $("deckB"), key: "deckB", name: "DECK B", cls: "mod-deck",
+      live: isPlaying("audioB"), onShow: deckRedraw("B") },
+
+    { start: $("glctc1MixerModule"),
+      key: "mixer", name: "MASTER MIXER · HEADPHONE CUE" },
+
+    { start: document.querySelector(".glctc1-master-volume-wrap"),
+      key: "mastervolume", name: "MASTER VOLUME" },
+
+    { start: document.querySelector(".crossfader-wrap"),
+      key: "crossfader", name: "CROSSFADER" },
+
+    { start: banksTitle && banksTitle.classList.contains("section-title") ? banksTitle : $("banksGrid"),
+      end: $("bankTracks"),
+      key: "banks", name: "BANKS A–Z" },
+
+    { start: $("masterLibraryEditorModule"),
+      key: "libraryeditor", name: "MASTER LIBRARY EDITOR" },
+
+    { start: $("glctc1PlaylistMasterModule"),
+      key: "playlistmaster", name: "PLAYLIST MASTER",
+      live: isPlaying("glctc1PlaylistAudio") },
+
+    { start: $("masterLibraryModule"),
+      key: "masterlibrary", name: "MASTER LIBRARY",
+      live: isPlaying("libraryPlayer") }
+
+  ].forEach(function (def) {
+    if (def.start) makeModule(def);
+  });
+
+
+  // -----------------------------------------------------
+  // Green ● PLAYING tag on a hidden module that is still playing
+  // -----------------------------------------------------
+  setInterval(function () {
+    items.forEach(function (it) {
+      if (!it.live) return;
+      var on = false;
+      try { on = !!it.live(); } catch (e) { on = false; }
+      it.run.classList.toggle("on", on && it.el.classList.contains("mod-collapsed"));
+    });
+  }, 500);
+
+
+  // -----------------------------------------------------
+  // One-touch HIDE ALL / SHOW ALL bar above the first module
+  // -----------------------------------------------------
+  function setAll(collapsed) {
+    items.forEach(function (i) { apply(i, collapsed, true); });
+  }
+
+  if (items.length) {
+
+    var bar = document.createElement("div");
+    bar.className = "mod-allbar";
+
+    function mkBtn(label, collapsed) {
+      var b = document.createElement("div");
+      b.className = "mod-allbtn";
+      b.setAttribute("role", "button");
+      b.setAttribute("tabindex", "0");
+      b.textContent = label;
+      b.addEventListener("click", function () { setAll(collapsed); });
+      b.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+          e.preventDefault();
+          setAll(collapsed);
+        }
+      });
+      return b;
+    }
+
+    bar.appendChild(mkBtn("▼ HIDE ALL MODULES", true));
+    bar.appendChild(mkBtn("▲ SHOW ALL MODULES", false));
+
+    items[0].el.parentNode.insertBefore(bar, items[0].el);
+  }
+
+
+  // Small helper for the browser console / other scripts
+  window.GLCTC1_MODULE_TABS = {
+    items: items,
+    hideAll: function () { setAll(true); },
+    showAll: function () { setAll(false); },
+    set: function (key, collapsed) {
+      items.forEach(function (i) { if (i.key === key) apply(i, !!collapsed, true); });
+    }
+  };
+
+})();
+
+</script>
+
 </body>
 </html>
+

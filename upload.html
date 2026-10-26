@@ -794,6 +794,14 @@ body .deck .gain-row input[type=range]{-webkit-appearance:none;appearance:none;h
 @media(max-width:520px){.cx-bpm b{font-size:1.6rem}.cx-mix{grid-template-columns:repeat(5,1fr);padding:8px 2px}.cx-platter{width:min(58vw,260px)}}
 @media(prefers-reduced-motion:reduce){.cx-platter{transition:none}}
 
+/* ===== v26: no browser long-press, pitch reset, tap flash ===== */
+.glow-card,.glow-card *:not(input):not(textarea){-webkit-touch-callout:none!important;-webkit-user-select:none!important;user-select:none!important;-webkit-tap-highlight-color:transparent}
+.glow-card button,.glow-card input[type=range],.cx-platter,.cx-knob{touch-action:manipulation}
+.cx-platter{touch-action:none}
+body .deck .cx-zero{min-height:34px!important;width:100%!important;font-size:.62rem!important;padding:0 2px!important;color:#9cf0ff!important;border-color:var(--acc)!important}
+body .deck .cx-flash{background:var(--acc)!important;color:#000!important}
+body .deck .pitch-wrap{width:64px!important;flex-basis:64px!important}
+
 </style>
 </head>
 
@@ -17920,28 +17928,64 @@ function knob(inp,label,fmt,parent){
 }
 var dB=function(v){var d=(v-.5)*24;return(d>0?'+':'')+d.toFixed(0)+' dB'};
 
+
+/* ---------- REAL SCRATCH ENGINE (reverse + forward, sample-accurate) ---------- */
+var ACX=null,BUF={};
+function ctx(){if(!ACX){var C=window.AudioContext||window.webkitAudioContext;ACX=new C()}if(ACX.state==='suspended')ACX.resume();return ACX}
+function loadBuf(d){
+  var a=aud(d),src=a&&(a.currentSrc||a.src);if(!src)return;
+  var b=BUF[d];if(b&&b.src===src)return;b=BUF[d]={src:src,buf:null};
+  try{fetch(src).then(function(r){return r.arrayBuffer()}).then(function(ab){return ctx().decodeAudioData(ab)}).then(function(buf){if(BUF[d]===b)b.buf=buf}).catch(function(){})}catch(e){}
+}
+function engineNode(d){
+  var s=S[d];if(s.node)return s.node;var c=ctx();
+  var n=c.createScriptProcessor(1024,0,2),p=s.sp={pos:0,rate:0,target:0,on:false,gain:0};
+  n.onaudioprocess=function(e){
+    var L=e.outputBuffer.getChannelData(0),R=e.outputBuffer.getChannelData(1),b=BUF[d]&&BUF[d].buf;
+    if(!b||(!p.on&&p.gain<.001)){L.fill(0);R.fill(0);return}
+    var l=b.getChannelData(0),r=b.numberOfChannels>1?b.getChannelData(1):l,N=b.length-2,k,i,f,g=p.gain;
+    for(k=0;k<L.length;k++){
+      p.rate+=(p.target-p.rate)*.004;g+=((p.on?1:0)-g)*.004;
+      p.pos+=p.rate*(b.sampleRate/c.sampleRate);
+      if(p.pos<0){p.pos=0;p.rate=0}if(p.pos>N){p.pos=N;p.rate=0}
+      i=p.pos|0;f=p.pos-i;
+      L[k]=(l[i]+(l[i+1]-l[i])*f)*g;R[k]=(r[i]+(r[i+1]-r[i])*f)*g}
+    p.gain=g};
+  s.node=n;return n;
+}
+function curTime(d){var s=S[d],a=aud(d);
+  if(s.touch&&s.eng&&BUF[d]&&BUF[d].buf)return s.sp.pos/BUF[d].buf.sampleRate;return a.currentTime}
+
 /* ---------- ANALOGUE PLATTER ---------- */
 function buildPlatter(d){
   var old=$('wheel'+d);if(!old||old.dataset.cx)return;
   var w=old.cloneNode(false);               /* clone w/o children drops the old click-to-scratch listeners */
   w.removeAttribute('style');w.className='cx-platter';w.dataset.cx='1';
-  w.innerHTML='<div class="cx-prog"></div><div class="cx-disc"><div class="cx-strobe"></div><div class="cx-vinyl"><div class="cx-label"><span>GLCTC1</span><i></i></div><div class="cx-line"></div></div><div class="cx-mark"></div></div><div class="cx-sheen"></div><div class="cx-hint">DRAG THE RECORD · HOLD TO STOP</div>';
+  w.innerHTML='<div class="cx-prog"></div><div class="cx-disc"><div class="cx-strobe"></div><div class="cx-vinyl"><div class="cx-label"><span>GLCTC1</span><i></i></div><div class="cx-line"></div></div><div class="cx-mark"></div></div><div class="cx-sheen"></div>';
   old.parentNode.replaceChild(w,old);
   var a=aud(d),s=S[d]={angle:0,speed:0,touch:false,lastA:0,lastT:0,vel:0,lastMove:0,rate0:1,was:false,pres:true,loop:null,cues:[null,null,null,null],disc:w.querySelector('.cx-disc'),prog:w.querySelector('.cx-prog'),w:w};
   function ang(e){var r=w.getBoundingClientRect();return Math.atan2(e.clientY-(r.top+r.height/2),e.clientX-(r.left+r.width/2))*180/Math.PI}
   w.addEventListener('pointerdown',function(e){
-    w.setPointerCapture(e.pointerId);s.touch=true;s.lastA=ang(e);s.lastT=performance.now();s.vel=0;s.lastMove=s.lastT;
-    s.was=!a.paused;s.rate0=a.playbackRate||1;s.pres=a.preservesPitch!==false;setPres(a,false);   /* vinyl: pitch follows speed */
+    if(s.touch)return;w.setPointerCapture(e.pointerId);s.touch=true;s.lastA=ang(e);s.lastT=performance.now();s.vel=0;s.lastMove=s.lastT;
+    s.was=!a.paused;s.rate0=a.playbackRate||1;s.pres=a.preservesPitch!==false;
+    var b=BUF[d]&&BUF[d].buf;s.eng=!!b;
+    if(s.eng){                                       /* take over audio: platter now IS the playhead */
+      var c=ctx(),n=engineNode(d),p=s.sp;try{n.connect(c.destination)}catch(x){}
+      p.pos=a.currentTime*b.sampleRate;p.rate=a.paused?0:s.rate0;p.target=0;p.gain=0;p.on=true;a.pause();
+    }else{setPres(a,false);loadBuf(d)}
     w.classList.add('touched');e.preventDefault()});
   w.addEventListener('pointermove',function(e){
     if(!s.touch)return;var na=ang(e),dg=na-s.lastA;if(dg>180)dg-=360;if(dg<-180)dg+=360;s.lastA=na;s.angle+=dg;
-    var n=performance.now(),dt=Math.max(.008,(n-s.lastT)/1000);s.lastT=n;s.lastMove=n;s.vel=s.vel*.55+(dg/dt)*.45;
-    if(dg<0&&a.duration)a.currentTime=clamp(a.currentTime+dg/RPM,0,a.duration)});   /* backspin = real seek */
+    var n=performance.now(),dt=Math.max(.008,(n-s.lastT)/1000);s.lastT=n;s.lastMove=n;s.vel=s.vel*.5+(dg/dt)*.5;
+    if(!s.eng&&dg<0&&a.duration)a.currentTime=clamp(a.currentTime+dg/RPM,0,a.duration)});   /* fallback only */
   function up(){
     if(!s.touch)return;s.touch=false;w.classList.remove('touched');
-    s.speed=clamp(s.vel/RPM,-2,3);                       /* flick momentum */
-    a.playbackRate=s.rate0;setPres(a,s.pres);
-    if(s.was){var p=a.play();if(p&&p.catch)p.catch(function(){})}else a.pause()}
+    s.speed=clamp(s.vel/RPM,-2,3);
+    if(s.eng){var p=s.sp,b=BUF[d].buf;p.on=false;p.target=0;
+      if(b)a.currentTime=clamp(p.pos/b.sampleRate,0,a.duration||1e9);
+      setTimeout(function(){if(!p.on){try{s.node.disconnect()}catch(x){}}},400)}
+    else{a.playbackRate=s.rate0;setPres(a,s.pres)}
+    if(s.was){var q=a.play();if(q&&q.catch)q.catch(function(){})}else a.pause()}
   w.addEventListener('pointerup',up);w.addEventListener('pointercancel',up);
   w.addEventListener('contextmenu',function(e){e.preventDefault()});
 }
@@ -18003,7 +18047,26 @@ function buildDeck(d){
   ].forEach(function(r){var i=$(r[0]+d);if(i)knob(i,r[1],r[2],mix)});
   if(sr)sr.classList.add('cx-gone');
   var G=$('gain'+d);if(G){var lbl=G.closest('.slider-block').querySelector('.slider-label');if(lbl)lbl.textContent='Volume'}
-  a.addEventListener('loadedmetadata',function(){s.cues=[null,null,null,null];s.loop=null;paint()});
+
+  /* pitch: RESET button + double-tap fader = back to 0.0% */
+  function pitchZero(){if(!ps)return;ps.value=1;ps.dispatchEvent(new Event('input',{bubbles:true}));if(typeof setPitch==='function')try{setPitch(d,1)}catch(x){}}
+  if(pw){var rb=el('button','cx-zero','RESET 0');rb.type='button';rb.addEventListener('click',pitchZero);pw.appendChild(rb)}
+  if(ps){var lt=0;ps.addEventListener('pointerup',function(){var n=Date.now();if(n-lt<320)pitchZero();lt=n})}
+  /* tap tempo: tap = tempo, 1-second hold = cancel & return to normal (replaces the old 2 s handler) */
+  var sy=$('sync'+d),ht=null,fired=false;
+  if(sy){
+    sy.addEventListener('pointerdown',function(e){e.stopImmediatePropagation();fired=false;clearTimeout(ht);
+      ht=setTimeout(function(){fired=true;try{tapTempoHistory[d]=[]}catch(x){}pitchZero();sy.classList.add('cx-flash');setTimeout(function(){sy.classList.remove('cx-flash')},250)},1000)},true);
+    sy.addEventListener('pointerup',function(e){e.stopImmediatePropagation();clearTimeout(ht);if(!fired&&typeof tapTempo==='function')tapTempo(d);fired=false},true);
+    sy.addEventListener('pointerleave',function(e){e.stopImmediatePropagation();clearTimeout(ht)},true);
+    sy.addEventListener('pointercancel',function(){clearTimeout(ht)},true);
+    sy.textContent='Tap Tempo';sy.title='Tap to set tempo · hold 1 s to cancel';
+  }
+  /* switch OFF browser long-press: menus, text select, callouts, image drag */
+  deck.addEventListener('contextmenu',function(e){e.preventDefault()});
+  deck.addEventListener('selectstart',function(e){if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault()});
+  deck.addEventListener('dragstart',function(e){e.preventDefault()});
+  a.addEventListener('loadedmetadata',function(){loadBuf(d);s.cues=[null,null,null,null];s.loop=null;paint()});
 }
 
 /* ---------- ONE ANIMATION LOOP: platter physics, readouts, loops ---------- */
@@ -18014,9 +18077,10 @@ function tick(t){
     var s=S[d],a=aud(d);if(!s||!a)return;
     var rate=a.playbackRate||1;
     if(s.touch){                                   /* finger on record */
-      if(t-s.lastMove>50)s.vel*=Math.pow(.02,dt*4);   /* hold still → stops */
+      if(t-s.lastMove>50)s.vel*=Math.pow(.02,dt*4);   /* still hand = stopped record */
       var v=s.vel/RPM;
-      if(v>.08){a.playbackRate=clamp(v,.1,4);if(a.paused){var p=a.play();if(p&&p.catch)p.catch(function(){})}}
+      if(s.eng)s.sp.target=clamp(v,-6,6);
+      else if(v>.08){a.playbackRate=clamp(v,.1,4);if(a.paused){var p=a.play();if(p&&p.catch)p.catch(function(){})}}
       else if(!a.paused)a.pause();
     }else{                                         /* motor: spins up fast, brakes slower, follows pitch */
       var target=a.paused?0:rate;
@@ -18025,7 +18089,7 @@ function tick(t){
       s.angle+=s.speed*RPM*dt;
     }
     s.disc.style.transform='rotate('+s.angle+'deg)';
-    var dur=a.duration||0,pos=dur?a.currentTime/dur:0;
+    var dur=a.duration||0,ct=curTime(d),pos=dur?ct/dur:0;
     s.prog.style.setProperty('--p',(pos*100).toFixed(2));
     if(s.ph)s.ph.style.left='calc('+(pos*100)+'% - 1px)';
     if(s.loop&&!s.touch&&a.currentTime>=s.loop.end)a.currentTime=s.loop.start;
@@ -18035,7 +18099,7 @@ function tick(t){
     s.head.querySelector('.cx-bpm b').textContent=base?(base*(s.ps?+s.ps.value:rate)).toFixed(1):'--';
     s.head.querySelector('.cx-bpm small').textContent='BPM · '+(pitch>=0?'+':'')+pitch.toFixed(1)+'%';
     s.pv.textContent=(pitch>=0?'+':'')+pitch.toFixed(1)+'%';
-    s.sub.querySelector('.cx-time').textContent=mmss((dur-a.currentTime)/Math.max(.1,rate));
+    s.sub.querySelector('.cx-time').textContent=mmss((dur-ct)/Math.max(.1,rate));
     var title=m&&m.title||(a.currentSrc?decodeURIComponent(a.currentSrc.split('?')[0].split('/').pop()).replace(/\.\w+$/,''):'Load a track');
     var tb=s.head.querySelector('.cx-meta b');if(tb.textContent!==title)tb.textContent=title;
     s.head.querySelector('.cx-meta small').textContent=(m&&m.artist)||'GLCTC1';
@@ -18045,7 +18109,7 @@ function tick(t){
 
 function start(){
   if(!$('deckA')||!$('deckB')||!$('audioA'))return setTimeout(start,300);
-  buildDeck('A');buildDeck('B');requestAnimationFrame(tick);
+  buildDeck('A');buildDeck('B');loadBuf('A');loadBuf('B');requestAnimationFrame(tick);
 }
 if(document.readyState==='complete')setTimeout(start,250);
 else window.addEventListener('load',function(){setTimeout(start,250)});

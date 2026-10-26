@@ -1,10 +1,8 @@
 <!doctype html>
 <!--
   GLCTC1 — CHARACTER STAGE
-  GitHub Pages ready, single-file browser experience.
-  Choose a character, load a song, optionally add a photo, then play.
-  Media is processed locally in the browser; this file does not upload it.
-  Character movement and mouth motion are audio-reactive animation, not AI lip-reading.
+  Hybrid Character Stage rebuild. Original filter/audio/recording engine retained.
+  Optional photo + song + selectable procedural 3D performer. Media stays local.
 -->
 <html lang="en">
 
@@ -17,7 +15,9 @@
   content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
 >
 
-<title>GLCTC1 — CHARACTER STAGE</title>
+<title>
+GLCTC1 — CHARACTER STAGE
+</title>
 
 <link
   href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap"
@@ -33,6 +33,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix"></script>
+
+<!-- Procedural 3D performer renderer. If unavailable, the original visual engine remains usable. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 
 
 <style>
@@ -1320,17 +1323,18 @@ button:disabled{
 }
 
 
-
-/* CHARACTER STAGE */
-.character-intro{color:#cbd5e1;font:14px/1.6 Arial,sans-serif;margin:-4px 0 16px}
+/* =========================================================
+   CHARACTER STAGE — performer picker and creation flow
+========================================================= */
+.character-intro{color:#cbd5e1;font:14px/1.65 Arial,sans-serif;margin:-4px 0 16px}
 .character-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.character-card{min-width:0;display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border:1px solid #ffffff24;border-radius:14px;background:#070612;color:#fff;font-family:Orbitron,Arial,sans-serif}
-.character-card.selected{border-color:var(--cyan);box-shadow:0 0 18px #00ffff2b;background:#00ffff0c}
-.character-card b{font-size:9px;letter-spacing:.06em;text-align:center}.character-card small{font:10px Arial,sans-serif;color:#94a3b8;text-align:center}
-.avatar{display:grid;place-items:center;width:58px;height:58px;border-radius:18px;font-size:28px;border:1px solid #ffffff50;box-shadow:inset 0 0 18px #ffffff14,0 0 15px #ffffff10}
-.avatar.neon{background:radial-gradient(circle,#ff2bd6,#40126c 70%);color:#fff}.avatar.alien{background:radial-gradient(circle,#6dffb3,#064f66 70%);color:#03140e}.avatar.robot{background:linear-gradient(135deg,#d8e8ff,#3b82f6 55%,#111827);color:#10172b}.avatar.jungle{background:radial-gradient(circle,#ffe16b,#155e35 70%);color:#fff}.avatar.dream{background:radial-gradient(circle,#ffd5fa,#6d28d9 70%);color:#fff}.avatar.chrome{background:linear-gradient(135deg,#fff,#64748b 45%,#171923);color:#111}
-.character-options{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:15px;font:11px Arial,sans-serif;color:#cbd5e1}.character-options label:first-child{font-family:Orbitron,Arial,sans-serif;font-size:9px;color:var(--cyan);font-weight:bold}.character-options select{background:#05030f;color:#fff;border:1px solid #00ffff66;border-radius:8px;padding:10px;max-width:100%}.photo-toggle{display:flex;align-items:center;gap:8px;flex:1 1 100%;line-height:1.5}.photo-toggle input{accent-color:var(--cyan)}
-@media(max-width:520px){.character-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.character-card{padding:10px 4px}.avatar{width:54px;height:54px}}
+.character-card{min-width:0;display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 7px;border:1px solid #ffffff24;border-radius:14px;background:#070612;color:#fff;font-family:Orbitron,Arial,sans-serif;cursor:pointer}
+.character-card.selected{border-color:var(--cyan);box-shadow:0 0 18px #00ffff2b,inset 0 0 18px #00ffff0b;background:#00ffff0c}
+.character-card b{font-size:9px;letter-spacing:.06em;text-align:center}.character-card small{font:10px/1.35 Arial,sans-serif;color:#94a3b8;text-align:center}
+.character-swatch{display:grid;place-items:center;width:66px;height:76px;border-radius:15px;font-size:30px;border:1px solid #ffffff40;box-shadow:inset 0 0 20px #ffffff1c,0 0 16px #ffffff10}
+.character-swatch.neon{background:radial-gradient(circle at 50% 30%,#ffb6e8,#9b1d8d 45%,#140a2a)}.character-swatch.alien{background:radial-gradient(circle at 50% 30%,#d0ffb9,#087c75 48%,#061b2b)}.character-swatch.robot{background:linear-gradient(145deg,#f8fafc,#64748b 48%,#111827)}.character-swatch.jungle{background:radial-gradient(circle at 50% 30%,#fff0a5,#a15b16 48%,#0b281b)}.character-swatch.dream{background:radial-gradient(circle at 50% 30%,#fff1ff,#b58bff 48%,#28134b)}.character-swatch.chrome{background:linear-gradient(145deg,#fff,#a8b6ca 42%,#252b38)}
+.character-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.character-toolbar button{flex:1 1 160px}.character-settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.character-settings label{display:flex;flex-direction:column;gap:7px;color:#94a3b8;font:11px Arial,sans-serif}.character-settings select{width:100%;background:#05030f;color:#fff;border:1px solid #00ffff66;border-radius:9px;padding:11px;min-height:40px}.character-note{font:11px/1.6 Arial,sans-serif;color:#94a3b8;margin-top:12px}.character-engine-status{margin-top:10px;font:10px/1.5 Arial,sans-serif;color:#7dd3fc;text-align:center}
+@media(max-width:520px){.character-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.character-settings{grid-template-columns:1fr}.character-swatch{width:60px;height:68px}}
 
 /* =========================================================
    MOBILE
@@ -1599,39 +1603,42 @@ GLCTC1
 <h1>CHARACTER STAGE</h1>
 
 <div class="hero-subtitle">
-YOUR SONG. YOUR CHARACTER. YOUR WORLD.
+YOUR SONG. YOUR PERFORMER. YOUR WORLD.
 </div>
 
 <div class="hero-copy">
 
-<strong>MAKE YOUR MUSIC COME ALIVE.</strong><br><br>
-Choose a character, add your song, and press play. Your character dances to the beat and sings along to the vocal energy. Add a photo to use it as the visual world or backdrop where possible. Your existing psychedelic filters stay available for the look.
+<strong>MAKE YOUR MUSIC COME ALIVE.</strong><br><br>Choose a performer, add your song, and press play. The 3D performer moves with the music while your existing visual filters transform the scene. A photo is optional.
 
 </div>
 
 </section>
 
 
-<!-- CHARACTER PICKER: fast, simple, phone-friendly -->
+<!-- =======================================================
+     CHARACTER STAGE — SIMPLE CREATION FLOW
+======================================================= -->
 <section class="panel" id="characterPanel">
-  <div class="section-title">01 — PICK YOUR PERFORMER</div>
-  <p class="character-intro">Choose a performer, or let the stage surprise you. Add a song and press play. Each performer has its own colours and stage style.</p>
-  <div class="character-grid" id="characterGrid">
-    <button type="button" class="character-card selected" data-character="neon" aria-pressed="true"><span class="avatar neon">✦</span><b>NEON NOVA</b><small>Electric pop star</small></button>
-    <button type="button" class="character-card" data-character="alien" aria-pressed="false"><span class="avatar alien">◉</span><b>STAR GROOVER</b><small>Cosmic alien</small></button>
-    <button type="button" class="character-card" data-character="robot" aria-pressed="false"><span class="avatar robot">▣</span><b>BEAT BOT</b><small>Funky robot</small></button>
-    <button type="button" class="character-card" data-character="jungle" aria-pressed="false"><span class="avatar jungle">✺</span><b>JUNGLE SPIRIT</b><small>Tribal energy</small></button>
-    <button type="button" class="character-card" data-character="dream" aria-pressed="false"><span class="avatar dream">☾</span><b>DREAM DANCER</b><small>Soft, surreal</small></button>
-    <button type="button" class="character-card" data-character="chrome" aria-pressed="false"><span class="avatar chrome">✧</span><b>CHROME ICON</b><small>Future club star</small></button>
+  <div class="section-title">01 — CHOOSE YOUR PERFORMER</div>
+  <p class="character-intro">Choose a performer or let the stage surprise you. These are locally generated 3D performer prototypes with beat-reactive choreography. Add a song and press play. Properly rigged artist-grade models can be plugged into this engine later.</p>
+  <div class="character-grid" id="characterGrid" role="group" aria-label="Choose a performer">
+    <button type="button" class="character-card selected" data-character="neon" aria-pressed="true"><span class="character-swatch neon">✦</span><b>NEON NOVA</b><small>Electric pop performer</small></button>
+    <button type="button" class="character-card" data-character="alien" aria-pressed="false"><span class="character-swatch alien">◉</span><b>STAR GROOVER</b><small>Cosmic performer</small></button>
+    <button type="button" class="character-card" data-character="robot" aria-pressed="false"><span class="character-swatch robot">▣</span><b>BEAT BOT</b><small>Chrome club dancer</small></button>
+    <button type="button" class="character-card" data-character="jungle" aria-pressed="false"><span class="character-swatch jungle">✺</span><b>JUNGLE SPIRIT</b><small>Earthy, tribal energy</small></button>
+    <button type="button" class="character-card" data-character="dream" aria-pressed="false"><span class="character-swatch dream">☾</span><b>DREAM DANCER</b><small>Soft surreal style</small></button>
+    <button type="button" class="character-card" data-character="chrome" aria-pressed="false"><span class="character-swatch chrome">✧</span><b>CHROME ICON</b><small>Futuristic stage star</small></button>
   </div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-    <button type="button" id="randomCharacterButton" style="border-color:var(--gold);color:var(--gold);flex:1 1 180px">✦ SURPRISE ME — RANDOM CHARACTER</button>
+  <div class="character-toolbar">
+    <button type="button" id="randomCharacterButton" style="border-color:var(--gold);color:var(--gold)">✦ SURPRISE ME</button>
+    <button type="button" id="previewCharacterButton" style="border-color:var(--cyan);color:var(--cyan)">↻ REBUILD PERFORMER</button>
   </div>
-  <div class="character-options">
-    <label for="danceStyle">DANCE STYLE</label>
-    <select id="danceStyle"><option value="full">Full-body groove</option><option value="bounce">Bounce &amp; head nod</option><option value="smooth">Smooth flow</option><option value="wild">Wild mode</option></select>
-    <label class="photo-toggle"><input id="photoBackdrop" type="checkbox" checked> Use my uploaded picture as the world / backdrop when available</label>
+  <div class="character-settings">
+    <label for="danceStyle">DANCE PERSONALITY<select id="danceStyle"><option value="full">Full-body groove</option><option value="bounce">Bounce &amp; head nod</option><option value="smooth">Smooth flow</option><option value="wild">Wild mode</option></select></label>
+    <label for="photoTreatment">UPLOADED PHOTO<select id="photoTreatment"><option value="scene">Use photo as the visual world</option><option value="subject">Emphasise detected person / subject layers</option></select></label>
   </div>
+  <div class="character-note">Photo support: images remain local. The existing subject-segmentation and visual FX engine can animate detected subject layers where supported. Turning an arbitrary photograph into a fully rigged 3D person requires a separate AI reconstruction service and is not falsely simulated here.</div>
+  <div id="characterEngineStatus" class="character-engine-status">3D ENGINE — CHECKING AVAILABILITY…</div>
 </section>
 
 <!-- =======================================================
@@ -1650,12 +1657,12 @@ LOAD YOUR MEDIA
 <div class="media-card">
 
 <div class="media-title">
-02 — YOUR WORLD / PHOTO
+02 — YOUR PHOTO / VISUAL WORLD
 </div>
 
 <div class="media-description">
 
-Upload a photo, artwork, or scene. It is used as the background where possible; your selected performer appears in front.
+Upload a photo, artwork or scene. It becomes the visual world; the existing local AI may also detect and separate people or objects.
 
 </div>
 
@@ -1683,7 +1690,7 @@ NO IMAGE LOADED
 
 <div class="media-description">
 
-Choose an MP3, WAV, or other browser-supported audio file. The beat and vocal energy animate your performer.
+Choose an MP3, WAV or other browser-supported audio file. Beat, bass and energy analysis drive the performance.
 
 </div>
 
@@ -1716,7 +1723,7 @@ NO SOUND LOADED
 
 
 <div class="section-title">
-CHARACTER STAGE
+PSYCHEDELIC SPACE
 </div>
 
 
@@ -2003,7 +2010,7 @@ VOICE — WAITING FOR SONG
   type="button"
   disabled
 >
-⇩ DOWNLOAD VISUAL
+⇩ DOWNLOAD VIDEO
 </button>
 
 </div>
@@ -2038,7 +2045,7 @@ VOICE — WAITING FOR SONG
 
 <div class="export-note">
 
-DOWNLOAD VIDEO records the character performance, visual effects, and available audio locally as WebM.
+DOWNLOAD VIDEO records the performer, visual effects and available audio locally as WebM.
 
 </div>
 
@@ -2049,7 +2056,7 @@ DOWNLOAD VIDEO records the character performance, visual effects, and available 
   id="experienceStatus"
   class="status"
 >
-CHOOSE A CHARACTER OR SURPRISE ME, ADD YOUR SONG, THEN PRESS PLAY. A PHOTO IS OPTIONAL.
+CHOOSE A PERFORMER, ADD YOUR SONG, THEN PRESS PLAY. A PHOTO IS OPTIONAL.
 </div>
 
 
@@ -2070,11 +2077,11 @@ GLCTC1 PRIVACY
 
 <br><br>
 
-Your photo and song are processed locally
+Your photo and sound are processed locally
 in this browser.
 
 Nothing is uploaded to a GLCTC1 media library
-or saved as a permanent media record.
+or saved as a permanent media record. The optional 3D performer runs in this browser.
 
 <br><br>
 
@@ -2195,101 +2202,6 @@ const readHigh =
 
 const readBpm =
   $("readBpm");
-
-const CHARACTER_PALETTES = {
-  neon:{skin:"#f8c9b4",hair:"#ff2bd6",top:"#00ffff",accent:"#9b5cff",eye:"#101020"},
-  alien:{skin:"#78ffc0",hair:"#0a9f8e",top:"#7c3aed",accent:"#b7ffdf",eye:"#071b24"},
-  robot:{skin:"#cbd5e1",hair:"#64748b",top:"#3b82f6",accent:"#00ffff",eye:"#111827"},
-  jungle:{skin:"#b97850",hair:"#172b20",top:"#eab308",accent:"#22c55e",eye:"#1a1208"},
-  dream:{skin:"#f3c7e8",hair:"#a78bfa",top:"#f0abfc",accent:"#fff1ff",eye:"#38204c"},
-  chrome:{skin:"#e2e8f0",hair:"#94a3b8",top:"#e5e7eb",accent:"#64748b",eye:"#0f172a"}
-};
-
-$("characterGrid").addEventListener("click", event => {
-  const card = event.target.closest("[data-character]");
-  if(!card) return;
-  S.character = card.dataset.character;
-  $("characterGrid").querySelectorAll("[data-character]").forEach(el=>{
-    const chosen = el === card;
-    el.classList.toggle("selected",chosen);
-    el.setAttribute("aria-pressed",String(chosen));
-  });
-  S.repaint = 2;
-});
-$("randomCharacterButton").addEventListener("click", () => {
-  const cards = [...$("characterGrid").querySelectorAll("[data-character]")];
-  const choices = cards.filter(card => card.dataset.character !== S.character);
-  const pick = choices[Math.floor(Math.random() * choices.length)] || cards[0];
-  if(pick) pick.click();
-});
-$("danceStyle").addEventListener("change", event => { S.danceStyle = event.target.value; S.repaint=2; });
-$("photoBackdrop").addEventListener("change", event => { S.photoBackdrop = event.target.checked; S.repaint=2; });
-
-function drawCharacterStage(timestamp){
-  if(!S.songURL) return;
-  const t = (timestamp || 0) / 1000;
-  const p = CHARACTER_PALETTES[S.character] || CHARACTER_PALETTES.neon;
-  const energy = Math.max(0,Math.min(1,(S.A.energy || 0)*1.8));
-  const beat = Math.max(0,S.A.beat || 0);
-  const wild = S.danceStyle === "wild" ? 1.65 : S.danceStyle === "smooth" ? .55 : S.danceStyle === "bounce" ? .7 : 1;
-  const bob = Math.sin(t*(S.danceStyle === "smooth" ? 4 : 8) + beat*2)* (10 + energy*25)*wild;
-  const sway = Math.sin(t*3.1)*(.10+energy*.18)*wild;
-  const cx = W*.5, baseY = H*.83;
-  const scale = .95 + energy*.06;
-  ctx.save();
-  ctx.translate(cx,baseY+bob);
-  ctx.scale(scale,scale);
-  ctx.rotate(sway*.22);
-  ctx.lineCap="round"; ctx.lineJoin="round";
-  // soft stage glow
-  const glow=ctx.createRadialGradient(0,-210,15,0,-210,245);
-  glow.addColorStop(0,p.accent+"33"); glow.addColorStop(1,"#00000000");
-  ctx.fillStyle=glow;ctx.beginPath();ctx.ellipse(0,-205,235,280,0,0,Math.PI*2);ctx.fill();
-  // legs dance independently
-  const legSwing=Math.sin(t*7+beat*2)*.45*wild;
-  ctx.strokeStyle=p.top;ctx.lineWidth=34;
-  ctx.beginPath();ctx.moveTo(-28,-95);ctx.lineTo(-45+Math.sin(legSwing)*32,-24);ctx.lineTo(-62+Math.sin(legSwing)*35,0);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(28,-95);ctx.lineTo(45-Math.sin(legSwing)*32,-24);ctx.lineTo(62-Math.sin(legSwing)*35,0);ctx.stroke();
-  ctx.strokeStyle=p.accent;ctx.lineWidth=15;ctx.beginPath();ctx.moveTo(-70,0);ctx.lineTo(-42,0);ctx.moveTo(50,0);ctx.lineTo(78,0);ctx.stroke();
-  // arms lift and swing with the beat
-  const arm=Math.sin(t*6+beat*2)*.55*wild;
-  ctx.strokeStyle=p.skin;ctx.lineWidth=25;
-  ctx.beginPath();ctx.moveTo(-48,-250);ctx.quadraticCurveTo(-105,-205+arm*50,-105,-170-arm*55);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(48,-250);ctx.quadraticCurveTo(105,-205-arm*50,105,-170+arm*55);ctx.stroke();
-  // body
-  ctx.fillStyle=p.top;ctx.beginPath();ctx.moveTo(-52,-275);ctx.quadraticCurveTo(0,-295,52,-275);ctx.lineTo(44,-115);ctx.quadraticCurveTo(0,-95,-44,-115);ctx.closePath();ctx.fill();
-  ctx.strokeStyle=p.accent;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-32,-245);ctx.lineTo(32,-245);ctx.stroke();
-  // neck and head
-  ctx.fillStyle=p.skin;ctx.fillRect(-13,-305,26,36);
-  ctx.beginPath();ctx.ellipse(0,-340,55,62,0,0,Math.PI*2);ctx.fill();
-  // hairstyle / character silhouette
-  ctx.fillStyle=p.hair;
-  if(S.character==="alien"){
-    ctx.beginPath();ctx.moveTo(-44,-365);ctx.lineTo(-76,-405);ctx.lineTo(-31,-391);ctx.lineTo(-12,-420);ctx.lineTo(8,-390);ctx.lineTo(48,-405);ctx.lineTo(43,-363);ctx.closePath();ctx.fill();
-  }else if(S.character==="robot"){
-    ctx.fillStyle=p.skin;ctx.beginPath();ctx.rect(-52,-386,104,88);ctx.fill();
-    ctx.fillStyle=p.accent;ctx.fillRect(-35,-354,20,10);ctx.fillRect(15,-354,20,10);
-  }else{
-    ctx.beginPath();ctx.ellipse(0,-376,58,32,0,Math.PI,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.moveTo(-55,-367);ctx.quadraticCurveTo(-68,-330,-48,-294);ctx.lineTo(-38,-342);ctx.closePath();ctx.fill();
-    ctx.beginPath();ctx.moveTo(55,-367);ctx.quadraticCurveTo(68,-330,48,-294);ctx.lineTo(38,-342);ctx.closePath();ctx.fill();
-  }
-  // expressive eyes
-  ctx.fillStyle=p.eye;ctx.beginPath();ctx.ellipse(-20,-342,7,10,0,0,Math.PI*2);ctx.ellipse(20,-342,7,10,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.arc(-22,-346,2.5,0,Math.PI*2);ctx.arc(18,-346,2.5,0,Math.PI*2);ctx.fill();
-  // audio-driven singing mouth: syllable-like pulse from vocal envelope and beat energy
-  const vocal = Math.max(0,Math.min(1,(S.vocal?.level || 0)*2.4));
-  const mouthOpen = Math.max(.12,vocal*.95 + energy*.15 + (beat>.5?.22:0));
-  ctx.fillStyle="#321329";ctx.beginPath();ctx.ellipse(0,-317,10+mouthOpen*5,2+mouthOpen*10,0,0,Math.PI*2);ctx.fill();
-  if(mouthOpen>.45){ctx.fillStyle="#fff0f5";ctx.fillRect(-7,-320,14,3);}
-  // cheek highlights and beat halo
-  ctx.fillStyle=p.accent;ctx.globalAlpha=.6;ctx.beginPath();ctx.arc(-38,-325,5+energy*4,0,Math.PI*2);ctx.arc(38,-325,5+energy*4,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
-  ctx.restore();
-  // unobtrusive performer label
-  ctx.save();ctx.font="bold 15px Orbitron,Arial";ctx.textAlign="center";ctx.fillStyle="#ffffffd9";ctx.shadowColor=p.accent;ctx.shadowBlur=16;
-  const labels={neon:"NEON NOVA",alien:"STAR GROOVER",robot:"BEAT BOT",jungle:"JUNGLE SPIRIT",dream:"DREAM DANCER",chrome:"CHROME ICON"};
-  ctx.fillText(labels[S.character] || "YOUR PERFORMER",W/2,H*.94);ctx.restore();
-}
 
 
 /* =========================================================
@@ -2576,7 +2488,13 @@ const S = {
 
   danceStyle:"full",
 
-  photoBackdrop:true,
+  photoTreatment:"scene",
+
+  character3D:null,
+
+  character3DReady:false,
+
+  character3DError:false,
 
   songURL:null,
 
@@ -2794,7 +2712,194 @@ S.vocal = {
   presence:0
 };
 
-
+/* =========================================================
+   CHARACTER ENGINE — PROCEDURAL 3D PERFORMER
+   Built as a separate layer so the original filters and
+   analyser remain untouched. Renderer output is composited
+   into the same final canvas used by MediaRecorder.
+========================================================= */
+const CHARACTER_LOOKS = {
+  neon:  {skin:0xd79a79,hair:0x24132f,top:0xff2bd6,trim:0x00ffff,pants:0x17162b,shoe:0xf4f7ff,eye:0x17101f,metal:false},
+  alien: {skin:0x70d9b0,hair:0x073e48,top:0x5d3ce7,trim:0xb7ffdf,pants:0x082d38,shoe:0x9affd8,eye:0x061820,metal:false},
+  robot: {skin:0xcbd5e1,hair:0x334155,top:0x2563eb,trim:0x00ffff,pants:0x1e293b,shoe:0xe2e8f0,eye:0x0b1220,metal:true},
+  jungle:{skin:0x9a6248,hair:0x171d16,top:0xe4ad22,trim:0x38d878,pants:0x24432f,shoe:0x34271d,eye:0x21150e,metal:false},
+  dream: {skin:0xe9c4d9,hair:0x7c4cba,top:0xd8a4f8,trim:0xffefff,pants:0x4b2b75,shoe:0xffe9ff,eye:0x39234a,metal:false},
+  chrome:{skin:0xc4cedb,hair:0x64748b,top:0xdce5f1,trim:0x647b99,pants:0x303744,shoe:0xf8fafc,eye:0x101827,metal:true}
+};
+const CHARACTER_NAMES = {neon:"NEON NOVA",alien:"STAR GROOVER",robot:"BEAT BOT",jungle:"JUNGLE SPIRIT",dream:"DREAM DANCER",chrome:"CHROME ICON"};
+let characterRenderer=null, characterScene=null, characterCamera=null, characterRoot=null, characterRig=null, characterMaterials=[];
+function mat(color, roughness=.52, metalness=0){return new THREE.MeshStandardMaterial({color,roughness,metalness});}
+function mesh(geometry, material, parent, position, scale){const m=new THREE.Mesh(geometry,material);if(position)m.position.set(...position);if(scale)m.scale.set(...scale);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;}
+function makeLimb(parent, length, radius, material){
+  const g=new THREE.Group(); parent.add(g);
+  mesh(new THREE.CapsuleGeometry(radius,Math.max(.05,length-radius*2),4,8),material,g,[0,-length/2,0]);
+  mesh(new THREE.SphereGeometry(radius*1.02,12,10),material,g,[0,-length+radius*.7,0]);
+  return g;
+}
+function makeCharacter3D(){
+  if(!window.THREE){
+    S.character3DError=true;
+    const st=$("characterEngineStatus");if(st)st.textContent="3D LIBRARY UNAVAILABLE — ORIGINAL VISUAL ENGINE STILL AVAILABLE.";
+    return false;
+  }
+  try{
+    if(characterRenderer){characterRenderer.dispose();characterRenderer=null;}
+    characterScene=new THREE.Scene();
+    characterCamera=new THREE.OrthographicCamera(-1.52,1.52,3.2,-2.2,.1,100);
+    characterCamera.position.set(0,.5,18);characterCamera.lookAt(0,.5,0);
+    characterRenderer=new THREE.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true,powerPreference:"low-power"});
+    characterRenderer.setPixelRatio(1);characterRenderer.setSize(W,H,false);
+    characterRenderer.setClearColor(0x000000,0);
+    characterRenderer.outputColorSpace=THREE.SRGBColorSpace;
+    characterRenderer.toneMapping=THREE.ACESFilmicToneMapping;
+    characterRenderer.toneMappingExposure=1.2;
+    characterScene.add(new THREE.HemisphereLight(0xddeeff,0x21112f,2.0));
+    const key=new THREE.DirectionalLight(0xffffff,3.0);key.position.set(-4,7,10);characterScene.add(key);
+    const rim=new THREE.PointLight(0x00ffff,24,16);rim.position.set(3,2,4);characterScene.add(rim);
+    const fill=new THREE.PointLight(0xff2bd6,18,14);fill.position.set(-4,1,3);characterScene.add(fill);
+    const look=CHARACTER_LOOKS[S.character]||CHARACTER_LOOKS.neon;
+    const skin=mat(look.skin,.7,look.metal?.35:0), hair=mat(look.hair,.4,look.metal?.55:0), top=mat(look.top,.38,look.metal?.55:.05), trim=mat(look.trim,.28,.25), pants=mat(look.pants,.55,look.metal?.3:0), shoes=mat(look.shoe,.3,look.metal?.65:.05), eyes=mat(look.eye,.25), dark=mat(0x201321,.4), white=mat(0xffffff,.25);
+    characterMaterials=[skin,hair,top,trim,pants,shoes,eyes,dark,white];
+    characterRoot=new THREE.Group();characterScene.add(characterRoot);
+    // Body silhouette, designed with layered volumes rather than flat 2D strokes.
+    const torso=new THREE.Group();torso.position.set(0,1.45,0);characterRoot.add(torso);
+    mesh(new THREE.SphereGeometry(.58,28,22),top,torso,[0,.2,0],[.88,1.05,.53]);
+    mesh(new THREE.SphereGeometry(.57,28,22),top,torso,[0,-.22,0],[.72,.82,.48]);
+    mesh(new THREE.TorusGeometry(.43,.045,8,32),trim,torso,[0,.46,.25],[1,.42,1]);
+    mesh(new THREE.BoxGeometry(.11,.7,.08),trim,torso,[0,.05,.51]);
+    // waist and hips
+    mesh(new THREE.SphereGeometry(.43,24,16),pants,characterRoot,[0,.92,0],[1,.55,.53]);
+    // neck, head and ears
+    mesh(new THREE.CylinderGeometry(.16,.19,.34,16),skin,characterRoot,[0,2.14,0]);
+    const head=new THREE.Group();head.position.set(0,2.62,0);characterRoot.add(head);
+    mesh(look.metal?new THREE.BoxGeometry(.72,.76,.55):new THREE.SphereGeometry(.39,28,24),skin,head,[0,0,0],look.metal?null:[.94,1.12,.86]);
+    mesh(new THREE.SphereGeometry(.12,16,12),skin,head,[-.39,-.02,0],[.48,.8,.65]);mesh(new THREE.SphereGeometry(.12,16,12),skin,head,[.39,-.02,0],[.48,.8,.65]);
+    // hair cap and side locks / robot crown
+    if(S.character==="robot"||S.character==="chrome"){
+      mesh(new THREE.BoxGeometry(.8,.19,.62),hair,head,[0,.34,0]);
+      mesh(new THREE.BoxGeometry(.13,.28,.12),trim,head,[-.25,.45,.18]);mesh(new THREE.BoxGeometry(.13,.28,.12),trim,head,[.25,.45,.18]);
+    }else{
+      mesh(new THREE.SphereGeometry(.405,24,16,0,Math.PI*2,0,Math.PI*.58),hair,head,[0,.14,-.015],[1.03,1.03,.94]);
+      mesh(new THREE.SphereGeometry(.13,14,12),hair,head,[-.32,-.1,-.01],[.65,1.65,.8]);mesh(new THREE.SphereGeometry(.13,14,12),hair,head,[.32,-.1,-.01],[.65,1.65,.8]);
+      if(S.character==="alien") {mesh(new THREE.ConeGeometry(.16,.35,12),skin,head,[-.24,.43,0]);mesh(new THREE.ConeGeometry(.16,.35,12),skin,head,[.24,.43,0]);}
+    }
+    // Face details on the front (+Z).
+    const eyeGeo=new THREE.SphereGeometry(.055,12,10);
+    mesh(eyeGeo,eyes,head,[-.145,.035,.323],[1,1.18,.48]);mesh(eyeGeo,eyes,head,[.145,.035,.323],[1,1.18,.48]);
+    mesh(new THREE.SphereGeometry(.018,8,8),white,head,[-.16,.055,.348]);mesh(new THREE.SphereGeometry(.018,8,8),white,head,[.13,.055,.348]);
+    const mouth=mesh(new THREE.SphereGeometry(.075,14,10),dark,head,[0,-.19,.326],[1.25,.18,.35]);
+    const lip=mesh(new THREE.TorusGeometry(.067,.012,6,18),skin,head,[0,-.19,.338],[1.2,.48,.3]);
+    // Arms with shoulders, elbows and hands as separate joints.
+    const arms=[];
+    for(const side of [-1,1]){
+      const shoulder=new THREE.Group();shoulder.position.set(side*.52,1.83,0);torso.add(shoulder);
+      mesh(new THREE.SphereGeometry(.19,16,12),top,shoulder,[0,0,0]);
+      const upper=makeLimb(shoulder,.58,.135,top);upper.rotation.z=side*-.12;
+      const elbow=new THREE.Group();elbow.position.y=-.53;shoulder.add(elbow);mesh(new THREE.SphereGeometry(.13,12,10),skin,elbow,[0,0,0]);
+      const lower=makeLimb(elbow,.53,.105,skin);
+      const hand=mesh(new THREE.SphereGeometry(.13,14,12),skin,elbow,[0,-.52,.01],[.8,1,.7]);
+      const cuff=mesh(new THREE.TorusGeometry(.12,.035,8,18),trim,shoulder,[0,-.47,0],[1,.65,1]);
+      arms.push({side,shoulder,upper,elbow,lower,hand});
+    }
+    // Legs with knee pivots, trousers and shoes.
+    const legs=[];
+    for(const side of [-1,1]){
+      const hip=new THREE.Group();hip.position.set(side*.23,.82,0);characterRoot.add(hip);
+      const upper=makeLimb(hip,.68,.18,pants);
+      const knee=new THREE.Group();knee.position.y=-.62;hip.add(knee);mesh(new THREE.SphereGeometry(.16,14,12),pants,knee,[0,0,0]);
+      const lower=makeLimb(knee,.63,.13,pants);
+      mesh(new THREE.SphereGeometry(.19,16,10),shoes,knee,[0,-.65,.1],[1.25,.55,1.8]);
+      mesh(new THREE.TorusGeometry(.17,.025,7,18),trim,knee,[0,-.16,.01],[1,.7,1]);
+      legs.push({side,hip,upper,knee,lower});
+    }
+    // Neckline jewel / chest badge.
+    mesh(new THREE.OctahedronGeometry(.12,1),trim,torso,[0,.12,.54]);
+    characterRig={torso,head,mouth,lip,arms,legs,look};
+    S.character3DReady=true;S.character3DError=false;
+    const st=$("characterEngineStatus");if(st)st.textContent="3D PERFORMER READY — BEAT-REACTIVE BODY, JOINTS AND MOUTH.";
+    return true;
+  }catch(err){
+    console.warn("Character 3D initialisation failed:",err);
+    S.character3DError=true;S.character3DReady=false;
+    const st=$("characterEngineStatus");if(st)st.textContent="3D RENDERER UNAVAILABLE IN THIS BROWSER — PHOTO FILTER ENGINE REMAINS AVAILABLE.";
+    return false;
+  }
+}
+function renderCharacterOverlay(timestamp){
+  if(!S.songURL) return;
+  if(!characterRenderer || !characterRig){if(!S.character3DError)makeCharacter3D();}
+  if(characterRenderer && characterRig){
+    const t=(timestamp||0)*.001;
+    const energy=clamp((S.A.energy||0)*2.4,0,1);
+    const beat=clamp(S.A.beat||0,0,1);
+    const vocal=clamp((S.vocal&&S.vocal.level||0)*2.6,0,1);
+    const mode=S.danceStyle||"full";
+    const amp=mode==="wild"?1.65:mode==="smooth"?.52:mode==="bounce"?.68:1;
+    const pulse=Math.sin(t*(mode==="smooth"?3.3:6.8))*amp;
+    const kick=beat*(.12+energy*.12);
+    characterRoot.position.y=-.52+Math.abs(Math.sin(t*6.8))*energy*.08-kick*.35;
+    characterRoot.rotation.y=Math.sin(t*1.1)*.09+Math.sin(t*2.3)*energy*.045;
+    characterRoot.rotation.z=Math.sin(t*2.8)*.045*amp;
+    characterRig.torso.rotation.z=Math.sin(t*3.4)*.09*amp;
+    characterRig.torso.rotation.x=Math.sin(t*2.1)*.035+kick*.12;
+    characterRig.head.rotation.z=Math.sin(t*4.7)*.09*amp;
+    characterRig.head.rotation.x=Math.sin(t*3.6)*.055+vocal*.025;
+    characterRig.arms.forEach((a,i)=>{
+      const phase=t*5.3+(a.side===1?Math.PI:0);
+      a.shoulder.rotation.z=a.side*(.16+Math.sin(phase)*(.48+energy*.6)*amp)+(mode==="wild"?Math.sin(t*11+i)*.24:0);
+      a.shoulder.rotation.x=Math.sin(t*3.2+i*2)*.18;
+      a.elbow.rotation.z=Math.sin(t*6.2+i*2.3)*.5*amp;
+      a.lower.rotation.x=Math.sin(t*5.7+i*2)*.2;
+    });
+    characterRig.legs.forEach((l,i)=>{
+      const phase=t*(mode==="smooth"?3.1:6.4)+(i?Math.PI:0);
+      l.hip.rotation.x=Math.sin(phase)*(.18+energy*.36)*amp;
+      l.hip.rotation.z=l.side*Math.sin(t*3.1+i)*.06;
+      l.knee.rotation.x=Math.max(0,Math.sin(phase+.8))*(.14+energy*.52)*amp;
+    });
+    const mouthOpen=clamp(.07+vocal*.95+energy*.08, .05, .95);
+    characterRig.mouth.scale.y=.15+mouthOpen*.9;
+    characterRig.lip.scale.y=.45+mouthOpen*.45;
+    characterRenderer.render(characterScene,characterCamera);
+    ctx.save();ctx.globalCompositeOperation="source-over";ctx.globalAlpha=1;
+    ctx.drawImage(characterRenderer.domElement,0,0,W,H);
+    ctx.restore();
+  }else{
+    drawCharacterFallback(timestamp);
+  }
+}
+function drawCharacterFallback(timestamp){
+  // Graceful fallback when WebGL/CDN is unavailable; never blocks original filters.
+  const look=CHARACTER_LOOKS[S.character]||CHARACTER_LOOKS.neon;
+  const t=(timestamp||0)*.001,energy=clamp((S.A.energy||0)*2,0,1),vocal=clamp((S.vocal?.level||0)*2,0,1);
+  const colors={skin:"#d79a79",hair:"#24132f",top:"#ff2bd6",trim:"#00ffff",pants:"#17162b"};
+  const hex=n=>"#"+n.toString(16).padStart(6,"0");
+  colors.skin=hex(look.skin);colors.hair=hex(look.hair);colors.top=hex(look.top);colors.trim=hex(look.trim);colors.pants=hex(look.pants);
+  const x=W*.5,y=H*.84+bobValue(t,energy),sc=.82+energy*.04;
+  ctx.save();ctx.translate(x,y);ctx.scale(sc,sc);ctx.lineCap="round";
+  const glow=ctx.createRadialGradient(0,-260,20,0,-260,250);glow.addColorStop(0,colors.trim+"55");glow.addColorStop(1,"#00000000");ctx.fillStyle=glow;ctx.beginPath();ctx.ellipse(0,-250,230,290,0,0,Math.PI*2);ctx.fill();
+  const arm=Math.sin(t*5.5)*(.45+energy*.5),leg=Math.sin(t*6.3)*(.35+energy*.35);
+  ctx.strokeStyle=colors.pants;ctx.lineWidth=37;ctx.beginPath();ctx.moveTo(-25,-120);ctx.lineTo(-38+leg*38,-45);ctx.lineTo(-48+leg*48,0);ctx.moveTo(25,-120);ctx.lineTo(38-leg*38,-45);ctx.lineTo(48-leg*48,0);ctx.stroke();
+  ctx.strokeStyle=colors.trim;ctx.lineWidth=14;ctx.beginPath();ctx.moveTo(-68,0);ctx.lineTo(-35,0);ctx.moveTo(35,0);ctx.lineTo(68,0);ctx.stroke();
+  ctx.strokeStyle=colors.skin;ctx.lineWidth=27;ctx.beginPath();ctx.moveTo(-48,-260);ctx.quadraticCurveTo(-105,-215+arm*38,-112,-165-arm*42);ctx.moveTo(48,-260);ctx.quadraticCurveTo(105,-215-arm*38,112,-165+arm*42);ctx.stroke();
+  ctx.fillStyle=colors.top;ctx.beginPath();ctx.moveTo(-55,-280);ctx.quadraticCurveTo(0,-300,55,-280);ctx.lineTo(45,-120);ctx.quadraticCurveTo(0,-100,-45,-120);ctx.closePath();ctx.fill();
+  ctx.fillStyle=colors.skin;ctx.fillRect(-13,-312,26,38);ctx.beginPath();ctx.ellipse(0,-350,55,62,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=colors.hair;ctx.beginPath();ctx.ellipse(0,-383,58,31,0,Math.PI,Math.PI*2);ctx.fill();ctx.fillRect(-55,-373,14,65);ctx.fillRect(41,-373,14,65);
+  ctx.fillStyle="#151020";ctx.beginPath();ctx.ellipse(-20,-352,7,10,0,0,Math.PI*2);ctx.ellipse(20,-352,7,10,0,0,Math.PI*2);ctx.fill();ctx.fillStyle="#301323";ctx.beginPath();ctx.ellipse(0,-326,10,3+vocal*10,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();ctx.save();ctx.textAlign="center";ctx.font="bold 14px Orbitron,Arial";ctx.fillStyle="#fff";ctx.shadowColor=colors.trim;ctx.shadowBlur=14;ctx.fillText(CHARACTER_NAMES[S.character]||"YOUR PERFORMER",W/2,H*.95);ctx.restore();
+}
+function bobValue(t,e){return Math.sin(t*6.8)*(6+e*16);}
+function selectCharacter(key){
+  if(!CHARACTER_LOOKS[key])return;
+  S.character=key;
+  $("characterGrid").querySelectorAll("[data-character]").forEach(card=>{const selected=card.dataset.character===key;card.classList.toggle("selected",selected);card.setAttribute("aria-pressed",String(selected));});
+  makeCharacter3D();S.repaint=2;
+}
+$("characterGrid").addEventListener("click",event=>{const card=event.target.closest("[data-character]");if(card)selectCharacter(card.dataset.character);});
+$("randomCharacterButton").addEventListener("click",()=>{const keys=Object.keys(CHARACTER_LOOKS).filter(k=>k!==S.character);selectCharacter(keys[Math.floor(Math.random()*keys.length)]||"neon");});
+$("previewCharacterButton").addEventListener("click",()=>{makeCharacter3D();S.repaint=2;});
+$("danceStyle").addEventListener("change",event=>{S.danceStyle=event.target.value;S.repaint=2;});
+$("photoTreatment").addEventListener("change",event=>{S.photoTreatment=event.target.value;S.repaint=2;if(S.image&&event.target.value==="subject")status.textContent="SUBJECT LAYERS SELECTED — LOCAL SEGMENTATION IS USED WHERE AVAILABLE.";});
+makeCharacter3D();
 
 /* =========================================================
    WET / DRY
@@ -2822,7 +2927,6 @@ mixSlider.oninput =
 function ready(){
 
   const r =
-    !!S.image &&
     !!S.songURL;
 
 
@@ -2999,8 +3103,8 @@ pictureInput.onchange =
 
         status.textContent =
           S.songURL
-            ? "IMAGE + SOUND READY — AUTO IS ON — PRESS PLAY."
-            : "IMAGE READY — NOW LOAD YOUR SOUND.";
+            ? "PHOTO + SONG READY — PRESS PLAY."
+            : "PHOTO READY — YOUR SONG IS NEXT. A PHOTO IS OPTIONAL.";
 
 
         ensureAutoOn();
@@ -3106,8 +3210,8 @@ songInput.onchange =
 
         status.textContent =
           S.image
-            ? "IMAGE + SOUND READY — AUTO IS ON — PRESS PLAY."
-            : "SOUND LOADED — NOW LOAD YOUR IMAGE.";
+            ? "PHOTO + SONG READY — PRESS PLAY."
+            : "SONG READY — PHOTO IS OPTIONAL — PRESS PLAY.";
 
 
         ensureAutoOn();
@@ -5202,7 +5306,7 @@ playButton.onclick =
 
       status.textContent =
         S.auto
-          ? "CHARACTER STAGE ACTIVE — YOUR SONG IS DRIVING THE PERFORMANCE."
+          ? "PSYCHEDELIC SPACE ACTIVE — THE SONG IS THE INSTRUCTION."
           : "PLAYING — AUTO IS OFF — AUTOMATIC EXPRESSION IS ZERO.";
 
     }
@@ -5316,7 +5420,7 @@ function stop(){
             : "READY — AUTO OFF — AUTOMATIC EXPRESSION ZERO."
         )
 
-      : "CHOOSE A CHARACTER OR SURPRISE ME, ADD YOUR SONG, THEN PRESS PLAY. A PHOTO IS OPTIONAL.";
+      : "CHOOSE A PERFORMER, ADD YOUR SONG, THEN PRESS PLAY. A PHOTO IS OPTIONAL.";
 
 }
 
@@ -5791,7 +5895,7 @@ function track(){
    * the actual live expression values.
    *
    * This means ANALYSE / another GLCTC1 engine
-   * can genuinely instruct CHARACTER STAGE.
+   * can genuinely instruct PSYCHEDELIC SPACE.
    */
 
   const externalLow =
@@ -7981,17 +8085,12 @@ function drawStaticBase(){
   );
 
 
-  if(
-    S.image
-  ){
-
-    ctx.drawImage(
-      sourceCanvas,
-      0,
-      0
-    );
-
-  }
+  // sourceCanvas also carries the generated stage when the photo is optional.
+  ctx.drawImage(
+    sourceCanvas,
+    0,
+    0
+  );
 
 }
 
@@ -8019,6 +8118,13 @@ function drawSemanticScene(
     expr("objectFloat") <= 0
   ){
     drawStaticBase();
+    return;
+  }
+
+  // The user can choose a clean visual-world treatment or let detected
+  // people / objects move as separate layers through the original AI pipeline.
+  if(S.photoTreatment === "scene" && S.image){
+    drawWholeImageMotion(time);
     return;
   }
 
@@ -9207,25 +9313,17 @@ function render(
     1000;
 
 
-  if(!S.image || !S.photoBackdrop){
-    // A photo is optional: create a simple animated stage when no photo is loaded or the user disables it.
-    const bg = ctx.createLinearGradient(0,0,W,H);
-    bg.addColorStop(0,"#08021b");
-    bg.addColorStop(.5,"#071a2c");
-    bg.addColorStop(1,"#15051e");
-    ctx.fillStyle=bg;
-    ctx.fillRect(0,0,W,H);
-    const pulse=.5+.5*Math.sin((timestamp||0)*.006);
-    ctx.strokeStyle="rgba(0,255,255,"+(.12+pulse*.12)+")";
-    ctx.lineWidth=2;
-    for(let i=0;i<8;i++){
-      ctx.beginPath();
-      ctx.ellipse(W/2,H*.48,55+i*28,90+i*42,0,0,Math.PI*2);
-      ctx.stroke();
-    }
-    if(S.songURL) drawCharacterStage(timestamp);
-    updateFXUI({});
-    return;
+  if(!S.image){
+    // Generate a scene into the original source canvas so the existing FX
+    // pipeline continues to work even when the user has no photo.
+    const bg=sourceCtx.createLinearGradient(0,0,W,H);
+    bg.addColorStop(0,"#08021b");bg.addColorStop(.48,"#071a2c");bg.addColorStop(1,"#15051e");
+    sourceCtx.clearRect(0,0,W,H);sourceCtx.fillStyle=bg;sourceCtx.fillRect(0,0,W,H);
+    const pulse=.5+.5*Math.sin((timestamp||0)*.003);
+    sourceCtx.save();sourceCtx.strokeStyle="rgba(0,255,255,"+(.12+pulse*.16)+")";sourceCtx.lineWidth=2;
+    for(let i=0;i<9;i++){sourceCtx.beginPath();sourceCtx.ellipse(W/2,H*.52,35+i*28,65+i*43,0,0,Math.PI*2);sourceCtx.stroke();}
+    const floor=sourceCtx.createLinearGradient(0,H*.76,0,H);floor.addColorStop(0,"#ff2bd600");floor.addColorStop(1,"#9b5cff55");sourceCtx.fillStyle=floor;sourceCtx.fillRect(0,H*.76,W,H*.24);sourceCtx.restore();
+    backgroundCtx.clearRect(0,0,W,H);backgroundCtx.drawImage(sourceCanvas,0,0);
   }
 
 
@@ -10531,9 +10629,9 @@ function render(
   ctx.globalAlpha =
     1;
 
-  // Character is composited over the selected visual world.
-  // If a photo is loaded, the existing image engine and its filters remain intact.
-  drawCharacterStage(timestamp);
+  // Composite the performer AFTER the existing FX blend so both the preview
+  // and the original canvas.captureStream() recording contain the character.
+  renderCharacterOverlay(timestamp);
 
   updateFXUI(
     values
@@ -10816,7 +10914,7 @@ function startRecording(){
 
 
       a.download =
-        `GLCTC1-Psychedelic-Space-${Date.now()}.webm`;
+        `GLCTC1-Character-Stage-${Date.now()}.webm`;
 
 
       document.body.appendChild(
@@ -10843,7 +10941,7 @@ function startRecording(){
 
 
       downloadButton.textContent =
-        "⇩ DOWNLOAD VISUAL";
+        "⇩ DOWNLOAD VIDEO";
 
 
       downloadButton.classList.remove(
@@ -10856,7 +10954,7 @@ function startRecording(){
 
 
       status.textContent =
-        "VISUAL DOWNLOAD READY.";
+        "VIDEO DOWNLOAD READY.";
 
     };
 

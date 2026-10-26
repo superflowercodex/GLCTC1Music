@@ -821,6 +821,13 @@ html:not(.cx-ready) .decks-container{opacity:0!important;pointer-events:none}
 .cx-lat em{font-style:normal;min-width:62px;text-align:center}
 body .deck .cx-lat button{min-height:26px!important;width:26px!important;padding:0!important;font-size:.9rem!important;border-radius:8px!important}
 
+/* ===== v31: tune row ===== */
+.cx-tune{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0 0 8px;padding:6px 8px;border-radius:10px;background:#070b1d;border:1px solid var(--cx-line)}
+.cx-stat{font:700 .66rem var(--cx-mono);color:var(--acc);letter-spacing:.06em;min-width:84px}
+.cx-grid{display:flex;gap:4px;margin-left:auto}
+body .deck .cx-tune button{min-height:28px!important;min-width:28px!important;padding:0 6px!important;font-size:.8rem!important;border-radius:8px!important;text-transform:none!important}
+body .deck .cx-lat{gap:3px}
+
 </style>
 <script>setTimeout(function(){document.documentElement.classList.add("cx-ready")},6000)</script>
 </head>
@@ -17916,7 +17923,7 @@ var $=function(i){return document.getElementById(i)};
 var clamp=function(v,a,b){return Math.min(b,Math.max(a,v))};
 var S={},META={A:{},B:{}},T={},LAT=(function(){try{var v=parseFloat(localStorage.getItem('cxLat'));return isFinite(v)?v:60}catch(e){return 60}})();
 function aud(d){return $('audio'+d)}
-function bpmOf(d){var tk=T[d];if(tk&&tk.ready&&BUF[d]&&BUF[d].src===tk.src)return 60/tk.bl;try{var b=(typeof deckBaseBpm==='function')?deckBaseBpm(d):0;return b>0?b:0}catch(e){return 0}}
+function bpmOf(d){var tk=ensureGrid(d);if(tk)return 60/tk.bl;try{var b=(typeof deckBaseBpm==='function')?deckBaseBpm(d):0;return b>0?b:0}catch(e){return 0}}
 function mmss(s){if(!isFinite(s))return'-0:00';s=Math.max(0,Math.round(s));return'-'+Math.floor(s/60)+':'+('0'+s%60).slice(-2)}
 function el(t,c,h){var e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e}
 function setPres(a,v){try{a.preservesPitch=v;a.mozPreservesPitch=v;a.webkitPreservesPitch=v}catch(e){}}
@@ -18017,12 +18024,21 @@ function buildDeck(d){
   var a=aud(d);buildPlatter(d);var s=S[d];
   /* header */
   var head=el('div','cx-head','<div class="cx-badge">'+d+'</div><div class="cx-meta"><b>Load a track</b><small>GLCTC1</small></div><div class="cx-bpm"><b>0.0</b><small>BPM · 0.0%</small></div>');
-  var sub=el('div','cx-sub','<span class="cx-beats" title="Beat counter · tap on a beat to make it beat 1"><i></i><i></i><i></i><i></i></span><span class="cx-lat"><button type="button" data-d="-10">−</button><em></em><button type="button" data-d="10">+</button></span><span class="cx-time">-0:00</span><span class="cx-gone cx-beat"></span>');
-  deck.insertBefore(sub,deck.firstChild);deck.insertBefore(head,deck.firstChild);
+  var sub=el('div','cx-sub','<span class="cx-beats" title="Beat counter · tap on a beat to make it beat 1"><i></i><i></i><i></i><i></i></span><span class="cx-time">-0:00</span><span class="cx-gone cx-beat"></span>');
+  var tune=el('div','cx-tune','<span class="cx-stat">…</span><span class="cx-lat" title="Flash delay: + = later, − = earlier"><button type="button" data-d="-50">−−</button><button type="button" data-d="-10">−</button><em></em><button type="button" data-d="10">+</button><button type="button" data-d="50">++</button></span><span class="cx-grid"><button type="button" data-g="half" title="Half tempo">½</button><button type="button" data-g="dbl" title="Double tempo">×2</button><button type="button" data-g="l" title="Beat earlier 20ms">◂</button><button type="button" data-g="r" title="Beat later 20ms">▸</button><button type="button" data-g="scan" title="Re-scan track">↻</button></span>');
+  deck.insertBefore(tune,deck.firstChild);deck.insertBefore(sub,deck.firstChild);deck.insertBefore(head,deck.firstChild);
   var dd=$('deckDisplay'+d);if(dd)sub.querySelector('.cx-beat').appendChild(dd);
   s.pips=[].slice.call(sub.querySelectorAll('.cx-beats i'));
   sub.querySelector('.cx-beats').addEventListener('click',function(){if(s.bi==null)return;var z=((s.bi%4)+4)%4,tk=T[d];if(tk&&tk.ready)tk.bar0=z;else s.bar0=z});
-  [].forEach.call(sub.querySelectorAll('.cx-lat button'),function(bt){bt.addEventListener('click',function(){LAT=clamp(LAT+ +bt.dataset.d,-150,500);try{localStorage.setItem('cxLat',LAT)}catch(x){}latShow()})});
+  [].forEach.call(tune.querySelectorAll('.cx-lat button'),function(bt){bt.addEventListener('click',function(){LAT=clamp(LAT+ +bt.dataset.d,-150,500);try{localStorage.setItem('cxLat',LAT)}catch(x){}latShow()})});
+  s.stat=tune.querySelector('.cx-stat');
+  tune.querySelector('.cx-grid').addEventListener('click',function(e){
+    var bt=e.target.closest('button');if(!bt)return;var g=bt.dataset.g,tk=ensureGrid(d);
+    if(g==='scan'){T[d]=null;analyse(d);s.bi=null;return}
+    if(!tk)return;
+    if(g==='half'){tk.bl*=2}else if(g==='dbl'){tk.bl/=2}
+    else if(g==='l'){tk.off=((tk.off-.02)%tk.bl+tk.bl)%tk.bl}else if(g==='r'){tk.off=(tk.off+.02)%tk.bl}
+    s.bi=null});
   latShow();
   a.addEventListener('seeked',function(){s.bi=null});a.addEventListener('play',function(){s.bi=null});
   /* pitch readout */
@@ -18097,8 +18113,16 @@ function buildDeck(d){
 
 
 
+
+function curSrc(d){var a=aud(d);return a&&(a.currentSrc||a.src)||''}
+function ensureGrid(d){                      /* my lock if ready, else a grid built from the original analysis (so it can be nudged) */
+  var tk=T[d],sr=curSrc(d);if(tk&&tk.ready&&tk.src===sr)return tk;
+  try{var an=beatAnalysis[d];if(an&&an.ready&&an.beatLength>0&&isFinite(an.firstKick)){var bl=an.beatLength;
+    return T[d]={ready:true,old:true,bl:bl,off:((an.firstKick%bl)+bl)%bl,bar0:0,src:sr}}}catch(e){}
+  return null}
+
 /* ---------- BEAT TRACKER: finds the true tempo + phase of the whole track (kick band), no drift ---------- */
-function hintBpm(d){try{var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm;var x=Number($('deckDisplay'+d).dataset.bpm);return x>0?x:0}catch(e){return 0}}
+function hintBpm(d){try{var x=Number($('deckDisplay'+d).dataset.bpm);if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
 function analyse(d){
   var bo=BUF[d],b=bo&&bo.buf;if(!b)return;
   var sr=b.sampleRate,H=128,c0=b.getChannelData(0),c1=b.numberOfChannels>1?b.getChannelData(1):null,nF=Math.floor(b.length/H),i,j,x,sm;
@@ -18111,8 +18135,8 @@ function analyse(d){
     for(q=2;q<end;q++)hist[(q-P*Math.floor(q/P))|0]+=o[q];
     var best=-1,bk=0,s;for(k=0;k<m;k++){s=hist[(k+m-1)%m]+2*hist[k]+hist[(k+1)%m];if(s>best){best=s;bk=k}}
     return{s:best/(end/P),k:bk,m:m}}
-  var h=hintBpm(d),lo=h?h*.92:85,hi=h?h*1.08:175,bb=0,bs=-1,r,P;
-  for(x=lo;x<=hi;x+=.25){r=fold(60*fr/x,Math.min(nF,Math.floor(90*fr)));if(r.s>bs){bs=r.s;bb=x}}
+  var h=hintBpm(d),lo=h?h*.97:85,hi=h?h*1.03:175,bb=0,bs=-1,r,P;
+  for(x=lo;x<=hi;x+=(h?.05:.25)){r=fold(60*fr/x,Math.min(nF,Math.floor(90*fr)));if(r.s>bs){bs=r.s;bb=x}}
   var fb=bb;bs=-1;
   for(x=bb-.4;x<=bb+.4;x+=.01){r=fold(60*fr/x,nF);if(r.s>bs){bs=r.s;fb=x}}
   P=60*fr/fb;r=fold(P,nF);
@@ -18131,7 +18155,7 @@ function beatFlash(d,a,ct,rate){
   var s=S[d];if(!s||!s.pips)return;
   var now=performance.now();
   if(s.flT&&now-s.flT>115){s.pips.forEach(function(p){p.classList.remove('on')});s.flT=0}
-  var tk=T[d],lock=tk&&tk.ready&&BUF[d]&&BUF[d].src===tk.src,t=ct-(LAT/1000)*rate,idx;
+  var tk=ensureGrid(d),lock=!!tk,t=ct-(LAT/1000)*rate,idx;
   if(lock){idx=Math.floor((t-tk.off)/tk.bl+1e-6)}
   else{var an=(typeof beatAnalysis!=='undefined')?beatAnalysis[d]:null,g=an&&an.ready&&an.beatGrid&&an.beatGrid.length>1?an.beatGrid:null;
     if(g){var lo=0,hi=g.length-1;if(t<g[0])idx=-1;else{while(lo<hi){var m=(lo+hi+1)>>1;if(g[m]<=t)lo=m;else hi=m-1}idx=lo}}
@@ -18168,7 +18192,10 @@ function tick(t){
     if(s.ph)s.ph.style.left='calc('+(pos*100)+'% - 1px)';
     if(s.loop&&!s.touch&&a.currentTime>=s.loop.end)a.currentTime=s.loop.start;
     if(s.loop&&dur){s.lp.style.display='block';s.lp.style.left=(s.loop.start/dur*100)+'%';s.lp.style.width=((s.loop.end-s.loop.start)/dur*100)+'%'}
-    beatFlash(d,a,ct,rate);
+    var raw=a.currentTime,nw=performance.now();if(raw!==s.cr){s.cr=raw;s.c0=nw}
+    beatFlash(d,a,(a.paused||s.touch)?ct:ct+Math.min(.25,(nw-s.c0)/1000*rate),rate);
+    var tg=ensureGrid(d),st=tg?(tg.old?'GRID ':'LOCK ')+(60/tg.bl).toFixed(2):'NO GRID';
+    if(s.stat&&s.stat.textContent!==st)s.stat.textContent=st;
     /* readouts */
     var base=bpmOf(d),pitch=s.ps?(+s.ps.value-1)*100:(rate-1)*100,m=META[d];
     s.head.querySelector('.cx-bpm b').textContent=base?(base*(s.ps?+s.ps.value:rate)).toFixed(1):'--';

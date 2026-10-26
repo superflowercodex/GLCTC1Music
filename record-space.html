@@ -9335,173 +9335,122 @@ audioContainer.innerHTML =
 
 /*
    -------------------------------------------------------
-   PLAY COUNTER
+   SHARED PLAY COUNTER — MATCHES PLAY SPACE
    -------------------------------------------------------
+   A play is qualified after 30 seconds of consecutive
+   playback. Pausing, buffering, seeking, or a large time
+   jump resets the run. Tracks shorter than 30 seconds count
+   once when played through to completion.
 
-   Count one play when the Master Audio actually starts.
-
-   The database value is incremented directly in
-   Record Space.
-
-   Do not count repeated play events from the same
-   playback session.
+   Updates use compare-and-swap retries against the latest
+   database value so concurrent listeners are less likely
+   to overwrite one another's increments.
 */
 
-let playCounted =
-  false;
+const PLAY_COUNT_THRESHOLD_SECONDS = 30;
+const PLAY_COUNT_MAX_TIME_STEP = 2.5;
 
+async function recordQualifiedPlay(targetRecord) {
+  if (!targetRecord || !targetRecord.id) return null;
 
-async function recordPlay() {
-
-  if (
-    playCounted
-  ) {
-
-    return;
-
-  }
-
-
-  if (
-    !record ||
-    !record.id
-  ) {
-
-    return;
-
-  }
-
-
-  playCounted =
-    true;
-
-
-  const currentPlayCount =
-    Number(
-      record.plays || 0
-    );
-
-
-  const newPlayCount =
-    currentPlayCount + 1;
-
-
-  /*
-     Update the Record Space database.
-  */
-
-  const {
-    data,
-    error
-  } =
-    await supabaseClient
-      .from(
-        TABLE_NAME
-      )
-      .update({
-        plays:
-          newPlayCount
-      })
-      .eq(
-        "id",
-        record.id
-      )
-      .select()
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: latest, error: readError } = await supabaseClient
+      .from(TABLE_NAME)
+      .select('id,plays')
+      .eq('id', targetRecord.id)
       .single();
 
+    if (readError || !latest) {
+      console.error('RECORD SPACE: could not read latest play total:', readError);
+      return null;
+    }
 
-  if (
-    error
-  ) {
+    const oldPlays = Number(latest.plays) || 0;
+    let update = supabaseClient
+      .from(TABLE_NAME)
+      .update({ plays: oldPlays + 1 })
+      .eq('id', targetRecord.id);
+    update = latest.plays == null
+      ? update.is('plays', null)
+      : update.eq('plays', latest.plays);
 
-    console.error(
-      "❌ RECORD SPACE PLAY COUNT FAILED:",
-      error
-    );
+    const { data, error } = await update.select('*');
+    if (error) {
+      console.error('RECORD SPACE: play-count update failed; check Supabase UPDATE RLS:', error);
+      return null;
+    }
+    if (data && data.length === 1) {
+      const updated = data[0];
+      const index = records.findIndex(item => item.id === updated.id);
+      if (index >= 0) records[index] = updated;
+      if (selectedRecord && selectedRecord.id === updated.id) selectedRecord = updated;
+      const detailPlays = document.getElementById('detailPlays');
+      if (detailPlays && selectedRecord && selectedRecord.id === updated.id) {
+        detailPlays.textContent = formatNumber(updated.plays);
+      }
+      renderTop40();
+      renderTable();
+      window.dispatchEvent(new CustomEvent('glctc1:play-counted', {
+        detail: { recordId: updated.id, artist: updated.artist, title: updated.track_title, plays: Number(updated.plays) || 0 }
+      }));
+      return updated.plays;
+    }
+    // The row changed concurrently; re-read the new total and retry.
+  }
+  console.warn('RECORD SPACE: play count not saved after retries. Check concurrent writes and Supabase RLS.');
+  return null;
+}
 
+function attachQualifiedPlayCounter(audio, targetRecord) {
+  if (!audio || audio.dataset.glctc1PlayCounterAttached === 'true') return;
+  audio.dataset.glctc1PlayCounterAttached = 'true';
+  let accumulated = 0;
+  let lastTime = null;
+  let countedThisRun = false;
+  let countInFlight = false;
 
-    playCounted =
-      false;
-
-
-    return;
-
+  function resetRun() {
+    accumulated = 0;
+    lastTime = null;
   }
 
-
-  /*
-     Keep the local Record Space data
-     immediately in sync.
-  */
-
-  if (
-    data
-  ) {
-
-    const index =
-      records.findIndex(
-        item =>
-          item.id ===
-          record.id
-      );
-
-
-    if (
-      index >= 0
-    ) {
-
-      records[index] =
-        data;
-
+  audio.addEventListener('play', () => {
+    if (audio.currentTime < 1 && countedThisRun) countedThisRun = false;
+    lastTime = audio.currentTime;
+  });
+  audio.addEventListener('playing', () => { lastTime = audio.currentTime; });
+  audio.addEventListener('waiting', resetRun);
+  audio.addEventListener('pause', resetRun);
+  audio.addEventListener('seeking', resetRun);
+  audio.addEventListener('emptied', () => { resetRun(); countedThisRun = false; });
+  audio.addEventListener('timeupdate', async () => {
+    if (audio.paused || audio.seeking) { lastTime = null; return; }
+    const current = audio.currentTime;
+    if (lastTime !== null) {
+      const delta = current - lastTime;
+      if (delta > 0 && delta <= PLAY_COUNT_MAX_TIME_STEP) accumulated += delta;
+      else if (delta < 0 || delta > PLAY_COUNT_MAX_TIME_STEP) accumulated = 0;
     }
-
-
-    /*
-       Keep selectedRecord pointing at
-       the updated database row.
-    */
-
-    if (
-      selectedRecord ===
-      record
-    ) {
-
-      selectedRecord =
-        records[index];
-
+    lastTime = current;
+    if (!countedThisRun && !countInFlight && accumulated >= PLAY_COUNT_THRESHOLD_SECONDS) {
+      countedThisRun = true;
+      countInFlight = true;
+      const saved = await recordQualifiedPlay(targetRecord);
+      countInFlight = false;
+      if (saved == null) countedThisRun = false;
     }
-
-
-    /*
-       Update the visible play count.
-    */
-
-    const detailPlays =
-      document.getElementById(
-        "detailPlays"
-      );
-
-
-    if (
-      detailPlays
-    ) {
-
-      detailPlays.textContent =
-        formatNumber(
-          data.plays
-        );
-
+  });
+  audio.addEventListener('ended', async () => {
+    const duration = audio.duration;
+    if (!countedThisRun && !countInFlight && Number.isFinite(duration) && duration > 0 && duration < PLAY_COUNT_THRESHOLD_SECONDS && accumulated >= duration - 1.5) {
+      countedThisRun = true;
+      countInFlight = true;
+      const saved = await recordQualifiedPlay(targetRecord);
+      countInFlight = false;
+      if (saved == null) countedThisRun = false;
     }
-
-
-    /*
-       Re-rank TOP 40 immediately.
-    */
-
-    renderTop40();
-
-  }
-
+    resetRun();
+  });
 }
 
 
@@ -9547,11 +9496,7 @@ if (
     audioValue;
 
 
-  audio.addEventListener(
-    "play",
-    recordPlay
-  );
-
+  attachQualifiedPlayCounter(audio, record);
 
   audioContainer.appendChild(
     audio
@@ -9601,13 +9546,7 @@ else if (
         "true"
       ) {
 
-        /*
-           Audio is already resolved.
-           Count this playback.
-        */
-
-        await recordPlay();
-
+        /* Audio is resolved; the shared tracker counts qualified playback. */
         return;
 
       }
@@ -9690,19 +9629,11 @@ else if (
         audio.load();
 
 
-        /*
-           Count this actual playback.
-        */
+        /* Attach the same 30-second qualified-play rule used by Play Space. */
+        attachQualifiedPlayCounter(audio, audioRecord);
 
-        await recordPlay();
-
-
-        /*
-           Start the requested playback.
-        */
-
+        /* Start the requested playback. */
         try {
-
           await audio.play();
 
         }
@@ -13257,6 +13188,39 @@ supabaseClient
 
 
 /* =========================================================
+   LIVE PLAY-COUNT SYNC
+   Reflect Play Space updates without requiring a reload.
+   Requires Supabase Realtime to be enabled for record_space.
+========================================================= */
+
+try {
+  supabaseClient
+    .channel('record-space-play-count-sync')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME }, payload => {
+      const updated = payload && payload.new;
+      if (!updated || updated.id == null) return;
+      const index = records.findIndex(item => item.id === updated.id);
+      if (index < 0) return;
+      records[index] = { ...records[index], ...updated };
+      if (selectedRecord && selectedRecord.id === updated.id) {
+        selectedRecord = records[index];
+        const detailPlays = document.getElementById('detailPlays');
+        if (detailPlays) detailPlays.textContent = formatNumber(updated.plays);
+      }
+      renderTop40();
+      renderTable();
+    })
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR') {
+        console.warn('RECORD SPACE: live database sync unavailable; enable Supabase Realtime for public.record_space if desired.');
+      }
+    });
+} catch (error) {
+  console.warn('RECORD SPACE: live play-count sync could not start:', error);
+}
+
+
+/* =========================================================
    INIT
 ========================================================= */
 
@@ -13274,3 +13238,4 @@ supabaseClient
 
 </body>
 </html>
+

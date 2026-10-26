@@ -1,0 +1,362 @@
+<!doctype html>
+<!--
+=====================================================================
+ GLCTC1 STORY SPACE v2  (save/rename this file to story.html to use)
+ Likes + comments need two extra tables. Run this ONCE in Supabase SQL:
+
+ create table if not exists story_reactions(
+   story_id uuid references story_posts(id) on delete cascade,
+   user_id uuid references auth.users(id) on delete cascade,
+   kind text not null default 'love', created_at timestamptz default now(),
+   primary key(story_id,user_id));
+ create table if not exists story_comments(
+   id uuid primary key default gen_random_uuid(),
+   story_id uuid references story_posts(id) on delete cascade,
+   user_id uuid references auth.users(id) on delete cascade,
+   author_name text, body text not null check(char_length(body)<=1000),
+   created_at timestamptz default now());
+ alter table story_reactions enable row level security;
+ alter table story_comments enable row level security;
+ create policy "rx read" on story_reactions for select using(true);
+ create policy "rx add" on story_reactions for insert with check(auth.uid()=user_id);
+ create policy "rx upd" on story_reactions for update using(auth.uid()=user_id);
+ create policy "rx del" on story_reactions for delete using(auth.uid()=user_id);
+ create policy "cm read" on story_comments for select using(true);
+ create policy "cm add" on story_comments for insert with check(auth.uid()=user_id);
+ create policy "cm del" on story_comments for delete using(auth.uid()=user_id);
+=====================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#08080f">
+<title>STORY SPACE — GLCTC1 MUSIC</title>
+<meta name="description" content="GLCTC1 MUSIC STORY SPACE — share your music, ideas, art and creative life.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--ink:#08080f;--card:#0b0b14;--card2:#14142a;--line:#2a2646;--txt:#f4f2ff;--mut:#a9a5c8;--pink:#ff2fb9;--cyan:#00e5ff;--vio:#8b5cf6;--lime:#b6ff3c;--org:#ff9f1c;--gold:#ffd400;--grad:linear-gradient(90deg,var(--pink),var(--vio),var(--cyan))}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;color:var(--ink);font:600 18px Rajdhani,Arial,sans-serif;min-height:100vh;
+background:radial-gradient(ellipse 50% 40% at 10% 0,#ffd6f3 0,transparent 70%),radial-gradient(ellipse 45% 40% at 95% 20%,#cfe9ff 0,transparent 70%),radial-gradient(ellipse 55% 45% at 50% 100%,#e6d9ff 0,transparent 70%),#fff;background-attachment:fixed}
+#sky{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.app{position:relative;z-index:1}a{color:inherit;text-decoration:none}button,input,textarea,select{font:inherit}button{cursor:pointer}
+.shell{width:min(1120px,100% - 24px);margin:auto}.hidden{display:none!important}
+header{position:sticky;top:0;z-index:20;background:rgba(8,8,15,.97);border-bottom:2px solid transparent;border-image:var(--grad) 1;box-shadow:0 6px 28px #0006}
+.top{display:flex;align-items:center;gap:14px;padding:10px 0}
+.brand{display:flex;align-items:center;gap:10px;flex:0 0 auto}.brand img{width:42px;height:42px;object-fit:contain;filter:drop-shadow(0 0 8px #8b5cf6aa)}
+.bt{font:800 18px Orbitron;letter-spacing:.08em;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.bs{font:500 8px Orbitron;letter-spacing:.24em;color:#aaa3d0;margin-top:3px}
+.search{flex:1;max-width:420px;margin:auto}.search input{width:100%;background:#16162b;border:1px solid #34305a;color:var(--txt);border-radius:30px;padding:9px 16px;outline:none}
+.search input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #00e5ff30}
+.acct{font-size:14px;color:#cfcaf0;text-align:right;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+nav{display:flex;gap:6px;overflow-x:auto;padding:0 0 10px;scrollbar-width:none}
+nav a{white-space:nowrap;border:1px solid #302b55;background:#12122200;color:#ddd8f5;border-radius:8px;padding:7px 11px;font:700 10px Orbitron;letter-spacing:.05em;transition:.18s}
+nav a:hover{border-color:var(--cyan);color:#fff;box-shadow:0 0 12px #00e5ff55}
+nav a.on{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 0 14px #ff2fb966}
+.banner{margin:14px auto 0;background:var(--ink);border-radius:14px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--txt);border:1px solid transparent;background:linear-gradient(var(--ink),var(--ink)) padding-box,var(--grad) border-box}
+.banner b{font:700 12px Orbitron;letter-spacing:.1em;display:block}.banner span{color:var(--mut);font-size:15px}
+.btn{border:0;border-radius:10px;padding:10px 16px;font:700 11px Orbitron;letter-spacing:.06em;color:#fff;background:var(--grad);box-shadow:0 4px 18px #8b5cf655;transition:.2s;white-space:nowrap;display:inline-block}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 24px #ff2fb977}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.dk{background:var(--card2);border:1px solid #3a3566;box-shadow:none}.btn.gh{background:transparent;border:1px solid #3a3566;box-shadow:none;color:var(--mut)}
+.hero{text-align:center;padding:38px 10px 12px}
+.hero h1{font:800 clamp(34px,7vw,66px)/1 Orbitron;margin:0;letter-spacing:.05em;color:var(--ink)}
+.hero h1 em{font-style:normal;background:linear-gradient(90deg,var(--pink),var(--org),var(--vio),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{max-width:620px;margin:12px auto 0;font-size:20px;color:#2b2845}
+.eb{font:700 10px Orbitron;letter-spacing:.3em;color:var(--vio)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:20px;align-items:start;padding:14px 0 60px}
+.box{background:var(--card);color:var(--txt);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px #0003}
+.rail{display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;scrollbar-width:none}
+.rb{flex:0 0 auto;text-align:center;width:66px;background:none;border:0;color:var(--ink);font-size:13px;font-weight:700}
+.ring{width:60px;height:60px;border-radius:50%;padding:3px;background:conic-gradient(var(--pink),var(--org),var(--gold),var(--lime),var(--cyan),var(--vio),var(--pink));margin:0 auto 4px}
+.ring .av{width:100%;height:100%;border:2px solid #fff}
+.rb span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.av{width:44px;height:44px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,var(--vio),var(--cyan));color:#fff;font:700 13px Orbitron;overflow:hidden}.av img{width:100%;height:100%;object-fit:cover}
+.comp{padding:14px;margin-bottom:14px}.comp .r1{display:flex;gap:12px;align-items:center}
+.fake{flex:1;text-align:left;background:#17172e;border:1px solid #302c55;color:#b9b4dc;border-radius:30px;padding:12px 18px}.fake:hover{border-color:var(--pink)}
+.comp .r2{display:flex;gap:6px;margin-top:12px;border-top:1px solid #22203f;padding-top:10px}
+.comp .r2 button{flex:1;background:none;border:0;color:#d9d4f7;border-radius:8px;padding:8px;font-size:16px}.comp .r2 button:hover{background:#1a1a35}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px;align-items:center}
+.chip{background:#fff;border:1px solid #cfc8f0;color:var(--ink);border-radius:30px;padding:6px 13px;font-size:15px;font-weight:700}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink);box-shadow:0 0 0 2px #fff,0 0 0 4px var(--pink)}
+.bar select{margin-left:auto;background:#fff;border:1px solid #cfc8f0;border-radius:10px;padding:6px 10px;color:var(--ink)}
+.feed{display:grid;gap:16px}
+.card{overflow:hidden;position:relative;transition:.2s}.card:hover{border-color:#5a4fa0;box-shadow:0 10px 36px #8b5cf655}
+.card::before{content:"";display:block;height:4px;background:var(--c1,var(--grad))}
+.card.flash{animation:fl 1.6s}@keyframes fl{0%,60%{box-shadow:0 0 0 3px var(--cyan),0 0 30px var(--cyan)}}
+.hd{display:flex;gap:11px;align-items:center;padding:14px 16px 6px}.hd .m{flex:1;min-width:0}
+.au{font:700 12px Orbitron;overflow-wrap:anywhere}.dt{font-size:14px;color:var(--mut);margin-top:2px}
+.tag{font-size:12px;border-radius:20px;padding:2px 9px;margin-left:6px;color:var(--ink);background:var(--c2,var(--cyan));font-weight:700}
+.mn{position:relative}.mn>button{background:none;border:0;color:var(--mut);font-size:22px;padding:2px 8px;border-radius:8px}.mn>button:hover{background:#1c1c38}
+.dd{position:absolute;right:0;top:34px;background:#171733;border:1px solid #3a3566;border-radius:10px;overflow:hidden;z-index:5;min-width:130px}
+.dd button{display:block;width:100%;background:none;border:0;color:#fff;text-align:left;padding:10px 14px}.dd button:hover{background:#26264d}.dd .x{color:#ff7aa0}
+.bd{padding:4px 16px 12px}.ti{font:700 19px/1.3 Orbitron;margin:4px 0 8px}
+.tx{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;font-size:19px;color:#ebe8fa;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical;overflow:hidden}.tx.open{display:block}
+.more{background:none;border:0;color:var(--cyan);padding:4px 0;font-weight:700}
+.med{display:block;max-width:100%;max-height:560px;margin:12px auto 0;border-radius:10px;background:#000;cursor:zoom-in}
+.emb{position:relative;padding-top:56.25%;margin-top:12px;border-radius:10px;overflow:hidden;background:#000}.emb.a{padding-top:0;height:166px}
+.emb iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.lk{display:inline-block;margin-top:10px;color:var(--cyan);overflow-wrap:anywhere}
+.cnt{display:flex;justify-content:space-between;padding:6px 16px;color:var(--mut);font-size:15px}
+.act{display:flex;gap:4px;border-top:1px solid #22203f;padding:4px 10px}
+.act>div,.act>button{flex:1;position:relative}
+.act button{width:100%;background:none;border:0;color:#d9d4f7;padding:10px 4px;border-radius:9px;font-weight:700;font-size:16px}.act button:hover{background:#19193a}
+.act .me{color:var(--pink)}
+.pk{position:absolute;bottom:44px;left:0;display:none;gap:2px;background:#1b1b3a;border:1px solid #3a3566;border-radius:30px;padding:5px 8px;z-index:6;box-shadow:0 8px 24px #000a}
+.rx:hover .pk,.rx:focus-within .pk{display:flex}.pk button{width:auto;font-size:24px;padding:3px 6px;transition:.15s}.pk button:hover{transform:scale(1.35)}
+.cm{border-top:1px solid #22203f;padding:12px 16px;display:grid;gap:10px}
+.c{display:flex;gap:9px}.c .av{width:32px;height:32px;font-size:10px}.cb{background:#17172e;border-radius:14px;padding:7px 12px;font-size:16px;line-height:1.3;overflow-wrap:anywhere}
+.cb b{font:700 11px Orbitron;display:block;margin-bottom:2px}.cb small{color:var(--mut);margin-left:6px}.cb button{background:none;border:0;color:#ff7aa0;font-size:13px;padding:0 0 0 8px}
+.cf{display:flex;gap:8px}.cf input{flex:1}
+input,textarea,select.f{width:100%;background:#16162b;border:1px solid #34305a;color:var(--txt);border-radius:10px;padding:11px 13px;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #00e5ff30}
+.side{display:grid;gap:14px;position:sticky;top:116px}.side .box{padding:16px}
+.side h3{font:700 12px Orbitron;letter-spacing:.09em;margin:0 0 10px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.si{padding:10px;border:1px solid #28244a;border-radius:10px;background:#10101f;margin-bottom:8px}.si b{font:700 10px Orbitron;display:block;margin-bottom:3px;color:var(--lime)}.si span{font-size:15px;color:var(--mut);line-height:1.3}
+.stats{display:flex;gap:10px}.stats div{flex:1;text-align:center;background:#10101f;border-radius:10px;padding:10px 4px;font:800 22px Orbitron;color:#fff}.stats small{display:block;font:500 9px Orbitron;color:var(--mut);margin-top:2px}
+.note{font-size:15px;color:var(--mut);line-height:1.4;margin:0 0 8px}
+.empty{padding:34px 18px;text-align:center;color:var(--mut)}.empty b{display:block;font:700 13px Orbitron;color:#fff;margin-bottom:8px}
+.sk{height:190px;border-radius:16px;background:linear-gradient(100deg,#12122a 30%,#1f1f45 50%,#12122a 70%) 0 0/300% 100%;animation:sh 1.3s infinite}@keyframes sh{to{background-position:-300% 0}}
+.stt{text-align:center;color:#3d3963;font-size:15px;min-height:20px;margin-top:8px}.stt.err{color:#d3124f}.stt.ok{color:#0a8f4d}
+dialog{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,var(--grad) border-box;color:var(--txt);border-radius:18px;padding:0;width:min(620px,calc(100% - 20px));max-height:92vh}
+dialog::backdrop{background:rgba(10,6,30,.72);backdrop-filter:blur(4px)}
+.dh{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid #26224a}.dh h2{margin:0;font:700 15px Orbitron;letter-spacing:.07em}
+.dh button{background:#1e1e3d;border:0;color:#fff;border-radius:50%;width:34px;height:34px;font-size:18px}
+.fm{padding:16px 18px;display:grid;gap:12px}.fm label{font:700 10px Orbitron;letter-spacing:.07em;color:#cfc9f5;display:block;margin-bottom:5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}textarea{min-height:130px;resize:vertical;line-height:1.4}
+.hint{font-size:14px;color:var(--mut)}.pv{max-height:200px;border-radius:10px;margin-top:8px}
+input[type=file]::file-selector-button{background:#26214a;border:1px solid var(--vio);color:#fff;border-radius:6px;padding:6px 10px;margin-right:10px}
+#lb{background:#000d;border:0;max-width:96vw;width:auto;border-radius:12px}#lb img{max-width:94vw;max-height:90vh;display:block}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99;background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;border:1px solid var(--pink);box-shadow:0 0 24px #ff2fb966}
+.top-btn{position:fixed;right:16px;bottom:18px;z-index:15;width:46px;height:46px;border-radius:50%;border:0;color:#fff;background:var(--grad);font-size:20px;box-shadow:0 4px 18px #8b5cf688}
+footer{text-align:center;padding:26px 10px 34px;color:#3d3963;font-size:15px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.side{position:static}.search{display:none}.acct{margin-left:auto}}
+@media(max-width:520px){.two{grid-template-columns:1fr}.bs{display:none}.banner{flex-direction:column;align-items:flex-start}.act button{font-size:14px}.hero{padding-top:26px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<div class="app">
+<header><div class="shell">
+  <div class="top">
+    <a class="brand" href="index.html" aria-label="GLCTC1 Music home">
+      <img src="https://raw.githubusercontent.com/superflowercodex/GLCTC1Music/main/assets/glctc1-logo.png" alt="" onerror="this.style.display='none'">
+      <div><div class="bt">GLCTC1 MUSIC</div><div class="bs">I AM GALACTIC ONE</div></div></a>
+    <div class="search"><input id="q" type="search" placeholder="🔍  Search artists, titles, stories…" aria-label="Search stories"></div>
+    <div class="acct" id="acct">Checking account…</div>
+  </div>
+  <nav aria-label="Main navigation">
+    <a href="nav.html">NAV</a><a href="index.html">HOME</a><a href="upload.html">MUSIC</a><a href="daw.html">DAW</a><a href="video.html">VIDEO</a><a href="social.html">LIVE</a><a href="radio.html">RADIO</a><a href="audio-analyse.html">ANALYSE</a><a href="account.html">ARTIST</a><a href="open-space.html">OPEN</a><a href="booking.html">BOOKING</a><a href="records.html">RECORDS</a><a href="story.html" class="on" aria-current="page">STORY</a><a href="https://glctc1.com" target="_blank" rel="noopener">SHOP</a><a href="https://www.tiktok.com/" target="_blank" rel="noopener">TIKTOK</a>
+  </nav>
+</div></header>
+
+<main class="shell">
+  <div class="banner"><div><b>🛍️ GLCTC1 CLOTHING</b><span>Rep the frequency. Wear the universe.</span></div><a class="btn" href="https://glctc1.com" target="_blank" rel="noopener">ENTER THE SHOP ↗</a></div>
+  <section class="hero">
+    <div class="eb">✦ GLCTC1 MUSIC · ARTIST PUBLISHING SPACE ✦</div>
+    <h1><em>STORY</em> SPACE</h1>
+    <p>Every artist has a story. Share your journey, music, art and ideas with the whole GLCTC1 galaxy.</p>
+  </section>
+
+  <div class="grid">
+    <section>
+      <div class="rail" id="rail" aria-label="Artists"></div>
+      <div class="box comp" id="comp">
+        <div class="r1"><div class="av" id="meAv">GL</div><button class="fake" id="fake" type="button">What's on your mind?</button></div>
+        <div class="r2"><button data-f="mediaFile">📷 Photo / Video</button><button data-f="mediaUrl">🎵 Music link</button><button data-f="storyText">✍️ Write</button></div>
+      </div>
+      <div class="bar" id="chips"></div>
+      <div class="feed" id="feed"><div class="sk"></div><div class="sk"></div></div>
+      <div style="text-align:center;margin-top:16px"><button class="btn dk hidden" id="moreBtn">LOAD MORE STORIES ↓</button></div>
+      <div class="stt" id="feedSt" role="status" aria-live="polite"></div>
+    </section>
+    <aside class="side">
+      <div class="box"><h3>✦ GALAXY STATS</h3><div class="stats"><div id="nS">0<small>STORIES</small></div><div id="nA">0<small>ARTISTS</small></div></div></div>
+      <div class="box"><h3>✧ WHAT BELONGS HERE?</h3>
+        <div class="si"><b>YOUR JOURNEY</b><span>Milestones, inspiration and life behind the music.</span></div>
+        <div class="si"><b>NEW MUSIC</b><span>Singles, mixes, premieres and release links.</span></div>
+        <div class="si"><b>ART &amp; VISUALS</b><span>Cover art, photos, studio moments, video.</span></div>
+        <div class="si"><b>ANNOUNCEMENTS</b><span>Shows, collabs and community news.</span></div></div>
+      <div class="box"><h3>★ HOUSE RULES</h3><p class="note">Stories stay up until you or an admin remove them. Only share media you own or have permission to use. Respect other artists.</p><a class="btn dk" href="account.html">ARTIST PROFILE ↗</a></div>
+    </aside>
+  </div>
+</main>
+<footer>GLCTC1 MUSIC · STORY SPACE · MUSIC • CREATIVITY • CONNECTION<br>© 2026 GLCTC1 MUSIC. All rights reserved.</footer>
+</div>
+
+<dialog id="dlg">
+  <div class="dh"><h2 id="dTitle">✦ CREATE A STORY</h2><button type="button" id="dClose" aria-label="Close">✕</button></div>
+  <form class="fm" id="form">
+    <div class="two">
+      <div><label for="artistName">ARTIST NAME *</label><input id="artistName" maxlength="90" placeholder="Your artist name" required></div>
+      <div><label for="storyTitle">TITLE (OPTIONAL)</label><input id="storyTitle" maxlength="140" placeholder="Give it a title"></div>
+    </div>
+    <div><label for="storyText">YOUR STORY *</label><textarea id="storyText" maxlength="12000" placeholder="What's happening in your world?" required></textarea><span class="hint"><span id="cc">0</span>/12,000</span></div>
+    <div><label for="mediaFile">PHOTO OR VIDEO (OPTIONAL)</label><input id="mediaFile" type="file" accept="image/*,video/mp4,video/webm,video/quicktime"><img id="pv" class="pv hidden" alt="Preview"></div>
+    <div><label for="mediaUrl">OR PASTE A LINK (YOUTUBE, SOUNDCLOUD, SPOTIFY…)</label><input id="mediaUrl" type="url" placeholder="https://…"></div>
+    <div><label for="cat">STORY TYPE</label><select id="cat" class="f"><option value="Update">Artist update</option><option value="Music">Music / release</option><option value="Behind the scenes">Behind the scenes</option><option value="Artwork">Artwork / photography</option><option value="Video">Video / performance</option><option value="Thoughts">Thoughts / writing</option><option value="Announcement">Announcement</option><option value="Collaboration">Collaboration</option><option value="Other">Other</option></select></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="pub" type="submit">PUBLISH STORY ↗</button><button class="btn gh" type="button" id="dCancel">CANCEL</button></div>
+    <div class="stt" id="formSt" role="status" aria-live="polite"></div>
+  </form>
+</dialog>
+<dialog id="lb"><img alt="Story media"></dialog>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<button class="top-btn hidden" id="topBtn" aria-label="Back to top">↑</button>
+
+<script>
+(()=>{'use strict';
+const SUPABASE_URL='https://zdlaloiruxamxsduxqxw.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ';
+const TABLE='story_posts',BUCKET='story-media',MAXB=100*1024*1024,PAGE=8;
+const CATS=['Update','Music','Behind the scenes','Artwork','Video','Thoughts','Announcement','Collaboration','Other'];
+const RX={love:'💜',fire:'🔥',rocket:'🚀',star:'✨'};
+const NEON=[['#ff2fb9','#ff9f1c'],['#00e5ff','#8b5cf6'],['#b6ff3c','#00e5ff'],['#ffd400','#ff2fb9'],['#8b5cf6','#ff2fb9']];
+const $=id=>document.getElementById(id);
+let sb=null,user=null,editId=null,stories=[],rx={},cm={},extrasOK=false,busy=false,shown=PAGE,cat='',sort='new',openCm=new Set(),openTx=new Set();
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safe=v=>{try{const u=new URL(v);return['http:','https:'].includes(u.protocol)?u.href:''}catch{return''}};
+const ini=n=>(n||'GL').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase()||'GL';
+function ago(v){const s=(Date.now()-new Date(v))/1e3;if(isNaN(s))return'';if(s<60)return'Just now';if(s<3600)return(s/60|0)+'m ago';if(s<86400)return(s/3600|0)+'h ago';if(s<604800)return(s/86400|0)+'d ago';return new Date(v).toLocaleDateString(undefined,{dateStyle:'medium'})}
+const st=(id,m,t='')=>{const e=$(id);e.textContent=m;e.className='stt'+(t?' '+t:'')};
+let tt;function toast(m){const e=$('toast');e.textContent=m;e.classList.remove('hidden');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hidden'),3500)}
+const myName=()=>{const m=user?.user_metadata||{};return m.artist_name||m.full_name||m.name||(user?.email||'').split('@')[0]||'Artist'};
+const av=(n,u)=>`<div class="av">${u&&safe(u)?`<img src="${esc(u)}" alt="">`:esc(ini(n))}</div>`;
+
+/* ---------- galaxy sky ---------- */
+(()=>{const cv=$('sky'),x=cv.getContext('2d'),C=['#ff2fb9','#00b8ff','#8b5cf6','#ff9f1c','#17c964','#ffc800','#ff4d4d'];let W,H,S=[];
+function size(){const r=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;x.setTransform(r,0,0,r,0,0);
+S=Array.from({length:Math.min(150,W*H/8000|0)},()=>({x:Math.random()*W,y:Math.random()*H,r:Math.random()*5+1.5,c:C[Math.random()*C.length|0],p:Math.random()*6.3,s:Math.random()*.03+.01,sp:Math.random()<.45,v:Math.random()*.12+.02}))}
+function spark(a,b,r,t){x.beginPath();for(let i=0;i<8;i++){const g=i*Math.PI/4+t,d=i%2?r*.26:r;x.lineTo(a+Math.cos(g)*d,b+Math.sin(g)*d)}x.closePath();x.fill()}
+function draw(){x.clearRect(0,0,W,H);for(const s of S){s.p+=s.s;s.y+=s.v;s.x-=s.v*.4;if(s.y>H+10){s.y=-10;s.x=Math.random()*W}if(s.x<-10)s.x=W+10;
+x.globalAlpha=.3+.7*Math.abs(Math.sin(s.p));x.fillStyle=s.c;x.shadowColor=s.c;x.shadowBlur=s.r*2.5;
+if(s.sp)spark(s.x,s.y,s.r*1.8,s.p*.1);else{x.beginPath();x.arc(s.x,s.y,s.r*.45,0,6.3);x.fill()}}x.globalAlpha=1;x.shadowBlur=0}
+size();addEventListener('resize',size);
+if(matchMedia('(prefers-reduced-motion:reduce)').matches)draw();else(function loop(){if(!document.hidden)draw();requestAnimationFrame(loop)})()})();
+
+/* ---------- media ---------- */
+function embed(raw){const url=safe(raw);if(!url)return null;try{const u=new URL(url),h=u.hostname.replace(/^www\./,'');
+const yt=id=>id?{src:`https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`}:null;
+if(h==='youtu.be')return yt(u.pathname.slice(1));
+if(/^(m\.|music\.)?youtube\.com$/.test(h)){if(u.searchParams.get('v'))return yt(u.searchParams.get('v'));if(u.pathname.startsWith('/shorts/'))return yt(u.pathname.split('/')[2]);if(u.pathname.startsWith('/embed/'))return{src:url}}
+if(h==='soundcloud.com')return{src:'https://w.soundcloud.com/player/?url='+encodeURIComponent(url)+'&color=%23ff2fb9',a:1};
+if(h==='open.spotify.com')return{src:url.replace('open.spotify.com/','open.spotify.com/embed/'),a:1}}catch{}return null}
+
+/* ---------- render ---------- */
+function filtered(){const q=$('q').value.trim().toLowerCase();
+let l=stories.filter(s=>(!q||[s.artist_name,s.title,s.body,s.category].join(' ').toLowerCase().includes(q))&&(!cat||s.category===cat));
+if(sort==='top')l=[...l].sort((a,b)=>score(b)-score(a));return l}
+const score=s=>(rx[s.id]||[]).length*2+(cm[s.id]||[]).length*3;
+function card(s,i){const n=s.artist_name||'GLCTC1 Artist',own=user&&s.user_id===user.id,m=safe(s.media_url||''),c=NEON[i%NEON.length];
+let mh='';if(m&&s.media_kind==='image')mh=`<img class="med" data-act="zoom" src="${esc(m)}" alt="Story media" loading="lazy">`;
+else if(m&&s.media_kind==='video')mh=`<video class="med" style="cursor:default" controls preload="metadata" src="${esc(m)}"></video>`;
+else if(m){const e=embed(m);mh=e?`<div class="emb${e.a?' a':''}"><iframe src="${esc(e.src)}" title="Embedded media" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`:`<a class="lk" href="${esc(m)}" target="_blank" rel="noopener noreferrer">↗ OPEN SHARED LINK</a>`}
+const long=(s.body||'').length>420||(s.body||'').split('\n').length>7,o=openTx.has(s.id);
+const R=rx[s.id]||[],mine=user&&R.find(r=>r.user_id===user.id),C=cm[s.id]||[],kinds=[...new Set(R.map(r=>r.kind))].slice(0,3).map(k=>RX[k]||'💜').join('');
+const cmHtml=openCm.has(s.id)?`<div class="cm">${C.map(k=>`<div class="c">${av(k.author_name)}<div class="cb"><b>${esc(k.author_name||'Artist')}<small>${ago(k.created_at)}</small>${user&&k.user_id===user.id?`<button data-act="cdel" data-id="${esc(k.id)}" data-s="${esc(s.id)}">delete</button>`:''}</b>${esc(k.body)}</div></div>`).join('')||'<span class="hint">No comments yet — be the first.</span>'}
+${user?`<form class="cf" data-s="${esc(s.id)}"><input maxlength="1000" placeholder="Write a comment…" aria-label="Comment" required><button class="btn" type="submit">SEND</button></form>`:'<a class="hint" href="account.html">Sign in to comment ↗</a>'}</div>`:'';
+return`<article class="box card" id="s-${esc(s.id)}" style="--c1:linear-gradient(90deg,${c[0]},${c[1]});--c2:${c[0]}">
+<div class="hd">${av(n,s.artist_avatar_url)}<div class="m"><div class="au">${esc(n)}<span class="tag">${esc(s.category||'Update')}</span></div><div class="dt">${ago(s.created_at)} · 🌐</div></div>
+${own?`<div class="mn"><button data-act="menu" aria-label="Story options">⋯</button><div class="dd hidden"><button data-act="edit" data-id="${esc(s.id)}">✏️ Edit</button><button class="x" data-act="del" data-id="${esc(s.id)}">🗑 Delete</button></div></div>`:''}</div>
+<div class="bd">${s.title?`<h3 class="ti">${esc(s.title)}</h3>`:''}<div class="tx${o?' open':''}">${esc(s.body)}</div>${long?`<button class="more" data-act="more" data-id="${esc(s.id)}">${o?'See less':'See more'}</button>`:''}${mh}</div>
+<div class="cnt"><span>${R.length?`${kinds} ${R.length}`:''}</span><span>${C.length?`${C.length} comment${C.length>1?'s':''}`:''}</span></div>
+<div class="act"><div class="rx"><div class="pk">${Object.entries(RX).map(([k,e])=>`<button data-act="rx" data-k="${k}" data-id="${esc(s.id)}" aria-label="${k}">${e}</button>`).join('')}</div><button class="${mine?'me':''}" data-act="rx" data-k="love" data-id="${esc(s.id)}">${mine?RX[mine.kind]||'💜':'🤍'} ${mine?'Loved':'Love'}</button></div>
+<button data-act="cm" data-id="${esc(s.id)}">💬 Comment</button><button data-act="share" data-id="${esc(s.id)}">↗ Share</button></div>${cmHtml}</article>`}
+
+function render(){const l=filtered(),v=l.slice(0,shown);
+$('feed').innerHTML=v.length?v.map(card).join(''):`<div class="box empty"><b>${stories.length?'NO MATCHING STORIES':'YOUR STORY SPACE STARTS HERE'}</b>${stories.length?'Try another search or story type.':'No stories yet — be the first artist to publish.'}</div>`;
+$('moreBtn').classList.toggle('hidden',l.length<=shown);
+$('chips').innerHTML=['',...CATS].map(c=>`<button class="chip${c===cat?' on':''}" data-c="${esc(c)}">${c||'✦ All'}</button>`).join('')+`<select id="sort" aria-label="Sort"><option value="new"${sort==='new'?' selected':''}>Newest</option><option value="top"${sort==='top'?' selected':''}>Most loved</option></select>`;
+$('sort').onchange=e=>{sort=e.target.value;render()};
+const seen=new Map();stories.forEach(s=>{if(!seen.has(s.artist_name))seen.set(s.artist_name,s.artist_avatar_url)});
+$('rail').innerHTML=[...seen].slice(0,14).map(([n,u])=>`<button class="rb" data-a="${esc(n)}"><div class="ring">${av(n,u)}</div><span>${esc(n||'Artist')}</span></button>`).join('');
+$('nS').firstChild.nodeValue=stories.length;$('nA').firstChild.nodeValue=seen.size}
+
+function ui(){$('acct').textContent=user?`● ${myName()}`:'Public feed · Sign in to post';
+$('meAv').textContent=ini(user?myName():'GL');$('fake').textContent=user?`What's on your mind, ${myName().split(' ')[0]}?`:'Sign in to share your story…';render()}
+
+/* ---------- data ---------- */
+async function load(){st('feedSt','Loading stories…');
+const{data,error}=await sb.from(TABLE).select('id,user_id,artist_name,artist_avatar_url,title,body,category,media_url,media_kind,created_at,updated_at').order('created_at',{ascending:false}).limit(100);
+if(error){$('feed').innerHTML='<div class="box empty"><b>STORY FEED COULD NOT LOAD</b>Check story_setup.sql has been run and the public read policy is active.</div>';st('feedSt',error.message,'err');return}
+stories=data||[];await extras();st('feedSt','');render();
+if(location.hash.startsWith('#s-')){const e=document.querySelector(location.hash.replace(/[^#\w-]/g,''));if(e){e.scrollIntoView({block:'center'});e.classList.add('flash')}}}
+async function extras(){rx={};cm={};extrasOK=false;if(!stories.length)return;const ids=stories.map(s=>s.id);
+try{const[a,b]=await Promise.all([sb.from('story_reactions').select('story_id,user_id,kind').in('story_id',ids),sb.from('story_comments').select('id,story_id,user_id,author_name,body,created_at').in('story_id',ids).order('created_at')]);
+extrasOK=!a.error&&!b.error;(a.data||[]).forEach(r=>(rx[r.story_id]=rx[r.story_id]||[]).push(r));(b.data||[]).forEach(r=>(cm[r.story_id]=cm[r.story_id]||[]).push(r))}catch{}}
+const needIn=()=>toast('Sign in via Artist Profile first, then come back ✦');
+async function react(id,kind){if(!user)return needIn();if(!extrasOK)return toast('Likes & comments need the extra SQL at the top of this file.');
+const l=rx[id]=rx[id]||[],mine=l.find(r=>r.user_id===user.id);let err;
+if(mine&&mine.kind===kind){rx[id]=l.filter(r=>r!==mine);({error:err}=await sb.from('story_reactions').delete().eq('story_id',id).eq('user_id',user.id))}
+else{if(mine)mine.kind=kind;else l.push({story_id:id,user_id:user.id,kind});({error:err}=await sb.from('story_reactions').upsert({story_id:id,user_id:user.id,kind},{onConflict:'story_id,user_id'}))}
+if(err){toast(err.message);await extras()}render()}
+async function addComment(id,body){if(!extrasOK)return toast('Comments need the extra SQL at the top of this file.');
+const{data,error}=await sb.from('story_comments').insert({story_id:id,user_id:user.id,author_name:myName(),body}).select().single();
+if(error)return toast(error.message);(cm[id]=cm[id]||[]).push(data);render()}
+async function share(id){const url=location.href.split('#')[0]+'#s-'+id,s=stories.find(x=>x.id===id);
+if(navigator.share){try{await navigator.share({title:s?.title||'GLCTC1 Story',text:(s?.body||'').slice(0,100),url});return}catch(e){if(e.name==='AbortError')return}}
+try{await navigator.clipboard.writeText(url);toast('Link copied ✦')}catch{prompt('Copy this link:',url)}}
+
+/* ---------- compose ---------- */
+function openForm(focus){if(!user)return needIn(),void 0;if(!editId){$('form').reset();$('cc').textContent='0';$('pv').classList.add('hidden');$('artistName').value=myName()}
+$('dTitle').textContent=editId?'✦ EDIT YOUR STORY':'✦ CREATE A STORY';$('pub').textContent=editId?'SAVE CHANGES ↗':'PUBLISH STORY ↗';st('formSt','');$('dlg').showModal();if(focus)setTimeout(()=>$(focus).focus(),60)}
+function closeForm(){editId=null;$('dlg').close()}
+async function upload(f){if(!f)return{};if(f.size>MAXB)throw new Error('File is over the 100 MB limit.');if(!/^(image|video)\//.test(f.type))throw new Error('Choose an image or video file.');
+const p=`${user.id}/${Date.now()}-${crypto.randomUUID()}-${f.name.replace(/[^\w.-]/g,'_').slice(-120)}`;
+const{error}=await sb.storage.from(BUCKET).upload(p,f,{cacheControl:'3600',upsert:false,contentType:f.type});if(error)throw error;
+return{url:sb.storage.from(BUCKET).getPublicUrl(p).data.publicUrl,kind:f.type.startsWith('image/')?'image':'video'}}
+async function submit(e){e.preventDefault();if(!user||busy)return;const name=$('artistName').value.trim(),body=$('storyText').value.trim();
+if(!name||!body)return st('formSt','Artist name and story text are required.','err');
+busy=true;$('pub').disabled=true;st('formSt',editId?'Saving…':'Publishing…');const was=!!editId;
+try{let url='',kind='';const f=$('mediaFile').files[0];
+if(f){const u=await upload(f);url=u.url;kind=u.kind}else if(editId){const x=stories.find(s=>s.id===editId);url=x?.media_url||'';kind=x?.media_kind||''}
+const p=safe($('mediaUrl').value.trim());if(p){url=p;kind='link'}
+const row={user_id:user.id,artist_name:name,title:$('storyTitle').value.trim()||null,body,category:$('cat').value,media_url:url||null,media_kind:kind||null,updated_at:new Date().toISOString()};
+const r=editId?await sb.from(TABLE).update(row).eq('id',editId).eq('user_id',user.id):await sb.from(TABLE).insert(row);
+if(r.error)throw r.error;closeForm();await load();toast(was?'Story updated ✦':'Story published ✦')}
+catch(x){st('formSt',x.message||'Could not publish.','err')}finally{busy=false;$('pub').disabled=false}}
+function edit(id){const s=stories.find(x=>x.id===id);if(!s||s.user_id!==user?.id)return;editId=id;openForm();
+$('artistName').value=s.artist_name||'';$('storyTitle').value=s.title||'';$('storyText').value=s.body||'';$('cat').value=s.category||'Update';
+$('mediaUrl').value=s.media_kind==='link'?(s.media_url||''):'';$('cc').textContent=$('storyText').value.length}
+async function del(id){const s=stories.find(x=>x.id===id);if(!s||s.user_id!==user?.id||!confirm('Delete this story permanently?'))return;
+const{error}=await sb.from(TABLE).delete().eq('id',id).eq('user_id',user.id);if(error)return toast(error.message);stories=stories.filter(x=>x.id!==id);render();toast('Story deleted')}
+
+/* ---------- events ---------- */
+document.addEventListener('click',e=>{
+const dd=e.target.closest('[data-act="menu"]');document.querySelectorAll('.dd').forEach(d=>{if(!dd||d!==dd.nextElementSibling)d.classList.add('hidden')});
+const c=e.target.closest('[data-c]');if(c){cat=c.dataset.c;shown=PAGE;render();return}
+const a=e.target.closest('[data-a]');if(a){$('q').value=a.dataset.a;shown=PAGE;render();return}
+const b=e.target.closest('[data-act]');if(!b)return;const id=b.dataset.id,k=b.dataset.act;
+if(k==='menu')b.nextElementSibling.classList.toggle('hidden');
+else if(k==='rx')react(id,b.dataset.k);
+else if(k==='cm'){openCm.has(id)?openCm.delete(id):openCm.add(id);render()}
+else if(k==='share')share(id);else if(k==='edit')edit(id);else if(k==='del')del(id);
+else if(k==='more'){openTx.has(id)?openTx.delete(id):openTx.add(id);render()}
+else if(k==='zoom'){$('lb').querySelector('img').src=b.src;$('lb').showModal()}
+else if(k==='cdel'){sb.from('story_comments').delete().eq('id',id).eq('user_id',user.id).then(({error})=>{if(error)return toast(error.message);cm[b.dataset.s]=cm[b.dataset.s].filter(x=>x.id!==id);render()})}});
+document.addEventListener('submit',e=>{const f=e.target.closest('.cf');if(!f)return;e.preventDefault();const i=f.querySelector('input'),t=i.value.trim();if(t&&user)addComment(f.dataset.s,t)});
+$('fake').onclick=()=>openForm();
+document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>openForm(b.dataset.f));
+$('dClose').onclick=$('dCancel').onclick=closeForm;$('dlg').addEventListener('close',()=>{editId=null});
+$('lb').onclick=()=>$('lb').close();
+$('form').addEventListener('submit',submit);
+$('storyText').oninput=()=>$('cc').textContent=$('storyText').value.length;
+$('mediaFile').onchange=e=>{const f=e.target.files[0],p=$('pv');if(f&&f.type.startsWith('image/')){p.src=URL.createObjectURL(f);p.classList.remove('hidden')}else p.classList.add('hidden')};
+$('q').oninput=()=>{shown=PAGE;render()};
+$('moreBtn').onclick=()=>{shown+=PAGE;render()};
+$('topBtn').onclick=()=>scrollTo({top:0,behavior:'smooth'});
+addEventListener('scroll',()=>$('topBtn').classList.toggle('hidden',scrollY<700),{passive:true});
+
+(async()=>{try{
+if(!window.supabase?.createClient){st('feedSt','Supabase library did not load. Check your connection.','err');return}
+sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+user=(await sb.auth.getSession()).data?.session?.user||null;ui();await load();
+sb.auth.onAuthStateChange((_e,s)=>{user=s?.user||null;ui()})}catch(e){console.error(e);st('feedSt','Startup error: '+(e.message||e),'err')}})();
+})();
+</script>
+</body>
+</html>
+

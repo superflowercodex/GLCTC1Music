@@ -1,7 +1,7 @@
 <!DOCTYPE html>  <html lang="en">  
 <head>  
   <meta charset="UTF-8">
-  <!-- GLCTC1 Play Space — neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
+  <!-- GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
   <title>GLCTC1 – Play Space · Cosmic Decks</title>    <style>  
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');  
   
@@ -4654,6 +4654,20 @@ if (masterLibraryEditorModule) {
 
   </div>
 
+
+  <!-- ===================================================
+       ♡ MY FAVOURITES — ACCOUNT-SAVED TRACKS
+       =================================================== -->
+  <section id="glctc1FavouritePlaylist" class="glctc1-favourite-playlist" aria-labelledby="glctc1FavouritePlaylistTitle">
+    <div class="glctc1-favourite-playlist-head">
+      <div id="glctc1FavouritePlaylistTitle">♡ MY FAVOURITE TRACKS</div>
+      <button id="glctc1RefreshFavourites" type="button">↻ REFRESH</button>
+    </div>
+    <p id="glctc1FavouritePlaylistMessage">Sign in to see your saved favourite tracks.</p>
+    <div id="glctc1FavouritePlaylistItems"></div>
+    <button id="glctc1PlayFavourites" type="button" disabled>▶ PLAY FAVOURITES</button>
+    <button id="glctc1AddFavouritesToPlaylist" type="button" disabled>＋ ADD FAVOURITES TO SELECTED PLAYLIST</button>
+  </section>
 
   <!-- ===================================================
        🎧 ONE PLAYLIST PLAYER
@@ -17314,7 +17328,22 @@ if (sharedTrackId) {
 </script>
 
 
-<!-- ===== GLCTC1 PLAY COUNTER v21: track playback -> Record-Space plays ===== -->
+<style id="glctc1FavouritePlaylistStyles">
+.glctc1-favourite-playlist{margin:16px 0;padding:14px;border:1px solid rgba(255,155,218,.55);border-radius:14px;background:linear-gradient(145deg,rgba(35,12,42,.96),rgba(5,10,28,.96));box-shadow:0 0 18px rgba(216,121,183,.15)}
+.glctc1-favourite-playlist-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#ffb5e3;font-weight:800;letter-spacing:.08em}
+.glctc1-favourite-playlist-head button,.glctc1-favourite-playlist button{width:auto;margin:6px 4px 0;padding:8px 12px;border:1px solid #d879b7;border-radius:10px;background:#170d20;color:#ffd8ef;font-size:.72rem}
+#glctc1FavouritePlaylistMessage{font-size:.8rem;color:#cbd5e1}
+.glctc1-favourite-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 4px;border-bottom:1px solid rgba(216,121,183,.22);font-size:.78rem}
+.glctc1-favourite-item-title{font-weight:700;color:#fff}
+.glctc1-favourite-item-artist{display:block;color:#c4b5fd;font-size:.7rem;margin-top:3px}
+.glctc1-favourite-item button{flex-shrink:0}
+.glctc1-favourite-button{display:block;width:auto!important;max-width:100%;margin:8px auto 10px!important;padding:9px 16px!important;border:1px solid #d879b7!important;border-radius:18px!important;background:#100a14!important;color:#ffb5e3!important;font-weight:800!important;cursor:pointer}
+.glctc1-favourite-button:disabled{opacity:.55;cursor:not-allowed}
+.glctc1-playcount{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;color:#0ff;text-shadow:0 0 8px #0ff;opacity:.9;text-align:center;margin:3px 0 4px}
+@media(max-width:600px){.glctc1-favourite-item{align-items:flex-start}.glctc1-favourite-item button{white-space:normal}}
+</style>
+
+<!-- ===== GLCTC1 PLAY COUNTER v23: track playback -> Record-Space plays ===== -->
 <script>
 (function () {
   "use strict";
@@ -17352,11 +17381,11 @@ if (sharedTrackId) {
   }
 
   function hasAudio(t) {
-    return !!(t && (t.master_audio || t.sample || t.audio || t.audio_url));
+    return !!(t && (t.master_audio || t["Master Audio"] || t.sample || t.audio || t.audio_url || t["Audio URL"]));
   }
 
   async function findRow(k) {
-    if (!k || (!k.artist || !k.title)) return null;
+    if (!k || (!k.cat && (!k.artist || !k.title))) return null;
 
     // Prefer the catalogue identifier: Record Space uses record_id (text),
     // not an id column. The Master Library's "ID Cat No" maps to record_id.
@@ -17370,14 +17399,17 @@ if (sharedTrackId) {
           return normal(row.artist) === normal(k.artist) &&
                  normal(row.track_title) === normal(k.title);
         });
-        // Never count a different track merely because a catalogue lookup
-        // returned one row. Require the artist/title identity to match too.
+        // Prefer exact artist/title when present. If the source only carries
+        // its catalogue ID, accept the unique record_id match.
         if (exactCat) return exactCat;
+        if ((!k.artist || !k.title) && byCat.data.length === 1) return byCat.data[0];
       } else if (byCat.error) {
         console.warn("GLCTC1 PLAY COUNTER: record_id lookup failed; trying artist/title:", byCat.error);
       }
     }
 
+    // Artist/title fallback is only possible when both values are present.
+    if (!k.artist || !k.title) return null;
     // Fallback to the actual Record Space artist/title columns. This is also
     // used when a Master Library catalogue number differs from record_id.
     var r = await supabaseClient.from(TABLE)
@@ -17408,7 +17440,7 @@ if (sharedTrackId) {
     // does not require granting direct UPDATE access to the whole record table.
     var result = await supabaseClient.rpc("increment_record_space_play", { p_record_id: String(row.record_id) });
     if (result.error) {
-      console.error("GLCTC1 PLAY COUNTER: atomic play RPC failed; run the supplied SQL and check function grants:", result.error);
+      console.error("GLCTC1 PLAY COUNTER: atomic play RPC failed; check that the existing play-counter function and grants are installed:", result.error);
       return { plays: null, error: result.error };
     }
     var data = result.data;
@@ -17427,7 +17459,7 @@ if (sharedTrackId) {
   async function refreshBadge(p) {
     var token = ++p.badgeToken;
     var k = keyOf(p.track);
-    if (!k || !k.artist || !k.title) { setBadge(p, "PLAYS —", "Track identity unavailable"); return; }
+    if (!k || (!k.cat && (!k.artist || !k.title))) { setBadge(p, "PLAYS —", "Track identity unavailable"); return; }
     setBadge(p, "PLAYS …");
     try {
       var row = await findRow(k);
@@ -17442,7 +17474,7 @@ if (sharedTrackId) {
 
   async function countPlay(p) {
     var k = keyOf(p.track);
-    if (!k || !k.artist || !k.title) return;
+    if (!k || (!k.cat && (!k.artist || !k.title))) return;
     try {
       var res = await addPlay(k);
       if (res.plays != null) {
@@ -17475,7 +17507,7 @@ if (sharedTrackId) {
     var q = await supabaseClient.from("record_space_favourites")
       .select("record_id,user_id").eq("record_id", String(row.record_id)).eq("user_id", user.id).maybeSingle();
     if (q.error) {
-      console.error("GLCTC1 FAVOURITE: status lookup failed; run the supplied SQL and check RLS:", q.error);
+      console.error("GLCTC1 FAVOURITE: status lookup failed; check the existing favourites table and RLS:", q.error);
       return { row: row, user: user, active: false, error: q.error };
     }
     return { row: row, user: user, active: !!q.data };
@@ -17485,20 +17517,20 @@ if (sharedTrackId) {
     if (!p.favButton) return;
     var token = (p.favToken || 0) + 1; p.favToken = token;
     var k = keyOf(p.track);
-    if (!k || !k.artist || !k.title) { p.favButton.textContent = "♥ FAVOURITE —"; p.favButton.disabled = true; return; }
+    if (!k || (!k.cat && (!k.artist || !k.title))) { p.favButton.textContent = "♡ FAVOURITE THIS TRACK"; p.favButton.disabled = true; return; }
     p.favButton.disabled = true; p.favButton.textContent = "♥ CHECKING…";
     var state = await favouriteRow(k);
     if (token !== p.favToken) return;
-    p.favButton.disabled = !state.user || !state.row;
+    p.favButton.disabled = !state.row;
     var total = state.row ? (Number(state.row.favourites) || 0) : 0;
-    p.favButton.textContent = (state.active ? "♥ FAVOURITED" : "♡ FAVOURITE") + " · " + total;
+    p.favButton.textContent = (state.active ? "♥ FAVOURITED — REMOVE" : "♡ FAVOURITE THIS TRACK") + " · " + total;
     p.favButton.title = !state.user ? "Sign in to favourite this track" : (!state.row ? "Track is not registered in Record Space" : (state.error ? "Could not check favourite status; check console" : "Total favourites: " + total + ". Toggle your favourite."));
     if (state.row) p.favButton.dataset.total = String(total);
   }
 
   async function toggleFavourite(p) {
     var user = await currentUser();
-    if (!user) { setBadge(p, "SIGN IN TO FAVOURITE", "A GLCTC1 account is required to interact"); refreshFavourite(p); return; }
+    if (!user) { alert("Please sign in to your GLCTC1 account to favourite this track."); refreshFavourite(p); return; }
     var k = keyOf(p.track);
     var row = await findRow(k);
     if (!row) { console.warn("GLCTC1 FAVOURITE: no matching Record Space track", k); return; }
@@ -17509,10 +17541,10 @@ if (sharedTrackId) {
       var data = result.data;
       if (Array.isArray(data)) data = data[0];
       if (data && data.favourites != null) p.favButton.dataset.total = String(data.favourites);
-      p.favButton.textContent = data && data.favorited ? "♥ FAVOURITED" : "♡ FAVOURITE";
+      p.favButton.textContent = data && data.favorited ? "♥ FAVOURITED — REMOVE" : "♡ FAVOURITE THIS TRACK";
       window.dispatchEvent(new CustomEvent("glctc1:favourite-changed", { detail: { recordId: row.record_id, favourites: data && data.favourites, favorited: !!(data && data.favorited) } }));
     } catch (e) {
-      console.error("GLCTC1 FAVOURITE: toggle failed; run the supplied SQL and check authenticated RLS:", e);
+      console.error("GLCTC1 FAVOURITE: toggle failed; check the existing favourite-toggle function and authenticated permissions:", e);
       p.favButton.textContent = "FAVOURITE ERROR";
       p.favButton.title = e.message || String(e);
     } finally { p.favButton.disabled = false; refreshFavourite(p); }
@@ -17541,8 +17573,8 @@ if (sharedTrackId) {
     badge.textContent = "PLAYS —";
     var anchor = (el.closest && el.closest(".audio-bar")) || el;
     if (id === "glctc1PlaylistAudio") {
-      var prog = document.querySelector(".glctc1-playlist-progress");
-      if (prog) anchor = prog;
+      var recordMeta = document.getElementById("glctc1PlaylistMeta");
+      if (recordMeta) anchor = recordMeta;
     }
     anchor.insertAdjacentElement("afterend", badge);
     p.badge = badge;
@@ -17602,11 +17634,12 @@ if (sharedTrackId) {
     window[name] = function () {
       var self = this, args = arguments;
       var p = choosePlayer.apply(null, args);
-      var before = p ? p.el.getAttribute("src") : null;
+      if (p && args[1] !== undefined) setTrack(p, args[1]);
+      else if (p && args[0] && typeof args[0] === "object") setTrack(p, args[0]);
       var result = original.apply(self, args);
       if (p) {
         Promise.resolve(result).then(function () {
-          if (p.el.getAttribute("src") !== before && p.pending) setTrack(p, p.pending);
+          if (p.pending) { setTrack(p, p.pending); p.pending = null; }
         }).catch(function () {});
       }
       return result;
@@ -17643,6 +17676,185 @@ if (sharedTrackId) {
       Object.keys(players).forEach(function (id) { refreshFavourite(players[id]); });
     });
   }
+  // Account-only favourites playlist. It reads the existing favourites table,
+  // resolves each saved record to the Master Library, and reuses the existing
+  // playlist/player functions. It does not require a new table or SQL.
+  var favouriteItems = [];
+  var favList = document.getElementById("glctc1FavouritePlaylistItems");
+  var favMessage = document.getElementById("glctc1FavouritePlaylistMessage");
+  var playFavsBtn = document.getElementById("glctc1PlayFavourites");
+  var addFavsBtn = document.getElementById("glctc1AddFavouritesToPlaylist");
+
+  function masterArtist(t) { return normal(t && (t.artist || t["Artist"])); }
+  function masterTitle(t) { return normal(t && (t.title || t.track_title || t["Track Title"])); }
+  function masterCat(t) { return str(t && (t.id_cat_no || t["ID Cat No"] || t.record_id)); }
+
+  async function loadFavouritePlaylist() {
+    if (!favList || !favMessage) return;
+    favList.replaceChildren();
+    favouriteItems = [];
+    var user = await currentUser();
+    if (!user) {
+      favMessage.textContent = "Sign in to your GLCTC1 account to view and play your favourites.";
+      if (playFavsBtn) playFavsBtn.disabled = true;
+      if (addFavsBtn) addFavsBtn.disabled = true;
+      return;
+    }
+    favMessage.textContent = "Loading your saved tracks…";
+    try {
+      var saved = await supabaseClient.from("record_space_favourites")
+        .select("record_id").eq("user_id", user.id);
+      if (saved.error) throw saved.error;
+      var ids = Array.from(new Set((saved.data || []).map(function (x) { return str(x.record_id); }).filter(Boolean)));
+      if (!ids.length) {
+        favMessage.textContent = "No favourite tracks saved yet. Use ♡ FAVOURITE THIS TRACK under a record.";
+        if (playFavsBtn) playFavsBtn.disabled = true;
+        if (addFavsBtn) addFavsBtn.disabled = true;
+        return;
+      }
+      var records = await supabaseClient.from(TABLE)
+        .select("record_id,artist,track_title,plays,favourites")
+        .in("record_id", ids);
+      if (records.error) throw records.error;
+      var master = await supabaseClient.from("master_library").select("*").limit(5000);
+      if (master.error) throw master.error;
+      var library = Array.isArray(master.data) ? master.data : [];
+      favouriteItems = (records.data || []).map(function (row) {
+        var track = library.find(function (t) {
+          var cat = masterCat(t);
+          return (cat && cat === str(row.record_id)) ||
+            (masterArtist(t) === normal(row.artist) && masterTitle(t) === normal(row.track_title));
+        });
+        if (!track) track = {
+          record_id: row.record_id,
+          artist: row.artist,
+          title: row.track_title,
+          track_title: row.track_title
+        };
+        // Normalize raw Supabase Master Library column names for the existing player.
+        track = Object.assign({}, track, {
+          record_id: track.record_id || row.record_id,
+          artist: track.artist || track["Artist"] || row.artist,
+          title: track.title || track.track_title || track["Track Title"] || row.track_title,
+          master_audio: track.master_audio || track["Master Audio"] || track.audio_url || track["Audio URL"],
+          cover_art: track.cover_art || track["Cover Art"] || ""
+        });
+        return { row: row, track: track, playable: hasAudio(track) };
+      });
+      favouriteItems.forEach(function (item, index) {
+        var line = document.createElement("div");
+        line.className = "glctc1-favourite-item";
+        var label = document.createElement("div");
+        var title = document.createElement("span");
+        title.className = "glctc1-favourite-item-title";
+        title.textContent = item.row.track_title || item.track.title || "Untitled track";
+        var artist = document.createElement("span");
+        artist.className = "glctc1-favourite-item-artist";
+        artist.textContent = item.row.artist || item.track.artist || "Unknown artist";
+        label.append(title, artist);
+        var actions = document.createElement("div");
+        var play = document.createElement("button");
+        play.type = "button";
+        play.textContent = item.playable ? "▶ PLAY" : "NO AUDIO";
+        play.disabled = !item.playable;
+        play.addEventListener("click", function () {
+          if (typeof window.playPlaylistMasterTrack === "function" && item.playable) {
+            window.playPlaylistMasterTrack(item.track, true);
+          } else {
+            alert("This favourite is saved, but its audio could not be matched in the Master Library.");
+          }
+        });
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "♥ REMOVE";
+        remove.title = "Remove this track from your favourites";
+        remove.addEventListener("click", async function () {
+          remove.disabled = true;
+          try {
+            var result = await supabaseClient.rpc("toggle_record_space_favourite", { p_record_id: String(item.row.record_id) });
+            if (result.error) throw result.error;
+            await loadFavouritePlaylist();
+            Object.keys(players).forEach(function (id) { refreshFavourite(players[id]); });
+          } catch (e) {
+            console.error("GLCTC1 FAVOURITES PLAYLIST: remove failed", e);
+            alert("Could not remove favourite. Please check your account permissions.");
+            remove.disabled = false;
+          }
+        });
+        actions.append(play, remove);
+        line.append(label, actions);
+        favList.appendChild(line);
+      });
+      favMessage.textContent = favouriteItems.length + " saved favourite track" + (favouriteItems.length === 1 ? "" : "s") + ".";
+      if (playFavsBtn) playFavsBtn.disabled = !favouriteItems.some(function (x) { return x.playable; });
+      if (addFavsBtn) addFavsBtn.disabled = !favouriteItems.some(function (x) { return x.playable; });
+    } catch (e) {
+      console.error("GLCTC1 FAVOURITES PLAYLIST: load failed", e);
+      favMessage.textContent = "Could not load favourites. Check sign-in and existing Supabase table permissions.";
+      if (playFavsBtn) playFavsBtn.disabled = true;
+      if (addFavsBtn) addFavsBtn.disabled = true;
+    }
+  }
+
+  if (playFavsBtn) playFavsBtn.addEventListener("click", async function () {
+    var tracks = favouriteItems.filter(function (x) { return x.playable; }).map(function (x) { return x.track; });
+    if (!tracks.length) return;
+    try {
+      var user = await currentUser();
+      if (!user) { alert("Sign in to play your favourite tracks."); return; }
+      var favPlaylistId = "glctc1-favourites-" + user.id;
+      var favPlaylist = glctc1Playlists.find(function (x) { return String(x.id) === favPlaylistId; });
+      if (!favPlaylist) {
+        favPlaylist = { id: favPlaylistId, name: "♡ MY FAVOURITES", tracks: [] };
+        glctc1Playlists.push(favPlaylist);
+      }
+      favPlaylist.name = "♡ MY FAVOURITES";
+      favPlaylist.tracks = tracks.slice();
+      glctc1SelectedPlaylistId = favPlaylistId;
+      glctc1PlaylistTrackIndex = 0;
+      if (glctc1SelectedPlaylistName) glctc1SelectedPlaylistName.textContent = favPlaylist.name;
+      glctc1SavePlaylists();
+      glctc1RenderPlaylistLibrary();
+      await glctc1UpdatePlaylistPlayer();
+      await playPlaylistMasterTrack(favPlaylist.tracks[0], true);
+      await glctc1UpdatePlaylistPlayer();
+    } catch (e) {
+      console.error("GLCTC1 FAVOURITES PLAYLIST: could not start favourites playlist", e);
+      alert("Could not start your favourites playlist. Your saved favourites remain intact.");
+    }
+  });
+  if (addFavsBtn) addFavsBtn.addEventListener("click", async function () {
+    var selectedId = window.glctc1SelectedPlaylistId || (typeof glctc1SelectedPlaylistId !== "undefined" ? glctc1SelectedPlaylistId : null);
+    var playlist = (typeof glctc1Playlists !== "undefined" && Array.isArray(glctc1Playlists))
+      ? glctc1Playlists.find(function (x) { return String(x.id) === String(selectedId); }) : null;
+    if (!playlist) { alert("Select one of your playlists first."); return; }
+    var tracks = favouriteItems.filter(function (x) { return x.playable; }).map(function (x) { return x.track; });
+    try {
+      if (!Array.isArray(playlist.tracks)) playlist.tracks = [];
+      tracks.forEach(function (track) {
+        var key = masterCat(track) || (masterArtist(track) + "|" + masterTitle(track));
+        var exists = playlist.tracks.some(function (t) {
+          return (masterCat(t) || (masterArtist(t) + "|" + masterTitle(t))) === key;
+        });
+        if (!exists) playlist.tracks.push(track);
+      });
+      glctc1SavePlaylists();
+      await glctc1UpdatePlaylistPlayer();
+      glctc1RenderPlaylistLibrary();
+      alert("Favourites added to the selected playlist where a matching playlist was available.");
+    } catch (e) {
+      console.error("GLCTC1 FAVOURITES PLAYLIST: add to playlist failed", e);
+      alert("Could not add favourites to the selected playlist. Your saved favourites remain intact.");
+    }
+  });
+  var refreshFavsBtn = document.getElementById("glctc1RefreshFavourites");
+  if (refreshFavsBtn) refreshFavsBtn.addEventListener("click", loadFavouritePlaylist);
+  window.addEventListener("glctc1:favourite-changed", loadFavouritePlaylist);
+  if (supabaseClient && supabaseClient.auth && supabaseClient.auth.onAuthStateChange) {
+    supabaseClient.auth.onAuthStateChange(function () { loadFavouritePlaylist(); });
+  }
+  loadFavouritePlaylist();
+
   window.GLCTC1PlayCounter = { threshold: THRESHOLD, players: players, refresh: function () { Object.keys(players).forEach(function (id) { refreshBadge(players[id]); refreshFavourite(players[id]); }); } };
 })();
 </script>

@@ -17300,6 +17300,255 @@ if (sharedTrackId) {
 
 </script>
 
+
+<!-- ===== GLCTC1 PLAY COUNTER: 30s consecutive play -> Record-Space plays (all 4 players) ===== -->
+<script>
+(function () {
+  "use strict";
+
+  /* =====================================================
+     GLCTC1 PLAY COUNTER
+     One play = 30 seconds of CONSECUTIVE playback.
+     Pause, stop, seek, scratch or a new load restarts the
+     30s run. Each completed run adds +1 to record_space.plays
+     (the same column Record-Space reads/ranks on).
+     ===================================================== */
+
+  var THRESHOLD = 30;      // seconds of unbroken play = 1 count
+  var MAX_STEP  = 2.5;     // bigger jump between updates = a seek, not play
+  var TABLE     = "record_space";
+
+  var PLAYER_IDS = ["audioA", "audioB", "libraryPlayer", "glctc1PlaylistAudio"];
+  var LABELS = {
+    audioA: "DECK A", audioB: "DECK B",
+    libraryPlayer: "LIBRARY", glctc1PlaylistAudio: "PLAYLIST"
+  };
+
+  var players = {};
+
+  function str(v) { return v == null ? "" : String(v).trim(); }
+
+  function keyOf(t) {
+    if (!t) return null;
+    return {
+      cat:    str(t.id_cat_no || t["ID Cat No"]),
+      artist: str(t.artist || t["Artist"]),
+      title:  str(t.title || t["Track Title"])
+    };
+  }
+
+  function hasAudio(t) {
+    return !!(t && (t.master_audio || t.sample || t.audio || t.audio_url));
+  }
+
+  /* ---------- Record-Space lookup + increment ---------- */
+
+  async function findRow(k) {
+    var r;
+    if (k.cat) {
+      r = await supabaseClient.from(TABLE).select("id,plays")
+            .eq("ID Cat No", k.cat).limit(1);
+      if (!r.error && r.data && r.data.length) return r.data[0];
+
+      var esc = k.cat.replace(/[\\%_]/g, "\\$&");
+      r = await supabaseClient.from(TABLE).select("id,plays")
+            .ilike("ID Cat No", esc).limit(1);
+      if (!r.error && r.data && r.data.length) return r.data[0];
+    }
+    if (k.artist && k.title) {
+      r = await supabaseClient.from(TABLE).select("id,plays")
+            .eq("Artist", k.artist).eq("Track Title", k.title).limit(1);
+      if (!r.error && r.data && r.data.length) return r.data[0];
+    }
+    return null;
+  }
+
+  async function addPlay(k) {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      var row = await findRow(k);
+      if (!row) {
+        console.warn("GLCTC1 PLAY COUNTER: not found in Record-Space:", k);
+        return { plays: null, missing: true };
+      }
+      var old = Number(row.plays) || 0;
+      var q = supabaseClient.from(TABLE).update({ plays: old + 1 }).eq("id", row.id);
+      q = (row.plays == null) ? q.is("plays", null) : q.eq("plays", row.plays);
+      var r = await q.select("id,plays");
+      if (r.error) {
+        console.error("GLCTC1 PLAY COUNTER: update failed:", r.error);
+        return { plays: null };
+      }
+      if (r.data && r.data.length === 1) return { plays: r.data[0].plays };
+      // 0 rows: someone else changed it just now (retry) or RLS blocked the update
+    }
+    console.warn("GLCTC1 PLAY COUNTER: update changed 0 rows. If this repeats, check the record_space UPDATE (RLS) policy.");
+    return { plays: null };
+  }
+
+  /* ---------- Visible counter under each player ---------- */
+
+  function setBadge(p, text, tip) {
+    if (!p.badge) return;
+    p.badge.textContent = text;
+    p.badge.title = tip || "";
+  }
+
+  async function refreshBadge(p) {
+    var token = ++p.badgeToken;
+    var k = keyOf(p.track);
+    if (!k || (!k.cat && !(k.artist && k.title))) { setBadge(p, "PLAYS —"); return; }
+    setBadge(p, "PLAYS …");
+    try {
+      var row = await findRow(k);
+      if (token !== p.badgeToken) return;
+      if (row) setBadge(p, "PLAYS " + (Number(row.plays) || 0), "Record-Space plays (counts every 30s of consecutive play)");
+      else setBadge(p, "PLAYS —", "Not found in Record-Space");
+    } catch (e) {
+      if (token === p.badgeToken) setBadge(p, "PLAYS —");
+    }
+  }
+
+  async function countPlay(p) {
+    var k = keyOf(p.track);
+    if (!k) return;
+    var token = ++p.badgeToken;
+    try {
+      var res = await addPlay(k);
+      if (token !== p.badgeToken) return;
+      if (res.plays != null) {
+        setBadge(p, "PLAYS " + (Number(res.plays) || 0), "Counted — 30s of consecutive play");
+      }
+    } catch (e) {
+      console.error("GLCTC1 PLAY COUNTER:", e);
+    }
+  }
+
+  /* ---------- Per-player 30s consecutive tracking ---------- */
+
+  function resetRun(p) { p.acc = 0; p.last = null; }
+
+  function setTrack(p, track) {
+    p.track = track || null;
+    resetRun(p);
+    p.counted = false;
+    refreshBadge(p);
+  }
+
+  function attach(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+
+    var p = { id: id, el: el, track: null, acc: 0, last: null,
+              counted: false, badge: null, badgeToken: 0 };
+    players[id] = p;
+
+    var badge = document.createElement("div");
+    badge.className = "glctc1-playcount";
+    badge.setAttribute("data-player", LABELS[id] || id);
+    badge.textContent = "PLAYS —";
+    var anchor = (el.closest && el.closest(".audio-bar")) || el;
+    anchor.insertAdjacentElement("afterend", badge);
+    p.badge = badge;
+
+    el.addEventListener("loadstart", function () { resetRun(p); p.counted = false; });
+    el.addEventListener("emptied",   function () { resetRun(p); p.counted = false; });
+
+    el.addEventListener("play", function () {
+      if (p.counted && el.currentTime < 1) p.counted = false;  // restarted from the top
+      p.last = el.currentTime;
+    });
+    el.addEventListener("playing", function () { p.last = el.currentTime; });
+    el.addEventListener("waiting", function () { p.last = null; });
+
+    el.addEventListener("pause",   function () { resetRun(p); });
+    el.addEventListener("seeking", function () { resetRun(p); });
+
+    el.addEventListener("timeupdate", function () {
+      if (el.paused || el.seeking) { p.last = null; return; }
+      var cur = el.currentTime;
+      if (p.last != null) {
+        var d = cur - p.last;
+        if (d > 0 && d <= MAX_STEP) p.acc += d;
+        else if (d < 0 || d > MAX_STEP) p.acc = 0;   // jump = not consecutive
+      }
+      p.last = cur;
+      if (!p.counted && p.acc >= THRESHOLD) {
+        p.counted = true;
+        countPlay(p);
+      }
+    });
+
+    el.addEventListener("ended", function () {
+      // Tracks shorter than 30s count when played all the way through.
+      var dur = el.duration;
+      if (!p.counted && isFinite(dur) && dur > 0 && dur < THRESHOLD && p.acc >= dur - 1.5) {
+        p.counted = true;
+        countPlay(p);
+      }
+      resetRun(p);
+      p.counted = false;   // next play-through can count again
+    });
+  }
+
+  /* ---------- Learn which track each player holds ---------- */
+
+  function wrap(name, fn) {
+    var orig = window[name];
+    if (typeof orig !== "function") {
+      console.warn("GLCTC1 PLAY COUNTER: " + name + "() not found");
+      return;
+    }
+    window[name] = function () {
+      var self = this, args = arguments;
+      var p = fn.apply(null, args);              // returns the player state (or null)
+      var before = p ? p.el.getAttribute("src") : null;
+      var result = orig.apply(self, args);
+      if (p) {
+        Promise.resolve(result).then(function () {
+          // only adopt the new track if the player really got a new source
+          if (p.el.getAttribute("src") !== before) setTrack(p, p.pending);
+        }, function () {});
+      }
+      return result;
+    };
+  }
+
+  function pick(id, track) {
+    var p = players[id];
+    if (!p || !hasAudio(track)) return null;
+    p.pending = track;
+    return p;
+  }
+
+  PLAYER_IDS.forEach(attach);
+
+  wrap("loadToDeck", function (deck, track) {
+    return pick(deck === "A" ? "audioA" : "audioB", track);
+  });
+  wrap("playLibraryTrack", function (track) { return pick("libraryPlayer", track); });
+  wrap("playPlaylistMasterTrack", function (track) { return pick("glctc1PlaylistAudio", track); });
+
+  // Stems loaded onto a deck are not the master record, so they never count.
+  var origStem = window.loadStemToDeck;
+  if (typeof origStem === "function") {
+    window.loadStemToDeck = function (deck) {
+      var p = players[deck === "A" ? "audioA" : "audioB"];
+      if (p) setTrack(p, null);
+      return origStem.apply(this, arguments);
+    };
+  }
+
+  var st = document.createElement("style");
+  st.textContent =
+    ".glctc1-playcount{font-family:'Orbitron',sans-serif;font-size:.72rem;" +
+    "letter-spacing:1px;color:#0ff;text-shadow:0 0 8px #0ff;opacity:.9;" +
+    "text-align:center;margin:4px 0 6px;}";
+  document.head.appendChild(st);
+
+  window.GLCTC1PlayCounter = { threshold: THRESHOLD, players: players };
+})();
+</script>
+
 </body>
 </html>
 

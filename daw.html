@@ -1803,11 +1803,16 @@ function noiseBuf(c,pink){const m=cc(c),k=pink?'np':'nw';if(m[k])return m[k];con
 const curveCache={};
 function satCurve(drive,crush){const key=Math.round(drive*40)+'_'+Math.round(crush*40);if(curveCache[key])return curveCache[key];const n=2048,a=new Float32Array(n),k=1+drive*14,lv=Math.pow(2,Math.max(3,16-crush*12));for(let i=0;i<n;i++){let x=i*2/n-1;let y=drive>.001?Math.tanh(k*x)/Math.tanh(k):x;if(crush>.001)y=Math.round(y*lv)/lv;a[i]=y}return curveCache[key]=a}
 function makeIR(c,sec){const m=cc(c),k='ir'+sec;if(m[k])return m[k];const n=Math.floor(c.sampleRate*sec),b=c.createBuffer(2,n,c.sampleRate);for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let y=0;for(let i=0;i<n;i++){const t=i/n,x=(Math.random()*2-1)*Math.pow(1-t,2.6)*(i<c.sampleRate*.012?i/(c.sampleRate*.012):1);const a=.85-.7*Math.min(1,t*1.6);y+=(x-y)*a;d[i]=y}}return m[k]=b}
-function makeLfo(c){const out=c.createGain(),osc=c.createOscillator(),oscG=c.createGain(),sh=c.createBufferSource(),shG=c.createGain();
+function makeLfo(c){const out=c.createGain(),oscG=c.createGain(),sh=c.createBufferSource(),shG=c.createGain();let osc=c.createOscillator(),cur={shape:0,hz:5,beats:0};
  osc.type='sine';osc.frequency.value=5;osc.connect(oscG);oscG.connect(out);
  const L=32,seg=250,b=c.createBuffer(1,L*seg,8000),d=b.getChannelData(0);for(let i=0;i<L;i++){const v=Math.random()*2-1;for(let j=0;j<seg;j++)d[i*seg+j]=v}
  sh.buffer=b;sh.loop=true;sh.connect(shG);shG.connect(out);shG.gain.value=0;osc.start();sh.start();
- return{out,set(shape,hz){if(LFO_T[shape]==='sh'){oscG.gain.value=0;shG.gain.value=1;sh.playbackRate.value=Math.max(.01,hz/32)}else{osc.type=LFO_T[shape];osc.frequency.value=hz;oscG.gain.value=1;shG.gain.value=0}}}}
+ return{out,
+  set(shape,hz,beats){const b=beats||0,ch=cur.shape!==shape||Math.abs(cur.hz-hz)>1e-6||cur.beats!==b;cur={shape,hz,beats:b};
+   if(LFO_T[shape]==='sh'){oscG.gain.value=0;shG.gain.value=1;sh.playbackRate.value=Math.max(.01,hz/32)}else{osc.type=LFO_T[shape];osc.frequency.value=hz;oscG.gain.value=1;shG.gain.value=0;if(ch&&b)this.lock()}},
+  /* restart a tempo-synced LFO exactly on a whole cycle of the master clock so it pulses WITH the beat, not against it */
+  lock(){try{const K=window.GLCTC_CLOCK;if(!cur.beats||LFO_T[cur.shape]==='sh'||!K||!K.anchored())return;const now=c.currentTime,sg=K.segs,T0=Math.max(now+.05,(sg&&sg.length?sg[sg.length-1].t0:0)+.01),B=cur.beats,nb=Math.ceil(K.beatAt(T0)/B-1e-6)*B,t=Math.max(T0,K.timeOfBeat(nb));
+   const n=c.createOscillator();n.type=osc.type;n.frequency.value=cur.hz;n.connect(oscG);n.start(t);const o=osc;try{o.stop(t)}catch(e){}osc=n}catch(e){}}}}
 
 /* ---------- master FX chain ---------- */
 function makeChain(c,live){
@@ -1817,7 +1822,7 @@ function makeChain(c,live){
  // drive / crush
  const ws=c.createWaveShaper();ws.oversample='2x';
  // trance gate
- const gate=c.createGain(),gOsc=c.createOscillator(),gAmt=c.createGain();gOsc.type='square';gOsc.frequency.value=4;gOsc.connect(gAmt);gAmt.gain.value=0;gAmt.connect(gate.gain);gate.gain.value=1;gOsc.start();
+ const gate=c.createGain(),gAmt=c.createGain();let gOsc=c.createOscillator(),gRateCur=-1,gBeat=0,gPeriod=0;gOsc.type='square';gOsc.frequency.value=4;gOsc.connect(gAmt);gAmt.gain.value=0;gAmt.connect(gate.gain);gate.gain.value=1;gOsc.start();
  // chorus (stereo, modulated delays)
  const chDry=c.createGain(),chWet=c.createGain(),chOut=c.createGain(),dL=c.createDelay(.05),dR=c.createDelay(.05),chL=c.createOscillator(),chGl=c.createGain(),chGr=c.createGain(),chMg=c.createChannelMerger(2);
  chL.type='sine';chL.frequency.value=.6;chL.connect(chGl);chL.connect(chGr);chGl.gain.value=.002;chGr.gain.value=-.002;dL.delayTime.value=.007;dR.delayTime.value=.007;chGl.connect(dL.delayTime);chGr.connect(dR.delayTime);chL.start();
@@ -1847,12 +1852,15 @@ function makeChain(c,live){
  M.connect(wm,0,0);Sd.connect(wm,0,0);M.connect(wm,0,1);Sn.connect(wm,0,1);wm.connect(lim);lim.connect(out);
  let analyser=null;if(live){analyser=c.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=.7;out.connect(analyser)}
  let irSec=0;
+ /* trance gate: restart the square LFO on a whole gate cycle of the master clock so the chops land on the beat */
+ function lockGate(){try{const K=window.GLCTC_CLOCK;if(!live||!gPeriod||!K||!K.anchored())return false;const now=c.currentTime,sg=K.segs,T0=Math.max(now+.05,(sg&&sg.length?sg[sg.length-1].t0:0)+.01),nb=Math.ceil(K.beatAt(T0)/gPeriod-1e-6)*gPeriod,t=Math.max(T0,K.timeOfBeat(nb));
+  const n=c.createOscillator();n.type='square';n.frequency.value=gOsc.frequency.value;if(LK.gt)n.connect(gAmt);n.start(t);const o=gOsc;try{o.stop(t)}catch(e){}gOsc=n;return true}catch(e){return false}}
  const LK={};function lnk(k,on,a,b){on=!!on;if(LK[k]===on)return;LK[k]=on;try{on?a.connect(b):a.disconnect(b)}catch(e){}}
  function apply(F,bpm,mac){
   const beat=60/(bpm||130);mac=mac||{bright:0,motion:0,space:0,grit:0};
   const drive=cl(F.fxDrive+mac.grit*.55,0,1),crush=cl(F.fxCrush+mac.grit*.35,0,1);
   ws.curve=(drive+crush<.01)?null:satCurve(drive,crush);
-  const gd=GATEB[F.gRate]?F.gDepth:0;S(gAmt.gain,gd/2,.02);S(gate.gain,1-gd/2,.02);gOsc.frequency.value=GATEB[F.gRate]?(1/(beat*GATEB[F.gRate]*2)):4;
+  const gd=GATEB[F.gRate]?F.gDepth:0;S(gAmt.gain,gd/2,.02);S(gate.gain,1-gd/2,.02);gOsc.frequency.value=GATEB[F.gRate]?(1/(beat*GATEB[F.gRate]*2)):4;gPeriod=GATEB[F.gRate]?GATEB[F.gRate]*2:0;if(live&&gPeriod&&(gRateCur!==F.gRate||gBeat!==beat)){if(lockGate()){gRateCur=F.gRate;gBeat=beat}}
   const cm=cl(F.chMix+mac.motion*.3,0,1),mode=F.chMode;chDry.gain.value=1-(mode?cm*.35:0);S(chWet.gain,mode?cm:0,.03);
   const cr=[.6,.5,.8,1.1][mode],cd=[.002,.0016,.0027,.0034][mode];chL.frequency.value=cr;S(chGl.gain,cd,.05);S(chGr.gain,-cd,.05);dL.delayTime.value=dR.delayTime.value=[.007,.0065,.0085,.0085][mode];
   S(phWet.gain,F.phMix,.03);phDry.gain.value=1-F.phMix*.3;phL.frequency.value=F.phRate;S(phLg.gain,300+F.phDepth*2200,.05);S(phFb.gain,F.phFb,.05);
@@ -1865,7 +1873,7 @@ function makeChain(c,live){
   apL.frequency.value=F.apRate;S(apG.gain,F.apDepth,.05);
   Sd.gain.value=F.width;S(out.gain,F.outLvl,.03);
  }
- return{input,output:out,analyser,apply,gOsc};
+ return{input,output:out,analyser,apply,get gOsc(){return gOsc},relock(){gRateCur=-1;lockGate()}};
 }
 
 /* ---------- envelopes ---------- */
@@ -2094,7 +2102,7 @@ const rootBase=S=>(S.oct+1)*12+S.root;
 function lfoHz(rate,sync,bpm){return sync?(1/((60/bpm)*SYNC_BEATS[sync])):rate}
 function applyRig(r,bpm){
  bpm=bpm||bpmNow();const G=r.G;
- [0,1].forEach(pi=>{const P=P_(pi);G.lfo[pi*2].set(P.l1shape,lfoHz(P.l1rate,P.l1sync,bpm));G.lfo[pi*2+1].set(P.l2shape,lfoHz(P.l2rate,P.l2sync,bpm))});
+ [0,1].forEach(pi=>{const P=P_(pi);G.lfo[pi*2].set(P.l1shape,lfoHz(P.l1rate,P.l1sync,bpm),P.l1sync?SYNC_BEATS[P.l1sync]:0);G.lfo[pi*2+1].set(P.l2shape,lfoHz(P.l2rate,P.l2sync,bpm),P.l2sync?SYNC_BEATS[P.l2sync]:0)});
  const mm=1+ST.mac.motion*1.2;G.lfo.forEach(l=>{l.out.gain.value=mm});
  G.mcut.offset.value=ST.mac.bright*2400;
  const F=Object.assign({},ST.fx);if(perf.stutter){F.gRate=perf.stutter;F.gDepth=1}
@@ -2218,7 +2226,7 @@ function tick(){
 }
 function start(){
  const r=getRig();try{r.c.resume()}catch(e){}
- running=true;const S0=ST.seq;S0.pats.forEach(p=>{if(![4,8,16,32].includes(p.len))p.len=p.len<16?16:32});const K0=GLCTC_CLOCK,rb0=RATE_BEATS[S0.rate]||.25;K0.ensureAnchor(window.__glctcStartStep||0);let s0=Math.ceil(Math.max((window.__glctcStartStep||0)/4,K0.beatAt(r.c.currentTime+.03))/rb0-1e-6);__grb=rb0;stp=makeStepper(S0,s0);if(S0.chainOn&&S0.chain&&S0.chain.length&&stp.cur!==S0.cur)selectPattern(stp.cur);stepN=s0;arpS.i=0;
+ running=true;const S0=ST.seq;S0.pats.forEach(p=>{if(![4,8,16,32].includes(p.len))p.len=p.len<16?16:32});const K0=GLCTC_CLOCK,rb0=RATE_BEATS[S0.rate]||.25;K0.ensureAnchor(window.__glctcStartStep||0);let s0=Math.ceil(Math.max((window.__glctcStartStep||0)/4,K0.beatAt(r.c.currentTime+.03))/rb0-1e-6);__grb=rb0;stp=makeStepper(S0,s0);if(S0.chainOn&&S0.chain&&S0.chain.length&&stp.cur!==S0.cur)selectPattern(stp.cur);stepN=s0;arpS.i=0;try{r.G.lfo.forEach(l=>l.lock());r.chain.relock&&r.chain.relock()}catch(e){}
  clearInterval(timer);timer=setInterval(tick,20);
  const pb=$('goPlay');pb.textContent='Ⅱ PLAYING';pb.classList.add('active');setStatus(ST.seq.mode==='arp'?'ARPEGGIATOR RUNNING':ST.seq.mode==='seq'?'SEQUENCER RUNNING':'TRANSPORT RUNNING');
 }
@@ -2601,7 +2609,7 @@ GLCTC_HUB.reg('go',{name:'GALACTIC ONE',start,stop,running:()=>running,sendEl:'g
 
 buildPatchBar();buildSeq();buildKeys();buildSound();
 $('goTempo').textContent=GLCTC_CLOCK.fmt(bpmNow())+' BPM';
-window.GALACTIC_ONE={patterns:{get:()=>({pats:JSON.parse(JSON.stringify(ST.seq.pats)),root:ST.seq.root,scale:ST.seq.scale,swing:ST.seq.swing}),set:d=>{if(!d||!Array.isArray(d.pats))return false;const Sq=ST.seq;d.pats.forEach((p,i)=>{const t=Sq.pats[i];if(!t||!p||!Array.isArray(p.steps))return;t.len=[4,8,12,16,24,32].includes(p.len)?p.len:16;t.steps.forEach((s,j)=>{Object.assign(s,{on:0,n:0,v:.8,g:.7,p:1,r:1,c:0,a:0,s:0},p.steps[j]||{})})});if(d.root!=null)Sq.root=d.root;if(d.scale)Sq.scale=d.scale;if(Number.isFinite(d.swing))Sq.swing=d.swing;try{save()}catch(e){}try{buildSeq()}catch(e){try{layoutGrid();paintSeq()}catch(_){}}return true}},noteAt:(m,v,when,dur)=>{const r=getRig(),S=ST.seq,tg=S.target===2?[0,1]:[S.target],t=Math.max(r.c.currentTime,Number(when)||0);tg.forEach(pi=>{const x=playNote(r,P_(pi),pi,m,v||.8,t,Math.max(.03,dur||.2),{});if(x)x.seq=1});maxVoices(r)},project:()=>project,state:()=>ST,panic,playNote:(m,v,pi)=>{const r=getRig();return playNote(r,P_(pi||0),pi||0,m,v||.8,r.c.currentTime,null,{})},bounce,getRig,keyOn,keyOff};
+window.GALACTIC_ONE={patterns:{get:()=>({pats:JSON.parse(JSON.stringify(ST.seq.pats)),root:ST.seq.root,scale:ST.seq.scale,swing:ST.seq.swing,oct:ST.seq.oct}),set:d=>{if(!d||!Array.isArray(d.pats))return false;const Sq=ST.seq;d.pats.forEach((p,i)=>{const t=Sq.pats[i];if(!t||!p||!Array.isArray(p.steps))return;t.len=[4,8,12,16,24,32].includes(p.len)?p.len:16;t.steps.forEach((s,j)=>{Object.assign(s,{on:0,n:0,v:.8,g:.7,p:1,r:1,c:0,a:0,s:0},p.steps[j]||{})})});if(d.root!=null)Sq.root=d.root;if(d.scale)Sq.scale=d.scale;if(Number.isFinite(d.swing))Sq.swing=d.swing;if(Number.isFinite(d.oct))Sq.oct=Math.max(0,Math.min(7,Math.round(d.oct)));try{save()}catch(e){}try{buildSeq()}catch(e){try{layoutGrid();paintSeq()}catch(_){}}return true}},noteAt:(m,v,when,dur)=>{const r=getRig(),S=ST.seq,tg=S.target===2?[0,1]:[S.target],t=Math.max(r.c.currentTime,Number(when)||0);tg.forEach(pi=>{const x=playNote(r,P_(pi),pi,m,v||.8,t,Math.max(.03,dur||.2),{});if(x)x.seq=1});maxVoices(r)},project:()=>project,state:()=>ST,panic,playNote:(m,v,pi)=>{const r=getRig();return playNote(r,P_(pi||0),pi||0,m,v||.8,r.c.currentTime,null,{})},bounce,getRig,keyOn,keyOff};
 /* project restore: when a saved project carries Galactic One data, apply it */
 let lastProj=null;
 setInterval(()=>{try{if(typeof project==='undefined'||!project||project===lastProj)return;lastProj=project;
@@ -3312,7 +3320,7 @@ window.GALACTIC_VOX={patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,
   const D=mk((l,s,i)=>l===1?(i>=48&&s>=8?1:0):l===0?(i<48&&s===0?1:0):l===15?(i===48?2:0):0);
   return {slots:KINDS.map((k,i)=>({kind:i,level:.9,pan:[0,0,0,.18,-.12,-.25,.14,.28,0,0,-.1,.1,.2,-.2,0,0][i]||0,tune:0,decay:1,mute:false,solo:false,smp:''})),pats:[A,B,C,D],act:0,sel:0,bars:4,swing:.06,tool:'step',rec:false};
  };
- let ST={mods:{},scenes:Array(8).fill(null),curScene:-1,rec:{src:['master'],mode:'mix',bars:0,count:0,xport:'mods'},pads:defPads()};
+ let ST={lim:true,mods:{},scenes:Array(8).fill(null),curScene:-1,rec:{src:['master'],mode:'mix',bars:0,count:0,xport:'mods'},pads:defPads()};
  try{const x=JSON.parse(localStorage.getItem(KEY)||'null');if(x){ST.mods=x.mods||{};if(Array.isArray(x.scenes))ST.scenes=Array.from({length:8},(_,i)=>x.scenes[i]||null);if(x.rec)ST.rec={...ST.rec,...x.rec};const d=defPads(),p=x.pads;if(p&&Array.isArray(p.pats)&&p.pats.length===4&&Array.isArray(p.slots)&&p.slots.length===16){ST.pads={...d,...p,slots:d.slots.map((s,i)=>({...s,...p.slots[i]})),pats:p.pats.map((pp,pi)=>d.pats[pi].map((lane,l)=>Array.from({length:64},(_,i)=>cl(Number(pp?.[l]?.[i])||0,0,2))))};ST.pads.rec=false}}}catch(e){}
  try{Object.keys(ST.mods||{}).forEach(k=>{const m=ST.mods[k];if(!m||typeof m!=='object'){delete ST.mods[k];return}m.mute=false;m.solo=false;if(!(m.vol>.05))m.vol=1;if(!Number.isFinite(m.pan))m.pan=0})}catch(e){ST.mods={}}
  const P=()=>ST.pads;
@@ -3323,17 +3331,21 @@ window.GALACTIC_VOX={patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,
  const running=id=>{const m=HUB.mods[id];return !!(m&&m.running&&m.running())};
  /* ---------- per-module audio bus: every module routes through here -> master ---------- */
  const BUS={};
+ /* MIX ROLES: every module gets its own trim (headroom) and a high-pass so bass, drums, stabs, leads and vocals each own a frequency range */
+let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBOOST=Math.max(.25,Math.min(3,Number(v)||1));try{applyMix()}catch(e){}}};
+ const MIXTRIM={bl:.5,mine:.75,lee:.36,s101:.3,go:.55,vox:.55,ws:.5};
+ const MIXHPF={bl:28,mine:30,lee:32,s101:120,go:150,vox:190,ws:110};
  function bus(id){
   if(!audioCtx||!masterGain)return null;let b=BUS[id];if(b&&b.c===audioCtx)return b;
-  const c=audioCtx,inn=c.createGain(),vol=c.createGain(),tap=c.createGain(),gate=c.createGain(),pan=c.createStereoPanner(),an=c.createAnalyser();
-  an.fftSize=512;inn.channelCount=2;inn.channelCountMode='explicit';inn.channelInterpretation='speakers';inn.connect(vol);vol.connect(tap);tap.connect(gate);gate.connect(pan);pan.connect(masterGain);tap.connect(an);
-  b=BUS[id]={c,in:inn,vol,tap,gate,pan,an};applyMix();return b;
+  const c=audioCtx,inn=c.createGain(),hp=c.createBiquadFilter(),vol=c.createGain(),tap=c.createGain(),gate=c.createGain(),pan=c.createStereoPanner(),an=c.createAnalyser();hp.type='highpass';hp.frequency.value=MIXHPF[id]||20;hp.Q.value=.707;
+  an.fftSize=512;inn.channelCount=2;inn.channelCountMode='explicit';inn.channelInterpretation='speakers';inn.connect(hp);hp.connect(vol);vol.connect(tap);tap.connect(gate);gate.connect(pan);pan.connect(masterGain);tap.connect(an);
+  b=BUS[id]={c,in:inn,hp,vol,tap,gate,pan,an};applyMix();return b;
  }
  window.GLCTC_WSBUS=id=>{const b=bus(id);return b?b.in:null};
  window.WSB=(id,fb)=>{try{if(fb&&audioCtx&&fb.context!==audioCtx)return fb;return window.GLCTC_WSBUS(id)||fb}catch(e){return fb}};
  const anySolo=()=>MODS.some(m=>!m.track&&ms(m.id).solo);
  const audible=m=>{const s=ms(m.id);return !s.mute&&(!anySolo()||s.solo)};
- function applyMix(){if(!audioCtx)return;const t=audioCtx.currentTime;MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==audioCtx)return;const s=ms(m.id);b.vol.gain.setTargetAtTime(s.vol,t,.015);b.gate.gain.setTargetAtTime(audible(m)?1:0,t,.012);b.pan.pan.setTargetAtTime(s.pan,t,.015)})}
+ function applyMix(){if(!audioCtx)return;const t=audioCtx.currentTime;MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==audioCtx)return;const s=ms(m.id);b.vol.gain.setTargetAtTime(s.vol*(MIXTRIM[m.id]||1)*MIXBOOST,t,.015);b.gate.gain.setTargetAtTime(audible(m)?1:0,t,.012);b.pan.pan.setTargetAtTime(s.pan,t,.015)})}
  let fin=null;
  function ensureBuses(){
   const c=ensureAudio();MODS.forEach(m=>{if(!m.track)bus(m.id)});
@@ -3539,7 +3551,7 @@ window.GALACTIC_VOX={patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,
  const fxBtn=(t,sel)=>{const b=el('button',{class:'tiny',text:t,onclick:()=>{const o=typeof sel==='string'?document.querySelector(sel):sel;o&&o.click();refresh()}});return b};
  UI.fxOn=fxBtn('FX',$('mfxOn'));UI.fxF=fxBtn('FILTER','[data-mfx="flt"]');UI.fxD=fxBtn('DELAY','[data-mfx="dly"]');UI.fxR=fxBtn('REVERB','[data-mfx="rev"]');
  UI.lim=el('button',{class:'tiny',text:'LIMITER',title:'Brick-wall style safety limiter on the master',onclick:()=>{ST.lim=!ST.lim;applyLimiter();save();refresh()}});
- function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;if(ST.lim){l.threshold.value=-1.5;l.knee.value=0;l.ratio.value=20;l.attack.value=.002;l.release.value=.1}else{l.threshold.value=-4;l.knee.value=12;l.ratio.value=6;l.attack.value=.004;l.release.value=.18}}
+ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;if(ST.lim){l.threshold.value=-3;l.knee.value=2;l.ratio.value=14;l.attack.value=.002;l.release.value=.12}else{l.threshold.value=-6;l.knee.value=10;l.ratio.value=3;l.attack.value=.006;l.release.value=.2}}
  masC.c.append(el('div',{class:'ws-master'},el('div',{},el('div',{class:'ws-mm'},UI.mm[0],UI.mm[1]),UI.db,UI.clip),
   el('div',{style:'display:grid;gap:8px'},mir('Master volume','masterVol',v=>Math.round(v*100)+'%'),mir('Filter cutoff','filterCutoff',v=>v>=17900?'OPEN':Math.round(v)+' Hz'),mir('Delay','delayMix',v=>Math.round(v*100)+'%'),mir('Reverb','reverbMix',v=>Math.round(v*100)+'%'),
    el('div',{class:'ws-btns'},UI.fxOn,UI.fxF,UI.fxD,UI.fxR,UI.lim))));
@@ -3989,7 +4001,7 @@ window.GALACTIC_VOX={patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,
  const _ra=renderAll;renderAll=function(){const r=_ra.apply(this,arguments);try{renderTracks();renderChips()}catch(e){console.error(e)}return r};
  setInterval(()=>{try{refresh();if(aud&&!playing)endAudition()}catch(e){}},250);
  try{renderPads()}catch(e){console.error(e)}
- window.GLCTC_PAD64_PATTERNS={get:()=>JSON.parse(JSON.stringify({pats:P().pats,bars:P().bars,swing:P().swing})),set:d=>{if(!d||!Array.isArray(d.pats))return false;d.pats.forEach((pp,i)=>{if(!P().pats[i])return;P().pats[i]=Array.from({length:16},(_,l)=>Array.from({length:64},(_,k)=>cl(Number(pp&&pp[l]&&pp[l][k])||0,0,2)))});if(d.bars)P().bars=cl(d.bars|0,1,4);if(Number.isFinite(d.swing))P().swing=d.swing;save();try{renderPads()}catch(e){}return true}};
+ window.GLCTC_PAD64_PATTERNS={get:()=>JSON.parse(JSON.stringify({pats:P().pats,bars:P().bars,swing:P().swing,tunes:P().slots.map(x=>x.tune||0)})),set:d=>{if(!d||!Array.isArray(d.pats))return false;if(d.tunes&&typeof d.tunes==='object')Object.keys(d.tunes).forEach(k=>{const sl=P().slots[+k];if(sl&&!sl.smp&&Number.isFinite(d.tunes[k]))sl.tune=cl(Math.round(d.tunes[k]),-12,12)});d.pats.forEach((pp,i)=>{if(!P().pats[i])return;P().pats[i]=Array.from({length:16},(_,l)=>Array.from({length:64},(_,k)=>cl(Number(pp&&pp[l]&&pp[l][k])||0,0,2)))});if(d.bars)P().bars=cl(d.bars|0,1,4);if(Number.isFinite(d.swing))P().swing=d.swing;save();try{renderPads()}catch(e){}return true}};
  window.GLCTC_WS={ac:()=>audioCtx,proj:()=>project,pstate:()=>({running:pRunning,step:pStep}),bus,recToggle,recStop,panic,snap,recall,hit,state:()=>ST,ensureBuses,auditionTrack,renderTracks,addTrack,addClip,renderAll,markDirty,exportWav,applyPresetState:d=>{if(!d||!d.pads||!Array.isArray(d.pads.slots))throw Error('Invalid PAD-64 preset');const live=ST;ST={...live,mods:{...live.mods,...(d.mods||{})},pads:{...live.pads,...d.pads,pats:live.pads.pats,slots:live.pads.slots.map((v,i)=>({...v,...(d.pads.slots[i]||{})}))}};save();renderAll();say('PAD-64 PRESET LOADED');return true}};
  say('CONSOLE READY');
 })();
@@ -4157,7 +4169,7 @@ defs.s101.push(
  SY('House · Organ Stab',{wave:'sawtooth',cut:3800,res:3,env:.45,attack:.006,decay:.22,sustain:.35,release:.18,drive:.1,delay:.1,reverb:.18,chorus:.3,glide:0,level:.7},d=>L3(d,{wave:'sawtooth',level:.7},{wave:'square',oct:1,level:.3,detune:5})),
  SY('DnB · Neuro Stab',{wave:'sawtooth',cut:1500,res:10,env:.8,attack:.004,decay:.2,sustain:.5,release:.14,drive:.5,lfoRate:6,lfoAmt:.35,delay:.12,reverb:.1,chorus:.15,level:.68},d=>L3(d,{wave:'sawtooth',detune:-10,level:.75},{wave:'sawtooth',detune:10,level:.7})),
  SY('Hip-Hop · Dusty Keys',{wave:'triangle',cut:2200,res:1,env:.25,attack:.01,decay:.35,sustain:.4,release:.4,drive:.06,bitcrush:.12,delay:.15,reverb:.2,chorus:.35,level:.7},d=>L3(d,{wave:'triangle',level:.8},{wave:'sine',oct:1,level:.25,detune:4})),
- SY('Ambient · Slow Pad',{wave:'sawtooth',cut:3000,res:2,env:.2,attack:.9,decay:.6,sustain:.8,release:1.8,drive:.02,delay:.35,reverb:.55,chorus:.45,glide:.1,level:.6},d=>L3(d,{wave:'sawtooth',detune:-8,level:.6},{wave:'triangle',detune:8,level:.55},{on:true,wave:'sine',oct:1,level:.3})),
+ SY('Ambient · Slow Pad',{wave:'sawtooth',cut:3000,res:2,env:.2,attack:.04,decay:.5,sustain:.65,release:2.4,drive:.02,delay:.35,reverb:.55,chorus:.45,glide:.1,level:.6},d=>L3(d,{wave:'sawtooth',detune:-8,level:.6},{wave:'triangle',detune:8,level:.55},{on:true,wave:'sine',oct:1,level:.3})),
  SY('Pop · Bright Lead',{wave:'sawtooth',cut:7500,res:2,env:.3,attack:.01,decay:.2,sustain:.7,release:.25,drive:.1,delay:.2,reverb:.15,chorus:.25,glide:.04,level:.7},d=>L3(d,{wave:'sawtooth',level:.75},{wave:'square',detune:6,level:.3}))
 );
 const MIX=(d,m)=>{Object.keys(m).forEach(k=>{if(d.mods[k])d.mods[k].vol=m[k]})};
@@ -4201,6 +4213,16 @@ try{
   if(write(libs))localStorage.setItem(marker,'2');
  }
 }catch(e){console.warn('DIVINE09 factory preset refresh deferred',e)}
+// Versioned 0010110 factory refresh (Ambient · Slow Pad was inaudible on step patterns); user presets are kept.
+try{
+ const m2='glctc1.s101.factoryVersion';
+ if(localStorage.getItem(m2)!=='2'&&adapters.s101){
+  const base=adapters.s101.get(),fresh={};
+  for(const [name,mutate] of defs.s101||[]){const d=clone(base);mutate(d);fresh[name]=d}
+  libs.s101=libs.s101||{user:{}};libs.s101.factory=fresh;if(!libs.s101.user)libs.s101.user={};
+  if(write(libs))localStorage.setItem(m2,'2');
+ }
+}catch(e){console.warn('0010110 factory refresh deferred',e)}
 function options(k,sel){seed(k);const lib=factoryFor(k);const previous=sel.value;sel.innerHTML='<option value="">— SELECT PRESET —</option>';[['FACTORY',lib.factory||{}],['USER',lib.user||{}]].forEach(([group,obj])=>{const entries=Object.entries(obj);if(!entries.length)return;const og=document.createElement('optgroup');og.label=group+' PRESETS';entries.forEach(([name])=>{const o=document.createElement('option');o.value=name;o.textContent=name;og.appendChild(o)});sel.appendChild(og)});if([...sel.options].some(o=>o.value===previous))sel.value=previous;}
 function status(panel,msg){const el=panel.querySelector('.gpc-status');if(el)el.textContent=msg}
 function load(k,name){const lib=factoryFor(k),d=(lib.user&&lib.user[name])||(lib.factory&&lib.factory[name]);if(!d)throw Error('Preset not found');adapters[k].set(clone(d));const sel=$('gpcPreset_'+k);if(sel)sel.value=name;const panel=$(ids[k][0]);status(panel,'LOADED · '+name);return true}
@@ -4319,7 +4341,7 @@ panel.innerHTML=`<style>
  <div><label for="gscBpm">AI → MASTER BPM</label><strong id="gscBpm" style="display:block;padding:8px 4px;color:#f2ca70">130</strong><small style="display:block;opacity:.72">AI sets the DAW master; all modules follow</small></div>
  <div><label for="gscLen">LENGTH</label><select id="gscLen"><option value="demo">Demo · 36 bars</option><option value="16">16 bars</option><option value="32">32 bars</option><option value="64">64 bars</option></select></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px"><input id="gscLoop" type="checkbox">LOOP SONG</label></div>
- <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label></div>
+ <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label></div>
 </div>
 <div class="gsc-wrap"><table id="gscGrid"></table></div>
 <div class="gsc-actions">
@@ -4643,6 +4665,8 @@ const PAT=(()=>{
    bass:['x.x.x.x.x.x.x.x.','x.xxx.x.x.xxx.x.','x...............','x.x.x.x.xxxxxxxx'],slide:0,
    stab:'x.x.x.x.x.x.x.x.',goK:[7,10,3,12,5,10],voxR:'x.....x.x.x.....',pops:.3}
  };
+/* who owns what, so no two modules double the same sound: 80LA8 = kick/snare/clap/toms/rim, DIVINE09 = hats/perc/cowbell/crash, 30LEE = bass, 0010110 = stab, GALACTIC ONE = lead/arp, VOX = hook, PAD-64 = pad + FX */
+ const OWN={bl:'KSCTUR',mine:'HOGBZ'};
  const ROLE={bl:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,G:7,R:8,B:9,Z:10},ws:{K:0,S:1,C:2,H:3,O:4,T:5,R:6,G:7}};
  /* one bar of drum velocities per role; bar 2 gets a fill at the end so loops breathe */
  function bar(g,kind,b,r){
@@ -4656,8 +4680,8 @@ const PAT=(()=>{
   if(kind===1&&out.H&&g!=='ambient'){for(let i=0;i<16;i++)if(!out.H[i]&&r()<.18*G[g].pops)out.H[i]=.32}
   return out}
  const cell=v=>({on:v>0,accent:v>=1,velocity:v>0?cl(v,.2,1):.8});
- function drumsBL(g,r){return[0,1,2,3].map(k=>{const o=bar(g,k,0,r),steps=Array.from({length:12},()=>Array.from({length:16},()=>({on:false,velocity:.8})));for(const q in o){const ix=ROLE.bl[q];if(ix===undefined)continue;o[q].forEach((v,i)=>{if(v)steps[ix][i]={on:true,velocity:cl(v,.25,1)}})}return{steps}})}
- function drumsMine(g,r){return[0,1,2,3].map(k=>{const b0=bar(g,k,0,r),b1=bar(g,k,1,r);return Array.from({length:15},(_,v)=>Array.from({length:128},(_,i)=>{const bb=Math.floor(i/16)%2===0?b0:b1,q=Object.keys(ROLE.mine).find(x=>ROLE.mine[x]===v),a=q&&bb[q];return cell(a?a[i%16]:0)}))})}
+ function drumsBL(g,r){return[0,1,2,3].map(k=>{const o=bar(g,k,0,r),steps=Array.from({length:12},()=>Array.from({length:16},()=>({on:false,velocity:.8})));for(const q in o){const ix=ROLE.bl[q];if(ix===undefined||!OWN.bl.includes(q))continue;o[q].forEach((v,i)=>{if(v)steps[ix][i]={on:true,velocity:cl(v,.25,1)}})}return{steps}})}
+ function drumsMine(g,r){return[0,1,2,3].map(k=>{const b0=bar(g,k,0,r),b1=bar(g,k,1,r);return Array.from({length:15},(_,v)=>Array.from({length:128},(_,i)=>{const bb=Math.floor(i/16)%2===0?b0:b1,q=Object.keys(ROLE.mine).find(x=>ROLE.mine[x]===v),a=q&&OWN.mine.includes(q)&&bb[q];return cell(a?a[i%16]:0)}))})}
  function bassLee(g,r,key){const Gg=G[g],sc=SC[Gg.scale];const roots=[Gg.prog[0],Gg.prog[2],Gg.prog[0],Gg.prog[3]];
   return[0,1,2,3].map(k=>{const rh=Gg.bass[k],base=36+key+semi(sc,roots[k]);let last=null;
    return Array.from({length:16},(_,i)=>{const c=rh[i]||'.';if(c==='.')return{on:false,note:base,accent:false,slide:false,velocity:.78};
@@ -4670,20 +4694,20 @@ const PAT=(()=>{
     w.forEach((d,i)=>{if(d===null)return;steps[b*16+i]=goStep(1,semi(sc,d),cl((o.v||.8)+(r()-.5)*.2,.3,1),o.g||.62,i%4===0&&r()<.25,r()<.1)})}
    if(o.rise){for(let i=0;i<16;i++){const d=Gg.prog[0]+[0,2,4,2,0,2,4,7][i%8]+(i>=8?7:0);steps[i]=goStep(i%2===0,semi(sc,d),.45+i*.035,.5,i===0,0)}}
    return{len,steps}};
-  const mainP=mk(K[0],[0,1]),altP=mk(K[0]+1,[2,3],{rot:1}),sparse=mk(K[2],[0,1],{g:1.0,v:.7,len:32}),rise=mk(8,[0],{len:16,rise:1,g:.5});
-  const counter=mk(K[1],[2,3],{rot:3,hi:.5,v:.72}),drop2=mk(K[3],[2,3],{v:.92,g:.55,hi:.4}),pulse=mk(4,[0,1],{lo:-7,range:3,hi:0,v:.85,g:.8,rot:0}),pad=mk(2,[0,1],{g:1.05,v:.7,hi:0,range:4});
+  const mainP=mk(Math.min(K[0],7),[0,1]),altP=mk(Math.min(K[0]+1,8),[2,3],{rot:1}),sparse=mk(K[2],[0,1],{g:1.0,v:.7,len:32}),rise=mk(8,[0],{len:16,rise:1,g:.5});
+  const counter=mk(Math.min(K[1],6),[2,3],{rot:3,hi:.5,v:.72}),drop2=mk(Math.min(K[3],8),[2,3],{v:.92,g:.55,hi:.4}),pulse=mk(4,[0,1],{lo:-7,range:3,hi:0,v:.85,g:.8,rot:0}),pad=mk(2,[0,1],{g:1.05,v:.7,hi:0,range:4});
   return[mainP,altP,sparse,rise,counter,drop2,pulse,pad]}
  function s101Pat(g,r){const Gg=G[g],sc=SC[Gg.scale],rh=Gg.stab,cyc=[0,2,4,7,4,2];let j=0;
   return Array.from({length:16},(_,i)=>{const c=rh[i]||'.',on=c!=='.',deg=Gg.prog[i<8?0:2];let note=0;if(on){note=deg+cyc[j%cyc.length];j++}return{on,note:Math.max(0,note),accent:c==='X'||(on&&i%8===0),velocity:c==='X'?.95:.76}})}
  function voxPat(g,r){const Gg=G[g],sc=SC[Gg.scale],rh=Gg.voxR.padEnd(16,'.');return Array.from({length:16},(_,i)=>{const on=rh[i]==='x',deg=Gg.prog[i<8?0:2]+(r()<.25?2:0);return{on:on?1:0,n:on?cl(semi(sc,deg),-12,19):0,v:.85}})}
- function wsPats(g,r,key){const Gg=G[g],sc=SC[Gg.scale];
-  return[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));
-   const put=(lane,str,bars,val)=>bars.forEach(b=>[...str].forEach((c,i)=>{const v=c==='X'?2:(c==='x'||c==='o'||c==='g')?1:0;if(v&&i<16)L[lane][b*16+i]=val||v}));
-   const A=Gg.D[1],B=Gg.D[k===2?2:1],all=[0,1,2,3];
-   if(k!==2){['T','R','G'].forEach(q=>{if(A[q])put(ROLE.ws[q],A[q],all)});if(B.B)put(5,B.B,all);put(8,Gg.bass[k===3?3:1],all);put(10,Gg.stab,[0,2]);if(k===1){put(15,'X',[0]);put(13,'..............x.',[1,3])}}
-   else{put(6,Gg.D[2].R||'..o.....',all);put(11,'X',[0])}
-   if(k===3){put(14,'X',[3]);put(1,'........x.x.xxxx',[3]);L[1].forEach((v,i)=>{if(i<48)L[1][i]=0})}
+ function wsPats(g,r,key){const Gg=G[g],minor=Gg.scale!=='major';
+  /* PAD-64 plays atmosphere only (pad chord, riser, impact, zap): the drums, bass and stab already belong to other modules */
+  return[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));const at=(lane,steps,v)=>steps.forEach(i=>{L[lane][i]=v||1});
+   if(minor){if(k===2)at(11,[0]);else at(11,[0,32])}
+   if(k===1){at(15,[0],2);if(Gg.pops>=.3)at(13,[30])}
+   if(k===3){at(14,[48]);at(15,[0],2)}
    return L})}
+ const wsTunes=key=>{const wrap=n=>((n%12)+18)%12-6;return{8:wrap(key-9),9:wrap(key-9),10:wrap(key-9),11:wrap(key),12:wrap(key-9)}};
  function build(genre,seed,opts){
   const Gg=G[genre]||G.techno,r=RNG(seed),keys=Gg.keys,key=opts&&opts.key!=null?opts.key:keys[Math.floor(r()*keys.length)];
   let scale=Gg.scale;const t=(opts&&opts.text)||'';if(/major|happy|bright|uplift|euphor/.test(t))scale='major';else if(/phrygian|spook|dark|menac/.test(t))scale='phrygian';else if(/minor|sad|melanch/.test(t))scale='minor';
@@ -4694,9 +4718,9 @@ const PAT=(()=>{
     mine:{patterns:drumsMine(genre,r),bars:2,swing:Gg.swing},
     lee:{patterns:bassLee(genre,r,key),length:16,swing:Gg.swing},
     s101:{steps:s101Pat(genre,r),root:48+key,scale:scale==='phrygian'?'phrygian':scale==='major'?'major':scale==='pentatonic'?'pentatonic':'minor',len:16},
-    go:{pats:goPats(genre,r,key),root:key,scale:scale==='pentatonic'?'minor':scale,swing:Gg.swing},
-    vox:{steps:voxPat(genre,r),len:16,root:key,scale:scale==='pentatonic'?'minor':scale,oct:3},
-    ws:{pats:wsPats(genre,r,key),bars:4,swing:Gg.swing}};
+    go:{pats:goPats(genre,r,key),root:key,scale:scale==='pentatonic'?'minor':scale,swing:Gg.swing,oct:4},
+    vox:{steps:voxPat(genre,r),len:16,root:key,scale:scale==='pentatonic'?'minor':scale,oct:4},
+    ws:{pats:wsPats(genre,r,key),bars:4,swing:Gg.swing,tunes:wsTunes(key)}};
    return pack}finally{G[genre]=old}}
  const API={bl:()=>window.GLCTC_80LA8_PATTERNS,mine:()=>window.GLCTC_DIVINE09_PATTERNS,lee:()=>window.GLCTC_30LEE_PATTERNS,s101:()=>window.GLCTC_0010110_PATTERNS,go:()=>window.GALACTIC_ONE&&GALACTIC_ONE.patterns,vox:()=>window.GALACTIC_VOX&&GALACTIC_VOX.patterns,ws:()=>window.GLCTC_PAD64_PATTERNS};
  let backup=null;
@@ -4740,10 +4764,9 @@ function setMasterBpmFromComposer(value){
  return target;
 }
 /* ---------------- generate ---------------- */
-async function generate(){
- if(starting)return;
- if(S)stopSong('RE-GENERATING…');
- const genreKey=byId('gscGenre').value,g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value,txt=(byId('gscPrompt').value||'').toLowerCase();
+/* prepare = everything GENERATE does except pressing play: genre, tempo, which modules are in, their sounds and key-aligned patterns */
+function prepareSong(genreKey,txt,forceFill){
+ const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
  st.len=TPL[len]?len:'32';st.secs=mkSecs(st.len);st.cells=autoCells(st.secs);
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
  const skip=new Set(g.skip);
@@ -4753,11 +4776,44 @@ async function generate(){
  if(/minimal/.test(txt)){skip.add('s101');skip.add('vox');skip.add('ws')}
  MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});
  st.presets=Object.assign({},st.presets,g.pre);
- try{if(byId('gscAutoFill')&&byId('gscAutoFill').checked)fillPatterns(genreKey,txt)}catch(e){console.warn('pattern fill',e)}
+ try{if(window.GLCTC_MIX)window.GLCTC_MIX.boost={ambient:2.2}[genreKey]||1}catch(e){}
+ let pack=null;
+ try{if(forceFill||(byId('gscAutoFill')&&byId('gscAutoFill').checked))pack=fillPatterns(genreKey,txt)}catch(e){console.warn('pattern fill',e)}
  save();renderGrid();
+ return pack;
+}
+async function generate(){
+ if(starting)return;
+ if(S)stopSong('RE-GENERATING…');
+ const genreKey=byId('gscGenre').value,txt=(byId('gscPrompt').value||'').toLowerCase();
+ prepareSong(genreKey,txt,false);
  status('AI TEMPO SET · MASTER '+st.bpm+' BPM · GENERATING SONG');
  await startSong();
 }
+/* ---------- NEW SONG ON EVERY LOAD: random genre, key, tempo; every module written into the same key / tempo / genre ---------- */
+const AUTO_LS='glctc1.autoSongOnLoad';
+(()=>{
+ const box=byId('gscAutoLoad');
+ try{if(box)box.checked=localStorage.getItem(AUTO_LS)!=='0'}catch(e){}
+ if(box)box.addEventListener('change',()=>{try{localStorage.setItem(AUTO_LS,box.checked?'1':'0')}catch(e){}});
+ let tries=0;
+ function ready(){const h=H();return !!(h&&h.mods&&['bl','mine','lee','s101','go','vox','ws'].every(k=>h.mods[k])&&window.GLCTC_PATTERNS&&window.GALACTIC_ONE&&window.GALACTIC_VOX&&window.GLCTC_PAD64_PATTERNS&&window.GLCTC_80LA8_PATTERNS&&window.GLCTC_DIVINE09_PATTERNS&&window.GLCTC_30LEE_PATTERNS&&window.GLCTC_0010110_PATTERNS)}
+ function run(){
+  if(S||starting)return;
+  const b=byId('gscAutoLoad');if(b&&!b.checked)return;
+  if(!ready()){if(++tries<24)setTimeout(run,500);return}
+  try{
+   const keys=Object.keys(GENRE),g=keys[Math.floor(Math.random()*keys.length)];
+   const sel=byId('gscGenre');if(sel)sel.value=g;
+   const pack=prepareSong(g,'',true);
+   try{applyPresets()}catch(e){console.warn('preset apply',e)}
+   try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
+   window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};
+   status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press ♪ PLAY SONG');
+  }catch(e){console.error('new song on load failed',e)}
+ }
+ if(document.readyState==='complete')setTimeout(run,1500);else window.addEventListener('load',()=>setTimeout(run,1500),{once:true});
+})();
 /* ---------------- controls ---------------- */
 byId('gscPlay').addEventListener('click',startSong);
 byId('gscGen').addEventListener('click',generate);

@@ -17314,7 +17314,7 @@ if (sharedTrackId) {
 </script>
 
 
-<!-- ===== GLCTC1 PLAY COUNTER: track playback -> Record-Space plays ===== -->
+<!-- ===== GLCTC1 PLAY COUNTER v21: track playback -> Record-Space plays ===== -->
 <script>
 (function () {
   "use strict";
@@ -17358,10 +17358,30 @@ if (sharedTrackId) {
   async function findRow(k) {
     if (!k || (!k.artist || !k.title)) return null;
 
-    // Use real Record Space schema fields. Fetch candidates and compare
-    // normalized text so case/spacing differences do not block a match.
+    // Prefer the catalogue identifier: Record Space uses record_id (text),
+    // not an id column. The Master Library's "ID Cat No" maps to record_id.
+    if (k.cat) {
+      var byCat = await supabaseClient.from(TABLE)
+        .select("record_id,plays,artist,track_title,favourites")
+        .eq("record_id", k.cat)
+        .limit(2);
+      if (!byCat.error && Array.isArray(byCat.data) && byCat.data.length) {
+        var exactCat = byCat.data.find(function (row) {
+          return normal(row.artist) === normal(k.artist) &&
+                 normal(row.track_title) === normal(k.title);
+        });
+        // Never count a different track merely because a catalogue lookup
+        // returned one row. Require the artist/title identity to match too.
+        if (exactCat) return exactCat;
+      } else if (byCat.error) {
+        console.warn("GLCTC1 PLAY COUNTER: record_id lookup failed; trying artist/title:", byCat.error);
+      }
+    }
+
+    // Fallback to the actual Record Space artist/title columns. This is also
+    // used when a Master Library catalogue number differs from record_id.
     var r = await supabaseClient.from(TABLE)
-      .select("id,plays,artist,track_title")
+      .select("record_id,plays,artist,track_title,favourites")
       .ilike("artist", k.artist.replace(/[\\%_]/g, "\\$&"))
       .ilike("track_title", k.title.replace(/[\\%_]/g, "\\$&"))
       .limit(10);
@@ -17379,25 +17399,23 @@ if (sharedTrackId) {
   }
 
   async function addPlay(k) {
-    for (var attempt = 0; attempt < 4; attempt++) {
-      var row = await findRow(k);
-      if (!row) {
-        console.warn("GLCTC1 PLAY COUNTER: no matching Record-Space row for artist/title:", k);
-        return { plays: null, missing: true };
-      }
-      var old = Number(row.plays) || 0;
-      var q = supabaseClient.from(TABLE).update({ plays: old + 1 }).eq("id", row.id);
-      q = row.plays == null ? q.is("plays", null) : q.eq("plays", row.plays);
-      var result = await q.select("id,plays");
-      if (result.error) {
-        console.error("GLCTC1 PLAY COUNTER: update failed (check Record-Space UPDATE RLS policy):", result.error);
-        return { plays: null, error: result.error };
-      }
-      if (result.data && result.data.length === 1) return { plays: result.data[0].plays };
-      // Another play changed this row at the same time; re-read and retry.
+    var row = await findRow(k);
+    if (!row) {
+      console.warn("GLCTC1 PLAY COUNTER: no matching Record-Space row for artist/title:", k);
+      return { plays: null, missing: true };
     }
-    console.warn("GLCTC1 PLAY COUNTER: could not update after retries; check Record-Space UPDATE RLS policy.");
-    return { plays: null };
+    // Atomic database function avoids a browser-side read/modify/write race and
+    // does not require granting direct UPDATE access to the whole record table.
+    var result = await supabaseClient.rpc("increment_record_space_play", { p_record_id: String(row.record_id) });
+    if (result.error) {
+      console.error("GLCTC1 PLAY COUNTER: atomic play RPC failed; run the supplied SQL and check function grants:", result.error);
+      return { plays: null, error: result.error };
+    }
+    var data = result.data;
+    if (Array.isArray(data)) data = data[0];
+    if (data && data.plays != null) return { plays: Number(data.plays) };
+    console.error("GLCTC1 PLAY COUNTER: play RPC returned no total:", result.data);
+    return { plays: null, error: true };
   }
 
   function setBadge(p, text, tip) {
@@ -17442,6 +17460,64 @@ if (sharedTrackId) {
     }
   }
 
+  async function currentUser() {
+    try {
+      var result = await supabaseClient.auth.getUser();
+      return result && result.data && result.data.user ? result.data.user : null;
+    } catch (e) { return null; }
+  }
+
+  async function favouriteRow(k) {
+    var row = await findRow(k);
+    if (!row) return { row: null, user: null, active: false };
+    var user = await currentUser();
+    if (!user) return { row: row, user: null, active: false };
+    var q = await supabaseClient.from("record_space_favourites")
+      .select("record_id,user_id").eq("record_id", String(row.record_id)).eq("user_id", user.id).maybeSingle();
+    if (q.error) {
+      console.error("GLCTC1 FAVOURITE: status lookup failed; run the supplied SQL and check RLS:", q.error);
+      return { row: row, user: user, active: false, error: q.error };
+    }
+    return { row: row, user: user, active: !!q.data };
+  }
+
+  async function refreshFavourite(p) {
+    if (!p.favButton) return;
+    var token = (p.favToken || 0) + 1; p.favToken = token;
+    var k = keyOf(p.track);
+    if (!k || !k.artist || !k.title) { p.favButton.textContent = "♥ FAVOURITE —"; p.favButton.disabled = true; return; }
+    p.favButton.disabled = true; p.favButton.textContent = "♥ CHECKING…";
+    var state = await favouriteRow(k);
+    if (token !== p.favToken) return;
+    p.favButton.disabled = !state.user || !state.row;
+    var total = state.row ? (Number(state.row.favourites) || 0) : 0;
+    p.favButton.textContent = (state.active ? "♥ FAVOURITED" : "♡ FAVOURITE") + " · " + total;
+    p.favButton.title = !state.user ? "Sign in to favourite this track" : (!state.row ? "Track is not registered in Record Space" : (state.error ? "Could not check favourite status; check console" : "Total favourites: " + total + ". Toggle your favourite."));
+    if (state.row) p.favButton.dataset.total = String(total);
+  }
+
+  async function toggleFavourite(p) {
+    var user = await currentUser();
+    if (!user) { setBadge(p, "SIGN IN TO FAVOURITE", "A GLCTC1 account is required to interact"); refreshFavourite(p); return; }
+    var k = keyOf(p.track);
+    var row = await findRow(k);
+    if (!row) { console.warn("GLCTC1 FAVOURITE: no matching Record Space track", k); return; }
+    p.favButton.disabled = true;
+    try {
+      var result = await supabaseClient.rpc("toggle_record_space_favourite", { p_record_id: String(row.record_id) });
+      if (result.error) throw result.error;
+      var data = result.data;
+      if (Array.isArray(data)) data = data[0];
+      if (data && data.favourites != null) p.favButton.dataset.total = String(data.favourites);
+      p.favButton.textContent = data && data.favorited ? "♥ FAVOURITED" : "♡ FAVOURITE";
+      window.dispatchEvent(new CustomEvent("glctc1:favourite-changed", { detail: { recordId: row.record_id, favourites: data && data.favourites, favorited: !!(data && data.favorited) } }));
+    } catch (e) {
+      console.error("GLCTC1 FAVOURITE: toggle failed; run the supplied SQL and check authenticated RLS:", e);
+      p.favButton.textContent = "FAVOURITE ERROR";
+      p.favButton.title = e.message || String(e);
+    } finally { p.favButton.disabled = false; refreshFavourite(p); }
+  }
+
   function resetRun(p) { p.acc = 0; p.last = null; }
 
   function setTrack(p, track) {
@@ -17449,6 +17525,7 @@ if (sharedTrackId) {
     resetRun(p);
     p.counted = false;
     refreshBadge(p);
+    refreshFavourite(p);
   }
 
   function attach(id) {
@@ -17469,8 +17546,19 @@ if (sharedTrackId) {
     }
     anchor.insertAdjacentElement("afterend", badge);
     p.badge = badge;
+    var fav = document.createElement("button");
+    fav.type = "button";
+    fav.className = "glctc1-favourite-button";
+    fav.textContent = "♥ FAVOURITE —";
+    fav.title = "Sign in to favourite this track";
+    fav.addEventListener("click", function () { toggleFavourite(p); });
+    badge.insertAdjacentElement("afterend", fav);
+    p.favButton = fav;
 
-    el.addEventListener("loadstart", function () { resetRun(p); p.counted = false; });
+    el.addEventListener("loadstart", function () {
+      resetRun(p); p.counted = false;
+      if (p.pending) { p.track = p.pending; p.pending = null; refreshBadge(p); refreshFavourite(p); }
+    });
     el.addEventListener("emptied", function () { resetRun(p); p.counted = false; });
     el.addEventListener("play", function () {
       if (p.counted && el.currentTime < 1) p.counted = false;
@@ -17547,10 +17635,15 @@ if (sharedTrackId) {
   }
 
   var style = document.createElement("style");
-  style.textContent = ".glctc1-playcount{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;color:#0ff;text-shadow:0 0 8px #0ff;opacity:.9;text-align:center;margin:3px 0 6px;}";
+  style.textContent = ".glctc1-playcount{font-family:'Orbitron',sans-serif;font-size:.72rem;letter-spacing:1px;color:#0ff;text-shadow:0 0 8px #0ff;opacity:.9;text-align:center;margin:3px 0 4px}.glctc1-favourite-button{display:block;margin:0 auto 8px;padding:5px 12px;border:1px solid #d879b7;border-radius:18px;background:#100a14;color:#ff9bda;font-weight:700;cursor:pointer}.glctc1-favourite-button:disabled{opacity:.55;cursor:not-allowed}";
   document.head.appendChild(style);
 
-  window.GLCTC1PlayCounter = { threshold: THRESHOLD, players: players, refresh: function () { Object.keys(players).forEach(function (id) { refreshBadge(players[id]); }); } };
+  if (supabaseClient && supabaseClient.auth && supabaseClient.auth.onAuthStateChange) {
+    supabaseClient.auth.onAuthStateChange(function () {
+      Object.keys(players).forEach(function (id) { refreshFavourite(players[id]); });
+    });
+  }
+  window.GLCTC1PlayCounter = { threshold: THRESHOLD, players: players, refresh: function () { Object.keys(players).forEach(function (id) { refreshBadge(players[id]); refreshFavourite(players[id]); }); } };
 })();
 </script>
 

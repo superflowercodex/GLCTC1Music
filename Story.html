@@ -112,6 +112,7 @@ nav a.on{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0
 .cb b{font:700 11px Orbitron;display:block;margin-bottom:2px}.cb small{color:var(--mut);margin-left:6px}.cb button{background:none;border:0;color:#ff7aa0;font-size:13px;padding:0 0 0 8px}
 .cf{display:flex;gap:8px}.cf input{flex:1}
 input,textarea,select.f{width:100%;background:#16162b;border:1px solid #34305a;color:var(--txt);border-radius:10px;padding:11px 13px;outline:none}
+input[readonly]{opacity:.75;cursor:not-allowed;color:var(--cyan)}
 input:focus,textarea:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #00e5ff30}
 .side{display:grid;gap:14px;position:sticky;top:116px}.side .box{padding:16px}
 .side h3{font:700 12px Orbitron;letter-spacing:.09em;margin:0 0 10px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -192,7 +193,7 @@ footer{text-align:center;padding:26px 10px 34px;color:#3d3963;font-size:15px}
   <div class="dh"><h2 id="dTitle">✦ CREATE A STORY</h2><button type="button" id="dClose" aria-label="Close">✕</button></div>
   <form class="fm" id="form">
     <div class="two">
-      <div><label for="artistName">ARTIST NAME *</label><input id="artistName" maxlength="90" placeholder="Your artist name" required></div>
+      <div><label for="artistName">ARTIST NAME 🔒</label><input id="artistName" maxlength="90" readonly required></div>
       <div><label for="storyTitle">TITLE (OPTIONAL)</label><input id="storyTitle" maxlength="140" placeholder="Give it a title"></div>
     </div>
     <div><label for="storyText">YOUR STORY *</label><textarea id="storyText" maxlength="12000" placeholder="What's happening in your world?" required></textarea><span class="hint"><span id="cc">0</span>/12,000</span></div>
@@ -223,7 +224,13 @@ const ini=n=>(n||'GL').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').
 function ago(v){const s=(Date.now()-new Date(v))/1e3;if(isNaN(s))return'';if(s<60)return'Just now';if(s<3600)return(s/60|0)+'m ago';if(s<86400)return(s/3600|0)+'h ago';if(s<604800)return(s/86400|0)+'d ago';return new Date(v).toLocaleDateString(undefined,{dateStyle:'medium'})}
 const st=(id,m,t='')=>{const e=$(id);e.textContent=m;e.className='stt'+(t?' '+t:'')};
 let tt;function toast(m){const e=$('toast');e.textContent=m;e.classList.remove('hidden');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hidden'),3500)}
-const myName=()=>{const m=user?.user_metadata||{};return m.artist_name||m.full_name||m.name||(user?.email||'').split('@')[0]||'Artist'};
+let aName='';
+const myName=()=>aName||(user?.email||'').split('@')[0]||'Artist';
+async function resolveName(){aName='';if(!user)return;const m=user.user_metadata||{};
+const pick=o=>o?(o.artist_name||o.artist||o.display_name||o.stage_name||o.username||o.user_name||o.name||''):'';
+aName=pick(m);if(aName)return;
+for(const t of['profiles','artist_profiles','artists'])for(const k of['id','user_id']){try{const{data,error}=await sb.from(t).select('*').eq(k,user.id).limit(1);if(!error&&data?.[0]){aName=pick(data[0]);if(aName)return}}catch{}}
+try{const{data}=await sb.from(TABLE).select('artist_name').eq('user_id',user.id).order('created_at',{ascending:false}).limit(1);aName=data?.[0]?.artist_name||''}catch{}}
 const av=(n,u)=>`<div class="av">${u&&safe(u)?`<img src="${esc(u)}" alt="">`:esc(ini(n))}</div>`;
 
 /* ---------- galaxy sky ---------- */
@@ -319,7 +326,7 @@ const r=editId?await sb.from(TABLE).update(row).eq('id',editId).eq('user_id',use
 if(r.error)throw r.error;closeForm();await load();toast(was?'Story updated ✦':'Story published ✦')}
 catch(x){st('formSt',x.message||'Could not publish.','err')}finally{busy=false;$('pub').disabled=false}}
 function edit(id){const s=stories.find(x=>x.id===id);if(!s||s.user_id!==user?.id)return;editId=id;openForm();
-$('artistName').value=s.artist_name||'';$('storyTitle').value=s.title||'';$('storyText').value=s.body||'';$('cat').value=s.category||'Update';
+$('artistName').value=myName();$('storyTitle').value=s.title||'';$('storyText').value=s.body||'';$('cat').value=s.category||'Update';
 $('mediaUrl').value=s.media_kind==='link'?(s.media_url||''):'';$('cc').textContent=$('storyText').value.length}
 async function del(id){const s=stories.find(x=>x.id===id);if(!s||s.user_id!==user?.id||!confirm('Delete this story permanently?'))return;
 const{error}=await sb.from(TABLE).delete().eq('id',id).eq('user_id',user.id);if(error)return toast(error.message);stories=stories.filter(x=>x.id!==id);render();toast('Story deleted')}
@@ -353,8 +360,8 @@ addEventListener('scroll',()=>$('topBtn').classList.toggle('hidden',scrollY<700)
 (async()=>{try{
 if(!window.supabase?.createClient){st('feedSt','Supabase library did not load. Check your connection.','err');return}
 sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-user=(await sb.auth.getSession()).data?.session?.user||null;ui();await load();
-sb.auth.onAuthStateChange((_e,s)=>{user=s?.user||null;ui()})}catch(e){console.error(e);st('feedSt','Startup error: '+(e.message||e),'err')}})();
+user=(await sb.auth.getSession()).data?.session?.user||null;await resolveName();ui();await load();
+sb.auth.onAuthStateChange((_e,s)=>{user=s?.user||null;setTimeout(()=>resolveName().then(ui),0)})}catch(e){console.error(e);st('feedSt','Startup error: '+(e.message||e),'err')}})();
 })();
 </script>
 </body>

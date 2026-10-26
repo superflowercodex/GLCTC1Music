@@ -9351,54 +9351,61 @@ const PLAY_COUNT_THRESHOLD_SECONDS = 30;
 const PLAY_COUNT_MAX_TIME_STEP = 2.5;
 
 async function recordQualifiedPlay(targetRecord) {
-  if (!targetRecord || !targetRecord.id) return null;
+  if (!targetRecord) return null;
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const { data: latest, error: readError } = await supabaseClient
-      .from(TABLE_NAME)
-      .select('id,plays')
-      .eq('id', targetRecord.id)
-      .single();
-
-    if (readError || !latest) {
-      console.error('RECORD SPACE: could not read latest play total:', readError);
-      return null;
-    }
-
-    const oldPlays = Number(latest.plays) || 0;
-    let update = supabaseClient
-      .from(TABLE_NAME)
-      .update({ plays: oldPlays + 1 })
-      .eq('id', targetRecord.id);
-    update = latest.plays == null
-      ? update.is('plays', null)
-      : update.eq('plays', latest.plays);
-
-    const { data, error } = await update.select('*');
-    if (error) {
-      console.error('RECORD SPACE: play-count update failed; check Supabase UPDATE RLS:', error);
-      return null;
-    }
-    if (data && data.length === 1) {
-      const updated = data[0];
-      const index = records.findIndex(item => item.id === updated.id);
-      if (index >= 0) records[index] = updated;
-      if (selectedRecord && selectedRecord.id === updated.id) selectedRecord = updated;
-      const detailPlays = document.getElementById('detailPlays');
-      if (detailPlays && selectedRecord && selectedRecord.id === updated.id) {
-        detailPlays.textContent = formatNumber(updated.plays);
-      }
-      renderTop40();
-      renderTable();
-      window.dispatchEvent(new CustomEvent('glctc1:play-counted', {
-        detail: { recordId: updated.id, artist: updated.artist, title: updated.track_title, plays: Number(updated.plays) || 0 }
-      }));
-      return updated.plays;
-    }
-    // The row changed concurrently; re-read the new total and retry.
+  const targetId = getRecordId(targetRecord);
+  if (!targetId || targetId === "undefined" || targetId === "null") {
+    console.error('RECORD SPACE: cannot count play because record_id is missing:', targetRecord);
+    return null;
   }
-  console.warn('RECORD SPACE: play count not saved after retries. Check concurrent writes and Supabase RLS.');
-  return null;
+
+  // record_space uses record_id (text), not id. Use the same atomic RPC as
+  // Play Space so concurrent plays cannot overwrite one another and the
+  // browser does not need broad direct UPDATE permission on the table.
+  const { data: result, error } = await supabaseClient.rpc(
+    'increment_record_space_play',
+    { p_record_id: String(targetId) }
+  );
+
+  if (error) {
+    console.error('RECORD SPACE: atomic play-count RPC failed. Check that increment_record_space_play(text) has been installed and granted to anon/authenticated:', error);
+    return null;
+  }
+
+  let updated = Array.isArray(result) ? result[0] : result;
+  if (typeof updated === 'string') {
+    try { updated = JSON.parse(updated); } catch (_) {}
+  }
+  if (!updated || updated.plays == null) {
+    console.error('RECORD SPACE: play-count RPC returned no plays total:', result);
+    return null;
+  }
+
+  const updatedId = String(updated.record_id ?? targetId);
+  const updatedPlays = Number(updated.plays) || 0;
+  const index = records.findIndex(item => String(getRecordId(item)) === updatedId);
+  if (index >= 0) {
+    records[index] = { ...records[index], plays: updatedPlays };
+  }
+  if (selectedRecord && String(getRecordId(selectedRecord)) === updatedId) {
+    selectedRecord = { ...selectedRecord, plays: updatedPlays };
+  }
+
+  const detailPlays = document.getElementById('detailPlays');
+  if (detailPlays && selectedRecord && String(getRecordId(selectedRecord)) === updatedId) {
+    detailPlays.textContent = formatNumber(updatedPlays);
+  }
+  renderTop40();
+  renderTable();
+  window.dispatchEvent(new CustomEvent('glctc1:play-counted', {
+    detail: {
+      recordId: updatedId,
+      artist: targetRecord.artist || '',
+      title: targetRecord.track_title || '',
+      plays: updatedPlays
+    }
+  }));
+  return updatedPlays;
 }
 
 function attachQualifiedPlayCounter(audio, targetRecord) {
@@ -13238,4 +13245,5 @@ try {
 
 </body>
 </html>
+
 

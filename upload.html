@@ -802,7 +802,18 @@ body .deck .cx-zero{min-height:34px!important;width:100%!important;font-size:.62
 body .deck .cx-flash{background:var(--acc)!important;color:#000!important}
 body .deck .pitch-wrap{width:64px!important;flex-basis:64px!important}
 
+/* ===== v27: decks always visible, no hide tab; beat flash ===== */
+.mod-wrap.mod-deck{flex:1 1 340px;max-width:560px}
+body .deck .beat-flash.flash{background:var(--acc)!important;box-shadow:0 0 8px var(--acc),0 0 16px var(--acc)!important;transform:scale(1.25)!important}
+body .deck .beat-flash.flash.cx-down{background:#fff!important;box-shadow:0 0 10px #fff,0 0 22px var(--acc)!important;transform:scale(1.6)!important}
+body .deck .beat-flash{transition:none!important}
+
+/* ===== v28: no flash of the old decks — hidden until the new decks are built ===== */
+.decks-container{transition:opacity .25s ease}
+html:not(.cx-ready) .decks-container{opacity:0!important;pointer-events:none}
+
 </style>
+<script>setTimeout(function(){document.documentElement.classList.add("cx-ready")},6000)</script>
 </head>
 
 <body>
@@ -18069,6 +18080,26 @@ function buildDeck(d){
   a.addEventListener('loadedmetadata',function(){loadBuf(d);s.cues=[null,null,null,null];s.loop=null;paint()});
 }
 
+
+/* ---------- BEAT FLASH: locked to the audio position & the analysed beat grid ---------- */
+window.startBeatFlash=function(){};          /* retire the old free-running timer (it drifted, ignored the first kick, seeks & scratches) */
+function beatFlash(d,a,ct,rate){
+  var s=S[d],L=$('beatFlash'+d);if(!L)return;
+  var now=performance.now();
+  if(s.flT&&now-s.flT>95){L.classList.remove('flash','cx-down');s.flT=0}
+  var an=(typeof beatAnalysis!=='undefined')?beatAnalysis[d]:null,g=an&&an.ready&&an.beatGrid&&an.beatGrid.length>1?an.beatGrid:null;
+  var base=bpmOf(d),bl=an&&an.ready&&an.beatLength>0?an.beatLength:60/base,off=an&&an.ready&&isFinite(an.firstKick)?an.firstKick:0;
+  var lat=(ACX&&(ACX.outputLatency||ACX.baseLatency))||.05;     /* sound is heard slightly after currentTime */
+  var t=ct-lat*rate,idx;
+  if(g){var lo=0,hi=g.length-1;if(t<g[0])idx=-1;else{while(lo<hi){var m=(lo+hi+1)>>1;if(g[m]<=t)lo=m;else hi=m-1}idx=lo}}
+  else idx=Math.floor((t-off)/bl+1e-6);
+  var live=!a.paused&&!s.touch&&isFinite(ct);
+  if(live&&s.bi!=null&&idx>s.bi&&idx-s.bi<=2){
+    L.classList.remove('flash','cx-down');void L.offsetWidth;L.classList.add('flash');
+    if(((idx%4)+4)%4===0)L.classList.add('cx-down');s.flT=now}
+  s.bi=idx;
+}
+
 /* ---------- ONE ANIMATION LOOP: platter physics, readouts, loops ---------- */
 var last=performance.now();
 function tick(t){
@@ -18094,6 +18125,7 @@ function tick(t){
     if(s.ph)s.ph.style.left='calc('+(pos*100)+'% - 1px)';
     if(s.loop&&!s.touch&&a.currentTime>=s.loop.end)a.currentTime=s.loop.start;
     if(s.loop&&dur){s.lp.style.display='block';s.lp.style.left=(s.loop.start/dur*100)+'%';s.lp.style.width=((s.loop.end-s.loop.start)/dur*100)+'%'}
+    beatFlash(d,a,ct,rate);
     /* readouts */
     var base=bpmOf(d),pitch=s.ps?(+s.ps.value-1)*100:(rate-1)*100,m=META[d];
     s.head.querySelector('.cx-bpm b').textContent=base?(base*(s.ps?+s.ps.value:rate)).toFixed(1):'--';
@@ -18107,12 +18139,14 @@ function tick(t){
   requestAnimationFrame(tick);
 }
 
+
+
 function start(){
   if(!$('deckA')||!$('deckB')||!$('audioA'))return setTimeout(start,300);
-  buildDeck('A');buildDeck('B');loadBuf('A');loadBuf('B');requestAnimationFrame(tick);
+  buildDeck('A');buildDeck('B');document.documentElement.classList.add('cx-ready');loadBuf('A');loadBuf('B');requestAnimationFrame(tick);
 }
-if(document.readyState==='complete')setTimeout(start,250);
-else window.addEventListener('load',function(){setTimeout(start,250)});
+if(document.readyState==='complete')setTimeout(start,60);
+else window.addEventListener('load',function(){setTimeout(start,60)});
 })();
 
 </script>

@@ -5522,6 +5522,8 @@ async function drawWaveform(deck) {
 
   try {
 
+    const wfSrc = a.src;
+
     const response =
       await fetch(a.src);
 
@@ -5537,6 +5539,12 @@ async function drawWaveform(deck) {
 
     const audioBuffer =
       await audioContext.decodeAudioData(arrayBuffer);
+
+    // a newer track was loaded while this one decoded: drop this drawing
+    if (a.src !== wfSrc) {
+      audioContext.close().catch(() => {});
+      return;
+    }
 
     const data =
       audioBuffer.getChannelData(0);
@@ -6481,6 +6489,8 @@ async function buildTransientMap(
     );
 
 
+    const analysisSrc = a.src;
+
     const response =
       await fetch(
         a.src
@@ -6521,6 +6531,12 @@ async function buildTransientMap(
         audioBuffer
       );
 
+
+    // a newer track was loaded while this one was analysed: drop this result
+    if (a.src !== analysisSrc) {
+      await audioContext.close().catch(() => {});
+      return;
+    }
 
     if (
       analysis
@@ -8845,37 +8861,136 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
 });
   
 // --- LOADERS ---  
+// =====================================================
+// 🎚️ LOAD TRACK TO DECK  (v47 rebuilt)
+// • accepts every audio field name the library / playlist / bank use
+// • accepts storage paths (signed), http(s), blob: and data: audio
+// • clears the old track's pitch, cue, slow-mo, tap tempo and beat grid
+// • ignores a slow earlier load if a newer one has started
+// • tells you what happened (loaded / couldn't load)
+// =====================================================
+
+const glctc1DeckLoadToken = { A: 0, B: 0 };
+
+function glctc1DeckToast(msg) {
+  let t = document.getElementById("glctc1DeckToast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "glctc1DeckToast";
+    t.style.cssText =
+      "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:99999;" +
+      "max-width:90vw;padding:10px 16px;border-radius:12px;background:#101636;" +
+      "border:1px solid #00e5ff;color:#e8ecff;font:600 .8rem sans-serif;text-align:center;" +
+      "box-shadow:0 0 18px rgba(0,229,255,.5);pointer-events:none;display:none";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.style.display = "none"; }, 3500);
+}
+
+function glctc1TrackAudioPath(track) {
+  return String(
+    track.master_audio ||
+    track["Master Audio"] ||
+    track.sample ||
+    track.audio ||
+    track.audio_url ||
+    track["Audio URL"] ||
+    ""
+  ).trim();
+}
+
+// A new track must start from a clean deck. Loading audio resets the
+// element's speed to 1x, so the pitch fader, platter, cue point, slow-mo,
+// tap-tempo history and old beat grid are brought back in line.
+function glctc1ResetDeckForNewTrack(deck) {
+  const a = audio(deck);
+  if (!a) return;
+
+  try { a.pause(); } catch (e) {}
+
+  try { cuePoints[deck] = null; } catch (e) {}
+  try { tapTempoHistory[deck] = []; } catch (e) {}
+
+  a._slowMo = false;
+  a._normalRate = 1;
+
+  const ps = document.getElementById("pitch" + deck);
+  if (ps) ps.value = 1;
+  try { setPitch(deck, 1); } catch (e) {}
+
+  try {
+    Object.assign(beatAnalysis[deck], {
+      firstKick: null, bpm: null, beatLength: null, barLength: null,
+      beatGrid: [], barGrid: [], kickPoints: [], ready: false, snapIndex: -1
+    });
+  } catch (e) {}
+}
+
 async function loadToDeck(deck, track) {
 
-  if (!track || !track.master_audio) return;
+  if (!track) return false;
 
-  let audioFile = track.master_audio;
+  const a = audio(deck);
+  if (!a) return false;
+
+  const name = (track.artist || track["Artist"] || "Unknown") + " — " +
+               (track.title || track["Track Title"] || "Untitled");
+
+  let audioFile = glctc1TrackAudioPath(track);
+
+  if (!audioFile) {
+    console.error("GLCTC1 DECK " + deck + ": NO AUDIO FIELD FOUND", track);
+    glctc1DeckToast("Deck " + deck + ": this track has no audio file");
+    return false;
+  }
+
+  const my = ++glctc1DeckLoadToken[deck];
 
   // Create a playable signed URL for Supabase storage paths
-  if (!audioFile.startsWith("http")) {
+  if (!/^(https?:|blob:|data:)/i.test(audioFile)) {
 
     const { data: signedData, error: signedError } =
       await supabaseClient.storage
         .from("tracks")
         .createSignedUrl(audioFile, 60 * 60 * 24);
 
-    if (signedError) {
+    if (my !== glctc1DeckLoadToken[deck]) return false;   // a newer load took over
+
+    if (signedError || !signedData || !signedData.signedUrl) {
       console.error("GLCTC1 DECK SIGNED URL ERROR:", signedError);
-      return;
+      glctc1DeckToast("Deck " + deck + ": couldn't open that audio file");
+      return false;
     }
 
     audioFile = signedData.signedUrl;
   }
 
-  const a = audio(deck);
+  glctc1ResetDeckForNewTrack(deck);
+
+  if (!a._glctc1LoadErr) {
+    a._glctc1LoadErr = true;
+    a.addEventListener("error", () => {
+      if (a.getAttribute("src")) {
+        glctc1DeckToast("Deck " + deck + ": couldn't play that audio");
+      }
+    });
+  }
 
   a.src = audioFile;
   a.load();
 
+  const bpm = Number(track.bpm || track["BPM"]) || 120;
+
+  updateBpmMeter(deck, bpm);
   drawWaveform(deck);
-  updateBpmMeter(deck, track.bpm || 120);
+
+  glctc1DeckToast("Deck " + deck + " loaded — " + name);
+  return true;
 }
-  
+
 function loadStemToDeck(deck, fileUrl, bpm) {  
   if (!fileUrl) return;  
   const a = audio(deck);  

@@ -6526,12 +6526,44 @@ async function buildTransientMap(
       analysis
     ) {
 
-      beatAnalysis[deck] =
-        analysis;
+      // ONE SHARED GRID RULE FOR BOTH SNAP AND FLASH:
+      // first detected kick is the phase anchor; Master Library BPM
+      // is the tempo when present. Rebuild both beatGrid and barGrid
+      // from those exact same values so the two systems cannot diverge.
+      const display = document.getElementById("deckDisplay" + deck);
+      const metaBpm = Number(
+        (typeof META !== "undefined" && META[deck] && META[deck].bpm) ||
+        (display && display.dataset && display.dataset.bpm) || 0
+      );
+      const sharedBpm = Number.isFinite(metaBpm) && metaBpm > 0
+        ? metaBpm
+        : analysis.bpm;
+      const sharedFirstKick = Number.isFinite(analysis.firstKick)
+        ? analysis.firstKick
+        : 0;
+      analysis.bpm = sharedBpm;
+      analysis.firstKick = sharedFirstKick;
+      analysis.beatLength = 60 / sharedBpm;
+      analysis.barLength = analysis.beatLength * 4;
+      analysis.beatGrid = buildFullBeatGrid(
+        sharedFirstKick, sharedBpm, audioBuffer.duration
+      );
+      analysis.barGrid = buildBarGrid(
+        sharedFirstKick, sharedBpm, audioBuffer.duration
+      );
+      analysis.ready = analysis.barGrid.length > 0;
+      analysis.snapIndex = -1;
+      beatAnalysis[deck] = analysis;
 
+      // Force the flashing counter to rebuild from the same kick + BPM.
+      if (typeof T !== "undefined") T[deck] = null;
+      if (typeof S !== "undefined" && S[deck]) {
+        S[deck].bi = null;
+        S[deck].wasPlaying = false;
+      }
 
       console.log(
-        `GLCTC1 ${deck}: BEAT GRID READY`
+        `GLCTC1 ${deck}: SHARED FIRST-KICK GRID READY — BPM ${sharedBpm}, first kick ${sharedFirstKick.toFixed(3)}s`
       );
 
 
@@ -18157,7 +18189,9 @@ function buildDeck(d){
   deck.addEventListener('contextmenu',function(e){e.preventDefault()});
   deck.addEventListener('selectstart',function(e){if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault()});
   deck.addEventListener('dragstart',function(e){e.preventDefault()});
-  a.addEventListener('loadedmetadata',function(){loadBuf(d);s.cues=[null,null,null,null];s.loop=null;paint()});
+  a.addEventListener('loadedmetadata',function(){T[d]=null;s.bi=null;s.wasPlaying=false;s.lastSrc=curSrc(d);loadBuf(d);s.cues=[null,null,null,null];s.loop=null;paint();analyse(d)});
+  a.addEventListener('seeked',function(){s.bi=null;s.wasPlaying=false;s.pips&&s.pips.forEach(function(p){p.classList.remove('on')})});
+  a.addEventListener('play',function(){s.bi=null;s.wasPlaying=false});
 }
 
 
@@ -18165,63 +18199,69 @@ function buildDeck(d){
 
 function curSrc(d){var a=aud(d);return a&&(a.currentSrc||a.src)||''}
 function ensureGrid(d){
-  var sr=curSrc(d),an=beatAnalysis&&beatAnalysis[d];
-  // Prefer the analysed kick grid over a metadata-only fallback.
-  if(an&&an.ready&&Number.isFinite(an.beatLength)&&an.beatLength>0&&Number.isFinite(an.firstKick)){
-    if(!T[d]||T[d].src!==sr||T[d].source!=='kick-analysis'){
-      T[d]={ready:true,bl:an.beatLength,off:an.firstKick,bar0:0,src:sr,source:'kick-analysis'};
+  var src=curSrc(d),an=beatAnalysis&&beatAnalysis[d],display=$('deckDisplay'+d);
+  var meta=Number((META[d]&&META[d].bpm)||(display&&display.dataset.bpm));
+  // Use the saved track BPM for tempo; audio analysis supplies phase only.
+  // This prevents an incorrect kick-detector tempo from making the flash drift.
+  if(meta>0&&Number.isFinite(meta)){
+    var phase=0,source='metadata';
+    if(an&&an.ready&&Number.isFinite(an.firstKick)&&an.firstKick>=0){phase=an.firstKick;source='shared-first-kick-grid'}
+    if(!T[d]||T[d].src!==src||Math.abs(T[d].bl-60/meta)>.0005||T[d].off!==phase||T[d].source!==source){
+      T[d]={ready:true,bl:60/meta,off:phase,bar0:0,src:src,source:source};
       if(S[d])S[d].bi=null;
     }
     return T[d];
   }
-  var tk=T[d];if(tk&&tk.ready&&tk.src===sr)return tk;
-  return null}
-
-/* ---------- BEAT TRACKER: finds the true tempo + phase of the whole track (kick band), no drift ---------- */
-function hintBpm(d){try{var x=Number($('deckDisplay'+d).dataset.bpm);if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
+  if(an&&an.ready&&Number.isFinite(an.beatLength)&&an.beatLength>0&&Number.isFinite(an.firstKick)){
+    if(!T[d]||T[d].src!==src||T[d].source!=='kick-analysis'){
+      T[d]={ready:true,bl:an.beatLength,off:an.firstKick,bar0:0,src:src,source:'kick-analysis'};
+      if(S[d])S[d].bi=null;
+    }
+    return T[d];
+  }
+  var tk=T[d];if(tk&&tk.ready&&tk.src===src)return tk;
+  return null;
+}
+function hintBpm(d){try{var x=Number((META[d]&&META[d].bpm)||$('deckDisplay'+d).dataset.bpm);if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
 function analyse(d){
-  var src=curSrc(d),an=beatAnalysis&&beatAnalysis[d];
-  // Best case: use audio-derived BPM AND the detected first-kick phase.
-  if(an&&an.ready&&Number.isFinite(an.bpm)&&an.bpm>0&&
-     Number.isFinite(an.firstKick)&&Number.isFinite(an.beatLength)&&an.beatLength>0){
+  var src=curSrc(d),an=beatAnalysis&&beatAnalysis[d],bp=hintBpm(d);
+  // Rebuild from this track's metadata every time; audio detection is used for phase,
+  // not to override a known BPM from the Master Library.
+  if(bp>0&&Number.isFinite(bp)){
+    var phase=(an&&an.ready&&Number.isFinite(an.firstKick)&&an.firstKick>=0)?an.firstKick:0;
+    T[d]={ready:true,bl:60/bp,off:phase,bar0:0,src:src,source:phase?'shared-first-kick-grid':'metadata'};
+    if(S[d])S[d].bi=null;
+    return;
+  }
+  if(an&&an.ready&&Number.isFinite(an.beatLength)&&an.beatLength>0&&Number.isFinite(an.firstKick)){
     T[d]={ready:true,bl:an.beatLength,off:an.firstKick,bar0:0,src:src,source:'kick-analysis'};
     if(S[d])S[d].bi=null;
-    try{console.log('GLCTC1 '+d+' BEAT LOCK',(60/an.beatLength).toFixed(2)+' BPM','source: audio analysis','first kick',an.firstKick.toFixed(3)+'s')}catch(e){}
     return;
   }
-
-  // Fallback: use the BPM saved in this track's Master Library metadata.
-  // The metadata provides tempo but not beat-one phase, so anchor at 0:00
-  // until audio analysis supplies a detected first kick.
-  var display=$('deckDisplay'+d),metaBpm=Number((META[d]&&META[d].bpm)||(display&&display.dataset.bpm));
-  if(metaBpm>0&&Number.isFinite(metaBpm)){
-    var bl=60/metaBpm;
-    T[d]={ready:true,bl:bl,off:0,bar0:0,src:src,source:'metadata'};
-    if(S[d])S[d].bi=null;
-    try{console.log('GLCTC1 '+d+' BEAT GRID',(metaBpm).toFixed(2)+' BPM','source: track metadata; phase awaiting audio analysis')}catch(e){}
-    return;
-  }
-
-  // Do not carry a previous track's grid into the newly loaded track.
   if(T[d]&&T[d].src!==src)T[d]=null;
 }
 
-/* ---------- BEAT FLASH: locked to the audio position & the analysed beat grid ---------- */
-window.startBeatFlash=function(){};          /* retire the old free-running timer (it drifted, ignored the first kick, seeks & scratches) */
+/* ---------- BEAT FLASH: one beat index from the actual audio playhead ---------- */
+window.startBeatFlash=function(){};
 function beatFlash(d,a,ct,rate){
-  var s=S[d];if(!s||!s.pips)return;
-  var now=performance.now();
-  if(s.flT&&now-s.flT>115){s.pips.forEach(function(p){p.classList.remove('on')});s.flT=0}
-  var tk=ensureGrid(d),lock=!!tk,t=ct-(LAT/1000)*rate,idx;
-  if(lock){idx=Math.floor((t-tk.off)/tk.bl+1e-6)}
-  else{var an=(typeof beatAnalysis!=='undefined')?beatAnalysis[d]:null,g=an&&an.ready&&an.beatGrid&&an.beatGrid.length>1?an.beatGrid:null;
-    if(g){var lo=0,hi=g.length-1;if(t<g[0])idx=-1;else{while(lo<hi){var m=(lo+hi+1)>>1;if(g[m]<=t)lo=m;else hi=m-1}idx=lo}}
-    else{var bp=bpmOf(d);if(!bp)return;idx=Math.floor(t/(60/bp)+1e-6)}}
-  var live=!a.paused&&!s.touch&&isFinite(ct);
-  if(live&&s.bi!=null&&idx>s.bi&&idx-s.bi<=2){
-    var pos=(((idx-(lock?tk.bar0:(s.bar0||0)))%4)+4)%4;
-    s.pips.forEach(function(p){p.classList.remove('on')});s.pips[pos].classList.add('on');s.flT=now}
-  s.bi=idx;
+  var s=S[d];if(!s||!s.pips||!s.pips.length)return;
+  var now=performance.now(),live=!a.paused&&!s.touch&&Number.isFinite(ct);
+  var tk=ensureGrid(d);
+  if(!tk){s.pips.forEach(function(p){p.classList.remove('on')});s.bi=null;return;}
+  // Correct for output latency and playback-rate changes; use one stable grid per track.
+  var t=ct-(LAT/1000)*(rate||1),idx=Math.floor((t-tk.off)/tk.bl+1e-7);
+  var playing=live;
+  if(playing&&(!s.wasPlaying||s.lastSrc!==curSrc(d))){s.bi=idx-1;s.flT=0;}
+  if(!playing){s.pips.forEach(function(p){p.classList.remove('on')});s.flT=0;}
+  if(playing&&s.bi!=null&&idx>s.bi){
+    // If a frame is delayed, show the current beat instead of silently losing the count.
+    var beat=((idx-(tk.bar0||0))%4+4)%4;
+    s.pips.forEach(function(p){p.classList.remove('on')});
+    s.pips[beat].classList.add('on');s.flT=now;
+  }else if(s.flT&&now-s.flT>Math.max(90,tk.bl*1000*.32)){
+    s.pips.forEach(function(p){p.classList.remove('on')});s.flT=0;
+  }
+  s.bi=idx;s.wasPlaying=playing;s.lastSrc=curSrc(d);
 }
 
 /* ---------- ONE ANIMATION LOOP: platter physics, readouts, loops ---------- */

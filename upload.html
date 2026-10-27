@@ -16962,6 +16962,14 @@ if (sharedTrackId) {
 
 <style>
 
+/* Simple View must also hide mixer controls that are nested/repositioned by the deck layout. */
+body.glctc1-simple-view #glctc1MixerModule,
+body.glctc1-simple-view .glctc1-master-volume-wrap,
+body.glctc1-simple-view .crossfader-wrap,
+body.glctc1-simple-view .mixer-bay-controls {
+  display: none !important;
+}
+
 /* ===== NEON MODULE HIDE TABS ===== */
 
 .mod-wrap {
@@ -17348,11 +17356,13 @@ if (sharedTrackId) {
   // One-touch HIDE ALL / SHOW ALL bar above the first module
   // -----------------------------------------------------
   function setAll(collapsed) {
+    document.body.classList.remove("glctc1-simple-view");
     items.forEach(function (i) { apply(i, collapsed, true); });
   }
 
-  // SIMPLE VIEW = the new-user layout (only Playlist Master + Master Library open)
+  // SIMPLE VIEW = Playlist Master + Master Library only; hide loose mixer controls too.
   function simpleView() {
+    document.body.classList.add("glctc1-simple-view");
     items.forEach(function (i) { apply(i, !i.defOpen, true); });
   }
 
@@ -17943,10 +17953,24 @@ function knob(inp,label,fmt,parent){
   k.querySelector('.t').style.strokeDasharray=L+' 200';
   function draw(){var n=(inp.value-min)/(max-min);v.style.strokeDasharray=(L*n)+' 200';p.style.transform='rotate('+(-135+270*n)+'deg)';b.textContent=fmt(+inp.value)}
   function set(x){inp.value=clamp(x,min,max);inp.dispatchEvent(new Event('input',{bubbles:true}));draw()}
-  var y0=null,v0=0,moved=0,lastUp=0;
-  k.addEventListener('pointerdown',function(e){k.setPointerCapture(e.pointerId);y0=e.clientY;v0=+inp.value;moved=0;k.classList.add('on');e.preventDefault()});
-  k.addEventListener('pointermove',function(e){if(y0==null)return;moved=Math.max(moved,Math.abs(y0-e.clientY));set(v0+(y0-e.clientY)/150*(max-min))});
-  function end(){if(y0==null)return;y0=null;k.classList.remove('on');inp.dispatchEvent(new Event('change',{bubbles:true}));
+  var x0=null,y0=null,v0=0,moved=0,lastUp=0,activePointer=null;
+  k.addEventListener('pointerdown',function(e){
+    if(activePointer!==null)return;
+    activePointer=e.pointerId;
+    k.setPointerCapture(e.pointerId);
+    x0=e.clientX;y0=e.clientY;v0=+inp.value;moved=0;
+    k.classList.add('on');e.preventDefault();
+  });
+  k.addEventListener('pointermove',function(e){
+    if(activePointer!==e.pointerId||y0===null)return;
+    var dx=e.clientX-x0,dy=y0-e.clientY;
+    moved=Math.max(moved,Math.abs(dx),Math.abs(dy));
+    // Drag up/right to increase; down/left to decrease. Combined diagonal movement works too.
+    var delta=(dy+dx)*0.5;
+    set(v0+delta/110*(max-min));
+  });
+  function end(e){if(y0===null||(e&&activePointer!==e.pointerId))return;
+    y0=null;x0=null;activePointer=null;k.classList.remove('on');inp.dispatchEvent(new Event('change',{bubbles:true}));
     var n=Date.now();if(moved<5&&n-lastUp<320)set(def);lastUp=n}
   k.addEventListener('pointerup',end);k.addEventListener('pointercancel',end);
   k.addEventListener('wheel',function(e){e.preventDefault();set(+inp.value-Math.sign(e.deltaY)*(max-min)/40)},{passive:false});
@@ -17976,7 +18000,10 @@ function engineNode(d){
       p.pos+=p.rate*(b.sampleRate/c.sampleRate);
       if(p.pos<0){p.pos=0;p.rate=0}if(p.pos>N){p.pos=N;p.rate=0}
       i=p.pos|0;f=p.pos-i;
-      L[k]=(l[i]+(l[i+1]-l[i])*f)*g;R[k]=(r[i]+(r[i+1]-r[i])*f)*g}
+      /* Reverse platter audio must obey the same deck crossfader as normal playback. */
+      var xf=document.getElementById('crossfader'),x=xf?Number(xf.value):0.5;
+      var xfGain=d==='A'?Math.cos(x*Math.PI/2):Math.sin(x*Math.PI/2);
+      L[k]=(l[i]+(l[i+1]-l[i])*f)*g*xfGain;R[k]=(r[i]+(r[i+1]-r[i])*f)*g*xfGain}
     p.gain=g};
   s.node=n;return n;
 }
@@ -18220,6 +18247,54 @@ else window.addEventListener('load',function(){setTimeout(start,60)});
 })();
 
 </script>
+
+<script>
+/* GLCTC1 TOUCH-HOLD DRAG CONTROL
+   Hold a slider/fader and move vertically or horizontally to adjust it.
+   Uses the dominant drag axis, captures touch movement, and preserves input/change events. */
+(function(){
+  if (window.__glctc1HoldDragInstalled) return;
+  window.__glctc1HoldDragInstalled = true;
+  var active = null;
+  function numericRange(el){
+    var min = Number(el.min || 0), max = Number(el.max || 100);
+    if (!isFinite(min) || !isFinite(max) || max <= min) return null;
+    return {min:min,max:max,step:Number(el.step)||((max-min)/100)};
+  }
+  function setValue(el, value){
+    var r=numericRange(el); if(!r)return;
+    value=Math.max(r.min,Math.min(r.max,value));
+    if(el.step && el.step!=='any') value=Math.round((value-r.min)/r.step)*r.step+r.min;
+    el.value=String(Math.max(r.min,Math.min(r.max,value)));
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  document.addEventListener('pointerdown',function(e){
+    var el=e.target && e.target.closest && e.target.closest('input[type="range"]');
+    if(!el || el.disabled || el.dataset.holdDragNative==='true')return;
+    var r=numericRange(el); if(!r)return;
+    active={el:el,id:e.pointerId,x:e.clientX,y:e.clientY,start:Number(el.value),range:r,changed:false};
+    try{el.setPointerCapture(e.pointerId)}catch(_){}
+  },true);
+  document.addEventListener('pointermove',function(e){
+    if(!active || e.pointerId!==active.id)return;
+    var dx=e.clientX-active.x, dy=active.y-e.clientY;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<2)return;
+    active.changed=true;
+    var delta=Math.abs(dx)>Math.abs(dy)?dx:-dy;
+    var span=active.range.max-active.range.min;
+    setValue(active.el,active.start+delta/140*span);
+    if(e.cancelable)e.preventDefault();
+  },{capture:true,passive:false});
+  function finish(e){
+    if(!active || (e && e.pointerId!==active.id))return;
+    var el=active.el, changed=active.changed; active=null;
+    if(changed)el.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  document.addEventListener('pointerup',finish,true);
+  document.addEventListener('pointercancel',finish,true);
+})();
+</script>
+
 </body>
 </html>
 

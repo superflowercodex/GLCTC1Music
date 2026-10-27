@@ -18798,31 +18798,44 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
 </script>
 
 
-<!-- GLCTC1 v49 - NO SIDE-SWIPE
-     Stops the browser's left/right swipe (history back/forward, sideways page drag).
-     Inner scrollers (nav tabs, tables, sliders) keep working. -->
+<!-- GLCTC1 v50 - NO SIDE-SWIPE (stronger)
+     1. CSS: the page only accepts up/down touch panning, so the browser never
+        starts a sideways drag or its swipe back/forward navigation.
+        (Nav tabs, tables and faders that scroll/slide sideways keep working.)
+     2. History guard: a swipe-back / back-button press (including the phone's
+        own edge-swipe gesture) stays on this page instead of leaving it.
+        To allow Back again, change BLOCK_BACK below to false. -->
 <style>
-html, body { overscroll-behavior-x: none; }
-/* clip sideways overflow without turning <body> into a scroll container */
+html, body { touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
 body { overflow-x: clip; }
+/* inner scrollers must not hand a sideways swipe to the page either */
+* { overscroll-behavior-x: contain; }
+html, body { overscroll-behavior-x: none; }
 </style>
 <script>
 (function () {
   "use strict";
-  /* Edge-swipe guard (iPhone Safari back/forward edge swipe).
-     Only touches that START within 18px of the left/right screen edge are
-     blocked, and never when they start on a control, so faders and knobs
-     at the edge still work. */
-  var EDGE = 18;
-  var INTERACTIVE = "input,button,select,textarea,a,canvas,label,audio,[role=button],.cx-platter,.cx-knob,.scratch-ribbon,.nav";
-  document.addEventListener("touchstart", function (e) {
-    if (e.touches.length !== 1) return;
-    var t = e.touches[0], w = window.innerWidth;
-    if (t.clientX > EDGE && t.clientX < w - EDGE) return;
-    var el = e.target && e.target.closest ? e.target.closest(INTERACTIVE) : null;
-    if (el) return;
-    if (e.cancelable) e.preventDefault();
-  }, { passive: false });
+  var BLOCK_BACK = true;
+  if (!BLOCK_BACK || !window.history || !history.pushState) return;
+
+  var armed = false;
+  function push() { try { history.pushState({ glctc1: 1 }, "", location.href); } catch (e) {} }
+
+  // Arm after the first real tap/key press (browsers ignore history entries
+  // a page adds before the visitor has interacted with it).
+  function arm() {
+    if (armed) return;
+    armed = true;
+    push();
+  }
+  ["touchend", "pointerup", "click", "keydown"].forEach(function (ev) {
+    window.addEventListener(ev, arm, { capture: true, passive: true });
+  });
+
+  // Back swipe / back button: put the page straight back where it was.
+  window.addEventListener("popstate", function () {
+    if (armed) push();
+  });
 })();
 </script>
 

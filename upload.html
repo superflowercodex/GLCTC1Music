@@ -18303,6 +18303,180 @@ else window.addEventListener('load',function(){setTimeout(start,60)});
 })();
 </script>
 
+
+<!-- =====================================================
+     📱 GLCTC1 v44 — LOCK-SCREEN / NOTIFICATION MEDIA CONTROLS
+     Uses the browser Media Session API so the phone's lock screen,
+     notification shade, smartwatch and Bluetooth/car controls show:
+       • Cover art  • Track title + artist  • ⏮ ▶/⏸ ⏭  • seek bar
+     Works for the Playlist Master (with Previous / Next), plus the
+     Library preview and Deck A / Deck B (play / pause / seek).
+     The most recently played player is the one shown on the lock screen.
+     Self-contained: reads the existing player elements, changes nothing else.
+     ===================================================== -->
+<script>
+(function () {
+  "use strict";
+
+  if (!("mediaSession" in navigator)) return;
+  var ms = navigator.mediaSession;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var txt = function (id) { var e = $(id); return e ? (e.textContent || "").trim() : ""; };
+
+  var PLAYERS = {
+    glctc1PlaylistAudio: { label: "PLAYLIST MASTER", nav: true },
+    libraryPlayer:       { label: "LIBRARY",         nav: false },
+    audioA:              { label: "DECK A",          nav: false },
+    audioB:              { label: "DECK B",          nav: false }
+  };
+
+  var activeId = null;
+
+  // ---------- fallback cover art (neon GLCTC1 tile, used when a track has no cover) ----------
+  var fallbackArt = null;
+  function makeFallbackArt() {
+    if (fallbackArt) return fallbackArt;
+    try {
+      var c = document.createElement("canvas");
+      c.width = c.height = 512;
+      var g = c.getContext("2d");
+      var bg = g.createLinearGradient(0, 0, 512, 512);
+      bg.addColorStop(0, "#0a0e22"); bg.addColorStop(1, "#2a0a3a");
+      g.fillStyle = bg; g.fillRect(0, 0, 512, 512);
+      g.strokeStyle = "#00ffff"; g.lineWidth = 10; g.shadowColor = "#00ffff"; g.shadowBlur = 30;
+      g.beginPath(); g.arc(256, 256, 170, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = "#ff9bda"; g.shadowColor = "#ff00aa"; g.shadowBlur = 25;
+      g.font = "bold 120px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText("GLC", 256, 256);
+      fallbackArt = c.toDataURL("image/png");
+    } catch (e) { fallbackArt = ""; }
+    return fallbackArt;
+  }
+
+  function artworkFor(id) {
+    var url = "";
+    if (id === "glctc1PlaylistAudio") {
+      var img = $("glctc1PlaylistArtwork");
+      if (img && img.getAttribute("src") && img.style.display !== "none") url = img.src;
+    }
+    if (!url) url = makeFallbackArt();
+    if (!url) return [];
+    return [96, 128, 192, 256, 384, 512].map(function (n) {
+      return { src: url, sizes: n + "x" + n };
+    });
+  }
+
+  function metaFor(id) {
+    var p = PLAYERS[id];
+    var title = "", artist = "", album = "GLCTC1 Play Space";
+
+    if (id === "glctc1PlaylistAudio") {
+      title = txt("glctc1PlaylistTitle");
+      artist = txt("glctc1PlaylistArtist");
+    } else if (id === "libraryPlayer") {
+      var np = txt("libraryNowPlaying");          // "Artist — Title"
+      var i = np.indexOf(" — ");
+      if (i > -1) { artist = np.slice(0, i); title = np.slice(i + 3); } else { title = np; }
+    }
+    if (!title || /^(no track|nothing playing)/i.test(title)) title = p.label;
+    if (/^(no artist|—)$/i.test(artist)) artist = "";
+    return { title: title, artist: artist || "GLCTC1", album: album, artwork: artworkFor(id) };
+  }
+
+  var pending = null;
+  function refresh() {
+    clearTimeout(pending);
+    pending = setTimeout(function () {
+      if (!activeId) return;
+      try { ms.metadata = new MediaMetadata(metaFor(activeId)); } catch (e) {}
+      var a = $(activeId);
+      if (a) ms.playbackState = a.paused ? "paused" : "playing";
+      setNav();
+      pushPosition();
+    }, 120);
+  }
+
+  // ---------- seek bar on the lock screen ----------
+  var lastPos = 0;
+  function pushPosition() {
+    var a = activeId && $(activeId);
+    if (!a || !ms.setPositionState) return;
+    var d = a.duration;
+    if (!isFinite(d) || d <= 0) return;
+    try {
+      ms.setPositionState({
+        duration: d,
+        playbackRate: a.playbackRate || 1,
+        position: Math.min(Math.max(a.currentTime || 0, 0), d)
+      });
+    } catch (e) {}
+  }
+
+  // ---------- action handlers ----------
+  function act(name, fn) { try { ms.setActionHandler(name, fn); } catch (e) {} }
+  function cur() { return activeId && $(activeId); }
+
+  function setNav() {
+    var nav = activeId && PLAYERS[activeId].nav;
+    act("previoustrack", nav ? function () { var b = $("glctc1PlaylistPrev"); if (b) b.click(); } : null);
+    act("nexttrack",     nav ? function () { var b = $("glctc1PlaylistNext"); if (b) b.click(); } : null);
+  }
+
+  act("play",  function () { var a = cur(); if (a) a.play().catch(function () {}); });
+  act("pause", function () { var a = cur(); if (a) a.pause(); });
+  act("stop",  function () { var a = cur(); if (a) { a.pause(); a.currentTime = 0; } });
+  act("seekto", function (d) {
+    var a = cur(); if (!a || d.seekTime == null) return;
+    if (d.fastSeek && a.fastSeek) a.fastSeek(d.seekTime); else a.currentTime = d.seekTime;
+    pushPosition();
+  });
+  act("seekbackward", function (d) { var a = cur(); if (a) { a.currentTime = Math.max(0, a.currentTime - (d.seekOffset || 10)); pushPosition(); } });
+  act("seekforward",  function (d) { var a = cur(); if (a && isFinite(a.duration)) { a.currentTime = Math.min(a.duration, a.currentTime + (d.seekOffset || 10)); pushPosition(); } });
+
+  // ---------- wire up the players ----------
+  Object.keys(PLAYERS).forEach(function (id) {
+    var a = $(id);
+    if (!a) return;
+
+    a.addEventListener("play", function () {
+      activeId = id;
+      ms.playbackState = "playing";
+      refresh();
+    });
+    a.addEventListener("playing", function () { if (activeId === id) refresh(); });
+    a.addEventListener("pause", function () {
+      if (activeId === id && !a.ended) ms.playbackState = "paused";
+    });
+    a.addEventListener("ended", function () { if (activeId === id) ms.playbackState = "paused"; });
+    a.addEventListener("loadedmetadata", function () { if (activeId === id) refresh(); });
+    a.addEventListener("durationchange", function () { if (activeId === id) pushPosition(); });
+    a.addEventListener("seeked", function () { if (activeId === id) pushPosition(); });
+    a.addEventListener("ratechange", function () { if (activeId === id) pushPosition(); });
+    a.addEventListener("timeupdate", function () {
+      if (activeId !== id) return;
+      var now = Date.now();
+      if (now - lastPos > 5000) { lastPos = now; pushPosition(); }
+    });
+  });
+
+  // ---------- keep title / artist / cover in step when the track changes ----------
+  var mo = new MutationObserver(function () { if (activeId) refresh(); });
+  ["glctc1PlaylistTitle", "glctc1PlaylistArtist", "libraryNowPlaying"].forEach(function (id) {
+    var e = $(id);
+    if (e) mo.observe(e, { childList: true, characterData: true, subtree: true });
+  });
+  var art = $("glctc1PlaylistArtwork");
+  if (art) {
+    mo.observe(art, { attributes: true, attributeFilter: ["src", "style"] });
+    art.addEventListener("load", function () { if (activeId === "glctc1PlaylistAudio") refresh(); });
+  }
+
+  // Phones sometimes drop the session after a long lock — refresh when the page comes back.
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && activeId) refresh(); });
+})();
+</script>
+
 </body>
 </html>
 

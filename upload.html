@@ -5522,6 +5522,8 @@ async function drawWaveform(deck) {
 
   try {
 
+    const wfSrc = a.src;
+
     const response =
       await fetch(a.src);
 
@@ -5537,6 +5539,12 @@ async function drawWaveform(deck) {
 
     const audioBuffer =
       await audioContext.decodeAudioData(arrayBuffer);
+
+    // a newer track was loaded while this one decoded: drop this drawing
+    if (a.src !== wfSrc) {
+      audioContext.close().catch(() => {});
+      return;
+    }
 
     const data =
       audioBuffer.getChannelData(0);
@@ -6481,6 +6489,8 @@ async function buildTransientMap(
     );
 
 
+    const analysisSrc = a.src;
+
     const response =
       await fetch(
         a.src
@@ -6521,6 +6531,12 @@ async function buildTransientMap(
         audioBuffer
       );
 
+
+    // a newer track was loaded while this one was analysed: drop this result
+    if (a.src !== analysisSrc) {
+      await audioContext.close().catch(() => {});
+      return;
+    }
 
     if (
       analysis
@@ -8845,37 +8861,143 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
 });
   
 // --- LOADERS ---  
+// =====================================================
+// 🎚️ LOAD TRACK TO DECK  (v48 rebuilt — remove LOCK/FLASH strip; validate deck target)
+// • accepts every audio field name the library / playlist / bank use
+// • accepts storage paths (signed), http(s), blob: and data: audio
+// • clears the old track's pitch, cue, slow-mo, tap tempo and beat grid
+// • ignores a slow earlier load if a newer one has started
+// • tells you what happened (loaded / couldn't load)
+// =====================================================
+
+const glctc1DeckLoadToken = { A: 0, B: 0 };
+
+function glctc1DeckToast(msg) {
+  let t = document.getElementById("glctc1DeckToast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "glctc1DeckToast";
+    t.style.cssText =
+      "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:99999;" +
+      "max-width:90vw;padding:10px 16px;border-radius:12px;background:#101636;" +
+      "border:1px solid #00e5ff;color:#e8ecff;font:600 .8rem sans-serif;text-align:center;" +
+      "box-shadow:0 0 18px rgba(0,229,255,.5);pointer-events:none;display:none";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.style.display = "none"; }, 3500);
+}
+
+function glctc1TrackAudioPath(track) {
+  return String(
+    track.master_audio ||
+    track["Master Audio"] ||
+    track.sample ||
+    track.audio ||
+    track.audio_url ||
+    track["Audio URL"] ||
+    ""
+  ).trim();
+}
+
+// A new track must start from a clean deck. Loading audio resets the
+// element's speed to 1x, so the pitch fader, platter, cue point, slow-mo,
+// tap-tempo history and old beat grid are brought back in line.
+function glctc1ResetDeckForNewTrack(deck) {
+  const a = audio(deck);
+  if (!a) return;
+
+  try { a.pause(); } catch (e) {}
+
+  try { cuePoints[deck] = null; } catch (e) {}
+  try { tapTempoHistory[deck] = []; } catch (e) {}
+
+  a._slowMo = false;
+  a._normalRate = 1;
+
+  const ps = document.getElementById("pitch" + deck);
+  if (ps) ps.value = 1;
+  try { setPitch(deck, 1); } catch (e) {}
+
+  try {
+    Object.assign(beatAnalysis[deck], {
+      firstKick: null, bpm: null, beatLength: null, barLength: null,
+      beatGrid: [], barGrid: [], kickPoints: [], ready: false, snapIndex: -1
+    });
+  } catch (e) {}
+}
+
 async function loadToDeck(deck, track) {
 
-  if (!track || !track.master_audio) return;
+  // Never silently treat an invalid deck value as Deck B.
+  deck = String(deck || "").toUpperCase();
+  if (deck !== "A" && deck !== "B") {
+    console.error("GLCTC1 loadToDeck rejected invalid deck target:", deck, track);
+    return false;
+  }
+  if (!track) return false;
 
-  let audioFile = track.master_audio;
+  const a = audio(deck);
+  if (!a) return false;
+
+  const name = (track.artist || track["Artist"] || "Unknown") + " — " +
+               (track.title || track["Track Title"] || "Untitled");
+
+  let audioFile = glctc1TrackAudioPath(track);
+
+  if (!audioFile) {
+    console.error("GLCTC1 DECK " + deck + ": NO AUDIO FIELD FOUND", track);
+    glctc1DeckToast("Deck " + deck + ": this track has no audio file");
+    return false;
+  }
+
+  const my = ++glctc1DeckLoadToken[deck];
+  console.info("GLCTC1 DECK LOAD REQUEST", { targetDeck: deck, track: name, audioElement: a.id, requestToken: my });
 
   // Create a playable signed URL for Supabase storage paths
-  if (!audioFile.startsWith("http")) {
+  if (!/^(https?:|blob:|data:)/i.test(audioFile)) {
 
     const { data: signedData, error: signedError } =
       await supabaseClient.storage
         .from("tracks")
         .createSignedUrl(audioFile, 60 * 60 * 24);
 
-    if (signedError) {
+    if (my !== glctc1DeckLoadToken[deck]) return false;   // a newer load took over
+
+    if (signedError || !signedData || !signedData.signedUrl) {
       console.error("GLCTC1 DECK SIGNED URL ERROR:", signedError);
-      return;
+      glctc1DeckToast("Deck " + deck + ": couldn't open that audio file");
+      return false;
     }
 
     audioFile = signedData.signedUrl;
   }
 
-  const a = audio(deck);
+  glctc1ResetDeckForNewTrack(deck);
+
+  if (!a._glctc1LoadErr) {
+    a._glctc1LoadErr = true;
+    a.addEventListener("error", () => {
+      if (a.getAttribute("src")) {
+        glctc1DeckToast("Deck " + deck + ": couldn't play that audio");
+      }
+    });
+  }
 
   a.src = audioFile;
   a.load();
 
+  const bpm = Number(track.bpm || track["BPM"]) || 120;
+
+  updateBpmMeter(deck, bpm);
   drawWaveform(deck);
-  updateBpmMeter(deck, track.bpm || 120);
+
+  glctc1DeckToast("Deck " + deck + " loaded — " + name);
+  return true;
 }
-  
+
 function loadStemToDeck(deck, fileUrl, bpm) {  
   if (!fileUrl) return;  
   const a = audio(deck);  
@@ -12112,13 +12234,15 @@ if (libraryPlayer) {
 }
 
   // Load selected to decks  
-  document.getElementById("libLoadA").addEventListener("click", () => {  
-    if (!selectedLibraryTrack) return;  
-    loadToDeck("A", selectedLibraryTrack);  
-  });  
-  document.getElementById("libLoadB").addEventListener("click", () => {  
-    if (!selectedLibraryTrack) return;  
-    loadToDeck("B", selectedLibraryTrack);  
+  document.getElementById("libLoadA").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!selectedLibraryTrack) return;
+    loadToDeck("A", selectedLibraryTrack);
+  });
+  document.getElementById("libLoadB").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!selectedLibraryTrack) return;
+    loadToDeck("B", selectedLibraryTrack);
   });  
   
    // Add selected to bank
@@ -17808,14 +17932,22 @@ body.glctc1-simple-view .mixer-bay-controls {
   window.addEventListener("online", flushQueue);
   window.addEventListener("pagehide", function () { /* queue is already in localStorage */ });
   window.glctc1FlushPlays = flushQueue;
-  wrap("loadToDeck", 1, function (deck, track) { return pick(deck === "A" ? "audioA" : "audioB", track); });
+  wrap("loadToDeck", 1, function (deck, track) {
+    var target = String(deck == null ? "" : deck).toUpperCase();
+    if (target !== "A" && target !== "B") {
+      console.error("GLCTC1 PLAY COUNTER: rejected invalid deck target", deck, track);
+      return null;
+    }
+    return pick(target === "A" ? "audioA" : "audioB", track);
+  });
   wrap("playLibraryTrack", 0, function (track) { return pick("libraryPlayer", track); });
   wrap("playPlaylistMasterTrack", 0, function (track) { return pick("glctc1PlaylistAudio", track); });
 
   var originalStem = window.loadStemToDeck;
   if (typeof originalStem === "function") {
     window.loadStemToDeck = function (deck) {
-      var p = players[deck === "A" ? "audioA" : "audioB"];
+      var target = String(deck == null ? "" : deck).toUpperCase();
+      var p = (target === "A" || target === "B") ? players[target === "A" ? "audioA" : "audioB"] : null;
       if (p) setTrack(p, null); // stems are not master-track plays
       return originalStem.apply(this, arguments);
     };
@@ -18052,21 +18184,13 @@ function buildDeck(d){
   /* header */
   var head=el('div','cx-head','<div class="cx-badge">'+d+'</div><div class="cx-meta"><b>Load a track</b><small>GLCTC1</small></div><div class="cx-bpm"><b>0.0</b><small>BPM · 0.0%</small></div>');
   var sub=el('div','cx-sub','<span class="cx-beats" title="Beat counter · tap on a beat to make it beat 1"><i></i><i></i><i></i><i></i></span><span class="cx-time">-0:00</span><span class="cx-gone cx-beat"></span>');
-  var tune=el('div','cx-tune','<span class="cx-stat">…</span><span class="cx-lat" title="Flash delay: + = later, − = earlier"><button type="button" data-d="-50">−−</button><button type="button" data-d="-10">−</button><em></em><button type="button" data-d="10">+</button><button type="button" data-d="50">++</button></span><span class="cx-grid"><button type="button" data-g="half" title="Half tempo">½</button><button type="button" data-g="dbl" title="Double tempo">×2</button><button type="button" data-g="l" title="Beat earlier 20ms">◂</button><button type="button" data-g="r" title="Beat later 20ms">▸</button><button type="button" data-g="scan" title="Re-scan track">↻</button></span>');
-  deck.insertBefore(tune,deck.firstChild);deck.insertBefore(sub,deck.firstChild);deck.insertBefore(head,deck.firstChild);
+  /* v48: remove the extra LOCK / FLASH / half-double / nudge / rescan control strip. */
+  deck.insertBefore(sub,deck.firstChild);deck.insertBefore(head,deck.firstChild);
   var dd=$('deckDisplay'+d);if(dd)sub.querySelector('.cx-beat').appendChild(dd);
   s.pips=[].slice.call(sub.querySelectorAll('.cx-beats i'));
   sub.querySelector('.cx-beats').addEventListener('click',function(){if(s.bi==null)return;var z=((s.bi%4)+4)%4,tk=T[d];if(tk&&tk.ready)tk.bar0=z;else s.bar0=z});
-  [].forEach.call(tune.querySelectorAll('.cx-lat button'),function(bt){bt.addEventListener('click',function(){LAT=clamp(LAT+ +bt.dataset.d,-150,500);try{localStorage.setItem('cxLat',LAT)}catch(x){}latShow()})});
-  s.stat=tune.querySelector('.cx-stat');
-  tune.querySelector('.cx-grid').addEventListener('click',function(e){
-    var bt=e.target.closest('button');if(!bt)return;var g=bt.dataset.g,tk=ensureGrid(d);
-    if(g==='scan'){T[d]=null;analyse(d);s.bi=null;return}
-    if(!tk)return;
-    if(g==='half'){tk.bl*=2}else if(g==='dbl'){tk.bl/=2}
-    else if(g==='l'){tk.off=((tk.off-.02)%tk.bl+tk.bl)%tk.bl}else if(g==='r'){tk.off=(tk.off+.02)%tk.bl}
-    s.bi=null});
-  latShow();
+  /* v48: the removed tune strip no longer exposes flash-delay or beat-grid buttons. */
+  s.stat=null;
   a.addEventListener('seeked',function(){s.bi=null});a.addEventListener('play',function(){s.bi=null});
   /* pitch readout */
   var pw=deck.querySelector('.pitch-wrap'),pv=el('div','cx-pitchval','0.0%'),ps=$('pitch'+d);
@@ -18300,6 +18424,386 @@ else window.addEventListener('load',function(){setTimeout(start,60)});
   }
   document.addEventListener('pointerup',finish,true);
   document.addEventListener('pointercancel',finish,true);
+})();
+</script>
+
+
+<!-- GLCTC1 v45 - LOCK-SCREEN / NOTIFICATION MEDIA CONTROLS (Media Session API).
+     Shows cover art, title, artist, previous / play-pause / next and a seek bar
+     on the phone lock screen, notification shade, watch and car/Bluetooth controls.
+     Cover art + title come straight from the track data (not the page image),
+     so they are correct whichever way the track was started.
+     Self-contained: it only listens to the existing players. -->
+<script>
+(function () {
+  "use strict";
+  if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+  var ms = navigator.mediaSession;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var PLAYERS = {
+    glctc1PlaylistAudio: "PLAYLIST MASTER",
+    libraryPlayer: "LIBRARY",
+    audioA: "DECK A",
+    audioB: "DECK B"
+  };
+
+  var activeId = "glctc1PlaylistAudio";
+  var tracks = {};          // current track object per player id
+  var artCache = {};        // cover path -> usable URL
+  var fallbackUrl = "";
+
+  function field(t, a, b) { return t ? (t[a] || t[b] || "") : ""; }
+  function isUrl(v) { return /^(https?:|data:image\/|blob:)/i.test(v); }
+
+  // ---------- fallback cover (neon tile) ----------
+  (function () {
+    try {
+      var c = document.createElement("canvas"); c.width = c.height = 512;
+      var g = c.getContext("2d");
+      var bg = g.createLinearGradient(0, 0, 512, 512);
+      bg.addColorStop(0, "#0a0e22"); bg.addColorStop(1, "#2a0a3a");
+      g.fillStyle = bg; g.fillRect(0, 0, 512, 512);
+      g.strokeStyle = "#00ffff"; g.lineWidth = 10;
+      g.beginPath(); g.arc(256, 256, 170, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = "#ff9bda"; g.font = "bold 120px sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("GLC", 256, 256);
+      fallbackUrl = c.toDataURL("image/png");
+    } catch (e) {}
+  })();
+
+  // ---------- cover art: storage path -> signed URL ----------
+  async function resolveArt(track) {
+    var v = String(field(track, "cover_art", "Cover Art") || "").trim();
+    if (!v) return "";
+    if (isUrl(v)) return v;
+    if (artCache[v]) return artCache[v];
+    try {
+      if (typeof supabaseClient !== "undefined") {
+        var r = await supabaseClient.storage.from("tracks").createSignedUrl(v, 60 * 60 * 24);
+        if (r && r.data && r.data.signedUrl) { artCache[v] = r.data.signedUrl; return artCache[v]; }
+      }
+    } catch (e) {}
+    return "";
+  }
+
+  function artList(url) {
+    url = url || fallbackUrl;
+    if (!url) return [];
+    return [{ src: url, sizes: "512x512" }, { src: url, sizes: "256x256" }, { src: url, sizes: "128x128" }];
+  }
+
+  // ---------- metadata ----------
+  var version = 0;
+  function domText(id) { var e = $(id); return e ? (e.textContent || "").trim() : ""; }
+
+  async function publish() {
+    var id = activeId, my = ++version;
+    var t = tracks[id];
+    var title = field(t, "title", "Track Title");
+    var artist = field(t, "artist", "Artist");
+    var album = field(t, "album", "Album");
+
+    if (!title && id === "glctc1PlaylistAudio") title = domText("glctc1PlaylistTitle");
+    if (!artist && id === "glctc1PlaylistAudio") artist = domText("glctc1PlaylistArtist");
+    if (/^(no track|no artist|—)/i.test(title)) title = "";
+    if (/^(no artist|—)/i.test(artist)) artist = "";
+
+    // show text straight away, with the fallback cover
+    try {
+      ms.metadata = new MediaMetadata({
+        title: title || PLAYERS[id], artist: artist || "GLCTC1",
+        album: album || "GLCTC1 Play Space", artwork: artList("")
+      });
+    } catch (e) {}
+
+    // then swap in the real cover once it is resolved
+    var url = await resolveArt(t);
+    if (!url && id === "glctc1PlaylistAudio") {
+      var img = $("glctc1PlaylistArtwork");
+      if (img && img.complete && img.naturalWidth > 0 && isUrl(img.currentSrc || "")) url = img.currentSrc;
+    }
+    if (my !== version || !url) return;
+    try {
+      ms.metadata = new MediaMetadata({
+        title: title || PLAYERS[id], artist: artist || "GLCTC1",
+        album: album || "GLCTC1 Play Space", artwork: artList(url)
+      });
+    } catch (e) {}
+  }
+
+  // ---------- seek bar ----------
+  function pushPosition() {
+    var a = $(activeId);
+    if (!a || !ms.setPositionState) return;
+    var d = a.duration;
+    if (!isFinite(d) || d <= 0) return;
+    try {
+      ms.setPositionState({ duration: d, playbackRate: a.playbackRate || 1,
+        position: Math.min(Math.max(a.currentTime || 0, 0), d) });
+    } catch (e) {}
+  }
+
+  // ---------- buttons ----------
+  function act(name, fn) { try { ms.setActionHandler(name, fn); } catch (e) {} }
+
+  function skip(btnId) {
+    // If a deck/library preview is the active player, stop it and jump to the playlist.
+    var a = $(activeId);
+    if (a && activeId !== "glctc1PlaylistAudio" && !a.paused) a.pause();
+    activeId = "glctc1PlaylistAudio";
+    var b = $(btnId);
+    if (b) b.click();
+  }
+
+  act("play",  function () { var a = $(activeId); if (a) a.play().catch(function () {}); });
+  act("pause", function () { var a = $(activeId); if (a) a.pause(); });
+  act("previoustrack", function () { skip("glctc1PlaylistPrev"); });
+  act("nexttrack",     function () { skip("glctc1PlaylistNext"); });
+  act("seekto", function (d) {
+    var a = $(activeId); if (!a || d.seekTime == null) return;
+    a.currentTime = d.seekTime; pushPosition();
+  });
+  // NOTE: seekbackward / seekforward are deliberately NOT registered:
+  // Android would show them in place of the previous / next buttons.
+
+  // ---------- follow the tracks that get loaded ----------
+  function wrap(name, idOf, trackIndex) {
+    var orig = window[name];
+    if (typeof orig !== "function") return;
+    window[name] = function () {
+      var t = arguments[trackIndex];
+      var id = idOf.apply(null, arguments);
+      if (t && typeof t === "object" && id) {
+        tracks[id] = t;
+        if (id === activeId || id === "glctc1PlaylistAudio") { activeId = id; publish(); }
+      }
+      return orig.apply(this, arguments);
+    };
+  }
+  wrap("playPlaylistMasterTrack", function () { return "glctc1PlaylistAudio"; }, 0);
+  wrap("loadToDeck", function (deck) {
+    var target = String(deck == null ? "" : deck).toUpperCase();
+    if (target !== "A" && target !== "B") return null;
+    return target === "A" ? "audioA" : "audioB";
+  }, 1);
+
+  Object.keys(PLAYERS).forEach(function (id) {
+    var a = $(id); if (!a) return;
+    a.addEventListener("play", function () {
+      activeId = id;
+      ms.playbackState = "playing";
+      publish(); pushPosition();
+    });
+    a.addEventListener("playing", function () { if (activeId === id) { ms.playbackState = "playing"; pushPosition(); } });
+    a.addEventListener("pause", function () { if (activeId === id && !a.ended) ms.playbackState = "paused"; });
+    a.addEventListener("loadedmetadata", function () { if (activeId === id) { publish(); pushPosition(); } });
+    a.addEventListener("durationchange", function () { if (activeId === id) pushPosition(); });
+    a.addEventListener("seeked", function () { if (activeId === id) pushPosition(); });
+    var last = 0;
+    a.addEventListener("timeupdate", function () {
+      if (activeId !== id) return;
+      var n = Date.now(); if (n - last > 5000) { last = n; pushPosition(); }
+    });
+  });
+
+  // keep text in step if the playlist title/artist change on screen
+  var mo = new MutationObserver(function () {
+    var a = $(activeId); if (a && !a.paused) publish();
+  });
+  ["glctc1PlaylistTitle", "glctc1PlaylistArtist"].forEach(function (id) {
+    var e = $(id); if (e) mo.observe(e, { childList: true, characterData: true, subtree: true });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    var a = $(activeId); if (!document.hidden && a && !a.paused) publish();
+  });
+
+  publish();
+})();
+</script>
+
+
+<!-- GLCTC1 v46 - DECK SYNC + TIDIED TRANSPORT SECTION
+     SYNC (beside SLOW MO on both decks):
+       1st press on a deck  = that deck's BPM is set as the reference (button pulses amber)
+       press SYNC on the other deck = it matches the reference BPM (both buttons go green)
+       press SYNC again     = release (pitch stays where it is)
+     Works either way round (A then B, or B then A). -->
+<style>
+body .deck .transport-row .cx-rowlbl{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:6px 2px 0;font:700 .62rem var(--cx-ui);letter-spacing:.16em;text-transform:uppercase;color:var(--cx-dim)}
+body .deck .transport-row .cx-rowlbl:first-child{margin-top:0}
+body .deck .transport-row .cx-rowlbl em{font-style:normal;font-weight:400;letter-spacing:.03em;text-transform:none;opacity:.8;text-align:right;min-width:0}
+body .deck .transport-row .cx-q{grid-column:span 3;min-height:58px!important;font-size:.9rem!important}
+body .deck .transport-row .cx-sync{line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+body .deck .transport-row .cx-sync small{font:600 .6rem var(--cx-mono);letter-spacing:.03em;text-transform:none;min-height:.7rem;opacity:.95}
+body .deck .transport-row button.cx-sync.armed{color:#1a1000!important;background:linear-gradient(180deg,#ffd36a,#ff9d1c)!important;border-color:#ffe3a0!important;animation:cxSyncPulse 1s ease-in-out infinite}
+body .deck .transport-row button.cx-sync.locked{color:#02140c!important;background:linear-gradient(180deg,#5dffa8,#17c46a)!important;border-color:#8fffc5!important;box-shadow:0 0 14px #3dffb0!important}
+@keyframes cxSyncPulse{50%{box-shadow:0 0 16px #ffb020}}
+</style>
+<script>
+(function () {
+  "use strict";
+  var $ = function (i) { return document.getElementById(i); };
+  var clamp = function (v, a, b) { return Math.min(b, Math.max(a, v)); };
+
+  /* pure maths: the pitch value that makes `cur` BPM play at `ref` BPM.
+     Also tries half / double time so 70 vs 140 BPM tracks still lock sensibly. */
+  function pickRate(refBpm, curBpm, pitch, lo, hi) {
+    var base = curBpm / pitch, best = null;
+    [[1, ""], [2, "double"], [0.5, "half"]].forEach(function (m) {
+      var r = (refBpm * m[0]) / base;
+      var score = Math.abs(Math.log(r));
+      if (r >= lo && r <= hi && (best === null || score < best.score)) best = { rate: r, mode: m[1], score: score };
+    });
+    if (best) return { rate: best.rate, mode: best.mode, clamped: false };
+    return { rate: clamp(refBpm / base, lo, hi), mode: "", clamped: true };
+  }
+
+  var DECKS = ["A", "B"];
+  var st = { state: "idle", ref: null };      // idle | armed | locked
+  var note = "";                               // one-off message for the hint line
+  var noteTimer = null;
+
+  function deckEl(d) { return $("deck" + d); }
+  function readBpm(d) {                         // the BPM shown in the deck header (base BPM x pitch)
+    var b = document.querySelector("#deck" + d + " .cx-bpm b");
+    var v = b ? parseFloat(b.textContent) : NaN;
+    return isFinite(v) && v > 0 ? v : 0;
+  }
+  function pitchEl(d) { return $("pitch" + d); }
+  function other(d) { return d === "A" ? "B" : "A"; }
+
+  function say(msg) {
+    note = msg; clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { note = ""; render(); }, 4500);
+    render();
+  }
+
+  function render() {
+    DECKS.forEach(function (d) {
+      var btn = $("beatSync" + d); if (!btn) return;
+      var small = btn.querySelector("small");
+      btn.classList.toggle("armed", st.state === "armed" && st.ref === d);
+      btn.classList.toggle("locked", st.state === "locked");
+      var t = "";
+      if (st.state === "armed" && st.ref === d) t = "SET " + readBpm(d).toFixed(1);
+      else if (st.state === "locked") t = "= " + readBpm(d).toFixed(1);
+      if (small && small.textContent !== t) small.textContent = t;
+
+      var hint = deckEl(d) && deckEl(d).querySelector(".cx-tempohint");
+      if (hint) {
+        var h;
+        if (note) h = note;
+        else if (st.state === "idle") h = "SYNC: press on one deck to set the BPM, then on the other to match";
+        else if (st.state === "armed") h = st.ref === d ? "Deck " + d + " BPM set - press SYNC on Deck " + other(d)
+                                                         : "Press SYNC to match Deck " + st.ref;
+        else h = "Decks matched - press SYNC to release";
+        if (hint.textContent !== h) hint.textContent = h;
+      }
+    });
+  }
+
+  function release() { st.state = "idle"; st.ref = null; render(); }
+
+  function match(follower, ref) {
+    var a = $("audio" + follower), ps = pitchEl(follower);
+    var refBpm = readBpm(ref), cur = readBpm(follower);
+    if (!a || !ps || !refBpm || !cur) { say("Load a track on both decks first"); return false; }
+    if (a._slowMo && typeof toggleSlowMo === "function") { try { toggleSlowMo(follower); } catch (e) {} }
+    var pitch = +ps.value || 1;
+    var r = pickRate(refBpm, cur, pitch, +ps.min, +ps.max);
+    ps.value = r.rate;                          // slider snaps to its step
+    var applied = +ps.value;
+    if (typeof setPitch === "function") { try { setPitch(follower, applied); } catch (e) { a.playbackRate = applied; } }
+    else a.playbackRate = applied;
+    try { tapTempoHistory[follower] = []; } catch (e) {}
+    if (r.clamped) say("Deck " + follower + " can't reach " + refBpm.toFixed(1) + " BPM - pitch range limit");
+    else if (r.mode) say("Matched at " + r.mode + " time");
+    return true;
+  }
+
+  function press(d) {
+    if (st.state === "locked") { release(); return; }
+    if (st.state === "armed") {
+      if (st.ref === d) { release(); return; }                 // cancel
+      if (match(d, st.ref)) { st.state = "locked"; render(); }  // 2nd deck matches the 1st
+      return;
+    }
+    if (!readBpm(d)) { say("Load a track on Deck " + d + " first"); return; }
+    st.state = "armed"; st.ref = d; render();                   // 1st deck sets the BPM
+  }
+
+  function buildRows(d) {
+    var deck = deckEl(d), tr = deck && deck.querySelector(".transport-row");
+    if (!tr || tr.dataset.v46) return;
+    tr.dataset.v46 = "1";
+    var g = function (n) { return $(n + d); };
+
+    function label(text, hintClass, hint) {
+      var e = document.createElement("div"); e.className = "cx-rowlbl";
+      e.innerHTML = text + "<em" + (hintClass ? ' class="' + hintClass + '"' : "") + ">" + (hint || "") + "</em>";
+      return e;
+    }
+    function setBtn(id, text, title, cls) {
+      var b = g(id); if (!b) return null;
+      b.classList.remove("cx-big", "cx-s3", "cx-s4", "cx-q");
+      b.classList.add(cls);
+      if (text) b.textContent = text;
+      if (title) b.title = title;
+      return b;
+    }
+
+    // new SYNC button
+    var sync = document.createElement("button");
+    sync.type = "button"; sync.id = "beatSync" + d; sync.className = "cx-sync cx-s4";
+    sync.title = "Tap on one deck to set the BPM, then tap on the other deck to match it";
+    sync.innerHTML = "SYNC<small></small>";
+    sync.addEventListener("click", function () { press(d); });
+
+    var order = [
+      label("Transport", "", "play · set cue · jump back to cue"),
+      setBtn("play", "Play", "Play", "cx-q"),
+      setBtn("cue", "Cue", "Set the cue point (press again to clear)", "cx-q"),
+      setBtn("loop", "Cue ▶", "Jump back to the cue point and play", "cx-q"),
+      setBtn("stop", "Stop", "Stop", "cx-q"),
+
+      label("Position", "", "snap to bar · nudge 50 ms"),
+      setBtn("snapLeft", "◀ Snap", "Snap to the previous bar", "cx-s3"),
+      setBtn("snapRight", "Snap ▶", "Snap to the next bar", "cx-s3"),
+      setBtn("tapBack", "◀ Nudge", "Nudge back 50 ms", "cx-s3"),
+      setBtn("tapForward", "Nudge ▶", "Nudge forward 50 ms", "cx-s3"),
+
+      label("Tempo", "cx-tempohint", ""),
+      setBtn("sync", "Tap Tempo", "Tap to set tempo · hold 1 s to cancel", "cx-s4"),
+      setBtn("slowMo", "Slow Mo", "Half speed on / off", "cx-s4"),
+      sync
+    ];
+    order.forEach(function (n) { if (n) tr.appendChild(n); });   // appending re-orders the existing buttons
+
+    var ps = pitchEl(d);
+    if (ps) {
+      ps.step = "0.001";                                          // fine enough to lock BPM exactly
+      ps.addEventListener("input", function () { if (st.state === "locked") release(); });
+    }
+    var a = $("audio" + d);
+    if (a) a.addEventListener("loadedmetadata", function () { if (st.state !== "idle") release(); });
+  }
+
+  function start() {
+    var ready = DECKS.every(function (d) {
+      var dk = deckEl(d);
+      return dk && dk.dataset.cx && dk.querySelector(".transport-row") && dk.querySelector(".cx-bpm b");
+    });
+    if (!ready) return setTimeout(start, 250);
+    DECKS.forEach(buildRows);
+    render();
+    setInterval(render, 300);
+  }
+  if (document.readyState === "complete") setTimeout(start, 120);
+  else window.addEventListener("load", function () { setTimeout(start, 120); });
+
+  window.glctc1SyncTest = { pickRate: pickRate };
 })();
 </script>
 

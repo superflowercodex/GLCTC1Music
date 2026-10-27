@@ -17488,7 +17488,7 @@ if (sharedTrackId) {
 @media(max-width:600px){.glctc1-favourite-item{align-items:flex-start}.glctc1-favourite-item button{white-space:normal}}
 </style>
 
-<!-- ===== GLCTC1 PLAY COUNTER v23: track playback -> Record-Space plays ===== -->
+<!-- ===== GLCTC1 PLAY COUNTER v32: track playback -> Record-Space plays (remembered locally, retried, tolerant matching) ===== -->
 <script>
 (function () {
   "use strict";
@@ -17529,70 +17529,118 @@ if (sharedTrackId) {
     return !!(t && (t.master_audio || t["Master Audio"] || t.sample || t.audio || t.audio_url || t["Audio URL"]));
   }
 
+  var QKEY = "glctc1_pending_plays_v1";
+  function qRead() { try { var a = JSON.parse(localStorage.getItem(QKEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function qWrite(a) { try { localStorage.setItem(QKEY, JSON.stringify(a.slice(-500))); } catch (e) {} }
+  function qAdd(k) {
+    var a = qRead();
+    var item = { id: Date.now() + "-" + Math.random().toString(36).slice(2), cat: k.cat, artist: k.artist, title: k.title, ts: Date.now() };
+    a.push(item); qWrite(a); return item.id;
+  }
+  function qRemove(id) { qWrite(qRead().filter(function (x) { return x.id !== id; })); }
+
+  function esc(v) { return v.replace(/[\\%_]/g, "\\$&"); }
+  var SELECT = "record_id,plays,artist,track_title,favourites";
+
   async function findRow(k) {
     if (!k || (!k.cat && (!k.artist || !k.title))) return null;
 
-    // Prefer the catalogue identifier: Record Space uses record_id (text),
-    // not an id column. The Master Library's "ID Cat No" maps to record_id.
+    // 1) Catalogue number -> record_id. A unique record_id match is accepted even
+    //    if artist/title are spelled slightly differently in Record Space.
     if (k.cat) {
-      var byCat = await supabaseClient.from(TABLE)
-        .select("record_id,plays,artist,track_title,favourites")
-        .eq("record_id", k.cat)
-        .limit(2);
+      var byCat = await supabaseClient.from(TABLE).select(SELECT).eq("record_id", k.cat).limit(5);
+      if ((!byCat.error) && Array.isArray(byCat.data) && !byCat.data.length) {
+        // case / spacing tolerant retry
+        byCat = await supabaseClient.from(TABLE).select(SELECT).ilike("record_id", esc(k.cat)).limit(5);
+      }
       if (!byCat.error && Array.isArray(byCat.data) && byCat.data.length) {
         var exactCat = byCat.data.find(function (row) {
-          return normal(row.artist) === normal(k.artist) &&
-                 normal(row.track_title) === normal(k.title);
+          return normal(row.artist) === normal(k.artist) && normal(row.track_title) === normal(k.title);
         });
-        // Prefer exact artist/title when present. If the source only carries
-        // its catalogue ID, accept the unique record_id match.
         if (exactCat) return exactCat;
-        if ((!k.artist || !k.title) && byCat.data.length === 1) return byCat.data[0];
+        if (byCat.data.length === 1) return byCat.data[0];
       } else if (byCat.error) {
         console.warn("GLCTC1 PLAY COUNTER: record_id lookup failed; trying artist/title:", byCat.error);
       }
     }
 
-    // Artist/title fallback is only possible when both values are present.
-    if (!k.artist || !k.title) return null;
-    // Fallback to the actual Record Space artist/title columns. This is also
-    // used when a Master Library catalogue number differs from record_id.
-    var r = await supabaseClient.from(TABLE)
-      .select("record_id,plays,artist,track_title,favourites")
-      .ilike("artist", k.artist.replace(/[\\%_]/g, "\\$&"))
-      .ilike("track_title", k.title.replace(/[\\%_]/g, "\\$&"))
-      .limit(10);
+    if (!k.title) return null;
 
-    if (r.error) {
-      console.error("GLCTC1 PLAY COUNTER: Record-Space lookup failed:", r.error);
-      return null;
+    // 2) Exact artist + title (case-insensitive)
+    if (k.artist) {
+      var r = await supabaseClient.from(TABLE).select(SELECT)
+        .ilike("artist", esc(k.artist)).ilike("track_title", esc(k.title)).limit(10);
+      if (r.error) {
+        console.error("GLCTC1 PLAY COUNTER: Record-Space lookup failed:", r.error);
+      } else if (Array.isArray(r.data) && r.data.length) {
+        var exact = r.data.find(function (row) {
+          return normal(row.artist) === normal(k.artist) && normal(row.track_title) === normal(k.title);
+        });
+        return exact || r.data[0];
+      }
     }
-    var rows = Array.isArray(r.data) ? r.data : [];
-    var exact = rows.find(function (row) {
-      return normal(row.artist) === normal(k.artist) &&
-             normal(row.track_title) === normal(k.title);
-    });
-    return exact || null;
+
+    // 3) Title only, accepted only when it is unambiguous
+    var t = await supabaseClient.from(TABLE).select(SELECT).ilike("track_title", esc(k.title)).limit(3);
+    if (!t.error && Array.isArray(t.data) && t.data.length === 1) return t.data[0];
+    return null;
   }
 
   async function addPlay(k) {
     var row = await findRow(k);
     if (!row) {
-      console.warn("GLCTC1 PLAY COUNTER: no matching Record-Space row for artist/title:", k);
+      console.warn("GLCTC1 PLAY COUNTER: no matching Record-Space row for:", k);
       return { plays: null, missing: true };
     }
-    // Atomic database function avoids a browser-side read/modify/write race and
-    // does not require granting direct UPDATE access to the whole record table.
-    var result = await supabaseClient.rpc("increment_record_space_play", { p_record_id: String(row.record_id) });
-    if (result.error) {
-      console.error("GLCTC1 PLAY COUNTER: atomic play RPC failed; check that the existing play-counter function and grants are installed:", result.error);
-      return { plays: null, error: result.error };
+    var id = String(row.record_id);
+
+    // Preferred: atomic database function.
+    var result = await supabaseClient.rpc("increment_record_space_play", { p_record_id: id });
+    if (!result.error) {
+      var data = result.data;
+      if (Array.isArray(data)) data = data[0];
+      if (data && typeof data === "object" && data.plays != null) return { plays: Number(data.plays) };
+      if (typeof data === "number") return { plays: data };
+    } else {
+      console.warn("GLCTC1 PLAY COUNTER: RPC failed, trying direct update:", result.error);
     }
-    var data = result.data;
-    if (Array.isArray(data)) data = data[0];
-    if (data && data.plays != null) return { plays: Number(data.plays) };
-    console.error("GLCTC1 PLAY COUNTER: play RPC returned no total:", result.data);
-    return { plays: null, error: true };
+
+    // Fallback: read -> update (works when the table allows UPDATE for this user).
+    var cur = await supabaseClient.from(TABLE).select("plays").eq("record_id", id).limit(1);
+    if (cur.error || !cur.data || !cur.data.length) return { plays: null, error: cur.error || true };
+    var next = (Number(cur.data[0].plays) || 0) + 1;
+    var up = await supabaseClient.from(TABLE).update({ plays: next }).eq("record_id", id).select("plays");
+    if (up.error) { console.error("GLCTC1 PLAY COUNTER: direct update failed:", up.error); return { plays: null, error: up.error }; }
+    if (!up.data || !up.data.length) {
+      console.error("GLCTC1 PLAY COUNTER: update touched 0 rows - Record Space RLS UPDATE policy / RPC grant needed");
+      return { plays: null, error: true };
+    }
+    return { plays: Number(up.data[0].plays) || next };
+  }
+
+  var flushing = false;
+  async function flushQueue() {
+    if (flushing) return;
+    flushing = true;
+    try {
+      var items = qRead();
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var res = await addPlay({ cat: it.cat, artist: it.artist, title: it.title });
+        if (res.plays != null) {
+          qRemove(it.id);
+          announce({ artist: it.artist, title: it.title }, res.plays);
+        } else if (res.missing) {
+          if (Date.now() - it.ts > 14 * 864e5) qRemove(it.id); // give up after 14 days
+        } else break; // network / permission problem: retry later
+      }
+    } catch (e) { console.warn("GLCTC1 PLAY COUNTER: queue flush failed:", e); }
+    flushing = false;
+  }
+
+  function announce(k, plays) {
+    window.dispatchEvent(new CustomEvent("glctc1:play-counted", { detail: { artist: k.artist, title: k.title, plays: Number(plays) || 0 } }));
+    try { var bc = new BroadcastChannel("glctc1-plays"); bc.postMessage({ artist: k.artist, title: k.title, plays: Number(plays) || 0 }); bc.close(); } catch (e) {}
   }
 
   function setBadge(p, text, tip) {
@@ -17620,19 +17668,22 @@ if (sharedTrackId) {
   async function countPlay(p) {
     var k = keyOf(p.track);
     if (!k || (!k.cat && (!k.artist || !k.title))) return;
+    // Write to this device first so the play is remembered even if the save fails.
+    var qid = qAdd(k);
     try {
       var res = await addPlay(k);
       if (res.plays != null) {
+        qRemove(qid);
         setBadge(p, "PLAYS " + (Number(res.plays) || 0), "Play saved to Record Space");
-        // Broadcast so any other same-page Record-Space widgets can refresh.
-        window.dispatchEvent(new CustomEvent("glctc1:play-counted", {
-          detail: { artist: k.artist, title: k.title, plays: Number(res.plays) || 0 }
-        }));
+        announce(k, res.plays);
+        flushQueue();
+      } else if (res.missing) {
+        setBadge(p, "PLAYS !", "Track not found in Record Space; the play is kept and will be added once a matching record exists");
       } else {
-        setBadge(p, "PLAYS !", res.missing ? "Track not found in Record Space; add/match its record first" : "Play could not be saved; check console and Supabase RLS");
+        setBadge(p, "PLAYS ⏳", "Play kept on this device; will retry saving to Record Space");
       }
     } catch (e) {
-      setBadge(p, "PLAYS !", "Play could not be saved; check console and Supabase RLS");
+      setBadge(p, "PLAYS ⏳", "Play kept on this device; will retry saving to Record Space");
       console.error("GLCTC1 PLAY COUNTER:", e);
     }
   }
@@ -17743,8 +17794,10 @@ if (sharedTrackId) {
     });
     el.addEventListener("playing", function () { p.last = el.currentTime; });
     el.addEventListener("waiting", function () { p.last = null; });
-    el.addEventListener("pause", function () { resetRun(p); });
-    el.addEventListener("seeking", function () { resetRun(p); });
+    // Listening time is kept across pauses, cues and scratching (only the clock restarts).
+    el.addEventListener("pause", function () { p.last = null; });
+    el.addEventListener("seeking", function () { p.last = null; });
+    el.addEventListener("seeked", function () { p.last = el.currentTime; });
     el.addEventListener("timeupdate", function () {
       if (el.paused || el.seeking || !p.track) { p.last = null; return; }
       var cur = el.currentTime;
@@ -17770,7 +17823,7 @@ if (sharedTrackId) {
     });
   }
 
-  function wrap(name, choosePlayer) {
+  function wrap(name, trackIndex, choosePlayer) {
     var original = window[name];
     if (typeof original !== "function") {
       console.warn("GLCTC1 PLAY COUNTER: " + name + "() not found during initialisation");
@@ -17778,9 +17831,9 @@ if (sharedTrackId) {
     }
     window[name] = function () {
       var self = this, args = arguments;
+      var track = args[trackIndex];
       var p = choosePlayer.apply(null, args);
-      if (p && args[1] !== undefined) setTrack(p, args[1]);
-      else if (p && args[0] && typeof args[0] === "object") setTrack(p, args[0]);
+      if (p && track && typeof track === "object") setTrack(p, track);
       var result = original.apply(self, args);
       if (p) {
         Promise.resolve(result).then(function () {
@@ -17799,9 +17852,14 @@ if (sharedTrackId) {
   }
 
   PLAYER_IDS.forEach(attach);
-  wrap("loadToDeck", function (deck, track) { return pick(deck === "A" ? "audioA" : "audioB", track); });
-  wrap("playLibraryTrack", function (track) { return pick("libraryPlayer", track); });
-  wrap("playPlaylistMasterTrack", function (track) { return pick("glctc1PlaylistAudio", track); });
+  setTimeout(flushQueue, 2500);
+  setInterval(flushQueue, 60000);
+  window.addEventListener("online", flushQueue);
+  window.addEventListener("pagehide", function () { /* queue is already in localStorage */ });
+  window.glctc1FlushPlays = flushQueue;
+  wrap("loadToDeck", 1, function (deck, track) { return pick(deck === "A" ? "audioA" : "audioB", track); });
+  wrap("playLibraryTrack", 0, function (track) { return pick("libraryPlayer", track); });
+  wrap("playPlaylistMasterTrack", 0, function (track) { return pick("glctc1PlaylistAudio", track); });
 
   var originalStem = window.loadStemToDeck;
   if (typeof originalStem === "function") {
@@ -17818,6 +17876,7 @@ if (sharedTrackId) {
 
   if (supabaseClient && supabaseClient.auth && supabaseClient.auth.onAuthStateChange) {
     supabaseClient.auth.onAuthStateChange(function () {
+      flushQueue();
       Object.keys(players).forEach(function (id) { refreshFavourite(players[id]); });
     });
   }

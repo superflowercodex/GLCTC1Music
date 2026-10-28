@@ -1,7 +1,7 @@
 <!DOCTYPE html>  <html lang="en">  
 <head>  
   <meta charset="UTF-8">
-  <!-- v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
+  <!-- v35: Master Library search runs on Enter (wired at top level, honours filter menu); track + playlist shares attach cover-art image; playlist link compact + truncated text. v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
   <title>GLCTC1 – Play Space · Cosmic Decks</title>    <style>  
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');  
   
@@ -5179,7 +5179,11 @@ if (masterLibraryEditorModule) {
   <input
     type="text"
     id="librarySearch"
-    placeholder="Search library..."
+    placeholder="Search library... (press Enter)"
+    enterkeyhint="search"
+    autocomplete="off"
+    autocapitalize="off"
+    spellcheck="false"
     style="
       flex:1;
       padding:8px;
@@ -5494,6 +5498,127 @@ async function glctc1CopyText(text) {
   );
 
   return false;
+}
+
+
+// =====================================================
+// 🖼️ SHARE WITH ARTWORK IMAGE  (v35)
+// Attaches the cover art as an image file in the phone's
+// share sheet. Falls back to the plain link share if the
+// image or file-sharing is not available.
+// =====================================================
+
+function glctc1FindTrackArt(track) {
+
+  if (!track) return "";
+
+  let art = track.cover_art || track["Cover Art"] || "";
+
+  if (!art && typeof library !== "undefined" && Array.isArray(library)) {
+    const id = track.id || track.id_cat_no || track["ID Cat No"];
+    const match = library.find(t =>
+      String(t.id) === String(id) || String(t.id_cat_no) === String(id)
+    );
+    if (match) art = match.cover_art || "";
+  }
+
+  return art;
+}
+
+async function glctc1ResolveArtworkUrl(art) {
+
+  art = String(art || "").trim();
+
+  if (!art) return "";
+
+  if (/^(https?:|data:image\/|blob:)/i.test(art)) return art;
+
+  try {
+    const { data, error } =
+      await supabaseClient.storage
+        .from("tracks")
+        .createSignedUrl(art, 60 * 60);
+
+    if (!error && data && data.signedUrl) return data.signedUrl;
+  } catch (e) {
+    console.log("Artwork URL failed:", e);
+  }
+
+  return "";
+}
+
+async function glctc1BuildShareImage(art, baseName) {
+
+  try {
+
+    const url = await glctc1ResolveArtworkUrl(art);
+
+    if (!url) return null;
+
+    const res = await fetch(url);
+
+    if (!res.ok) return null;
+
+    const blob = await res.blob();
+
+    const type =
+      blob.type && blob.type.startsWith("image/")
+        ? blob.type
+        : "image/jpeg";
+
+    const ext =
+      type.includes("png") ? "png" :
+      type.includes("webp") ? "webp" :
+      type.includes("gif") ? "gif" : "jpg";
+
+    const safe =
+      String(baseName || "glctc1")
+        .replace(/[^\w\-]+/g, "_")
+        .slice(0, 40) || "glctc1";
+
+    return new File([blob], safe + "." + ext, { type });
+
+  } catch (e) {
+    console.log("Share image failed:", e);
+    return null;
+  }
+}
+
+// returns "shared" | "cancelled" | "copied"
+async function glctc1ShareWithImage({ title, text, url, art, name }) {
+
+  if (!navigator.share) {
+    await glctc1CopyText(url);
+    return "copied";
+  }
+
+  const file = await glctc1BuildShareImage(art, name);
+
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      // Most share sheets drop `url` when a file is attached,
+      // so the link goes inside the text.
+      await navigator.share({ title, text: text + "\n" + url, files: [file] });
+      return "shared";
+    } catch (e) {
+      if (e && e.name === "AbortError") return "cancelled";
+      console.log("Image share failed, trying link only:", e);
+    }
+  }
+
+  try {
+    await navigator.share({ title, text, url });
+    return "shared";
+  } catch (e) {
+    if (e && e.name === "AbortError") return "cancelled";
+    await glctc1CopyText(url);
+    return "copied";
+  }
+}
+
+function glctc1Truncate(str, max) {
+  str = String(str || "").trim();
+  return str.length > max ? str.slice(0, max - 1).trimEnd() + "…" : str;
 }
 
 
@@ -8838,39 +8963,28 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
   const shareUrl =
     `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}`;
 
-  // 📱 Use the phone's native Share menu
-  if (navigator.share) {
+  // 📱 Native Share menu with the cover art attached (v35)
+  try {
 
-    try {
+    const result = await glctc1ShareWithImage({
+      title: glctc1Truncate(selectedLibraryTrack.title || "GLCTC1 Track", 60),
+      text: glctc1Truncate(
+        `${selectedLibraryTrack.artist || ""} - ${selectedLibraryTrack.title || ""}`, 80),
+      url: shareUrl,
+      art: glctc1FindTrackArt(selectedLibraryTrack),
+      name: selectedLibraryTrack.title
+    });
 
-      await navigator.share({
-        title: selectedLibraryTrack.title || "GLCTC1 Track",
-        text:
-          `${selectedLibraryTrack.artist || ""} - ${selectedLibraryTrack.title || ""}`,
-        url: shareUrl
-      });
-
-    } catch (error) {
-
-      // User cancelled the share window
-      console.log("Share cancelled.");
-
+    if (result === "copied") {
+      alert("🔗 Track link copied to clipboard:\n\n" + shareUrl);
     }
 
-  } else {
-
-    // 💻 Fallback — copy link
-    await glctc1CopyText(shareUrl);
-
-    alert(
-      "🔗 Track link copied to clipboard:\n\n" +
-      shareUrl
-    );
-
+  } catch (error) {
+    console.log("Share cancelled.", error);
   }
 
 });
-  
+
 // --- LOADERS ---  
 // =====================================================
 // 🎚️ LOAD TRACK TO DECK  (v47 rebuilt)
@@ -10005,7 +10119,24 @@ function renderLibraryTable(searchTerm = "") {
       ];
 
 
-      return searchableFields.some(
+      // v35: honour the filter dropdown (All Fields or one column)
+      const filterEl =
+        document.getElementById("libraryFilter");
+
+      const filterField =
+        filterEl ? filterEl.value : "all";
+
+      let fieldsToSearch = searchableFields;
+
+      if (filterField && filterField !== "all") {
+        fieldsToSearch = [
+          filterField === "id_cat_no"
+            ? (track.id_cat_no || track.cat_no)
+            : track[filterField]
+        ];
+      }
+
+      return fieldsToSearch.some(
         value =>
           String(value || "")
             .toLowerCase()
@@ -14510,31 +14641,17 @@ if (glctc1PlaylistShareTrack) {
 
       try {
 
-        if (
-          navigator.share
-        ) {
+        const result = await glctc1ShareWithImage({
+          title: glctc1Truncate(glctc1TrackTitle(track), 60),
+          text: glctc1Truncate(
+            `${glctc1TrackTitle(track)} — ${glctc1TrackArtist(track)}`, 80),
+          url: shareUrl,
+          art: glctc1FindTrackArt(track),
+          name: glctc1TrackTitle(track)
+        });
 
-          await navigator.share({
-
-            title:
-              glctc1TrackTitle(track),
-
-            text:
-              `${glctc1TrackTitle(track)} — ${glctc1TrackArtist(track)}`,
-
-            url:
-              shareUrl
-          });
-
-        } else {
-
-          await glctc1CopyText(
-            shareUrl
-          );
-
-          alert(
-            "🔗 Track share link copied."
-          );
+        if (result === "copied") {
+          alert("🔗 Track share link copied.");
         }
 
       } catch (error) {
@@ -14584,81 +14701,67 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       // -----------------------------------------------
-      // CREATE SMALL SHARE PAYLOAD
+      // CREATE SMALL SHARE PAYLOAD  (v35: compact)
+      // Only the name + track IDs travel in the link.
+      // The artwork is NOT stored in the URL any more
+      // (it made the link huge) — the receiver uses the
+      // first track's cover art instead.
       // -----------------------------------------------
 
       const shareData = {
 
-  name:
-    playlist.name,
+        name:
+          glctc1Truncate(playlist.name || "Playlist", 60),
 
-  // 🖼️ PLAYLIST ARTWORK
-  // Use the first track's artwork as the
-  // shared playlist artwork reference.
-  artwork:
-    playlist.tracks[0]?.cover_art ||
-    playlist.tracks[0]?.["Cover Art"] ||
-    "",
-
-  tracks:
-    playlist.tracks
-      .map(track =>
-        track.id ||
-        track.id_cat_no ||
-        track["ID Cat No"]
-      )
-      .filter(Boolean)
-
-};
+        tracks:
+          playlist.tracks
+            .map(track =>
+              track.id ||
+              track.id_cat_no ||
+              track["ID Cat No"]
+            )
+            .filter(Boolean)
+      };
 
 
       // -----------------------------------------------
-      // ENCODE PLAYLIST INTO URL
+      // ENCODE (UTF-8 → URL-safe base64, no padding)
       // -----------------------------------------------
 
       const encodedPlaylist =
-        btoa(
-          encodeURIComponent(
-            JSON.stringify(
-              shareData
-            )
-          )
-        );
+        btoa(unescape(encodeURIComponent(JSON.stringify(shareData))))
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/g, "");
 
 
       const shareUrl =
         `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
 
 
+      // Short share text: truncated name + track count
+      const shareText =
+        `${glctc1Truncate(playlist.name || "Playlist", 40)} · ${shareData.tracks.length} track${shareData.tracks.length === 1 ? "" : "s"}`;
+
+
+      // Playlist image = playlist artwork or first track's cover
+      const playlistArt =
+        playlist.artwork ||
+        glctc1FindTrackArt(playlist.tracks[0]);
+
+
       try {
 
-        if (
-          navigator.share
-        ) {
+        const result = await glctc1ShareWithImage({
+          title: glctc1Truncate(playlist.name || "GLCTC1 Playlist", 40),
+          text: shareText,
+          url: shareUrl,
+          art: playlistArt,
+          name: playlist.name
+        });
 
-          await navigator.share({
-
-            title:
-              playlist.name,
-
-text:
-  playlist.name,
-
-            url:
-              shareUrl
-
-          });
-
-        } else {
-
-          await glctc1CopyText(
-            shareUrl
-          );
-
-          alert(
-            "🔗 Playlist share link copied."
-          );
-
+        if (result === "copied") {
+          alert("🔗 Playlist share link copied.");
         }
 
       } catch (error) {
@@ -14697,14 +14800,28 @@ if (sharedPlaylistData) {
 
   try {
 
-    const decodedPlaylist =
-      JSON.parse(
-        decodeURIComponent(
-          atob(
-            sharedPlaylistData
-          )
-        )
-      );
+    // v35: accepts new compact links AND older links
+    let decodedPlaylist = null;
+
+    {
+      let b64 =
+        String(sharedPlaylistData)
+          .replace(/ /g, "+")
+          .replace(/-/g, "+")
+          .replace(/_/g, "/");
+
+      while (b64.length % 4) b64 += "=";
+
+      const raw = atob(b64);
+
+      try {
+        decodedPlaylist =
+          JSON.parse(decodeURIComponent(escape(raw)));
+      } catch (e1) {
+        decodedPlaylist =
+          JSON.parse(decodeURIComponent(raw));
+      }
+    }
 
 
     if (
@@ -14788,6 +14905,78 @@ glctc1UpdatePlaylistPlayer();
 // END GLCTC1 PLAYLIST MASTER
 // =====================================================
   
+// =====================================================
+// 🔍 MASTER LIBRARY SEARCH — ENTER / FILTER  (v35)
+// Wired at top level so a failure elsewhere during startup
+// can no longer stop the Enter key from working.
+// =====================================================
+
+function glctc1RunLibrarySearch() {
+
+  if (typeof renderLibraryTable !== "function") return;
+
+  const box = document.getElementById("librarySearch");
+
+  renderLibraryTable(box ? box.value : "");
+}
+
+function glctc1InitLibrarySearch() {
+
+  const box = document.getElementById("librarySearch");
+
+  if (!box || box.dataset.glctc1SearchWired === "1") return;
+
+  box.dataset.glctc1SearchWired = "1";
+
+  box.setAttribute("enterkeyhint", "search");
+
+  let timer = null;
+
+  // Live search while typing (debounced)
+  box.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(glctc1RunLibrarySearch, 300);
+  });
+
+  // ENTER = search now
+  box.addEventListener("keydown", event => {
+
+    const isEnter =
+      event.key === "Enter" ||
+      event.keyCode === 13 ||
+      event.which === 13;
+
+    if (!isEnter || event.isComposing) return;
+
+    event.preventDefault();
+
+    clearTimeout(timer);
+
+    glctc1RunLibrarySearch();
+
+    // close the phone keyboard so the results are visible
+    box.blur();
+  });
+
+  // Clear (x) button on type="search" browsers
+  box.addEventListener("search", glctc1RunLibrarySearch);
+
+  // Changing the filter menu re-runs the search
+  const filter = document.getElementById("libraryFilter");
+
+  if (filter) {
+    filter.addEventListener("change", glctc1RunLibrarySearch);
+  }
+
+  console.log("✅ GLCTC1 Master Library Search READY");
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", glctc1InitLibrarySearch);
+} else {
+  glctc1InitLibrarySearch();
+}
+
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {
 
@@ -15019,7 +15208,10 @@ if (
     glctc1PendingSharedPlaylist.name,
 
   artwork:
-    glctc1PendingSharedPlaylist.artwork || "",
+    glctc1PendingSharedPlaylist.artwork ||
+    sharedTracks[0]?.cover_art ||
+    sharedTracks[0]?.["Cover Art"] ||
+    "",
 
   tracks:
     sharedTracks.map(
@@ -15176,100 +15368,8 @@ wireControls();
   drawWaveform("B");
 
 
-  // ===================================================
-  // 🔍 MASTER LIBRARY SEARCH FILTER
-  // ===================================================
-
-  const librarySearch =
-    document.getElementById(
-      "librarySearch"
-    );
-
-
-  if (!librarySearch) {
-
-    console.log(
-      "❌ GLCTC1 librarySearch not found"
-    );
-
-    return;
-  }
-
-
-   librarySearch.addEventListener(
-    "input",
-    () => {
-
-      const searchTerm =
-        librarySearch.value
-          .trim()
-          .toLowerCase();
-
-      const rows =
-        document.querySelectorAll(
-          "#libraryBody .library-row"
-        );
-
-      rows.forEach(row => {
-
-        const rowText =
-          row.textContent
-            .toLowerCase();
-
-        row.style.display =
-          !searchTerm ||
-          rowText.includes(searchTerm)
-            ? ""
-            : "none";
-
-      });
-
-      console.log(
-        "🔍 GLCTC1 Library Filter:",
-        searchTerm
-      );
-
-    }
-  );
-
-
-  // ===================================================
-  // ⌨️ MASTER LIBRARY SEARCH — ENTER
-  // ===================================================
-
-  librarySearch.addEventListener(
-    "keydown",
-    event => {
-
-      if (
-        event.key !== "Enter"
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-
-      const searchTerm =
-        librarySearch.value
-          .trim()
-          .toLowerCase();
-
-      renderLibraryTable(
-        searchTerm
-      );
-
-      console.log(
-        "🔎 GLCTC1 SEARCH ENTER:",
-        searchTerm
-      );
-
-    }
-  );
-
-
-  console.log(
-    "✅ GLCTC1 Master Library Search READY"
-  );
+  // v35: search wiring lives in glctc1InitLibrarySearch() (top level)
+  glctc1InitLibrarySearch();
 
 });
 
@@ -19272,4 +19372,5 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
   else initMixerBay();
 })();
 </script>
+
 

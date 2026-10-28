@@ -3631,17 +3631,26 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   box.append(label,dial,out,select);perfKnobs.append(box);perfKnobRows.push({select,range,out,pointer,paintDial});
  });
  const perfPads=el('div',{class:'glctc-perf-pads'}),perfPadRows=[];
+ const masterSamples=Array(16).fill(null),masterSampleSources=new Set();
+ mkPanicBtn.addEventListener('click',()=>{masterSampleSources.forEach(n=>{try{n.stop()}catch(e){}});masterSampleSources.clear()});
+ const masterSampleDB=new Promise(resolve=>{try{const r=indexedDB.open('glctc1_master_samples',1);r.onupgradeneeded=()=>r.result.createObjectStore('pads');r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch(e){resolve(null)}});
+ function samplePadLabel(i){const row=perfPadRows[i],p=masterSamples[i];if(!row)return;row.b.textContent=p?'♪ '+(i+1)+' · '+p.name:'PAD '+String(i+1).padStart(2,'0');row.b.title=p?p.name:'Unassigned performance pad'}
+ async function playMasterSample(i){const p=masterSamples[i];if(!p)return toast('Save a WAV selection to this pad first.');try{const c=ensureBuses();await c.resume();if(!p.buf)p.buf=await c.decodeAudioData(await p.blob.arrayBuffer());const n=c.createBufferSource();n.buffer=p.buf;n.connect(c._sat||c.destination);masterSampleSources.add(n);n.onended=()=>{masterSampleSources.delete(n);n.disconnect()};n.start();mkStatus.textContent='SAMPLE PAD '+(i+1)+' · '+p.name}catch(e){toast('Sample playback failed: '+e.message)}}
+ masterSampleDB.then(db=>{if(!db)return;const r=db.transaction('pads').objectStore('pads').openCursor();r.onsuccess=()=>{const c=r.result;if(!c)return;const i=Number(c.key);if(i>=0&&i<16&&!masterSamples[i]){masterSamples[i]=c.value;const row=perfPadRows[i];if(row){row.select.value='sample';samplePadLabel(i)}}c.continue()}});
+
  Array.from({length:16},(_,i)=>i).forEach(i=>{
   const b=el('button',{class:'glctc-perf-pad',type:'button',text:'PAD '+String(i+1).padStart(2,'0')});
   const select=el('select',{'aria-label':'Pad '+(i+1)+' assignment'});
   select.append(el('option',{value:'',text:'UNASSIGNED'}));
   perfPadActions.forEach((a,j)=>select.append(el('option',{value:String(j+1),text:a})));
+  select.append(el('option',{value:'sample',text:'PLAY SAVED SAMPLE'}));
   select.value='';
   b.title='Unassigned performance pad';
-  select.addEventListener('change',()=>{b.title=select.value?perfPadActions[Number(select.value)-1]:'Unassigned performance pad';mkStatus.textContent='PAD '+(i+1)+' · '+(select.value?('ASSIGNED TO '+select.options[select.selectedIndex].text):'UNASSIGNED')});
+  select.addEventListener('change',()=>{b.title=select.value==='sample'?(masterSamples[i]?.name||'Empty sample pad'):select.value?perfPadActions[Number(select.value)-1]:'Unassigned performance pad';mkStatus.textContent='PAD '+(i+1)+' · '+(select.value?('ASSIGNED TO '+select.options[select.selectedIndex].text):'UNASSIGNED')});
   b.addEventListener('click',()=>{
    if(!select.value){mkStatus.textContent='PAD '+(i+1)+' · UNASSIGNED · CHOOSE AN ACTION FIRST';return}
    b.classList.add('hit');setTimeout(()=>b.classList.remove('hit'),140);
+   if(select.value==='sample'){playMasterSample(i);return}
    const a=Number(select.value)-1;
    if(a===0){const play=$('playBtn');if(play)play.click()}
    else if(a===1){try{HUB.stopAll()}catch(e){};const stop=$('stopBtn');if(stop)stop.click();mkReleaseAll()}
@@ -4028,14 +4037,15 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   if(Number.isFinite(g('masterVol')))sy('master',g('masterVol'));if(Number.isFinite(g('filterCutoff')))sy('filter',hzToFrac(g('filterCutoff')));if(Number.isFinite(g('delayMix')))sy('delay',g('delayMix'));if(Number.isFinite(g('reverbMix')))sy('reverb',g('reverbMix'));
   sqSync()});
  /* ---------- BIG SCREEN: live / recording waveform ---------- */
- const SC={mode:'live',cols:[],ms:25,amn:0,amx:0,last:0,c:null,an:null,tb:null,wasRec:false,recStart:0,take:null,tw:0,tp:null,src:null,t0:0,pk:0};
+ const SC={mode:'live',cols:[],ms:25,amn:0,amx:0,last:0,c:null,an:null,tb:null,wasRec:false,recStart:0,take:null,tw:0,tp:null,src:null,t0:0,pk:0,cursor:0,selA:0,selB:0,edit:false,undo:[]};
  const scCanvas=el('canvas',{class:'cn-wave','aria-label':'Live and recording waveform'});
  const scInfo=el('div',{class:'cn-sinfo',text:'MONITORING MASTER OUTPUT'});
  function scAn(){const c=audioCtx;if(!c||!c._fin)return null;if(SC.c!==c){SC.c=c;try{SC.an=c.createAnalyser();SC.an.fftSize=2048;SC.an.smoothingTimeConstant=0;c._fin.connect(SC.an)}catch(e){SC.an=null}}return SC.an}
  function scRead(an,o){if(!an)return;const n=an.fftSize;if(!SC.tb||SC.tb.length<n)SC.tb=new Float32Array(n);an.getFloatTimeDomainData(SC.tb);for(let i=0;i<n;i++){const v=SC.tb[i];if(v<o.mn)o.mn=v;if(v>o.mx)o.mx=v}}
  function scStopTake(){if(SC.src){try{SC.src.stop()}catch(e){}SC.src=null}}
- function cnTake(buf,name){if(!buf)return;scStopTake();SC.take={buf,name};SC.tw=0;SC.mode='take';scBtns()}
- function scPlayTake(){if(!SC.take||!audioCtx)return;if(SC.src){scStopTake();scBtns();return}const c=ensureBuses(),s=c.createBufferSource();s.buffer=SC.take.buf;s.connect(c._sat||c.destination);s.onended=()=>{if(SC.src===s){SC.src=null;scBtns()}};s.start();SC.src=s;SC.t0=c.currentTime;scBtns()}
+ function cnTake(buf,name){if(!buf)return;scStopTake();SC.take={buf,name};SC.cursor=0;SC.selA=0;SC.selB=buf.duration;SC.undo=[];SC.tw=0;SC.mode='take';scSyncSelection();scBtns()}
+ function scPlayTake(){if(!SC.take||REC.on||REC.counting)return;if(SC.src){SC.cursor=Math.min(SC.take.buf.duration,audioCtx.currentTime-SC.t0);scStopTake();scBtns();return}scStartAt(SC.cursor)}
+ function scStartAt(off,end){if(!SC.take)return;scStopTake();const c=ensureBuses();c.resume().catch(()=>{});const n=c.createBufferSource();n.buffer=SC.take.buf;off=cl(off,0,Math.max(0,n.buffer.duration-1/n.buffer.sampleRate));n.connect(c._sat||c.destination);SC.src=n;SC.mode='take';SC.cursor=off;SC.t0=c.currentTime-off;n.onended=()=>{n.disconnect();if(SC.src===n){SC.src=null;SC.cursor=0;scBtns()}};if(end>off)n.start(0,off,end-off);else n.start(0,off);scBtns()}
  function scDraw(now){
   const cv=scCanvas;if(!__glctcVisible(cv)||cv.offsetParent===null||(now-(SC.dt||0))<(__glctcLoad()>=4?60:33))return;SC.dt=now;const dpr=Math.min(2,window.devicePixelRatio||1),w=Math.round(cv.clientWidth*dpr),h=Math.round(cv.clientHeight*dpr);if(!w||!h)return;if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;SC.tw=0}
   const x=cv.getContext('2d'),rec=!!REC.on,cnt=!!REC.counting,mid=h/2,amp=h*.42,top=22*dpr;
@@ -4048,7 +4058,8 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    x.fillStyle='#ff6a78';for(let px=0;px<w;px++){const mn=SC.tp[px*2],mx=SC.tp[px*2+1],y1=mid-Math.min(1,mx)*amp,y2=mid-Math.max(-1,mn)*amp;x.fillRect(px,y1,1,Math.max(1,y2-y1))}
    const step=dur>120?30:dur>40?10:dur>16?5:dur>6?2:1;x.fillStyle='#9a9cab';x.strokeStyle='#ffffff18';for(let s=0;s<=dur;s+=step){const px=s/dur*w;x.beginPath();x.moveTo(px,top);x.lineTo(px,h);x.stroke();x.fillText(Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'),px+3*dpr,3*dpr)}
    if(SC.src&&audioCtx){const t=audioCtx.currentTime-SC.t0,px=Math.min(1,t/dur)*w;x.fillStyle='#fff';x.fillRect(px,0,2*dpr,h)}
-   scInfo.textContent='TAKE · '+SC.take.name+' · '+dur.toFixed(1)+' s · tap the wave to play from there';
+   x.fillStyle='#ffd36a30';x.fillRect(SC.selA/dur*w,0,(SC.selB-SC.selA)/dur*w,h);x.fillStyle='#ffd36a';[SC.selA,SC.selB].forEach(t=>x.fillRect(t/dur*w,0,2*dpr,h));
+   scInfo.textContent='TAKE · '+SC.take.name+' · '+dur.toFixed(1)+' s · '+(SC.edit?'EDIT: DRAG TO SELECT':'TAP TO SEEK')+' · selection '+SC.selA.toFixed(3)+'–'+SC.selB.toFixed(3)+' s';
   }else{
    const colPx=Math.max(1,Math.round(2*dpr)),N=Math.max(1,Math.floor(w/colPx)),cols=SC.cols,L=cols.length,perSec=1000/SC.ms;
    let first,xo=0;if(rec){const len=L-SC.recStart;if(len<=N){first=SC.recStart}else{first=L-N}}else{first=Math.max(0,L-N);xo=Math.max(0,N-(L-first))*colPx}
@@ -4069,12 +4080,25 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   const o={mn:0,mx:0};if(rec&&REC.takes&&REC.takes.length)REC.takes.forEach(t=>scRead(t.an,o));else scRead(scAn(),o);SC.pk=Math.max(Math.abs(o.mn),Math.abs(o.mx));SC.amn=Math.min(SC.amn,o.mn);SC.amx=Math.max(SC.amx,o.mx);
   if(!SC.last||now-SC.last>1500)SC.last=now;let cg=0;while(now-SC.last>=SC.ms&&cg++<60){SC.cols.push([SC.amn,SC.amx]);SC.last+=SC.ms}SC.amn=0;SC.amx=0;if(!rec&&SC.cols.length>6000)SC.cols.splice(0,SC.cols.length-3000)
   scDraw(now)}catch(e){}})(0);
- scCanvas.addEventListener('pointerdown',e=>{if(SC.mode==='take'&&SC.take&&!REC.on){const r=scCanvas.getBoundingClientRect(),f=cnSvg((e.clientX-r.left)/r.width);scStopTake();const c=ensureBuses(),s=c.createBufferSource();s.buffer=SC.take.buf;s.connect(c._sat||c.destination);const off=f*SC.take.buf.duration;s.onended=()=>{if(SC.src===s){SC.src=null;scBtns()}};s.start(0,off);SC.src=s;SC.t0=c.currentTime-off;scBtns()}});
+ scCanvas.style.touchAction='none';
+ scCanvas.addEventListener('pointerdown',e=>{if(SC.mode!=='take'||!SC.take||REC.on||REC.counting)return;const time=ev=>{const r=scCanvas.getBoundingClientRect();return cnSvg((ev.clientX-r.left)/r.width)*SC.take.buf.duration};if(!SC.edit){SC.cursor=time(e);scStartAt(SC.cursor);return}e.preventDefault();scStopTake();const start=time(e);scCanvas.setPointerCapture(e.pointerId);const move=ev=>{SC.selA=Math.min(start,time(ev));SC.selB=Math.max(start,time(ev));scSyncSelection()};const up=()=>{scCanvas.removeEventListener('pointermove',move);scCanvas.removeEventListener('pointerup',up);scCanvas.removeEventListener('pointercancel',up);scBtns()};move(e);scCanvas.addEventListener('pointermove',move);scCanvas.addEventListener('pointerup',up);scCanvas.addEventListener('pointercancel',up)});
  const scB=(t,fn,title,cls)=>el('button',{class:'cn-tb '+(cls||''),type:'button',text:t,title:title||t,onclick:fn});
- const scRecB=scB('● REC',()=>recToggle(),'Record the sources chosen below','rec'),scPlayB=scB('▶ TAKE',()=>scPlayTake(),'Play the last recording'),scLiveB=scB('LIVE',()=>{scStopTake();SC.mode='live';scBtns()},'Back to the live monitor'),
-  scZi=scB('ZOOM +',()=>{SC.ms=Math.max(6,SC.ms/2)},'Show less time, more detail'),scZo=scB('ZOOM −',()=>{SC.ms=Math.min(200,SC.ms*2)},'Show more time'),scClr=scB('CLEAR',()=>{SC.cols=[];SC.recStart=0;SC.take=null;SC.tp=null;scStopTake();SC.mode='live';scBtns()},'Clear the screen');
- function scBtns(){scRecB.classList.toggle('on',!!REC.on);scRecB.textContent=REC.on?'■ STOP':REC.counting?'■ CANCEL':'● REC';scPlayB.textContent=SC.src?'■ STOP TAKE':'▶ TAKE';scPlayB.disabled=!SC.take;scLiveB.classList.toggle('on',SC.mode==='live')}
+ const scRecB=scB('● REC',()=>{if(REC.on||REC.counting){recStop();return}if(REC.pending>0){toast('Please wait while the last take finishes.');return}scStopTake();ST.rec.src=['master'];ST.rec.mode='mix';ST.rec.count=0;ST.rec.bars=0;ST.rec.xport='none';save();refreshChips();recStart().catch(e=>toast('Recording failed: '+e.message))},'Capture master output until stopped','rec'),scPlayB=scB('▶ TAKE',()=>scPlayTake(),'Play the last recording'),scLiveB=scB('LIVE',()=>{scStopTake();SC.mode='live';scBtns()},'Back to the live monitor'),
+  scZi=scB('ZOOM +',()=>{SC.ms=Math.max(6,SC.ms/2)},'Show less time, more detail'),scZo=scB('ZOOM −',()=>{SC.ms=Math.min(200,SC.ms*2)},'Show more time'),scClr=scB('CLEAR',()=>{SC.cols=[];SC.recStart=0;SC.take=null;SC.undo=[];SC.cursor=0;SC.tp=null;scStopTake();SC.mode='live';scBtns()},'Clear the screen');
+ function scBtns(){scRecB.classList.toggle('on',!!REC.on);scRecB.textContent=REC.on?'■ STOP':REC.counting?'■ CANCEL':'● REC';scPlayB.textContent=SC.src?'Ⅱ PAUSE':'▶ TAKE';scPlayB.disabled=!SC.take;scLiveB.classList.toggle('on',SC.mode==='live')}
  mirrors.push(scBtns);
+ const scIn=el('input',{type:'number',min:0,step:.001,value:0,'aria-label':'Selection start seconds',style:'width:100px'}),scOut=el('input',{type:'number',min:0,step:.001,value:0,'aria-label':'Selection end seconds',style:'width:100px'});
+ function scSyncSelection(){scIn.value=SC.selA.toFixed(3);scOut.value=SC.selB.toFixed(3)}
+ [scIn,scOut].forEach(n=>n.onchange=()=>{if(!SC.take)return;SC.selA=cl(Number(scIn.value)||0,0,SC.take.buf.duration);SC.selB=cl(Number(scOut.value)||0,SC.selA,SC.take.buf.duration);scSyncSelection()});
+ function scSlice(b,a,z){const c=ensureBuses(),lo=Math.max(0,Math.round(a*b.sampleRate)),hi=Math.min(b.length,Math.round(z*b.sampleRate));if(hi<=lo)throw Error('Select some audio first.');const out=c.createBuffer(b.numberOfChannels,hi-lo,b.sampleRate);for(let ch=0;ch<b.numberOfChannels;ch++)out.copyToChannel(b.getChannelData(ch).subarray(lo,hi),ch);return out}
+ function scSelection(){if(!SC.take||REC.on||REC.counting)throw Error('Stop recording and select a take first.');return scSlice(SC.take.buf,SC.selA,SC.selB)}
+ function scEdit(cut){try{const b=SC.take?.buf;if(!b||REC.on||REC.counting)return;const lo=Math.round(SC.selA*b.sampleRate),hi=Math.round(SC.selB*b.sampleRate);if(hi<=lo)throw Error('Select some audio first.');let out;if(cut){if(hi-lo>=b.length)throw Error('Cut would remove the entire take.');out=ensureBuses().createBuffer(b.numberOfChannels,b.length-(hi-lo),b.sampleRate);for(let ch=0;ch<b.numberOfChannels;ch++){const d=b.getChannelData(ch),v=out.getChannelData(ch);v.set(d.subarray(0,lo));v.set(d.subarray(hi),lo)}}else out=scSelection();SC.undo.push(b);if(SC.undo.length>10)SC.undo.shift();scStopTake();SC.take.buf=out;SC.tp=null;SC.tw=0;SC.cursor=0;SC.selA=0;SC.selB=out.duration;scSyncSelection();scBtns()}catch(e){toast(e.message)}}
+ const scEditB=scB('EDIT',()=>{SC.edit=!SC.edit;scEditB.classList.toggle('on',SC.edit)},'Drag the waveform to select audio');
+ const scPad=el('select',{'aria-label':'Save destination sample pad'});for(let i=0;i<16;i++)scPad.append(el('option',{value:i,text:'KEYBOARD PAD '+(i+1)}));
+ const scName=el('input',{type:'text',value:'Master sample','aria-label':'Sample name',style:'width:160px'});
+ async function scSavePad(){try{const i=Number(scPad.value),buf=scSelection(),name=scName.value.trim()||'Master sample';if(masterSamples[i]&&!confirm('Replace the sample on keyboard pad '+(i+1)+'?'))return;const blob=new Blob([audioBufferToWav(buf)],{type:'audio/wav'});masterSamples[i]={buf,blob,name};perfPadRows[i].select.value='sample';samplePadLabel(i);const db=await masterSampleDB;if(!db)throw Error('Pad ready this session. Browser storage unavailable; download WAV to keep a copy.');await new Promise((resolve,reject)=>{const tx=db.transaction('pads','readwrite');tx.objectStore('pads').put({blob,name},i);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Storage cancelled'))});toast('Saved to keyboard pad '+(i+1)+' · restored on this browser after reload.')}catch(e){toast(e.message)}}
+ const scEditor=el('div',{class:'controls-row',style:'padding:10px;gap:8px;align-items:center'},scB('⏮ START',()=>{SC.cursor=0;scStopTake();scBtns()}),scB('■ STOP',()=>{scStopTake();SC.cursor=0;scBtns()}),scB('▶ SELECTION',()=>{try{scSelection();scStartAt(SC.selA,SC.selB)}catch(e){toast(e.message)}}),scEditB,el('label',{text:'IN (s)'},scIn),el('label',{text:'OUT (s)'},scOut),scB('SELECT ALL',()=>{if(SC.take){SC.selA=0;SC.selB=SC.take.buf.duration;scSyncSelection()}}),scB('TRIM',()=>scEdit(false),'Keep only the selected audio'),scB('CUT',()=>scEdit(true),'Remove the selected audio'),scB('UNDO',()=>{if(!SC.take||REC.on||REC.counting)return;const b=SC.undo.pop();if(!b)return;scStopTake();SC.take.buf=b;SC.tp=null;SC.tw=0;SC.cursor=0;SC.selA=0;SC.selB=b.duration;scSyncSelection()}),scName,scPad,scB('SAVE TO PAD',scSavePad),scB('DOWNLOAD WAV',()=>{try{downloadBlob(new Blob([audioBufferToWav(scSelection())],{type:'audio/wav'}),(scName.value.trim()||'Master-sample')+'.wav')}catch(e){toast(e.message)}}));
+
  /* ---------- BIG SCREEN: simple step sequencer (PAD-64 engine underneath) ---------- */
  const SQ={page:0,follow:true,cur:-1,drag:null};let sqCells=[];
  const sqGrid=el('div',{class:'cn-sqgrid'}),sqPageBox=el('div',{class:'cn-sqpages'});
@@ -4100,7 +4124,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  const cnScreen=el('div',{class:'cn-screen','data-tab':'wave'}),cnRecordPane=el('div',{class:'cn-recordpane'});cnRecordPane.append(recC.c);
  const setTab=t=>{cnScreen.dataset.tab=t;tabWave.classList.toggle('on',t==='wave');tabSeq.classList.toggle('on',t==='seq');tabRecord.classList.toggle('on',t==='record');if(t==='seq')sqPaint();if(t==='record')refreshChips()};tabWave.onclick=()=>setTab('wave');tabSeq.onclick=()=>setTab('seq');tabRecord.onclick=()=>setTab('record');
  cnScreen.append(el('div',{class:'cn-stabs'},tabWave,tabSeq,tabRecord,el('span',{class:'cn-sgrow'}),scRecB,scPlayB,scLiveB,scZo,scZi,scClr),
-  el('div',{class:'cn-wavepane'},el('div',{class:'cn-glass'},scCanvas),scInfo),
+  el('div',{class:'cn-wavepane'},el('div',{class:'cn-glass'},scCanvas),scInfo,scEditor,el('p',{class:'ws-hint',text:'REC captures the master output. Stop, enable EDIT, drag a selection or enter IN / OUT seconds. TRIM keeps the selection; CUT removes it; UNDO restores the previous edit. SAVE TO PAD copies the selection to a master keyboard pad. DOWNLOAD WAV keeps a portable copy. Pad samples are stored in this browser on this device; edited audio is saved as a copy, leaving timeline takes intact.'})),
   el('div',{class:'cn-sq'},el('div',{class:'cn-sqbar'},sqPlayB,sqStopB,sqPatS,sqBarS,sqPageBox,sqFollowB,sqRndB,sqClrB),el('div',{class:'cn-glass cn-sqglass'},sqGrid),el('div',{class:'cn-sinfo',text:'TAP A STEP · TAP AGAIN FOR ACCENT · AGAIN TO CLEAR · DRAG ACROSS TO PAINT · TAP A NAME TO HEAR IT · SAME ENGINE AS THE FULL PAD-64 EDITOR BELOW'})),cnRecordPane);
  const det=(title,node,open)=>{const d=el('details',{class:'cn-drawer'});if(open)d.open=true;d.append(el('summary',{text:title}),node);return d};
  const cnMixer=el('div',{class:'cn-mixer'},el('div',{class:'cn-sechead'},el('b',{text:'MIXER'}),el('span',{text:'ARM A CHANNEL TO PLAY IT FROM THE KEYBOARD · ARM SEVERAL TO LAYER · DRAG FADERS AND PANS LIVE'})),el('div',{class:'cn-mixwrap'},cnStrips,cnMaster),mkActions);
@@ -4183,9 +4207,9 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  /* Bubble-phase pointermove runs after each custom knob/fader has updated its own value. */
  document.addEventListener('pointermove',e=>{const t=chainCandidate(e.target);if(t)chainPropagate(t)},false);
  document.addEventListener('pointerup',e=>{const t=chainCandidate(e.target);if(t)chainPropagate(t)},true);
- const cnKeyboard=el('div',{class:'cn-keysec'},el('div',{class:'cn-sechead'},el('b',{text:'KEYBOARD'}),el('span',{text:'PLAYS EVERY ARMED CHANNEL · WHEELS · 8 ASSIGNABLE KNOBS · 16 PADS · 2 RIBBONS · PC KEYS A W S E D F T G Y H U J K O L P · Z/X OCTAVE · SPACE HOLD'})),padC.c,livePanel,perfShelf,mkChassis,mkUtil);
+ const cnKeyboard=el('div',{class:'cn-keysec'},el('div',{class:'cn-sechead'},el('b',{text:'KEYBOARD'}),el('span',{text:'PLAYS EVERY ARMED CHANNEL · WHEELS · 8 ASSIGNABLE KNOBS · 16 PADS · 2 RIBBONS · PC KEYS A W S E D F T G Y H U J K O L P · Z/X OCTAVE · SPACE HOLD'})),livePanel,perfShelf,mkChassis,mkUtil);
  body.innerHTML='';
- body.append(el('div',{class:'cn'},cnBarEl,cnScreen,cnMixer,cnKeyboard,det('SCENES · SNAPSHOT THE WHOLE CONSOLE',scC.c),det('SEQUENCE TRACKS · TIMELINE',trkC.c)));
+ body.append(el('div',{class:'cn'},cnBarEl,padC.c,cnScreen,cnMixer,cnKeyboard,det('SCENES · SNAPSHOT THE WHOLE CONSOLE',scC.c),det('SEQUENCE TRACKS · TIMELINE',trkC.c)));
  cnSyncArm();
  /* ---------- wiring into the host app ---------- */
  const _ra=renderAll;renderAll=function(){const r=_ra.apply(this,arguments);try{renderTracks();renderChips()}catch(e){console.error(e)}return r};

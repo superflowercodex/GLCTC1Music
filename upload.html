@@ -6252,7 +6252,8 @@ function buildBarGrid(
 // =====================================================
 
 async function analyseBeatGrid(
-  audioBuffer
+  audioBuffer,
+  deck
 ) {
 
   const kickPoints =
@@ -6292,10 +6293,19 @@ async function analyseBeatGrid(
   // BPM
   // ---------------------------------------------------
 
-  const bpm =
+  const kickBpm =
     calculateKickBPM(
       kickPoints
     );
+
+  // v49: one tempo for SNAP / TAP TEMPO / SYNC = Master Library BPM
+  // (refined by kick spacing when it agrees), else the tempo engine.
+  let bpm = kickBpm;
+  try {
+    bpm = glctc1ResolveBpm(deck, audioBuffer, kickBpm);
+  } catch (e) {
+    bpm = kickBpm;
+  }
 
 
   if (
@@ -6526,7 +6536,8 @@ async function buildTransientMap(
 
     const analysis =
       await analyseBeatGrid(
-        audioBuffer
+        audioBuffer,
+        deck
       );
 
 
@@ -7515,6 +7526,8 @@ function updateBpmMeter(deck, bpm) {
   if (!display) return;
 
   display.dataset.bpm = bpm || 120;
+  // v49: remember whether this BPM came from the library (a real value) or is just the 120 default
+  display.dataset.bpmKnown = (Number(bpm) >= 40 && Number(bpm) <= 220) ? "1" : "0";
 
 }
 
@@ -8980,7 +8993,8 @@ async function loadToDeck(deck, track) {
   a.src = audioFile;
   a.load();
 
-  const bpm = Number(track.bpm || track["BPM"]) || 120;
+  // v49: pass the real library BPM (or 0 when the track has none) so the decks know whether to trust it
+  const bpm = Number(track.bpm || track["BPM"]) || 0;
 
   updateBpmMeter(deck, bpm);
   drawWaveform(deck);
@@ -8994,7 +9008,7 @@ function loadStemToDeck(deck, fileUrl, bpm) {
   const a = audio(deck);  
   a.src = fileUrl;  
   drawWaveform(deck);  
-  updateBpmMeter(deck, bpm || 120);  
+  updateBpmMeter(deck, bpm || 0);  
 }  
   
 // --- SELECTED SLOT + PLAYER ---  
@@ -18057,6 +18071,263 @@ body.glctc1-simple-view .mixer-bay-controls {
 })();
 </script>
 
+<script id="glctc1-tempo-engine">
+/* =====================================================
+   GLCTC1 TEMPO ENGINE (same engine as the ANALYSE page, v13 breakbeat-aware)
+   Used by the decks only when a track has NO Master Library BPM, and to keep
+   SNAP / TAP TEMPO / SYNC on the same tempo as the Master Library.
+   ===================================================== */
+function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds, centerFrac) {
+  const duration = samples.length / sampleRate;
+  if (!Number.isFinite(duration) || duration < 8) return null;
+
+  // Analyse the middle of long tracks (skips quiet intros / outros).
+  const windowSeconds = Math.min(maxSeconds || 90, duration);
+  const cf = (typeof centerFrac === "number") ? centerFrac : 0.5;
+  const startSample = Math.floor((duration - windowSeconds) * cf * sampleRate);
+  const endSample = startSample + Math.floor(windowSeconds * sampleRate);
+
+  const hop = Math.max(1, Math.round(sampleRate / 250));   // ~250 envelope frames / second
+  const rate = sampleRate / hop;
+  const frames = Math.floor((endSample - startSample) / hop);
+  if (frames < rate * 6) return null;
+
+  const lpCoef = 1 - Math.exp(-2 * Math.PI * 150 / sampleRate); // ~150 Hz low-pass for kick
+  const lowEnv = new Float32Array(frames);
+  const highEnv = new Float32Array(frames);
+  let lp = 0, prev = 0, pos = startSample, totalEnergy = 0;
+
+  for (let f = 0; f < frames; f++) {
+    let le = 0, he = 0;
+    for (let k = 0; k < hop; k++, pos++) {
+      const x = samples[pos] || 0;
+      lp += lpCoef * (x - lp);
+      const d = x - prev; prev = x;     // first difference = high-frequency emphasis
+      le += lp * lp;
+      he += d * d;
+    }
+    totalEnergy += le + he;
+    lowEnv[f] = Math.log1p(Math.sqrt(le / hop) * 30);
+    highEnv[f] = Math.log1p(Math.sqrt(he / hop) * 30);
+  }
+  if (totalEnergy / (frames * hop) < 1e-9) return null;           // silence
+
+  // Half-wave-rectified novelty vs. the previous few frames.
+  const novelty = env => {
+    const out = new Float32Array(frames);
+    let sq = 0;
+    for (let i = 3; i < frames; i++) {
+      const ref = (env[i - 1] + env[i - 2] + env[i - 3]) / 3;
+      const v = Math.max(0, env[i] - ref);
+      out[i] = v; sq += v * v;
+    }
+    const sd = Math.sqrt(sq / frames) || 1;
+    for (let i = 0; i < frames; i++) out[i] /= sd;
+    return out;
+  };
+  const low = novelty(lowEnv), high = novelty(highEnv);
+  const merged = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) merged[i] = low[i] * 0.55 + high[i] * 0.45;
+
+  // Remove the slow-moving baseline (±0.25 s), keep only peaks, light smoothing.
+  const half = Math.round(rate * 0.25);
+  const prefix = new Float64Array(frames + 1);
+  for (let i = 0; i < frames; i++) prefix[i + 1] = prefix[i] + merged[i];
+  const onset = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const a = Math.max(0, i - half), b = Math.min(frames, i + half + 1);
+    const mean = (prefix[b] - prefix[a]) / (b - a);
+    onset[i] = Math.max(0, merged[i] - mean);
+  }
+  const smooth = new Float32Array(frames);
+  for (let i = 1; i < frames - 1; i++) smooth[i] = onset[i - 1] * 0.25 + onset[i] * 0.5 + onset[i + 1] * 0.25;
+  return { onset: smooth, rate, frames };
+}
+
+function glctc1TempoFromEnv(env) {
+  if (!env) return null;
+  const { onset, rate, frames } = env;
+
+  // Autocorrelation of the onset curve out to ~9 s (covers 2 bars at 60 BPM / 4 bars at 120).
+  const maxLag = Math.min(frames - 2, Math.ceil(rate * 9));
+  const acf = new Float32Array(maxLag + 2);
+  let r0 = 0;
+  for (let i = 0; i < frames; i++) r0 += onset[i] * onset[i];
+  r0 /= frames;
+  if (r0 < 1e-9) return null;
+  for (let lag = 1; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = lag; i < frames; i++) sum += onset[i] * onset[i - lag];
+    acf[lag] = (sum / (frames - lag)) / r0;
+  }
+  const acfAt = x => {
+    if (x < 1 || x >= maxLag) return 0;
+    const i = Math.floor(x), f = x - i;
+    return acf[i] * (1 - f) + acf[i + 1] * f;
+  };
+  // Peak-tolerant lookup: breaks drift a little, so take the best value within ±0.3 %.
+  const acfPeak = x => {
+    const w = Math.max(0.6, x * 0.003);
+    let m = -1;
+    for (let d = -w; d <= w; d += Math.max(0.5, w / 3)) { const v = acfAt(x + d); if (v > m) m = v; }
+    return m < 0 ? 0 : m;
+  };
+
+  // Comb filter over POWER-OF-TWO beat lags only (1/2, 1, 2, 4 and 8 beats). A real tempo repeats at
+  // those distances. A false "2/3 tempo" (e.g. 113 for a 170 break) lands on 3-beat / 6-beat / 12-beat
+  // distances, which don't repeat, so adding the 8-beat (two bar) lag removes it.
+  const LO = 60, HI = 200, STEP = 0.05;
+  const n = Math.round((HI - LO) / STEP) + 1;
+  const raw = new Float32Array(n);
+  const LAGS = [[0.5, 0.30], [1, 0.55], [2, 0.90], [4, 1.00], [8, 0.80]];
+  for (let k = 0; k < n; k++) {
+    const bpm = LO + k * STEP;
+    const P = (60 / bpm) * rate;
+    let s = 0, w = 0;
+    for (const [beats, weight] of LAGS) {
+      const lag = P * beats;
+      if (lag < maxLag - 2) { s += weight * acfPeak(lag); w += weight; }
+    }
+    // Wide, flat prior over the dance-music range (breaks, house, DnB, jungle all live here).
+    const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 140) / 1.1, 2));
+    raw[k] = (w ? s / w : 0) * prior;
+  }
+  const scores = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, k - 3); j <= Math.min(n - 1, k + 3); j++) { s += raw[j]; c++; }
+    scores[k] = s / c;
+  }
+  const bestIn = (lo, hi) => {
+    let bk = -1, bs = -Infinity;
+    const a = Math.max(0, Math.round((lo - LO) / STEP)), b = Math.min(n - 1, Math.round((hi - LO) / STEP));
+    for (let k = a; k <= b; k++) if (scores[k] > bs) { bs = scores[k]; bk = k; }
+    return bk < 0 ? null : { bpm: LO + bk * STEP, score: bs };
+  };
+
+  let best = bestIn(LO, HI);
+  if (!best || !(best.score > 0)) return null;
+
+  // Related-tempo check (ratios 2:1, 3:2, 4:3). If a related tempo is scored nearly as well
+  // and sits in a more plausible zone for the groove, prefer it.
+  const near = (f) => bestIn(best.bpm * f * 0.985, best.bpm * f * 1.015);
+  const zoneBonus = b => (b >= 160 && b <= 182) ? 1.10 : (b >= 118 && b <= 150) ? 1.04 : 1.0;
+  const candidates = [best];
+  for (const f of [1.5, 4 / 3, 0.75, 2 / 3]) {   // octaves (x2, /2) are handled separately below
+    const alt = near(f);
+    if (alt && alt.bpm >= LO && alt.bpm <= HI) candidates.push(alt);
+  }
+  // 3:2 / 4:3 relatives are only accepted when clearly better supported (they are the classic false peaks).
+  let pick = best;
+  for (const alt of candidates) {
+    if (alt === best) continue;
+    const ratio = alt.bpm / best.bpm;
+    const octave = Math.abs(ratio - 2) < 0.05 || Math.abs(ratio - 0.5) < 0.03;
+    const need = octave ? 0.90 : 1.15;
+    if (alt.score * zoneBonus(alt.bpm) >= pick.score * zoneBonus(pick.bpm) * need) pick = alt;
+  }
+  best = pick;
+
+  // Octave correction for half-time grooves: a snare on every 2nd beat makes a 170-ish break look like ~85.
+  const dbl = best.bpm * 2;
+  if (dbl <= HI + 0.5) {
+    const alt = bestIn(dbl * 0.985, dbl * 1.015);
+    if (alt) {
+      const needed = best.bpm < 70 ? 0.95 : (best.bpm >= 82 && best.bpm <= 89.5 ? 0.92 : 2);
+      if (alt.score >= best.score * needed) best = alt;
+    }
+  }
+  // Above 185 is almost always double-time of a ~93 groove (but real 186-190 DnB is rare).
+  if (best.bpm > 190) {
+    const alt = bestIn(best.bpm * 0.5 * 0.985, best.bpm * 0.5 * 1.015);
+    if (alt && alt.score >= best.score * 0.85) best = alt;
+  }
+
+  // Refine: parabolic-free local re-search on the finest grid around the winner.
+  const refined = bestIn(best.bpm - 0.6, best.bpm + 0.6);
+  let result = refined ? refined.bpm : best.bpm;
+  const nearest = Math.round(result);
+  if (Math.abs(result - nearest) <= 0.3) result = nearest; // most tracks sit on whole BPM
+  result = Math.round(result * 10) / 10;
+  const support = bpm => { const o = bestIn(bpm * 0.99, bpm * 1.01); return o ? Math.max(0, o.score) / best.score : 0; };
+  return { bpm: result, score: best.score, support };
+}
+
+
+// Multi-section tempo detection. Breaks have intros, breakdowns and fills that fool a single slice,
+// so several sections of the track vote and the strongest agreeing group wins.
+function glctc1DetectTempoDetailed(samples, sampleRate) {
+  const duration = samples.length / sampleRate;
+  if (!Number.isFinite(duration) || duration < 8) return null;
+  const jobs = [[120, 0.5]];
+  if (duration >= 100) jobs.push([45, 0.12], [45, 0.5], [45, 0.88]);
+  else if (duration >= 50) jobs.push([30, 0.2], [30, 0.8]);
+  const votes = [];
+  for (const [secs, frac] of jobs) {
+    const t = glctc1TempoFromEnv(glctc1OnsetEnvelope(samples, sampleRate, secs, frac));
+    if (t) votes.push(t);
+  }
+  if (!votes.length) return null;
+  // group votes that agree within 1.5 %
+  const groups = [];
+  for (const v of votes) {
+    let g = groups.find(g => Math.abs(g.bpm / v.bpm - 1) < 0.015);
+    if (!g) { g = { bpm: v.bpm, weight: 0, votes: [] }; groups.push(g); }
+    g.weight += v.score; g.votes.push(v);
+    g.bpm = g.votes.reduce((a, x) => a + x.bpm * x.score, 0) / g.weight;
+  }
+  groups.sort((a, b) => b.weight - a.weight);
+  const win = groups[0];
+  let bpm = Math.round(win.bpm * 10) / 10;
+  const nearest = Math.round(bpm);
+  if (Math.abs(bpm - nearest) <= 0.3) bpm = nearest;
+  const total = groups.reduce((a, g) => a + g.weight, 0) || 1;
+  const sup = x => votes.reduce((a, v) => a + v.support(x), 0) / votes.length;
+  return {
+    bpm,
+    confidence: Math.round(100 * win.weight / total),
+    agree: win.votes.length + "/" + votes.length,
+    alternatives: groups.slice(1, 3).map(g => Math.round(g.bpm * 10) / 10),
+    support: sup
+  };
+}
+
+
+var glctc1TempoCache = {};
+function glctc1TempoForDeck(deck, audioBuffer) {
+  var a = document.getElementById("audio" + deck);
+  var key = a ? (a.currentSrc || a.src || "") : "";
+  if (key && glctc1TempoCache[key]) return glctc1TempoCache[key];
+  var n = audioBuffer.length, nc = audioBuffer.numberOfChannels, mono = new Float32Array(n), c, i, d;
+  for (c = 0; c < nc; c++) { d = audioBuffer.getChannelData(c); for (i = 0; i < n; i++) mono[i] += d[i] / nc; }
+  var res = glctc1DetectTempoDetailed(mono, audioBuffer.sampleRate);
+  if (res && key) glctc1TempoCache[key] = res;
+  return res;
+}
+/* Library BPM of the track on a deck (0 when the track has none). */
+function glctc1LibraryBpm(deck) {
+  var dd = document.getElementById("deckDisplay" + deck);
+  if (!dd || dd.dataset.bpmKnown !== "1") return 0;
+  var x = Number(dd.dataset.bpm);
+  return x >= 40 && x <= 220 ? x : 0;
+}
+/* ONE tempo for the whole deck: Master Library BPM first (it is checked and fixed in the BPM manager),
+   refined by the kick spacing when that agrees within 1.5 % (incl. half/double); tracks with no
+   library BPM use the tempo engine; the old kick-spacing value is only the last resort. */
+function glctc1ResolveBpm(deck, audioBuffer, kickBpm) {
+  var lib = glctc1LibraryBpm(deck);
+  if (lib) {
+    if (kickBpm) {
+      var ks = [1, 2, 0.5];
+      for (var i = 0; i < ks.length; i++) { var v = kickBpm * ks[i]; if (Math.abs(v / lib - 1) < 0.015) return v; }
+    }
+    return lib;
+  }
+  try { var t = glctc1TempoForDeck(deck, audioBuffer); if (t && t.bpm > 0) return t.bpm; } catch (e) { console.warn("GLCTC1 tempo engine:", e); }
+  return kickBpm || 0;
+}
+</script>
+
 <script id="cx-js">
 /* ===== GLCTC1 COSMIC 1200 v25 — analogue platter + hands-on controls (adds to, never replaces, existing wiring) ===== */
 (function(){
@@ -18281,7 +18552,7 @@ function ensureGrid(d){                      /* my lock if ready, else a grid bu
   return null}
 
 /* ---------- BEAT TRACKER: finds the true tempo + phase of the whole track (kick band), no drift ---------- */
-function hintBpm(d){try{var x=Number($('deckDisplay'+d).dataset.bpm);if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
+function hintBpm(d){try{var x=(typeof glctc1LibraryBpm==='function')?glctc1LibraryBpm(d):0;if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
 function analyse(d){
   var bo=BUF[d],b=bo&&bo.buf;if(!b)return;
   var sr=b.sampleRate,H=128,c0=b.getChannelData(0),c1=b.numberOfChannels>1?b.getChannelData(1):null,nF=Math.floor(b.length/H),i,j,x,sm;
@@ -18294,7 +18565,8 @@ function analyse(d){
     for(q=2;q<end;q++)hist[(q-P*Math.floor(q/P))|0]+=o[q];
     var best=-1,bk=0,s;for(k=0;k<m;k++){s=hist[(k+m-1)%m]+2*hist[k]+hist[(k+1)%m];if(s>best){best=s;bk=k}}
     return{s:best/(end/P),k:bk,m:m}}
-  var h=hintBpm(d),lo=h?h*.97:85,hi=h?h*1.03:175,bb=0,bs=-1,r,P;
+  var h=hintBpm(d);if(!h){try{var te=glctc1TempoForDeck(d,b);if(te&&te.bpm>0)h=te.bpm}catch(x){}}   /* v49: no library BPM -> tempo engine, not a fake 120 */
+  var lo=h?h*.97:85,hi=h?h*1.03:175,bb=0,bs=-1,r,P;
   for(x=lo;x<=hi;x+=(h?.05:.25)){r=fold(60*fr/x,Math.min(nF,Math.floor(90*fr)));if(r.s>bs){bs=r.s;bb=x}}
   var fb=bb;bs=-1;
   for(x=bb-.4;x<=bb+.4;x+=.01){r=fold(60*fr/x,nF);if(r.s>bs){bs=r.s;fb=x}}

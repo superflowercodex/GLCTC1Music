@@ -1172,7 +1172,7 @@ body::before {
       </div>
       <div id="lbActMsg" class="lb-actmsg"></div>
       <div class="lb-bar">
-        <button id="lbSave" type="button" class="lb-btn lb-go" disabled>💾 SAVE TICKED TRACKS</button>
+        <button id="lbSave" type="button" class="lb-btn lb-go" disabled>⚡ EXECUTE &amp; SAVE TICKED FIXES</button>
         <button id="lbUndo" type="button" class="lb-btn" disabled>↩ UNDO LAST SAVE</button>
         <button id="lbExport" type="button" class="lb-btn">⬇ EXPORT CSV</button>
       </div>
@@ -4373,7 +4373,7 @@ let isMasterLibraryAdmin=false;
 .lb-tapout{font-size:16px;font-weight:900;color:#9dffc4;min-width:150px}
 `;document.head.appendChild(st);})();
 
-const LB={rows:[],busy:false,stop:false,filter:"all",search:"",armed:null,tap:[],audUrl:null,audRow:null,backups:[]};
+const LB={keyCol:null,rows:[],busy:false,stop:false,filter:"all",search:"",armed:null,tap:[],audUrl:null,audRow:null,backups:[]};
 const BACKUP_KEY="glctc1_bpm_backups_v2";
 const $=id=>document.getElementById(id);
 const el={confirm:$("lbConfirm"),confirmText:$("lbConfirmText"),yes:$("lbConfirmYes"),no:$("lbConfirmNo"),load:$("lbLoad"),aPend:$("lbAnalysePending"),aAll:$("lbAnalyseAll"),stop:$("lbStop"),bar:$("lbProgressBar"),filters:$("lbFilters"),search:$("lbSearch"),
@@ -4408,27 +4408,42 @@ async function verifyMasterLibraryAdmin(){
 verifyMasterLibraryAdmin();
 supabaseClient.auth.onAuthStateChange(()=>{setTimeout(verifyMasterLibraryAdmin,0);});
 
+function pickKeyCol(rows){
+  if(!rows.length)return null;
+  for(const c of ["id","ID","Id","uuid","track_id","ID Cat No","id_cat_no","Master Audio"]){
+    if(rows.every(r=>r[c]!==undefined&&r[c]!==null&&String(r[c])!==""&&true)&&new Set(rows.map(r=>String(r[c]))).size===rows.length)return c;
+  }
+  return null;
+}
 /* ---------- load (paged, so more than 1000 rows works) ---------- */
 async function loadLibrary(){
   if(!isMasterLibraryAdmin)return;
   if(LB.busy)return;
   LB.busy=true;syncButtons();say("Loading Master Library…","active");
   try{
-    const all=[];const PAGE=1000;let ordered=true;
-    for(let from=0;from<200000;from+=PAGE){
-      let q=supabaseClient.from("master_library").select("*");
-      if(ordered)q=q.order("id",{ascending:true});
-      let {data,error}=await q.range(from,from+PAGE-1);
-      if(error&&ordered){ordered=false;from-=PAGE;continue;}
-      if(error)throw error;
-      if(!data||!data.length)break;
-      all.push(...data);
-      if(data.length<PAGE)break;
-    }
+    const PAGE=1000;
+    const fetchAll=async(orderCol)=>{
+      const out=[];
+      for(let from=0;from<200000;from+=PAGE){
+        let q=supabaseClient.from("master_library").select("*");
+        if(orderCol)q=q.order(orderCol,{ascending:true});
+        const {data,error}=await q.range(from,from+PAGE-1);
+        if(error)throw error;
+        if(!data||!data.length)break;
+        out.push(...data);
+        if(data.length<PAGE)break;
+      }
+      return out;
+    };
+    let all=await fetchAll(null);
+    /* The row key column is not always called "id": detect the one that uniquely identifies every track. */
+    LB.keyCol=pickKeyCol(all);
+    if(all.length>=PAGE&&LB.keyCol)all=await fetchAll(LB.keyCol);
+    if(all.length&&!LB.keyCol)throw new Error("No unique key column found in master_library (columns: "+Object.keys(all[0]).join(", ")+"). Saving is not possible without one.");
     const prev=new Map(LB.rows.map(r=>[String(r.id),r]));
     LB.rows=all.map((row,k)=>{
       const raw=fieldValue(row,["BPM","bpm"]);const n=Number(raw);
-      const r={k,id:row.id,title:fieldValue(row,["Track Title","title","Title"])||("Track "+(k+1)),artist:fieldValue(row,["Artist","artist"]),
+      const r={k,id:row[LB.keyCol],title:fieldValue(row,["Track Title","title","Title"])||("Track "+(k+1)),artist:fieldValue(row,["Artist","artist"]),
         path:fieldValue(row,["Master Audio","master_audio","masterAudio","audio_url"]),saved:(raw!==""&&validBpm(n))?n:null,savedRaw:raw,
         status:"new",note:"",detected:null,conf:null,agree:"",newBpm:null,checked:false};
       const p=prev.get(String(r.id));
@@ -4533,7 +4548,7 @@ async function runAnalysis(all){
       await new Promise(x=>setTimeout(x,5));
     }
     const c=counts();
-    say(`${LB.stop?"Stopped":"Analysis complete"} · ${c.faults} faults · ${c.check} to check by ear · ${c.failed} failed · ${c.ok} correct.`,c.failed?"error":"success");
+    say(`${LB.stop?"Stopped":"ANALYSIS COMPLETE"} · ${c.faults} faults · ${c.check} to check by ear · ${c.failed} failed · ${c.ok} correct. ${c.ticked?"▶ Review the ticks, then press EXECUTE & SAVE below.":"No fixes ticked."}`,c.failed?"error":"success");try{el.save.scrollIntoView({behavior:"smooth",block:"center"});}catch(e){}
   }finally{LB.busy=false;LB.stop=false;el.bar.style.width="0";syncButtons();renderAll();}
 }
 
@@ -4564,7 +4579,7 @@ function renderSummary(){
   const c=counts();
   el.filters.innerHTML=FILTERS.map(([k,l])=>`<button type="button" class="lb-chip${LB.filter===k?" on":""}" data-f="${k}">${l} ${c[k==="new"?"new":k]}</button>`).join("");
   el.save.disabled=LB.busy||!c.ticked;
-  el.save.textContent=`💾 SAVE TICKED TRACKS (${c.ticked})`;
+  el.save.textContent=`⚡ EXECUTE & SAVE ${c.ticked} TICKED FIX${c.ticked===1?"":"ES"}`;
 }
 const LABEL={new:"NOT ANALYSED",ok:"CORRECT",wrong:"WRONG BPM",missing:"NO BPM",octave:"HALF/DOUBLE?",suspect:"CHECK",failed:"FAILED",fixed:"FIXED"};
 function rowHtml(r){
@@ -4667,25 +4682,26 @@ el.tapUse.addEventListener("click",()=>{
 });
 
 /* ---------- save (verified) / undo ---------- */
-async function writeBpm(id,value){
+async function writeBpm(id,value,col){
+  col=col||LB.keyCol;
   let v=Number(value);
-  let res=await supabaseClient.from("master_library").update({"BPM":v}).eq("id",id).select("id,BPM");
-  if(res.error&&/integer/i.test(res.error.message||"")){v=Math.round(v);res=await supabaseClient.from("master_library").update({"BPM":v}).eq("id",id).select("id,BPM");}
+  let res=await supabaseClient.from("master_library").update({"BPM":v}).eq(col,id).select("*");
+  if(res.error&&/integer/i.test(res.error.message||"")){v=Math.round(v);res=await supabaseClient.from("master_library").update({"BPM":v}).eq(col,id).select("*");}
   if(res.error)throw res.error;
   if(!Array.isArray(res.data)||res.data.length!==1)throw new Error("Not saved — Supabase returned no updated row (update permission / row-level security?)");
   const stored=Number(res.data[0].BPM);
   if(Math.abs(stored-v)>0.01)throw new Error("Supabase stored "+stored+" instead of "+v);
   return stored;
 }
-async function writeNull(id){const {error}=await supabaseClient.from("master_library").update({"BPM":null}).eq("id",id);if(error)throw error;}
+async function writeNull(id,col){const {error}=await supabaseClient.from("master_library").update({"BPM":null}).eq(col||LB.keyCol,id);if(error)throw error;}
 function disarm(){LB.armed=null;if(el.confirm)el.confirm.hidden=true;}
 function saveBackups(){try{localStorage.setItem(BACKUP_KEY,JSON.stringify(LB.backups.slice(-10)));}catch(e){console.warn("Backup not stored:",e);}}
 function ticked(){return LB.rows.filter(r=>r.checked&&r.id!==undefined&&r.id!==null&&validBpm(r.newBpm)&&(r.saved===null||Math.abs(r.newBpm-r.saved)>0.001));}
 el.save.addEventListener("click",()=>{
   if(!isMasterLibraryAdmin||LB.busy)return;
   const items=ticked();
-  if(!items.length){say("Nothing ticked to save.","error");return;}
-  el.confirmText.textContent=`Save new BPM for ${items.length} track${items.length===1?"":"s"}? Old values are backed up first and you can undo.`;
+  if(!items.length){say(LB.rows.some(r=>r.checked)?"Ticked rows cannot be saved: no usable key column was found for this table.":"Nothing ticked to save.","error");return;}
+  el.confirmText.textContent=`EXECUTE: save the new BPM for ${items.length} track${items.length===1?"":"s"}? Old values are backed up first and you can undo.`;
   el.confirm.hidden=false;el.confirm.scrollIntoView({behavior:"smooth",block:"nearest"});
 });
 el.no.addEventListener("click",()=>{disarm();say("Save cancelled.");});
@@ -4695,7 +4711,7 @@ async function doSave(){
   const items=ticked();
   if(!items.length){disarm();say("Nothing ticked to save.","error");return;}
   disarm();LB.busy=true;syncButtons();
-  const batch={time:new Date().toISOString(),items:items.map(r=>({id:r.id,title:r.title,oldBpm:r.saved}))};
+  const batch={time:new Date().toISOString(),keyCol:LB.keyCol,items:items.map(r=>({id:r.id,title:r.title,oldBpm:r.saved}))};
   LB.backups.push(batch);saveBackups();
   let ok=0,fail=0;const failed=[];
   try{
@@ -4719,7 +4735,7 @@ el.undo.addEventListener("click",async()=>{
     for(let i=0;i<batch.items.length;i++){
       const b=batch.items[i];say(`Restoring ${i+1}/${batch.items.length}: ${b.title}`,"active");
       try{
-        if(b.oldBpm===null||b.oldBpm===undefined)await writeNull(b.id);else await writeBpm(b.id,b.oldBpm);
+        if(b.oldBpm===null||b.oldBpm===undefined)await writeNull(b.id,batch.keyCol);else await writeBpm(b.id,b.oldBpm,batch.keyCol);
         const r=LB.rows.find(x=>x.id===b.id);if(r){r.saved=(b.oldBpm===undefined)?null:b.oldBpm;r.status="new";r.note="Restored previous BPM — re-analyse to check";r.checked=false;r.detected=null;r.newBpm=r.saved;}
         ok++;
       }catch(e){fail++;left.push(b);console.warn("Undo failed:",b.title,e);}

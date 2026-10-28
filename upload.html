@@ -18552,6 +18552,11 @@ function ensureGrid(d){                      /* my lock if ready, else a grid bu
   return null}
 
 /* ---------- BEAT TRACKER: finds the true tempo + phase of the whole track (kick band), no drift ---------- */
+/* v50: exact deck beat state for SYNC (interpolated audible position + beat grid) */
+window.glctc1BeatState=function(d){try{var tk=ensureGrid(d),a=aud(d),s=S[d];if(!tk||!a||!s)return null;
+  var rate=a.playbackRate||1,ct=curTime(d),nw=performance.now(),ex=(nw-(s.c0||nw))/1000*rate;
+  var pos=(a.paused||s.touch||!isFinite(ex))?ct:ct+Math.min(.25,Math.max(0,ex));
+  return{pos:pos,rate:rate,bl:tk.bl,off:tk.off,bar0:tk.bar0||0,old:!!tk.old,playing:!a.paused&&!s.touch}}catch(e){return null}};
 function hintBpm(d){try{var x=(typeof glctc1LibraryBpm==='function')?glctc1LibraryBpm(d):0;if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
 function analyse(d){
   var bo=BUF[d],b=bo&&bo.buf;if(!b)return;
@@ -18966,22 +18971,67 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     });
   }
 
-  function release() { st.state = "idle"; st.ref = null; render(); }
+  function release() { st.state = "idle"; st.ref = null; st.follower = null; render(); }
+
+  /* ---- v50: SYNC now matches the TEMPO exactly AND lines the BEATS up ---- */
+  function phaseShift(bRef, bFol) {            // beats the follower must move so its beat lands with the reference beat (-0.5 .. +0.5)
+    var d = (((bRef - bFol) % 1) + 1) % 1;
+    return d > 0.5 ? d - 1 : d;
+  }
+  function beatState(d) { return typeof window.glctc1BeatState === "function" ? window.glctc1BeatState(d) : null; }
+
+  function alignPhase(follower, ref, done, pass) {
+    pass = pass || 0;
+    var R = beatState(ref), F = beatState(follower);
+    if (!R || !F) { if (done) done("nogrid"); return; }
+    if (!R.playing || !F.playing) { if (done) done("idle"); return; }
+    var d = phaseShift((R.pos - R.off) / R.bl, (F.pos - F.off) / F.bl);
+    var err = d * F.bl / F.rate;                // error in real seconds
+    if (Math.abs(err) < 0.012 || pass >= 3) { if (done) done("ok", err); return; }
+    var a = $("audio" + follower), fin = false;
+    if (!a) return;
+    function next() {
+      if (fin) return; fin = true;
+      a.removeEventListener("seeked", next);
+      setTimeout(function () { alignPhase(follower, ref, done, pass + 1); }, 40);
+    }
+    a.addEventListener("seeked", next);
+    setTimeout(next, 700);
+    var t = a.currentTime + d * F.bl;
+    a.currentTime = Math.max(0, isFinite(a.duration) ? Math.min(a.duration - 0.05, t) : t);
+  }
+
+  function report(res, err) {
+    if (res === "ok") say("Matched - beats aligned" + (err != null ? " (" + Math.round(Math.abs(err) * 1000) + " ms)" : ""));
+    else if (res === "idle") say("Tempo matched - play both decks and the beats will line up");
+    else say("Tempo matched - beat grid not ready for exact alignment");
+  }
 
   function match(follower, ref) {
     var a = $("audio" + follower), ps = pitchEl(follower);
-    var refBpm = readBpm(ref), cur = readBpm(follower);
+    var R = beatState(ref), F = beatState(follower);
+    var refBpm, cur, pitch;
+    if (R && F && R.bl > 0 && F.bl > 0) {       // exact numbers straight from the beat grids and the real playback rates
+      pitch = a && a.playbackRate ? a.playbackRate : (ps ? +ps.value || 1 : 1);
+      refBpm = (60 / R.bl) * R.rate;
+      cur = (60 / F.bl) * pitch;
+    } else {                                    // fallback: the numbers shown in the deck headers
+      refBpm = readBpm(ref); cur = readBpm(follower); pitch = ps ? +ps.value || 1 : 1;
+    }
     if (!a || !ps || !refBpm || !cur) { say("Load a track on both decks first"); return false; }
     if (a._slowMo && typeof toggleSlowMo === "function") { try { toggleSlowMo(follower); } catch (e) {} }
-    var pitch = +ps.value || 1;
     var r = pickRate(refBpm, cur, pitch, +ps.min, +ps.max);
-    ps.value = r.rate;                          // slider snaps to its step
-    var applied = +ps.value;
+    ps.value = r.rate;                          // slider shows the nearest step ...
+    var applied = r.rate;                       // ... but the audio gets the exact rate
     if (typeof setPitch === "function") { try { setPitch(follower, applied); } catch (e) { a.playbackRate = applied; } }
     else a.playbackRate = applied;
     try { tapTempoHistory[follower] = []; } catch (e) {}
+    st.follower = follower;
     if (r.clamped) say("Deck " + follower + " can't reach " + refBpm.toFixed(1) + " BPM - pitch range limit");
-    else if (r.mode) say("Matched at " + r.mode + " time");
+    else {
+      if (r.mode) say("Matched at " + r.mode + " time");
+      setTimeout(function () { alignPhase(follower, ref, function (res, err) { if (!r.mode || res !== "ok") report(res, err); }); }, 80);
+    }
     return true;
   }
 
@@ -18989,7 +19039,7 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     if (st.state === "locked") { release(); return; }
     if (st.state === "armed") {
       if (st.ref === d) { release(); return; }                 // cancel
-      if (match(d, st.ref)) { st.state = "locked"; render(); }  // 2nd deck matches the 1st
+      if (match(d, st.ref)) { st.state = "locked"; st.follower = d; render(); }  // 2nd deck matches the 1st
       return;
     }
     if (!readBpm(d)) { say("Load a track on Deck " + d + " first"); return; }
@@ -19050,6 +19100,9 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     }
     var a = $("audio" + d);
     if (a) a.addEventListener("loadedmetadata", function () { if (st.state !== "idle") release(); });
+    if (a) a.addEventListener("play", function () {   // v50: a deck starts while matched -> line the beats up again
+      if (st.state === "locked" && st.follower) setTimeout(function () { alignPhase(st.follower, other(st.follower), report); }, 250);
+    });
   }
 
   function start() {
@@ -19065,7 +19118,7 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
   if (document.readyState === "complete") setTimeout(start, 120);
   else window.addEventListener("load", function () { setTimeout(start, 120); });
 
-  window.glctc1SyncTest = { pickRate: pickRate };
+  window.glctc1SyncTest = { pickRate: pickRate, phaseShift: phaseShift };
 })();
 </script>
 

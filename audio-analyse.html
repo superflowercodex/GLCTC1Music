@@ -10,7 +10,7 @@
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>GLCTC1 AUDIO ANALYSE — Header Match & Confirmed BPM Repair (Breakbeat-aware)</title>
+<title>GLCTC1 AUDIO ANALYSE — Header Match & Confirmed BPM Repair (Breakbeat-aware, v9 master scan fix)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -4257,16 +4257,89 @@ async function refreshMasterLibrary(){
   refreshLibraryButton.disabled=true; analyseMasterLibraryButton.disabled=true;
   libraryScanStatus.className="status active"; libraryScanStatus.textContent="Refreshing Master Library…";
   try{
-    const {data,error}=await supabaseClient.from("master_library").select("*").limit(5000);
-    if(error) throw error; masterLibraryRows=data||[];
+    /* Supabase returns max 1000 rows per request, so page through the whole table. */
+    const all=[]; const PAGE=1000;
+    for(let from=0;from<100000;from+=PAGE){
+      const {data,error}=await supabaseClient.from("master_library").select("*").range(from,from+PAGE-1);
+      if(error) throw error;
+      if(!data||!data.length) break;
+      all.push(...data);
+      if(data.length<PAGE) break;
+    }
+    masterLibraryRows=all;
     libraryScanStatus.className="status success"; libraryScanStatus.textContent=`Master Library refreshed: ${masterLibraryRows.length} records.`;
     return masterLibraryRows;
-  }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Refresh failed: "+e.message;throw e;}
+  }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Refresh failed: "+(e&&e.message?e.message:e);throw e;}
   finally{refreshLibraryButton.disabled=libraryScanBusy;analyseMasterLibraryButton.disabled=libraryScanBusy;}
 }
 function fieldValue(row,names){for(const n of names)if(row?.[n]!==undefined&&row[n]!==null&&String(row[n]).trim()!=="")return row[n];return "";}
-async function masterAudioUrl(path){if(!path)throw new Error("Missing Master Audio");if(/^https?:\/\//i.test(path))return path;const clean=String(path).replace(/^\/+/,"").replace(/^tracks\//,"");const {data,error}=await supabaseClient.storage.from("tracks").createSignedUrl(clean,900);if(error)throw error;if(!data?.signedUrl)throw new Error("Could not sign audio URL");return data.signedUrl;}
-async function decodeMasterUrl(url){const response=await fetch(url);if(!response.ok)throw new Error("Audio fetch HTTP "+response.status);const bytes=await response.arrayBuffer();const AC=window.AudioContext||window.webkitAudioContext;if(!AC)throw new Error("Web Audio unsupported");const ctx=new AC();try{return await ctx.decodeAudioData(bytes.slice(0));}finally{await ctx.close().catch(()=>{});}}
+function masterAudioCandidates(path){
+  const raw=String(path||"").trim();
+  const out=[];
+  const add=v=>{v=String(v||"").replace(/^\/+/,"");if(v&&!out.includes(v))out.push(v);};
+  /* Full Supabase storage URL -> pull the object path out of it */
+  const m=raw.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/tracks\/([^?#]+)/i);
+  let p=m?m[1]:raw;
+  p=p.replace(/^\/+/,"").replace(/^tracks\//,"");
+  add(p);
+  try{add(decodeURIComponent(p));}catch(e){}
+  try{add(encodeURI(p));}catch(e){}
+  return out;
+}
+async function fetchMasterAudioBytes(path){
+  if(!path)throw new Error("Missing Master Audio");
+  let lastErr=null;
+  /* 1. Direct full URL that is not a Supabase storage URL */
+  if(/^https?:\/\//i.test(path)&&!/\/storage\/v1\/object\//i.test(path)){
+    const r=await fetch(path);
+    if(r.ok)return await r.arrayBuffer();
+    lastErr=new Error("Audio fetch HTTP "+r.status);
+  }
+  for(const cand of masterAudioCandidates(path)){
+    /* 2. Authenticated download through the Supabase client (works for private buckets) */
+    try{
+      const {data,error}=await supabaseClient.storage.from("tracks").download(cand);
+      if(!error&&data)return await data.arrayBuffer();
+      if(error)lastErr=error;
+    }catch(e){lastErr=e;}
+    /* 3. Signed URL */
+    try{
+      const {data,error}=await supabaseClient.storage.from("tracks").createSignedUrl(cand,900);
+      if(!error&&data?.signedUrl){
+        const r=await fetch(data.signedUrl);
+        if(r.ok)return await r.arrayBuffer();
+        lastErr=new Error("Audio fetch HTTP "+r.status);
+      }else if(error)lastErr=error;
+    }catch(e){lastErr=e;}
+    /* 4. Public URL */
+    try{
+      const {data}=supabaseClient.storage.from("tracks").getPublicUrl(cand);
+      if(data?.publicUrl){
+        const r=await fetch(data.publicUrl);
+        if(r.ok)return await r.arrayBuffer();
+        lastErr=new Error("Audio fetch HTTP "+r.status);
+      }
+    }catch(e){lastErr=e;}
+  }
+  throw new Error("Could not load audio ("+path+"): "+(lastErr&&lastErr.message?lastErr.message:lastErr||"not found"));
+}
+let masterScanAudioCtx=null;
+function getMasterScanCtx(){
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC)throw new Error("Web Audio unsupported in this browser");
+  if(!masterScanAudioCtx||masterScanAudioCtx.state==="closed")masterScanAudioCtx=new AC();
+  return masterScanAudioCtx;
+}
+async function decodeMasterBytes(bytes){
+  const ctx=getMasterScanCtx();
+  const copy=bytes.slice(0);
+  return await new Promise((resolve,reject)=>{
+    try{
+      const p=ctx.decodeAudioData(copy,resolve,reject);
+      if(p&&typeof p.then==="function")p.then(resolve,reject);
+    }catch(e){reject(e);}
+  });
+}
 function monoFromBuffer(buffer){const mono=new Float32Array(buffer.length);for(let c=0;c<buffer.numberOfChannels;c++){const data=buffer.getChannelData(c);for(let i=0;i<data.length;i++)mono[i]+=data[i]/buffer.numberOfChannels;}return mono;}
 /* ---------- Two-step Master Library BPM repair: SCAN first, then EXECUTE ---------- */
 let repairPlan=[];
@@ -4280,30 +4353,40 @@ function ratioIsHalf(r){return Math.abs(r-0.5)<0.03;}
 async function analyseMasterLibrary(){
  if(!isMasterLibraryAdmin){libraryScanStatus.className="status error";libraryScanStatus.textContent="Administrator access required.";return;}
  if(libraryScanBusy)return;
- if(!currentUser){libraryScanStatus.className="status error";libraryScanStatus.textContent="Sign in before repairing Master Library BPM.";return;}
- libraryScanBusy=true;repairPlan=[];libraryRepairReport.hidden=true;libraryRepairReport.textContent="";repairBusy(true);
- let rows=masterLibraryRows,scanned=0,unchanged=0,skipped=0,failed=0;
- const review=[];
+ /* Re-check the live session instead of relying on a variable that may never have been set. */
  try{
-  if(!rows.length)rows=await refreshMasterLibrary();
-  if(!rows.length)throw new Error("No Master Library records returned.");
-  if(!window.confirm(`SCAN ${rows.length} Master Library tracks from their audio.\n\nNothing is changed or saved during the scan. You will get a report listing every track with a wrong BPM, then press EXECUTE REPAIR to fix them.`))return;
+  const {data:ud,error:ue}=await supabaseClient.auth.getUser();
+  if(ue||!ud?.user){libraryScanStatus.className="status error";libraryScanStatus.textContent="Sign in before scanning Master Library BPM.";return;}
+  currentUser=ud.user;
+ }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Could not verify login: "+(e&&e.message?e.message:e);return;}
+ libraryScanBusy=true;repairPlan=[];libraryRepairReport.hidden=true;libraryRepairReport.textContent="";repairBusy(true);
+ let rows=[],scanned=0,unchanged=0,skipped=0,failed=0;
+ const review=[],failures=[],skips=[];
+ try{
+  /* Always pull a fresh, complete list (paged) so the scan never runs on stale/partial data. */
+  rows=await refreshMasterLibrary();
+  if(!rows.length)throw new Error("No Master Library records returned. If tracks exist, Supabase row-level security is hiding them from this login.");
+  libraryScanBusy=true;repairBusy(true);
+  /* Scan is read-only, so no confirm() popup (browsers can silently block it, which made the scan do nothing). */
   for(const row of rows){
    scanned++;
    const title=fieldValue(row,["Track Title","title","Title"])||`Track ${scanned}`;
    libraryScanStatus.className="status active";
-   libraryScanStatus.textContent=`Scanning ${scanned}/${rows.length}: ${title} · faults found ${repairPlan.length}`;
+   libraryScanStatus.textContent=`Scanning ${scanned}/${rows.length}: ${title} · faults found ${repairPlan.length} · failed ${failed}`;
    try{
     const path=fieldValue(row,["Master Audio","master_audio","masterAudio","audio_url"]);
-    if(!path||row.id===undefined||row.id===null){skipped++;continue;}
-    const url=await masterAudioUrl(String(path));
-    const buffer=await decodeMasterUrl(url);
+    if(!path){skipped++;skips.push(`${title}: no Master Audio file`);continue;}
+    if(row.id===undefined||row.id===null){skipped++;skips.push(`${title}: row has no id`);continue;}
+    await new Promise(r=>setTimeout(r,0));
+    const bytes=await fetchMasterAudioBytes(String(path));
+    const buffer=await decodeMasterBytes(bytes);
+    await new Promise(r=>setTimeout(r,0));
     const bpm=Number(detectBPM(monoFromBuffer(buffer),buffer.sampleRate));
-    if(!Number.isFinite(bpm)||bpm<60||bpm>190){skipped++;continue;}
+    if(!Number.isFinite(bpm)||bpm<60||bpm>190){skipped++;skips.push(`${title}: BPM could not be detected`);continue;}
     const oldRaw=fieldValue(row,["BPM","bpm"]);
     const oldBpm=Number(oldRaw);
     const hasOld=oldRaw!==""&&Number.isFinite(oldBpm)&&oldBpm>=60&&oldBpm<=190;
-    if(!hasOld){repairPlan.push({id:row.id,title,oldBpm:hasOld?oldBpm:null,oldRaw,newBpm:bpm,kind:"MISSING/INVALID"});}
+    if(!hasOld){repairPlan.push({id:row.id,title,oldBpm:null,oldRaw,newBpm:bpm,kind:"MISSING/INVALID"});}
     else if(Math.abs(oldBpm-bpm)<=1.5){unchanged++;}
     else{
      const ratio=bpm/oldBpm;
@@ -4313,16 +4396,18 @@ async function analyseMasterLibrary(){
      }else if(ratioIsHalf(ratio)){review.push(`${title}: saved ${oldBpm}, scan says ${bpm} (half)`);}
      else repairPlan.push({id:row.id,title,oldBpm,oldRaw,newBpm:bpm,kind:"WRONG"});
     }
-   }catch(e){failed++;console.warn("Master Library BPM scan:",title,e);}
+   }catch(e){failed++;failures.push(`${title}: ${e&&e.message?e.message:e}`);console.warn("Master Library BPM scan:",title,e);}
    await new Promise(r=>setTimeout(r,15));
   }
   const lines=[`SCAN COMPLETE — ${scanned} tracks checked.`,`Correct already: ${unchanged} · To fix: ${repairPlan.length} · Left for you to check: ${review.length} · Skipped: ${skipped} · Failed: ${failed}`,""];
   if(repairPlan.length){lines.push("WILL BE FIXED WHEN YOU PRESS EXECUTE REPAIR:");for(const p of repairPlan)lines.push(`• [${p.kind}] ${p.title}: ${p.oldBpm===null?"blank/invalid":p.oldBpm} → ${p.newBpm}`);lines.push("");}
-  if(review.length){lines.push("NOT CHANGED — PLEASE CHECK BY EAR (half/double-time can't be settled from audio alone):");for(const r of review)lines.push("• "+r);}
+  if(review.length){lines.push("NOT CHANGED — PLEASE CHECK BY EAR (half/double-time can't be settled from audio alone):");for(const r of review)lines.push("• "+r);lines.push("");}
+  if(skips.length){lines.push("SKIPPED:");for(const s of skips)lines.push("• "+s);lines.push("");}
+  if(failures.length){lines.push("FAILED (reason shown):");for(const f of failures)lines.push("• "+f);lines.push("");}
   libraryRepairReport.textContent=lines.join("\n");libraryRepairReport.hidden=false;
   libraryScanStatus.className=failed?"status error":"status success";
-  libraryScanStatus.textContent=repairPlan.length?`Scan complete: ${repairPlan.length} faults found. Review the report, then press EXECUTE REPAIR.`:`Scan complete: no automatic fixes needed. ${review.length} track(s) listed for you to check.`;
- }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Library BPM scan failed: "+e.message;}
+  libraryScanStatus.textContent=repairPlan.length?`Scan complete: ${repairPlan.length} faults found. Review the report, then press EXECUTE REPAIR.`:`Scan complete: no automatic fixes needed. ${review.length} track(s) listed for you to check.${failed?" "+failed+" failed — see report.":""}`;
+ }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Library BPM scan failed: "+(e&&e.message?e.message:e);}
  finally{libraryScanBusy=false;repairBusy(false);}
 }
 async function writeVerifiedBpm(id,value){

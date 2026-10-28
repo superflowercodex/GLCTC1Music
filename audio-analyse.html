@@ -10,7 +10,7 @@
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>GLCTC1 AUDIO ANALYSE — Header Match & Confirmed BPM Repair (Breakbeat-aware, v10 breakbeat BPM fix)</title>
+<title>GLCTC1 AUDIO ANALYSE — Header Match & Confirmed BPM Repair (Breakbeat-aware, v11 BPM manager)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -1142,12 +1142,43 @@ body::before {
   </button>
 
   <div id="adminLibraryTools" hidden>
-    <button id="refreshLibraryButton" class="library-button" type="button">↻ REFRESH MASTER LIBRARY</button>
-    <button id="analyseMasterLibraryButton" class="analyse-button" type="button">⚡ STEP 1: SCAN MASTER LIBRARY BPM</button>
-    <button id="executeRepairButton" class="analyse-button" type="button" disabled>🛠 STEP 2: EXECUTE REPAIR</button>
-    <button id="undoRepairButton" class="library-button" type="button" disabled>↩ UNDO LAST REPAIR</button>
-    <div id="libraryScanStatus" class="status">Admin tools ready.</div>
-    <div id="libraryRepairReport" class="status" hidden style="white-space:pre-wrap;text-align:left;max-height:340px;overflow:auto;font-size:12px;line-height:1.5;"></div>
+    <div class="lb-head">MASTER LIBRARY — BPM MANAGER</div>
+    <div class="lb-bar">
+      <button id="lbLoad" type="button" class="lb-btn">↻ LOAD LIBRARY</button>
+      <button id="lbAnalysePending" type="button" class="lb-btn lb-main">⚡ ANALYSE UNCHECKED TRACKS</button>
+      <button id="lbAnalyseAll" type="button" class="lb-btn">⚡ RE-ANALYSE ALL</button>
+      <button id="lbStop" type="button" class="lb-btn lb-warn" disabled>■ STOP</button>
+    </div>
+    <div class="lb-progress"><div id="lbProgressBar"></div></div>
+    <div id="libraryScanStatus" class="status">Admin tools ready. Load the library to begin.</div>
+    <div id="lbFilters" class="lb-filters"></div>
+    <div class="lb-bar">
+      <input id="lbSearch" class="lb-search" type="search" placeholder="Search title or artist…">
+      <button id="lbTickFaults" type="button" class="lb-btn">✔ TICK ALL FAULTS</button>
+      <button id="lbTickNone" type="button" class="lb-btn">☐ UNTICK ALL</button>
+    </div>
+    <div class="lb-tablewrap">
+      <table class="lb-table">
+        <thead><tr><th></th><th>TRACK</th><th>SAVED</th><th>SCAN</th><th>NEW BPM</th><th>STATUS</th><th>TOOLS</th></tr></thead>
+        <tbody id="lbBody"><tr><td colspan="7" class="lb-empty">Library not loaded.</td></tr></tbody>
+      </table>
+    </div>
+    <div id="lbMore" class="lb-more" hidden></div>
+    <div class="lb-bar">
+      <button id="lbSave" type="button" class="lb-btn lb-go" disabled>💾 SAVE TICKED TRACKS</button>
+      <button id="lbUndo" type="button" class="lb-btn" disabled>↩ UNDO LAST SAVE</button>
+      <button id="lbExport" type="button" class="lb-btn">⬇ EXPORT CSV</button>
+    </div>
+    <div id="lbAudition" class="lb-audition" hidden>
+      <div class="lb-aud-title" id="lbAudTitle">—</div>
+      <audio id="lbAudio" controls preload="auto" style="width:100%"></audio>
+      <div class="lb-bar">
+        <button id="lbTap" type="button" class="lb-btn lb-main">👆 TAP TEMPO</button>
+        <span id="lbTapOut" class="lb-tapout">tap along to the beat</span>
+        <button id="lbTapUse" type="button" class="lb-btn" disabled>USE TAPPED BPM</button>
+        <button id="lbTapReset" type="button" class="lb-btn">RESET</button>
+      </div>
+    </div>
   </div>
   <div id="libraryAdminNotice" class="status">Master Library maintenance tools are restricted to the GLCTC1 administrator.</div>
 
@@ -2420,18 +2451,14 @@ function goertzelMagnitude(
    BPM  (breakbeat-aware tempo engine)
    ===================================================== */
 
-// Shared onset envelope used by both the BPM and time-signature estimators.
-// Splits the signal into a LOW band (kick) and a HIGH band (snare / hats /
-// ghost notes), turns each into a log-energy "novelty" curve, then merges them
-// so a busy, syncopated break is tracked by every drum hit instead of just
-// whichever instrument happens to be loudest.
-function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds) {
+function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds, centerFrac) {
   const duration = samples.length / sampleRate;
   if (!Number.isFinite(duration) || duration < 8) return null;
 
   // Analyse the middle of long tracks (skips quiet intros / outros).
   const windowSeconds = Math.min(maxSeconds || 90, duration);
-  const startSample = Math.floor(((duration - windowSeconds) / 2) * sampleRate);
+  const cf = (typeof centerFrac === "number") ? centerFrac : 0.5;
+  const startSample = Math.floor((duration - windowSeconds) * cf * sampleRate);
   const endSample = startSample + Math.floor(windowSeconds * sampleRate);
 
   const hop = Math.max(1, Math.round(sampleRate / 250));   // ~250 envelope frames / second
@@ -2491,9 +2518,8 @@ function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds) {
   return { onset: smooth, rate, frames };
 }
 
-function detectBPM(samples, sampleRate) {
-  const env = glctc1OnsetEnvelope(samples, sampleRate, 120);
-  if (!env) return "—";
+function glctc1TempoFromEnv(env) {
+  if (!env) return null;
   const { onset, rate, frames } = env;
 
   // Autocorrelation of the onset curve out to ~9 s (covers 2 bars at 60 BPM / 4 bars at 120).
@@ -2502,7 +2528,7 @@ function detectBPM(samples, sampleRate) {
   let r0 = 0;
   for (let i = 0; i < frames; i++) r0 += onset[i] * onset[i];
   r0 /= frames;
-  if (r0 < 1e-9) return "—";
+  if (r0 < 1e-9) return null;
   for (let lag = 1; lag <= maxLag; lag++) {
     let sum = 0;
     for (let i = lag; i < frames; i++) sum += onset[i] * onset[i - lag];
@@ -2554,7 +2580,7 @@ function detectBPM(samples, sampleRate) {
   };
 
   let best = bestIn(LO, HI);
-  if (!best || !(best.score > 0)) return "—";
+  if (!best || !(best.score > 0)) return null;
 
   // Related-tempo check (ratios 2:1, 3:2, 4:3). If a related tempo is scored nearly as well
   // and sits in a more plausible zone for the groove, prefer it.
@@ -2596,7 +2622,53 @@ function detectBPM(samples, sampleRate) {
   let result = refined ? refined.bpm : best.bpm;
   const nearest = Math.round(result);
   if (Math.abs(result - nearest) <= 0.3) result = nearest; // most tracks sit on whole BPM
-  return Math.round(result * 10) / 10;
+  result = Math.round(result * 10) / 10;
+  const support = bpm => { const o = bestIn(bpm * 0.99, bpm * 1.01); return o ? Math.max(0, o.score) / best.score : 0; };
+  return { bpm: result, score: best.score, support };
+}
+
+
+// Multi-section tempo detection. Breaks have intros, breakdowns and fills that fool a single slice,
+// so several sections of the track vote and the strongest agreeing group wins.
+function detectBPMDetailed(samples, sampleRate) {
+  const duration = samples.length / sampleRate;
+  if (!Number.isFinite(duration) || duration < 8) return null;
+  const jobs = [[120, 0.5]];
+  if (duration >= 100) jobs.push([45, 0.12], [45, 0.5], [45, 0.88]);
+  else if (duration >= 50) jobs.push([30, 0.2], [30, 0.8]);
+  const votes = [];
+  for (const [secs, frac] of jobs) {
+    const t = glctc1TempoFromEnv(glctc1OnsetEnvelope(samples, sampleRate, secs, frac));
+    if (t) votes.push(t);
+  }
+  if (!votes.length) return null;
+  // group votes that agree within 1.5 %
+  const groups = [];
+  for (const v of votes) {
+    let g = groups.find(g => Math.abs(g.bpm / v.bpm - 1) < 0.015);
+    if (!g) { g = { bpm: v.bpm, weight: 0, votes: [] }; groups.push(g); }
+    g.weight += v.score; g.votes.push(v);
+    g.bpm = g.votes.reduce((a, x) => a + x.bpm * x.score, 0) / g.weight;
+  }
+  groups.sort((a, b) => b.weight - a.weight);
+  const win = groups[0];
+  let bpm = Math.round(win.bpm * 10) / 10;
+  const nearest = Math.round(bpm);
+  if (Math.abs(bpm - nearest) <= 0.3) bpm = nearest;
+  const total = groups.reduce((a, g) => a + g.weight, 0) || 1;
+  const sup = x => votes.reduce((a, v) => a + v.support(x), 0) / votes.length;
+  return {
+    bpm,
+    confidence: Math.round(100 * win.weight / total),
+    agree: win.votes.length + "/" + votes.length,
+    alternatives: groups.slice(1, 3).map(g => Math.round(g.bpm * 10) / 10),
+    support: sup
+  };
+}
+
+function detectBPM(samples, sampleRate) {
+  const d = detectBPMDetailed(samples, sampleRate);
+  return d ? d.bpm : "—";
 }
 
 /* =====================================================
@@ -4245,249 +4317,404 @@ async function uploadToMasterLibrary() {
 }
 
 /* =====================================================
-   MASTER LIBRARY REFRESH / BPM REPAIR
+   MASTER LIBRARY — BPM MANAGER (admin only)
+   Load → Analyse → Review table → Tick → Save (verified) → Undo
    ===================================================== */
 const MASTER_LIBRARY_ADMIN_EMAIL="leytondj11@hotmail.com";
 const adminLibraryTools=document.getElementById("adminLibraryTools");
 const libraryAdminNotice=document.getElementById("libraryAdminNotice");
-const refreshLibraryButton=document.getElementById("refreshLibraryButton");
-const analyseMasterLibraryButton=document.getElementById("analyseMasterLibraryButton");
 const libraryScanStatus=document.getElementById("libraryScanStatus");
-let masterLibraryRows=[]; let libraryScanBusy=false; let isMasterLibraryAdmin=false;
+let isMasterLibraryAdmin=false;
 
+(function(){const st=document.createElement("style");st.textContent=`
+#adminLibraryTools{margin-top:22px;padding:16px;border:1px solid #22c55e;border-radius:14px;background:rgba(4,30,16,.55);box-shadow:0 0 14px rgba(34,197,94,.25)}
+.lb-head{text-align:center;font-weight:900;letter-spacing:3px;font-size:13px;color:#9dffc4;margin-bottom:12px}
+.lb-bar{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;align-items:center}
+.lb-btn{border:1px solid #5b3a99;background:#1b0f35;color:#fff;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:800;letter-spacing:1px;cursor:pointer}
+.lb-btn:hover:not(:disabled){border-color:#c178ff}
+.lb-btn:disabled{opacity:.4;cursor:not-allowed}
+.lb-main{background:linear-gradient(90deg,#311064,#6e22c9);border-color:#c178ff}
+.lb-go{background:linear-gradient(90deg,#063b20,#087a3e);border-color:#22c55e}
+.lb-warn{border-color:#f59e0b;color:#fcd34d}
+.lb-progress{height:6px;background:#12091f;border-radius:4px;overflow:hidden}
+#lbProgressBar{height:100%;width:0;background:linear-gradient(90deg,#22c55e,#9b4dff);transition:width .2s}
+.lb-filters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.lb-chip{border:1px solid #4a3a6a;background:#120a24;color:#cdbfe6;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}
+.lb-chip.on{background:#6e22c9;color:#fff;border-color:#c178ff}
+.lb-search{flex:1;min-width:160px;padding:10px;border-radius:8px;border:1px solid #4a3a6a;background:#0c0618;color:#fff;font-size:13px}
+.lb-tablewrap{max-height:62vh;overflow:auto;border:1px solid #3b2a5c;border-radius:10px}
+.lb-table{width:100%;border-collapse:collapse;font-size:12px}
+.lb-table th{position:sticky;top:0;background:#1a0e30;color:#d9b6ff;text-align:left;padding:8px;font-size:10px;letter-spacing:2px;z-index:1}
+.lb-table td{padding:7px 8px;border-top:1px solid #2a1d45;vertical-align:middle}
+.lb-table small{color:#9e91ac}
+.lb-empty{text-align:center;color:#9e91ac;padding:24px}
+.lb-bpm{width:74px;padding:6px;border-radius:6px;border:1px solid #5b3a99;background:#0c0618;color:#fff;font-size:13px;font-weight:800}
+.lb-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:1px}
+.st-ok{background:#064e2b;color:#86efac}.st-wrong,.st-missing{background:#5b1111;color:#fca5a5}
+.st-octave,.st-suspect{background:#5a3b05;color:#fcd34d}.st-failed{background:#3b1d5c;color:#e9d5ff}
+.st-new{background:#1f2937;color:#9ca3af}.st-fixed{background:#0b3b5c;color:#7dd3fc}
+.lb-note{display:block;color:#9e91ac;font-size:10px;margin-top:3px;max-width:260px}
+.lb-tools button{border:1px solid #4a3a6a;background:#120a24;color:#fff;border-radius:6px;padding:5px 7px;font-size:11px;font-weight:800;cursor:pointer;margin-right:3px}
+.lb-more{text-align:center;color:#9e91ac;font-size:12px;margin:6px}
+.lb-audition{margin-top:12px;padding:12px;border:1px solid #6e22c9;border-radius:10px;background:rgba(30,10,60,.6)}
+.lb-aud-title{font-weight:800;font-size:13px;margin-bottom:8px;color:#e9d5ff}
+.lb-tapout{font-size:16px;font-weight:900;color:#9dffc4;min-width:150px}
+`;document.head.appendChild(st);})();
+
+const LB={rows:[],busy:false,stop:false,filter:"all",search:"",armed:null,tap:[],audUrl:null,audRow:null,backups:[]};
+const BACKUP_KEY="glctc1_bpm_backups_v2";
+const $=id=>document.getElementById(id);
+const el={load:$("lbLoad"),aPend:$("lbAnalysePending"),aAll:$("lbAnalyseAll"),stop:$("lbStop"),bar:$("lbProgressBar"),filters:$("lbFilters"),search:$("lbSearch"),
+ tickF:$("lbTickFaults"),tickN:$("lbTickNone"),body:$("lbBody"),more:$("lbMore"),save:$("lbSave"),undo:$("lbUndo"),exp:$("lbExport"),
+ aud:$("lbAudition"),audTitle:$("lbAudTitle"),audio:$("lbAudio"),tap:$("lbTap"),tapOut:$("lbTapOut"),tapUse:$("lbTapUse"),tapReset:$("lbTapReset")};
+const MAX_SHOWN=400;
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const r1=n=>Math.round(Number(n)*10)/10;
+const validBpm=n=>Number.isFinite(n)&&n>=40&&n<=220;
+function fieldValue(row,names){for(const n of names)if(row?.[n]!==undefined&&row[n]!==null&&String(row[n]).trim()!=="")return row[n];return "";}
+function say(msg,type){libraryScanStatus.className="status"+(type?" "+type:"");libraryScanStatus.textContent=msg;}
+try{LB.backups=JSON.parse(localStorage.getItem(BACKUP_KEY)||"[]");}catch(e){LB.backups=[];}
+
+/* ---------- admin check ---------- */
 async function verifyMasterLibraryAdmin(){
+  const wasAdmin=isMasterLibraryAdmin;
   try{
     const {data,error}=await supabaseClient.auth.getUser();
     if(error) throw error;
     const email=String(data?.user?.email||"").trim().toLowerCase();
     isMasterLibraryAdmin=!!data?.user && email===MASTER_LIBRARY_ADMIN_EMAIL;
     adminLibraryTools.hidden=!isMasterLibraryAdmin;
-    libraryAdminNotice.textContent=isMasterLibraryAdmin
-      ? "ADMIN ACCESS VERIFIED — MASTER LIBRARY MAINTENANCE ENABLED."
-      : "Master Library maintenance tools are restricted to the GLCTC1 administrator.";
-    if(isMasterLibraryAdmin) libraryAdminNotice.classList.add("success");
-    else libraryAdminNotice.classList.remove("success");
+    libraryAdminNotice.textContent=isMasterLibraryAdmin?"ADMIN ACCESS VERIFIED — MASTER LIBRARY BPM MANAGER ENABLED.":"Master Library maintenance tools are restricted to the GLCTC1 administrator.";
+    libraryAdminNotice.classList.toggle("success",isMasterLibraryAdmin);
+    if(isMasterLibraryAdmin&&!wasAdmin&&!LB.rows.length&&!LB.busy) loadLibrary().catch(()=>{});
   }catch(error){
-    isMasterLibraryAdmin=false;
-    adminLibraryTools.hidden=true;
+    isMasterLibraryAdmin=false;adminLibraryTools.hidden=true;
     libraryAdminNotice.textContent="Unable to verify administrator access. Maintenance tools remain locked.";
     console.warn("GLCTC1 admin verification failed:",error);
   }
 }
 verifyMasterLibraryAdmin();
 supabaseClient.auth.onAuthStateChange(()=>{setTimeout(verifyMasterLibraryAdmin,0);});
-refreshLibraryButton.addEventListener("click",()=>{if(!isMasterLibraryAdmin){adminLibraryTools.hidden=true;return;}refreshMasterLibrary();});
-analyseMasterLibraryButton.addEventListener("click",()=>{if(!isMasterLibraryAdmin){adminLibraryTools.hidden=true;return;}analyseMasterLibrary();});
-async function refreshMasterLibrary(){
-  if(!isMasterLibraryAdmin) throw new Error("Administrator access required.");
-  refreshLibraryButton.disabled=true; analyseMasterLibraryButton.disabled=true;
-  libraryScanStatus.className="status active"; libraryScanStatus.textContent="Refreshing Master Library…";
+
+/* ---------- load (paged, so more than 1000 rows works) ---------- */
+async function loadLibrary(){
+  if(!isMasterLibraryAdmin)return;
+  if(LB.busy)return;
+  LB.busy=true;syncButtons();say("Loading Master Library…","active");
   try{
-    /* Supabase returns max 1000 rows per request, so page through the whole table. */
-    const all=[]; const PAGE=1000;
-    for(let from=0;from<100000;from+=PAGE){
-      const {data,error}=await supabaseClient.from("master_library").select("*").range(from,from+PAGE-1);
-      if(error) throw error;
-      if(!data||!data.length) break;
+    const all=[];const PAGE=1000;let ordered=true;
+    for(let from=0;from<200000;from+=PAGE){
+      let q=supabaseClient.from("master_library").select("*");
+      if(ordered)q=q.order("id",{ascending:true});
+      let {data,error}=await q.range(from,from+PAGE-1);
+      if(error&&ordered){ordered=false;from-=PAGE;continue;}
+      if(error)throw error;
+      if(!data||!data.length)break;
       all.push(...data);
-      if(data.length<PAGE) break;
+      if(data.length<PAGE)break;
     }
-    masterLibraryRows=all;
-    libraryScanStatus.className="status success"; libraryScanStatus.textContent=`Master Library refreshed: ${masterLibraryRows.length} records.`;
-    return masterLibraryRows;
-  }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Refresh failed: "+(e&&e.message?e.message:e);throw e;}
-  finally{refreshLibraryButton.disabled=libraryScanBusy;analyseMasterLibraryButton.disabled=libraryScanBusy;}
+    const prev=new Map(LB.rows.map(r=>[String(r.id),r]));
+    LB.rows=all.map((row,k)=>{
+      const raw=fieldValue(row,["BPM","bpm"]);const n=Number(raw);
+      const r={k,id:row.id,title:fieldValue(row,["Track Title","title","Title"])||("Track "+(k+1)),artist:fieldValue(row,["Artist","artist"]),
+        path:fieldValue(row,["Master Audio","master_audio","masterAudio","audio_url"]),saved:(raw!==""&&validBpm(n))?n:null,savedRaw:raw,
+        status:"new",note:"",detected:null,conf:null,agree:"",newBpm:null,checked:false};
+      const p=prev.get(String(r.id));
+      if(p&&p.status!=="new"&&p.detected!==null){ /* keep earlier analysis if the saved value is unchanged */
+        if(p.saved===r.saved){Object.assign(r,{status:p.status,note:p.note,detected:p.detected,conf:p.conf,agree:p.agree,newBpm:p.newBpm,checked:p.checked});}
+      }
+      return r;
+    });
+    say(LB.rows.length?`Loaded ${LB.rows.length} tracks. Press ANALYSE to scan their audio.`:"No records returned. If tracks exist, Supabase row-level security is hiding them from this login.",LB.rows.length?"success":"error");
+  }catch(e){say("Load failed: "+(e&&e.message?e.message:e),"error");}
+  finally{LB.busy=false;renderAll();}
 }
-function fieldValue(row,names){for(const n of names)if(row?.[n]!==undefined&&row[n]!==null&&String(row[n]).trim()!=="")return row[n];return "";}
+
+/* ---------- audio ---------- */
 function masterAudioCandidates(path){
-  const raw=String(path||"").trim();
-  const out=[];
+  const raw=String(path||"").trim();const out=[];
   const add=v=>{v=String(v||"").replace(/^\/+/,"");if(v&&!out.includes(v))out.push(v);};
-  /* Full Supabase storage URL -> pull the object path out of it */
   const m=raw.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/tracks\/([^?#]+)/i);
-  let p=m?m[1]:raw;
-  p=p.replace(/^\/+/,"").replace(/^tracks\//,"");
-  add(p);
-  try{add(decodeURIComponent(p));}catch(e){}
-  try{add(encodeURI(p));}catch(e){}
+  let p=m?m[1]:raw;p=p.replace(/^\/+/,"").replace(/^tracks\//,"");
+  add(p);try{add(decodeURIComponent(p));}catch(e){}
   return out;
 }
 async function fetchMasterAudioBytes(path){
-  if(!path)throw new Error("Missing Master Audio");
+  if(!path)throw new Error("No Master Audio file saved for this track");
   let lastErr=null;
-  /* 1. Direct full URL that is not a Supabase storage URL */
   if(/^https?:\/\//i.test(path)&&!/\/storage\/v1\/object\//i.test(path)){
-    const r=await fetch(path);
-    if(r.ok)return await r.arrayBuffer();
-    lastErr=new Error("Audio fetch HTTP "+r.status);
+    try{const r=await fetch(path);if(r.ok)return await r.arrayBuffer();lastErr=new Error("HTTP "+r.status);}catch(e){lastErr=e;}
   }
   for(const cand of masterAudioCandidates(path)){
-    /* 2. Authenticated download through the Supabase client (works for private buckets) */
-    try{
-      const {data,error}=await supabaseClient.storage.from("tracks").download(cand);
-      if(!error&&data)return await data.arrayBuffer();
-      if(error)lastErr=error;
-    }catch(e){lastErr=e;}
-    /* 3. Signed URL */
-    try{
-      const {data,error}=await supabaseClient.storage.from("tracks").createSignedUrl(cand,900);
-      if(!error&&data?.signedUrl){
-        const r=await fetch(data.signedUrl);
-        if(r.ok)return await r.arrayBuffer();
-        lastErr=new Error("Audio fetch HTTP "+r.status);
-      }else if(error)lastErr=error;
-    }catch(e){lastErr=e;}
-    /* 4. Public URL */
-    try{
-      const {data}=supabaseClient.storage.from("tracks").getPublicUrl(cand);
-      if(data?.publicUrl){
-        const r=await fetch(data.publicUrl);
-        if(r.ok)return await r.arrayBuffer();
-        lastErr=new Error("Audio fetch HTTP "+r.status);
-      }
-    }catch(e){lastErr=e;}
+    try{const {data,error}=await supabaseClient.storage.from("tracks").download(cand);if(!error&&data)return await data.arrayBuffer();if(error)lastErr=error;}catch(e){lastErr=e;}
+    try{const {data,error}=await supabaseClient.storage.from("tracks").createSignedUrl(cand,900);
+      if(!error&&data?.signedUrl){const r=await fetch(data.signedUrl);if(r.ok)return await r.arrayBuffer();lastErr=new Error("HTTP "+r.status);}else if(error)lastErr=error;}catch(e){lastErr=e;}
+    try{const {data}=supabaseClient.storage.from("tracks").getPublicUrl(cand);
+      if(data?.publicUrl){const r=await fetch(data.publicUrl);if(r.ok)return await r.arrayBuffer();lastErr=new Error("HTTP "+r.status);}}catch(e){lastErr=e;}
   }
-  throw new Error("Could not load audio ("+path+"): "+(lastErr&&lastErr.message?lastErr.message:lastErr||"not found"));
+  throw new Error("Audio file not found in storage ("+path+")"+(lastErr&&lastErr.message?": "+lastErr.message:""));
 }
-let masterScanAudioCtx=null;
-function getMasterScanCtx(){
+let lbCtx=null;
+function lbAudioCtx(){
   const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC)throw new Error("Web Audio unsupported in this browser");
-  if(!masterScanAudioCtx||masterScanAudioCtx.state==="closed")masterScanAudioCtx=new AC();
-  return masterScanAudioCtx;
+  if(!AC)throw new Error("Web Audio is not supported in this browser");
+  if(!lbCtx||lbCtx.state==="closed"){try{lbCtx=new AC({sampleRate:22050});}catch(e){lbCtx=new AC();}}
+  return lbCtx;
 }
-async function decodeMasterBytes(bytes){
-  const ctx=getMasterScanCtx();
-  const copy=bytes.slice(0);
-  return await new Promise((resolve,reject)=>{
-    try{
-      const p=ctx.decodeAudioData(copy,resolve,reject);
-      if(p&&typeof p.then==="function")p.then(resolve,reject);
-    }catch(e){reject(e);}
-  });
+async function decodeBytes(bytes){
+  const ctx=lbAudioCtx();const copy=bytes.slice(0);
+  return await new Promise((resolve,reject)=>{try{const p=ctx.decodeAudioData(copy,resolve,reject);if(p&&typeof p.then==="function")p.then(resolve,reject);}catch(e){reject(e);}});
 }
-function monoFromBuffer(buffer){const mono=new Float32Array(buffer.length);for(let c=0;c<buffer.numberOfChannels;c++){const data=buffer.getChannelData(c);for(let i=0;i<data.length;i++)mono[i]+=data[i]/buffer.numberOfChannels;}return mono;}
-/* ---------- Two-step Master Library BPM repair: SCAN first, then EXECUTE ---------- */
-let repairPlan=[];
-const executeRepairButton=document.getElementById("executeRepairButton");
-const undoRepairButton=document.getElementById("undoRepairButton");
-const libraryRepairReport=document.getElementById("libraryRepairReport");
-const REPAIR_BACKUP_KEY="glctc1_bpm_repair_backup";
-function repairBusy(on){refreshLibraryButton.disabled=on;analyseMasterLibraryButton.disabled=on;executeRepairButton.disabled=on||!repairPlan.length;undoRepairButton.disabled=on||!localStorage.getItem(REPAIR_BACKUP_KEY);}
-function ratioIsDouble(r){return Math.abs(r-2)<0.06;}
-function ratioIsHalf(r){return Math.abs(r-0.5)<0.03;}
-async function analyseMasterLibrary(){
- if(!isMasterLibraryAdmin){libraryScanStatus.className="status error";libraryScanStatus.textContent="Administrator access required.";return;}
- if(libraryScanBusy)return;
- /* Re-check the live session instead of relying on a variable that may never have been set. */
- try{
-  const {data:ud,error:ue}=await supabaseClient.auth.getUser();
-  if(ue||!ud?.user){libraryScanStatus.className="status error";libraryScanStatus.textContent="Sign in before scanning Master Library BPM.";return;}
-  currentUser=ud.user;
- }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Could not verify login: "+(e&&e.message?e.message:e);return;}
- libraryScanBusy=true;repairPlan=[];libraryRepairReport.hidden=true;libraryRepairReport.textContent="";repairBusy(true);
- let rows=[],scanned=0,unchanged=0,skipped=0,failed=0;
- const review=[],failures=[],skips=[];
- try{
-  /* Always pull a fresh, complete list (paged) so the scan never runs on stale/partial data. */
-  rows=await refreshMasterLibrary();
-  if(!rows.length)throw new Error("No Master Library records returned. If tracks exist, Supabase row-level security is hiding them from this login.");
-  libraryScanBusy=true;repairBusy(true);
-  /* Scan is read-only, so no confirm() popup (browsers can silently block it, which made the scan do nothing). */
-  for(const row of rows){
-   scanned++;
-   const title=fieldValue(row,["Track Title","title","Title"])||`Track ${scanned}`;
-   libraryScanStatus.className="status active";
-   libraryScanStatus.textContent=`Scanning ${scanned}/${rows.length}: ${title} · faults found ${repairPlan.length} · failed ${failed}`;
-   try{
-    const path=fieldValue(row,["Master Audio","master_audio","masterAudio","audio_url"]);
-    if(!path){skipped++;skips.push(`${title}: no Master Audio file`);continue;}
-    if(row.id===undefined||row.id===null){skipped++;skips.push(`${title}: row has no id`);continue;}
-    await new Promise(r=>setTimeout(r,0));
-    const bytes=await fetchMasterAudioBytes(String(path));
-    const buffer=await decodeMasterBytes(bytes);
-    await new Promise(r=>setTimeout(r,0));
-    const bpm=Number(detectBPM(monoFromBuffer(buffer),buffer.sampleRate));
-    if(!Number.isFinite(bpm)||bpm<60||bpm>190){skipped++;skips.push(`${title}: BPM could not be detected`);continue;}
-    const oldRaw=fieldValue(row,["BPM","bpm"]);
-    const oldBpm=Number(oldRaw);
-    const hasOld=oldRaw!==""&&Number.isFinite(oldBpm)&&oldBpm>=60&&oldBpm<=190;
-    if(!hasOld){repairPlan.push({id:row.id,title,oldBpm:null,oldRaw,newBpm:bpm,kind:"MISSING/INVALID"});}
-    else if(Math.abs(oldBpm-bpm)<=1.5){unchanged++;}
-    else{
-     const ratio=bpm/oldBpm;
-     if(ratioIsDouble(ratio)){
-      if(oldBpm<95)repairPlan.push({id:row.id,title,oldBpm,oldRaw,newBpm:bpm,kind:"HALF-SPEED"});
-      else review.push(`${title}: saved ${oldBpm}, scan says ${bpm} (double)`);
-     }else if(ratioIsHalf(ratio)){review.push(`${title}: saved ${oldBpm}, scan says ${bpm} (half)`);}
-     else repairPlan.push({id:row.id,title,oldBpm,oldRaw,newBpm:bpm,kind:"WRONG"});
+function monoFromBuffer(buffer){const mono=new Float32Array(buffer.length);const nc=buffer.numberOfChannels;for(let c=0;c<nc;c++){const d=buffer.getChannelData(c);for(let i=0;i<d.length;i++)mono[i]+=d[i]/nc;}return mono;}
+
+/* ---------- classify one scanned track ---------- */
+function classify(r,d){
+  const D=d.bpm,B=r.saved;
+  r.detected=D;r.conf=d.confidence;r.agree=d.agree;r.newBpm=D;r.checked=false;r.note="";
+  const lowConf=d.confidence<45;
+  if(B===null){r.status="missing";r.note="No valid BPM saved"+(lowConf?" · scan not sure, check by ear":"");r.checked=!lowConf;return;}
+  r.newBpm=B;
+  if(Math.abs(B-D)<=1.5){
+    const s2=d.support(B*2),s15=d.support(B*1.5);
+    if(B>=78&&B<=96&&B*2<=200&&s2>=0.75){r.status="suspect";r.newBpm=r1(B*2);r.note=`Matches the scan, but ${r1(B*2)} fits the audio almost as well — jungle/D&B can be double-time`;}
+    else if(B>=104&&B<=124&&B*1.5<=200&&s15>=0.85){r.status="suspect";r.newBpm=r1(B*1.5);r.note=`Matches the scan, but ${r1(B*1.5)} also fits (3:2) — listen to check`;}
+    else r.status="ok";
+    return;
+  }
+  const ratio=D/B;
+  r.newBpm=D;
+  if(Math.abs(ratio-2)<0.06){
+    if(B<95){r.status="wrong";r.note="Saved looks half-speed";r.checked=!lowConf;}
+    else{r.status="octave";r.note=`Scan says ${D} (double the saved value) — check by ear`;}
+  }else if(Math.abs(ratio-0.5)<0.03){
+    r.status="octave";r.note=`Scan says ${D} (half the saved value) — check by ear`;
+  }else{
+    r.status="wrong";r.note=lowConf?"Differs from scan, scan not sure — check by ear":"Saved BPM does not match the audio";r.checked=!lowConf;
+  }
+}
+async function analyseRow(r){
+  try{
+    if(!r.path){r.status="failed";r.note="No Master Audio file saved";r.detected=null;return;}
+    const bytes=await fetchMasterAudioBytes(String(r.path));
+    const buffer=await decodeBytes(bytes);
+    await new Promise(x=>setTimeout(x,0));
+    const d=detectBPMDetailed(monoFromBuffer(buffer),buffer.sampleRate);
+    if(!d){r.status="failed";r.note="No tempo found (silent or too short)";r.detected=null;return;}
+    classify(r,d);
+  }catch(e){r.status="failed";r.detected=null;r.note=String(e&&e.message?e.message:e).slice(0,200);console.warn("BPM analyse:",r.title,e);}
+}
+async function runAnalysis(all){
+  if(!isMasterLibraryAdmin||LB.busy)return;
+  if(!LB.rows.length){await loadLibrary();if(!LB.rows.length)return;}
+  const list=LB.rows.filter(r=>all||r.status==="new"||r.status==="failed");
+  if(!list.length){say("Nothing left to analyse. Use RE-ANALYSE ALL to scan again.","success");return;}
+  LB.busy=true;LB.stop=false;syncButtons();
+  let done=0;
+  try{
+    for(const r of list){
+      if(LB.stop)break;
+      done++;
+      say(`Analysing ${done}/${list.length}: ${r.title}`,"active");
+      el.bar.style.width=Math.round(100*done/list.length)+"%";
+      await analyseRow(r);
+      updateRowEl(r);renderSummary();
+      await new Promise(x=>setTimeout(x,5));
     }
-   }catch(e){failed++;failures.push(`${title}: ${e&&e.message?e.message:e}`);console.warn("Master Library BPM scan:",title,e);}
-   await new Promise(r=>setTimeout(r,15));
+    const c=counts();
+    say(`${LB.stop?"Stopped":"Analysis complete"} · ${c.faults} faults · ${c.check} to check by ear · ${c.failed} failed · ${c.ok} correct.`,c.failed?"error":"success");
+  }finally{LB.busy=false;LB.stop=false;el.bar.style.width="0";syncButtons();renderAll();}
+}
+
+/* ---------- table ---------- */
+function counts(){
+  const c={all:LB.rows.length,faults:0,check:0,ok:0,failed:0,new:0,fixed:0,ticked:0};
+  for(const r of LB.rows){
+    if(r.status==="wrong"||r.status==="missing")c.faults++;
+    else if(r.status==="octave"||r.status==="suspect")c.check++;
+    else if(r.status==="ok")c.ok++;else if(r.status==="failed")c.failed++;else if(r.status==="new")c.new++;else if(r.status==="fixed")c.fixed++;
+    if(r.checked)c.ticked++;
   }
-  const lines=[`SCAN COMPLETE — ${scanned} tracks checked.`,`Correct already: ${unchanged} · To fix: ${repairPlan.length} · Left for you to check: ${review.length} · Skipped: ${skipped} · Failed: ${failed}`,""];
-  if(repairPlan.length){lines.push("WILL BE FIXED WHEN YOU PRESS EXECUTE REPAIR:");for(const p of repairPlan)lines.push(`• [${p.kind}] ${p.title}: ${p.oldBpm===null?"blank/invalid":p.oldBpm} → ${p.newBpm}`);lines.push("");}
-  if(review.length){lines.push("NOT CHANGED — PLEASE CHECK BY EAR (half/double-time can't be settled from audio alone):");for(const r of review)lines.push("• "+r);lines.push("");}
-  if(skips.length){lines.push("SKIPPED:");for(const s of skips)lines.push("• "+s);lines.push("");}
-  if(failures.length){lines.push("FAILED (reason shown):");for(const f of failures)lines.push("• "+f);lines.push("");}
-  libraryRepairReport.textContent=lines.join("\n");libraryRepairReport.hidden=false;
-  libraryScanStatus.className=failed?"status error":"status success";
-  libraryScanStatus.textContent=repairPlan.length?`Scan complete: ${repairPlan.length} faults found. Review the report, then press EXECUTE REPAIR.`:`Scan complete: no automatic fixes needed. ${review.length} track(s) listed for you to check.${failed?" "+failed+" failed — see report.":""}`;
- }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Library BPM scan failed: "+(e&&e.message?e.message:e);}
- finally{libraryScanBusy=false;repairBusy(false);}
+  return c;
 }
-async function writeVerifiedBpm(id,value){
- const {data,error}=await supabaseClient.from("master_library").update({"BPM":Number(value)}).eq("id",id).select("id,BPM");
- if(error)throw error;
- if(!Array.isArray(data)||data.length!==1)throw new Error("BPM update was not confirmed by Supabase (no updated row returned).");
- if(Math.abs(Number(data[0].BPM)-Number(value))>0.01)throw new Error("Supabase returned a different BPM from the requested correction.");
+const FILTERS=[["all","ALL"],["faults","FAULTS"],["check","CHECK BY EAR"],["ok","CORRECT"],["failed","FAILED"],["new","NOT ANALYSED"],["fixed","FIXED"]];
+function matchesFilter(r){
+  const f=LB.filter;
+  if(f==="faults"&&!(r.status==="wrong"||r.status==="missing"))return false;
+  if(f==="check"&&!(r.status==="octave"||r.status==="suspect"))return false;
+  if(f==="ok"&&r.status!=="ok")return false;
+  if(f==="failed"&&r.status!=="failed")return false;
+  if(f==="new"&&r.status!=="new")return false;
+  if(f==="fixed"&&r.status!=="fixed")return false;
+  if(LB.search){const q=LB.search.toLowerCase();if(!(String(r.title).toLowerCase().includes(q)||String(r.artist).toLowerCase().includes(q)))return false;}
+  return true;
 }
-async function executeRepair(){
- if(!isMasterLibraryAdmin){libraryScanStatus.className="status error";libraryScanStatus.textContent="Administrator access required.";return;}
- if(libraryScanBusy||!repairPlan.length)return;
- if(!window.confirm(`EXECUTE REPAIR: save corrected BPM for ${repairPlan.length} tracks?\n\nThe old values are backed up first, and you can press UNDO LAST REPAIR afterwards.`))return;
- libraryScanBusy=true;repairBusy(true);
- let fixed=0,failed=0;const failedTitles=[];const backup=[];
- try{
-  try{localStorage.setItem(REPAIR_BACKUP_KEY,JSON.stringify(repairPlan.map(p=>({id:p.id,title:p.title,oldBpm:p.oldBpm,newBpm:p.newBpm}))));}catch(e){console.warn("Backup not stored:",e);}
-  for(let i=0;i<repairPlan.length;i++){
-   const p=repairPlan[i];
-   libraryScanStatus.className="status active";libraryScanStatus.textContent=`Repairing ${i+1}/${repairPlan.length}: ${p.title}`;
-   try{await writeVerifiedBpm(p.id,p.newBpm);fixed++;}catch(e){failed++;failedTitles.push(p.title);console.warn("Repair failed:",p.title,e);}
-   await new Promise(r=>setTimeout(r,15));
+function renderSummary(){
+  const c=counts();
+  el.filters.innerHTML=FILTERS.map(([k,l])=>`<button type="button" class="lb-chip${LB.filter===k?" on":""}" data-f="${k}">${l} ${c[k==="new"?"new":k]}</button>`).join("");
+  el.save.disabled=LB.busy||!c.ticked;
+  el.save.textContent=LB.armed?`⚠ PRESS AGAIN TO SAVE ${c.ticked} TRACK${c.ticked===1?"":"S"}`:`💾 SAVE TICKED TRACKS (${c.ticked})`;
+}
+const LABEL={new:"NOT ANALYSED",ok:"CORRECT",wrong:"WRONG BPM",missing:"NO BPM",octave:"HALF/DOUBLE?",suspect:"CHECK",failed:"FAILED",fixed:"FIXED"};
+function rowHtml(r){
+  const bpmVal=r.newBpm!==null&&r.newBpm!==undefined?r.newBpm:(r.saved!==null?r.saved:"");
+  const det=r.detected!==null?`<b>${r.detected}</b><br><small>${r.agree} sections · ${r.conf}%</small>`:"—";
+  return `<tr data-k="${r.k}"><td><input type="checkbox" class="lb-check"${r.checked?" checked":""}></td>
+  <td><b>${esc(r.title)}</b><br><small>${esc(r.artist)}</small></td>
+  <td>${r.saved!==null?r.saved:"<small>none</small>"}</td><td>${det}</td>
+  <td><input class="lb-bpm" type="number" step="0.1" min="40" max="220" value="${esc(bpmVal)}"></td>
+  <td><span class="lb-badge st-${r.status}">${LABEL[r.status]||r.status}</span>${r.note?`<span class="lb-note">${esc(r.note)}</span>`:""}</td>
+  <td class="lb-tools"><button type="button" data-a="half" title="Halve new BPM">÷2</button><button type="button" data-a="dbl" title="Double new BPM">×2</button><button type="button" data-a="play" title="Listen and tap tempo">▶</button><button type="button" data-a="re" title="Re-analyse this track">↻</button></td></tr>`;
+}
+function renderAll(){
+  const shown=LB.rows.filter(matchesFilter);
+  const slice=shown.slice(0,MAX_SHOWN);
+  el.body.innerHTML=slice.length?slice.map(rowHtml).join(""):`<tr><td colspan="7" class="lb-empty">${LB.rows.length?"No tracks match this filter.":"Library not loaded."}</td></tr>`;
+  el.more.hidden=shown.length<=MAX_SHOWN;
+  if(!el.more.hidden)el.more.textContent=`Showing the first ${MAX_SHOWN} of ${shown.length} — use search or a filter to narrow down.`;
+  renderSummary();syncButtons();
+}
+function updateRowEl(r){
+  const tr=el.body.querySelector(`tr[data-k="${r.k}"]`);
+  if(tr){const t=document.createElement("tbody");t.innerHTML=rowHtml(r);tr.replaceWith(t.firstElementChild);}
+}
+function syncButtons(){
+  const idle=!LB.busy;
+  el.load.disabled=!idle;el.aPend.disabled=!idle;el.aAll.disabled=!idle;el.stop.disabled=idle||!LB.rows.length;
+  el.undo.disabled=!idle||!LB.backups.length;
+  el.save.disabled=!idle||!LB.rows.some(r=>r.checked);
+}
+function rowFromEvent(e){const tr=e.target.closest("tr[data-k]");return tr?LB.rows[Number(tr.dataset.k)]:null;}
+el.body.addEventListener("input",e=>{
+  if(!e.target.classList.contains("lb-bpm"))return;
+  const r=rowFromEvent(e);if(!r)return;
+  r.newBpm=e.target.value===""?null:Number(e.target.value);
+  const differs=validBpm(r.newBpm)&&(r.saved===null||Math.abs(r.newBpm-r.saved)>0.001);
+  r.checked=differs;const cb=e.target.closest("tr").querySelector(".lb-check");if(cb)cb.checked=differs;
+  disarm();renderSummary();syncButtons();
+});
+el.body.addEventListener("change",e=>{
+  if(!e.target.classList.contains("lb-check"))return;
+  const r=rowFromEvent(e);if(!r)return;r.checked=e.target.checked;disarm();renderSummary();syncButtons();
+});
+el.body.addEventListener("click",async e=>{
+  const b=e.target.closest("button[data-a]");if(!b)return;
+  const r=rowFromEvent(e);if(!r)return;
+  const a=b.dataset.a;
+  if(a==="half"||a==="dbl"){
+    const base=validBpm(r.newBpm)?r.newBpm:(r.saved!==null?r.saved:r.detected);
+    if(!validBpm(base))return;
+    r.newBpm=r1(a==="half"?base/2:base*2);
+    r.checked=validBpm(r.newBpm)&&(r.saved===null||Math.abs(r.newBpm-r.saved)>0.001);
+    disarm();updateRowEl(r);renderSummary();syncButtons();
+  }else if(a==="play"){auditionRow(r);}
+  else if(a==="re"&&!LB.busy){
+    LB.busy=true;syncButtons();say("Re-analysing: "+r.title,"active");
+    try{await analyseRow(r);}finally{LB.busy=false;}
+    updateRowEl(r);renderSummary();syncButtons();say("Re-analysed: "+r.title,"success");
   }
-  await refreshMasterLibrary();
-  libraryScanStatus.className=failed?"status error":"status success";
-  libraryScanStatus.textContent=`Repair complete. Confirmed saved: ${fixed}. Failed: ${failed}.${failed?" Failed: "+failedTitles.join(" | "):""}`;
-  repairPlan=repairPlan.filter(p=>failedTitles.includes(p.title));
- }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Repair failed: "+e.message;}
- finally{libraryScanBusy=false;repairBusy(false);}
+});
+el.filters.addEventListener("click",e=>{const b=e.target.closest("[data-f]");if(!b)return;LB.filter=b.dataset.f;renderAll();});
+el.search.addEventListener("input",()=>{LB.search=el.search.value.trim();renderAll();});
+el.tickF.addEventListener("click",()=>{for(const r of LB.rows){if((r.status==="wrong"||r.status==="missing")&&validBpm(r.newBpm))r.checked=true;}disarm();renderAll();});
+el.tickN.addEventListener("click",()=>{for(const r of LB.rows)r.checked=false;disarm();renderAll();});
+el.load.addEventListener("click",()=>loadLibrary());
+el.aPend.addEventListener("click",()=>runAnalysis(false));
+el.aAll.addEventListener("click",()=>runAnalysis(true));
+el.stop.addEventListener("click",()=>{LB.stop=true;say("Stopping after this track…","active");});
+
+/* ---------- listen + tap tempo ---------- */
+async function auditionRow(r){
+  LB.audRow=r;LB.tap=[];el.tapOut.textContent="tap along to the beat";el.tapUse.disabled=true;
+  el.aud.hidden=false;el.audTitle.textContent="Loading: "+r.title+" …";
+  try{
+    const bytes=await fetchMasterAudioBytes(String(r.path));
+    if(LB.audUrl)URL.revokeObjectURL(LB.audUrl);
+    LB.audUrl=URL.createObjectURL(new Blob([bytes],{type:"audio/mpeg"}));
+    el.audio.src=LB.audUrl;
+    el.audTitle.textContent=`${r.title} — saved ${r.saved??"none"} · scan ${r.detected??"—"}`;
+    el.aud.scrollIntoView({behavior:"smooth",block:"nearest"});
+    el.audio.play().catch(()=>{});
+  }catch(e){el.audTitle.textContent="Could not load audio: "+(e&&e.message?e.message:e);}
 }
-async function undoRepair(){
- if(!isMasterLibraryAdmin||libraryScanBusy)return;
- let backup=[];try{backup=JSON.parse(localStorage.getItem(REPAIR_BACKUP_KEY)||"[]");}catch(e){}
- if(!backup.length){libraryScanStatus.className="status error";libraryScanStatus.textContent="No repair backup found on this device.";return;}
- if(!window.confirm(`UNDO: restore the previous BPM on ${backup.length} tracks?`))return;
- libraryScanBusy=true;repairBusy(true);let restored=0,failed=0;
- try{
-  for(const b of backup){
-   libraryScanStatus.className="status active";libraryScanStatus.textContent=`Restoring ${restored+failed+1}/${backup.length}: ${b.title}`;
-   try{
-    if(b.oldBpm===null){const {error}=await supabaseClient.from("master_library").update({"BPM":null}).eq("id",b.id);if(error)throw error;}
-    else await writeVerifiedBpm(b.id,b.oldBpm);
-    restored++;
-   }catch(e){failed++;console.warn("Undo failed:",b.title,e);}
-  }
-  if(!failed)localStorage.removeItem(REPAIR_BACKUP_KEY);
-  await refreshMasterLibrary();
-  libraryScanStatus.className=failed?"status error":"status success";
-  libraryScanStatus.textContent=`Undo complete. Restored: ${restored}. Failed: ${failed}.`;
- }catch(e){libraryScanStatus.className="status error";libraryScanStatus.textContent="Undo failed: "+e.message;}
- finally{libraryScanBusy=false;repairBusy(false);}
+el.tap.addEventListener("click",()=>{
+  const now=performance.now();
+  if(LB.tap.length&&now-LB.tap[LB.tap.length-1]>2500)LB.tap=[];
+  LB.tap.push(now);if(LB.tap.length>16)LB.tap.shift();
+  if(LB.tap.length>=4){
+    const iv=[];for(let i=1;i<LB.tap.length;i++)iv.push(LB.tap[i]-LB.tap[i-1]);
+    const bpm=r1(60000/(iv.reduce((a,b)=>a+b,0)/iv.length));
+    el.tapOut.textContent=bpm+" BPM";el.tapOut.dataset.bpm=bpm;el.tapUse.disabled=!LB.audRow||!validBpm(bpm);
+  }else el.tapOut.textContent="… keep tapping ("+LB.tap.length+")";
+});
+el.tapReset.addEventListener("click",()=>{LB.tap=[];el.tapOut.textContent="tap along to the beat";el.tapUse.disabled=true;});
+el.tapUse.addEventListener("click",()=>{
+  const r=LB.audRow,bpm=Number(el.tapOut.dataset.bpm);
+  if(!r||!validBpm(bpm))return;
+  r.newBpm=Math.round(bpm);r.checked=r.saved===null||Math.abs(r.newBpm-r.saved)>0.001;
+  disarm();updateRowEl(r);renderSummary();syncButtons();say(`Set ${r.title} to ${r.newBpm} BPM — press SAVE to store it.`,"success");
+});
+
+/* ---------- save (verified) / undo ---------- */
+async function writeBpm(id,value){
+  let v=Number(value);
+  let res=await supabaseClient.from("master_library").update({"BPM":v}).eq("id",id).select("id,BPM");
+  if(res.error&&/integer/i.test(res.error.message||"")){v=Math.round(v);res=await supabaseClient.from("master_library").update({"BPM":v}).eq("id",id).select("id,BPM");}
+  if(res.error)throw res.error;
+  if(!Array.isArray(res.data)||res.data.length!==1)throw new Error("Not saved — Supabase returned no updated row (update permission / row-level security?)");
+  const stored=Number(res.data[0].BPM);
+  if(Math.abs(stored-v)>0.01)throw new Error("Supabase stored "+stored+" instead of "+v);
+  return stored;
 }
-executeRepairButton.addEventListener("click",executeRepair);
-undoRepairButton.addEventListener("click",undoRepair);
-repairBusy(false);
+async function writeNull(id){const {error}=await supabaseClient.from("master_library").update({"BPM":null}).eq("id",id);if(error)throw error;}
+function disarm(){if(LB.armed){clearTimeout(LB.armed);LB.armed=null;}}
+function saveBackups(){try{localStorage.setItem(BACKUP_KEY,JSON.stringify(LB.backups.slice(-10)));}catch(e){console.warn("Backup not stored:",e);}}
+el.save.addEventListener("click",async()=>{
+  if(!isMasterLibraryAdmin||LB.busy)return;
+  const items=LB.rows.filter(r=>r.checked&&r.id!==undefined&&r.id!==null&&validBpm(r.newBpm)&&(r.saved===null||Math.abs(r.newBpm-r.saved)>0.001));
+  if(!items.length){say("Nothing ticked to save.","error");return;}
+  if(!LB.armed){LB.armed=setTimeout(()=>{LB.armed=null;renderSummary();},6000);renderSummary();say(`Press the button again within 6 seconds to save ${items.length} track(s). Old values are backed up first.`,"active");return;}
+  disarm();LB.busy=true;syncButtons();
+  const batch={time:new Date().toISOString(),items:items.map(r=>({id:r.id,title:r.title,oldBpm:r.saved}))};
+  LB.backups.push(batch);saveBackups();
+  let ok=0,fail=0;const failed=[];
+  try{
+    for(let i=0;i<items.length;i++){
+      const r=items[i];say(`Saving ${i+1}/${items.length}: ${r.title}`,"active");el.bar.style.width=Math.round(100*(i+1)/items.length)+"%";
+      try{const stored=await writeBpm(r.id,r.newBpm);r.saved=stored;r.newBpm=stored;r.status="fixed";r.note="Saved and confirmed: "+stored;r.checked=false;ok++;}
+      catch(e){fail++;failed.push(`${r.title}: ${e&&e.message?e.message:e}`);r.note="SAVE FAILED: "+(e&&e.message?e.message:e);console.warn("Save failed:",r.title,e);}
+      updateRowEl(r);await new Promise(x=>setTimeout(x,10));
+    }
+    batch.items=batch.items.filter(b=>{const r=LB.rows.find(x=>x.id===b.id);return r&&r.status==="fixed";});
+    if(!batch.items.length)LB.backups.pop();
+    saveBackups();
+    say(`Saved and confirmed: ${ok}. Failed: ${fail}.${fail?" "+failed.slice(0,3).join(" | "):""}`,fail?"error":"success");
+  }finally{LB.busy=false;el.bar.style.width="0";renderAll();}
+});
+el.undo.addEventListener("click",async()=>{
+  if(!isMasterLibraryAdmin||LB.busy||!LB.backups.length)return;
+  const batch=LB.backups[LB.backups.length-1];
+  LB.busy=true;syncButtons();let ok=0,fail=0;const left=[];
+  try{
+    for(let i=0;i<batch.items.length;i++){
+      const b=batch.items[i];say(`Restoring ${i+1}/${batch.items.length}: ${b.title}`,"active");
+      try{
+        if(b.oldBpm===null||b.oldBpm===undefined)await writeNull(b.id);else await writeBpm(b.id,b.oldBpm);
+        const r=LB.rows.find(x=>x.id===b.id);if(r){r.saved=(b.oldBpm===undefined)?null:b.oldBpm;r.status="new";r.note="Restored previous BPM — re-analyse to check";r.checked=false;r.detected=null;r.newBpm=r.saved;}
+        ok++;
+      }catch(e){fail++;left.push(b);console.warn("Undo failed:",b.title,e);}
+    }
+    if(left.length)batch.items=left;else LB.backups.pop();
+    saveBackups();say(`Undo complete. Restored: ${ok}. Failed: ${fail}.`,fail?"error":"success");
+  }finally{LB.busy=false;renderAll();}
+});
+el.exp.addEventListener("click",()=>{
+  const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const lines=["Title,Artist,Saved BPM,Scan BPM,New BPM,Status,Note"].concat(LB.rows.map(r=>[r.title,r.artist,r.saved??"",r.detected??"",r.newBpm??"",LABEL[r.status]||r.status,r.note].map(q).join(",")));
+  const blob=new Blob([lines.join("\n")],{type:"text/csv"});const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download="glctc1_master_library_bpm_report.csv";document.body.appendChild(a);a.click();a.remove();
+});
+renderAll();
+
 
 /* =====================================================
    FREQUENCY HIGHLIGHT

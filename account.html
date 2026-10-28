@@ -206,10 +206,10 @@ footer{padding:22px 0 30px;text-align:center;color:var(--muted);font-size:11px;l
 <script>
 const $=id=>document.getElementById(id);
 const ADMIN_USER_ID="8c70a492-3cf1-4053-b0ee-b5b186529d54";
-/* Storage buckets + stories table: rename here if yours differ */
-const AVATAR_BUCKET="artist-images", STORY_BUCKET="story-images", STORY_TABLE="stories";
+/* Matches the existing GLCTC1 database and Storage buckets. */
+const AVATAR_BUCKET="artist-images", STORY_BUCKET="story-media", STORY_TABLE="story_posts";
 const PREVIEW=new URLSearchParams(location.search).has("preview");
-let sb=null,me=null;
+let sb=null,me=null,avatarUrl="",avatarBusy=false;
 try{sb=window.supabase.createClient("https://zdlaloiruxamxsduxqxw.supabase.co","eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ")}catch(e){}
 
 const say=(el,t,err)=>{el.textContent=t;el.classList.toggle("err",!!err)};
@@ -227,7 +227,9 @@ counter("bio","bioC",500);counter("sBody","sC",2000);
 function chips(){$("nm").textContent=$("artistName").value.trim()||"Your artist name";const on=$("donationEnabled").checked;$("donChip").textContent=on?"SUPPORT ON":"SUPPORT OFF";$("donChip").className="chip "+(on?"p":"")}
 ["artistName","donationEnabled"].forEach(i=>$(i).addEventListener("input",chips));
 
-function setAvatar(u){if(u){$("avIm").style.backgroundImage="url('"+u+"')";$("avIm").textContent=""}}
+function setAvatar(u){$("avIm").style.backgroundImage=u?"url("+JSON.stringify(u)+")":"";$("avIm").textContent=u?"":"🎤";}
+function imageError(f){if(f.size>5*1024*1024)return "Image must be under 5MB.";if(!/^image\/(jpeg|png|webp|gif|avif)$/.test(f.type))return "Choose a JPG, PNG, WebP, GIF or AVIF image.";return "";}
+function filePath(userId,prefix,f){const ext={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","image/avif":"avif"}[f.type];return userId+"/"+prefix+"-"+crypto.randomUUID()+"."+ext;}
 
 async function load(){
  if(PREVIEW){me={id:"preview",email:"you@glctc1.com"};show();$("artistName").value="GLCTC1";$("bio").value="Galactic One. Beats from another orbit.";$("accountEmail").textContent=me.email;$("userId").textContent="preview-mode";$("perm").textContent="ADMIN";chips();return}
@@ -235,74 +237,106 @@ async function load(){
  const{data:{session},error}=await sb.auth.getSession();
  if(error){gate("COULD NOT CHECK ACCOUNT","Please refresh and try again.",false);return}
  if(!session){gate("YOU ARE NOT SIGNED IN","Log in to manage your artist profile, post stories and set up support.",true);return}
- me=session.user;show();
+ me=session.user;
  $("accountEmail").textContent=me.email||"";$("userId").textContent=me.id;
  const admin=me.id===ADMIN_USER_ID;$("permission").textContent=admin?"Administrator":"Standard User";$("perm").textContent=admin?"ADMIN":"STANDARD";$("perm").className="chip "+(admin?"g":"c");
  const{data:p,error:pe}=await sb.from("profiles").select("*").eq("id",me.id).maybeSingle();
- if(pe){say($("saveStatus"),"Unable to load artist profile.",1);return}
+ if(pe){gate("PROFILE COULD NOT LOAD",pe.message,false);return}
  if(p){$("artistName").value=p.artist_name||"";$("bio").value=p.bio||"";$("donationEnabled").checked=p.donation_enabled===true;
-  $("donationMessage").value=p.donation_message||"";$("paypalUrl").value=p.paypal_url||"";$("xrpAddress").value=p.xrp_address||"";$("xlmAddress").value=p.xlm_address||"";$("cryptoUrl").value=p.crypto_url||"";setAvatar(p.avatar_url);$("bio").dispatchEvent(new Event("input"))}
- chips();loadMine();
+  $("donationMessage").value=p.donation_message||"";$("paypalUrl").value=p.paypal_url||"";$("xrpAddress").value=p.xrp_address||"";$("xlmAddress").value=p.xlm_address||"";$("cryptoUrl").value=p.crypto_url||"";avatarUrl=p.avatar_url||"";setAvatar(avatarUrl);$("bio").dispatchEvent(new Event("input"))}
+ show();chips();loadMine();
 }
 
-/* save: core fields first (same columns as before), then bio/avatar so an older table never blocks it */
+/* Save profile and support fields in one database operation. */
 async function save(){
  const s=$("saveStatus");if(!me){say(s,"You are not signed in.",1);return}
  const name=$("artistName").value.trim();if(!name){say(s,"Please enter your artist name.",1);return}
  if(PREVIEW){say(s,"Preview mode — nothing saved.");return}
- say(s,"Saving…");
- const core={artist_name:name,donation_enabled:$("donationEnabled").checked,donation_message:$("donationMessage").value.trim(),paypal_url:$("paypalUrl").value.trim(),xrp_address:$("xrpAddress").value.trim(),xlm_address:$("xlmAddress").value.trim(),crypto_url:$("cryptoUrl").value.trim()};
- const{error:e1}=await sb.from("profiles").upsert({id:me.id,...core});
- if(e1){say(s,e1.message,1);return}
- const{error:e2}=await sb.from("profiles").update({bio:$("bio").value.trim()}).eq("id",me.id);
- say(s,e2?"✓ Saved. (Bio needs a 'bio' column on profiles.)":"✓ Artist profile saved.",!!e2&&false);
+ const userId=me.id;
+ const fields={id:userId,artist_name:name,bio:$("bio").value.trim(),donation_enabled:$("donationEnabled").checked,donation_message:$("donationMessage").value.trim(),paypal_url:$("paypalUrl").value.trim(),xrp_address:$("xrpAddress").value.trim(),xlm_address:$("xlmAddress").value.trim(),crypto_url:$("cryptoUrl").value.trim()};
+ $("saveProfileBtn").disabled=true;say(s,"Saving…");
+ try{
+  const{data,error}=await sb.from("profiles").upsert(fields,{onConflict:"id"}).select("id").single();
+  if(error)throw error;if(!data||data.id!==userId)throw new Error("Profile save was not confirmed.");
+  say(s,"✓ Artist profile and support details saved.");
+ }catch(e){say(s,"Save failed: "+e.message,1)}
+ finally{$("saveProfileBtn").disabled=false}
 }
 $("saveProfileBtn").onclick=save;
 
-/* artist image upload */
+/* Create a missing profile before updating its artist image URL. */
 $("avFile").onchange=async e=>{
- const f=e.target.files[0],m=$("avMsg");if(!f)return;
- if(f.size>5*1024*1024){say(m,"Image must be under 5MB.",1);return}
- setAvatar(URL.createObjectURL(f));
- if(PREVIEW){say(m,"Preview only.");return}
- say(m,"Uploading image…");
- const path=me.id+"/avatar-"+Date.now()+"."+(f.name.split(".").pop()||"jpg");
- const up=await sb.storage.from(AVATAR_BUCKET).upload(path,f,{upsert:true});
- if(up.error){say(m,"Upload failed: "+up.error.message,1);return}
- const url=sb.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
- const r=await sb.from("profiles").update({avatar_url:url}).eq("id",me.id);
- say(m,r.error?"Uploaded, but profiles needs an 'avatar_url' column.":"✓ Artist image updated.",!!r.error);
+ const input=e.target,f=input.files[0],m=$("avMsg");if(!f||avatarBusy)return;
+ if(!me){say(m,"You are not signed in.",1);return}
+ const invalid=imageError(f);if(invalid){say(m,invalid,1);input.value="";return}
+ if(PREVIEW){const preview=URL.createObjectURL(f);setAvatar(preview);say(m,"Preview only.");return}
+ const userId=me.id;avatarBusy=true;input.disabled=true;say(m,"Uploading image…");
+ try{
+  const path=filePath(userId,"avatar",f);
+  const up=await sb.storage.from(AVATAR_BUCKET).upload(path,f);
+  if(up.error)throw up.error;
+  const url=sb.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+  const created=await sb.from("profiles").upsert({id:userId},{onConflict:"id",ignoreDuplicates:true});
+  if(created.error)throw created.error;
+  const r=await sb.from("profiles").update({avatar_url:url}).eq("id",userId).select("id,avatar_url").single();
+  if(r.error)throw r.error;
+  if(!r.data||r.data.avatar_url!==url)throw new Error("Image link save was not confirmed.");
+  avatarUrl=url;setAvatar(url);say(m,"✓ Artist image saved.");
+ }catch(e){say(m,"Artist image was not saved: "+e.message,1)}
+ finally{avatarBusy=false;input.disabled=false;input.value=""}
 };
 
-/* stories */
-$("sFile").onchange=e=>{const f=e.target.files[0],p=$("sPrev");if(!f){p.style.display="none";return}p.src=URL.createObjectURL(f);p.style.display="block"};
+/* Story media uses the existing story-media bucket and story_posts columns. */
+let storyPreviewUrl="";
+$("sFile").onchange=e=>{
+ const f=e.target.files[0],p=$("sPrev");
+ if(storyPreviewUrl){URL.revokeObjectURL(storyPreviewUrl);storyPreviewUrl=""}
+ p.style.display="none";if(!f)return;
+ const invalid=imageError(f);if(invalid){say($("sMsg"),invalid,1);e.target.value="";return}
+ storyPreviewUrl=URL.createObjectURL(f);p.src=storyPreviewUrl;p.style.display="block";
+};
 $("postBtn").onclick=async()=>{
- const m=$("sMsg"),title=$("sTitle").value.trim(),body=$("sBody").value.trim(),f=$("sFile").files[0];
+ const m=$("sMsg"),title=$("sTitle").value.trim(),body=$("sBody").value.trim(),f=$("sFile").files[0],name=$("artistName").value.trim();
+ if(!me){say(m,"You are not signed in.",1);return}
+ if(!name){say(m,"Enter your artist name on the Profile tab first.",1);return}
  if(!title||!body){say(m,"Add a title and your story.",1);return}
+ if(f){const invalid=imageError(f);if(invalid){say(m,invalid,1);return}}
  if(PREVIEW){say(m,"Preview mode — nothing posted.");return}
+ if(avatarBusy){say(m,"Wait for your artist image to finish saving.",1);return}
+ const userId=me.id;
  $("postBtn").disabled=true;say(m,"Posting…");
- let image_url=null;
- if(f){const path=me.id+"/story-"+Date.now()+"."+(f.name.split(".").pop()||"jpg");
-  const up=await sb.storage.from(STORY_BUCKET).upload(path,f);
-  if(up.error){say(m,"Image upload failed: "+up.error.message,1);$("postBtn").disabled=false;return}
-  image_url=sb.storage.from(STORY_BUCKET).getPublicUrl(path).data.publicUrl}
- const{error}=await sb.from(STORY_TABLE).insert({user_id:me.id,artist_name:$("artistName").value.trim()||null,title,body,image_url});
- $("postBtn").disabled=false;
- if(error){say(m,error.message,1);return}
- say(m,"✓ Story posted. See it on the Story page.");
- $("sTitle").value="";$("sBody").value="";$("sFile").value="";$("sPrev").style.display="none";$("sBody").dispatchEvent(new Event("input"));loadMine();
+ try{
+  let media_url=null;
+  if(f){
+   const path=filePath(userId,"story",f);
+   const up=await sb.storage.from(STORY_BUCKET).upload(path,f);
+   if(up.error)throw up.error;
+   media_url=sb.storage.from(STORY_BUCKET).getPublicUrl(path).data.publicUrl;
+  }
+  const{data,error}=await sb.from(STORY_TABLE).insert({user_id:userId,artist_name:name,artist_avatar_url:avatarUrl||null,title,body,media_url,media_kind:media_url?"image":null}).select("id").single();
+  if(error)throw error;if(!data)throw new Error("Story save was not confirmed.");
+  say(m,"✓ Story posted. See it on the Story page.");
+  $("sTitle").value="";$("sBody").value="";$("sFile").value="";$("sPrev").style.display="none";
+  if(storyPreviewUrl){URL.revokeObjectURL(storyPreviewUrl);storyPreviewUrl=""}
+  $("sBody").dispatchEvent(new Event("input"));await loadMine();
+ }catch(e){say(m,"Story was not posted: "+e.message,1)}
+ finally{$("postBtn").disabled=false}
 };
 async function loadMine(){
- if(!sb)return;
- const{data}=await sb.from(STORY_TABLE).select("title,created_at").eq("user_id",me.id).order("created_at",{ascending:false}).limit(5);
- if(data&&data.length)$("mine").innerHTML=data.map(s=>'<div class="st"><b></b><small>'+new Date(s.created_at).toLocaleDateString()+'</small></div>').join("");
- if(data)[...$("mine").querySelectorAll(".st b")].forEach((b,i)=>b.textContent=data[i].title);
+ if(!sb||!me||PREVIEW)return;
+ const container=$("mine");
+ try{
+  const{data,error}=await sb.from(STORY_TABLE).select("title,created_at").eq("user_id",me.id).order("created_at",{ascending:false}).limit(5);
+  if(error)throw error;
+  container.replaceChildren();
+  if(!data||!data.length){const empty=document.createElement("small");empty.textContent="Nothing posted yet.";container.append(empty);return}
+  data.forEach(s=>{const row=document.createElement("div"),title=document.createElement("b"),date=document.createElement("small");row.className="st";title.textContent=s.title||"Untitled";date.textContent=new Date(s.created_at).toLocaleDateString();row.append(title,date);container.append(row)});
+ }catch(e){container.textContent="Could not load recent stories: "+e.message}
 }
 
 $("logoutBtn").onclick=async()=>{if(sb)await sb.auth.signOut();location.href="index.html"};
-if(sb)sb.auth.onAuthStateChange((ev,s)=>{me=s?.user||me});
-load();
+if(sb)sb.auth.onAuthStateChange((ev,s)=>{if(!PREVIEW){me=s?.user||null;if(ev==="SIGNED_OUT"){$("app").classList.add("hidden");$("gate").classList.remove("hidden");gate("YOU ARE NOT SIGNED IN","Log in to manage your artist profile.",true)}}});
+load().catch(e=>{$("app").classList.add("hidden");$("gate").classList.remove("hidden");gate("ACCOUNT COULD NOT LOAD",e.message,false)});
 </script>
 </body>
 </html>
-

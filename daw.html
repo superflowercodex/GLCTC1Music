@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -1623,7 +1622,7 @@ function setMidiValue(el,n){const lo=Number(el.min||0),hi=Number(el.max||127),st
 function handleMidiLearn(m){if(midiLearnEnabled&&midiLearnTarget){const [st,d1,d2]=m.data,cmd=st&240;if(cmd===176||cmd===144||cmd===128){const kind=cmd===176?'cc':'note';midiBindings[midiLearnTarget.id]={kind,number:d1,channel:st&15};try{localStorage.setItem('glctc1.midiBindings',JSON.stringify(midiBindings))}catch(e){}midiLearnTarget.classList.remove('midi-receive');midiLearnTarget.classList.add('midi-learning');toast('MIDI locked: '+midiLearnTarget.id+' ← '+(kind==='cc'?'CC '+d1:'Note '+d1));midiLearnTarget=null;midiLearnUi();return true}}applyMidiBinding(m);return false}
 $('midiLearnBtn').addEventListener('click',async()=>{midiLearnEnabled=!midiLearnEnabled;if(!midiLearnEnabled){if(midiLearnTarget)midiLearnTarget.classList.remove('midi-receive');midiLearnTarget=null;document.querySelectorAll('.midi-learning').forEach(e=>e.classList.remove('midi-learning'));midiLearnUi();toast('MIDI Learn off. Assignments are saved on this device.');return}midiLearnUi();if(!midiAccessRef)await enableMidi();midiLearnUi()});
 // Master transport broadcasts start/stop to modules. Each module can opt out using its PLAY WITH MASTER checkbox.
-function masterModuleEvent(type){const c=ensureAudio(),at=c.currentTime+.45;if(type==='play')window.__glctcLastMasterStartAt=at;window.__glctcMasterStartAt=type==='play'?at:null;try{GLCTC_HUB.master(type,at,playheadBeats)}catch(err){console.error(err)}window.dispatchEvent(new CustomEvent('glctc-master-'+type,{detail:{beat:playheadBeats,bpm:GLCTC_CLOCK.bpm,audioTime:at,transport:'GLCTC1'}}));window.__glctcMasterStartAt=null}
+function masterModuleEvent(type){const c=ensureAudio(),running=Object.values(GLCTC_HUB.mods).some(m=>m.running?.()),at=type==='play'&&running&&GLCTC_CLOCK.anchored()?GLCTC_HUB.nextLaunchPoint(c).at:c.currentTime+.45;if(type==='play')window.__glctcLastMasterStartAt=at;window.__glctcMasterStartAt=type==='play'?at:null;try{GLCTC_HUB.master(type,at,playheadBeats)}catch(err){console.error(err)}window.dispatchEvent(new CustomEvent('glctc-master-'+type,{detail:{beat:playheadBeats,bpm:GLCTC_CLOCK.bpm,audioTime:at,transport:'GLCTC1'}}));window.__glctcMasterStartAt=null}
 window.masterModuleEvent=masterModuleEvent;
 
 /* ===== GLCTC1 TRANSPORT HUB — one place that starts/stops every module =====
@@ -1660,10 +1659,16 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
  },
  halt(m){m.soloMode=false;GLCTC_CLOCK.cancelSources(m.id);try{m.stop()}catch(err){console.error('GLCTC1 module stop:',m.name,err)}},
  stopAll(){this.request++;Object.values(this.mods).forEach(m=>this.halt(m));this.playAllActive=false;this.syncPlayAllBtn();},
- master(type,at,beat){if(type==='stop'){this.stopAll();this.sharedEpochAt=null;this.sharedBeat=0;return}if(type!=='play')return;this.stopAll();this.sharedEpochAt=at;this.sharedBeat=Math.max(0,beat||0);this.sharedBpm=this.bpm();this.syncTempoDisplays();if(!this.modulesOn)return;const step=Math.round((beat||0)*4);Object.values(this.mods).forEach(m=>{if(this.available(m)&&this.sends(m))this.launch(m,at,step,false,false)})},
+ master(type,at,beat){
+  if(type==='stop'){this.setModules(false);this.sharedEpochAt=null;this.sharedBeat=0;return}
+  if(type!=='play')return;
+  // Transport Play never changes the module switch or launches an instrument.
+  if(!Object.values(this.mods).some(m=>m.running?.()))GLCTC_CLOCK.anchor(at,Math.max(0,beat||0));
+  this.syncTempoDisplays();
+ },
  allRunning(){const list=Object.values(this.mods).filter(m=>!this.bypassed(m)&&(!m.can||m.can()));return list.length>0&&list.every(m=>m.running&&m.running())},
  syncPlayAllBtn(){const b=this.el('playAllModulesBtn');if(!b)return;const on=this.playAllActive||this.allRunning();const t=on?'■ STOP ALL MODULES':'▶ PLAY ALL MODULES';if(b.textContent!==t)b.textContent=t;b.classList.toggle('active',on)},
- async playAll(){if(!this.modulesOn){this.modulesSuspendedGroup=false;await this.setModules(true);if(this.allRunning()){this.playAllActive=true;this.syncPlayAllBtn();return}}this.modulesSuspendedGroup=false;if(this.playAllActive||this.allRunning()){this.stopAll();if(!playing){this.sharedEpochAt=null;this.sharedBeat=0}return}const token=++this.request;const c=await this.prepare();if(token!==this.request)return;const anyRunning=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!anyRunning&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.playAllActive=true;Object.values(this.mods).forEach(m=>{if(!this.bypassed(m)&&(!m.can||m.can())&&!(m.running&&m.running()))this.launch(m,point.at,point.step,true,false)});this.syncPlayAllBtn();this.syncTempoDisplays()},
+ async playAll(){if(!this.modulesOn){toast('Switch MODULES ON to play the modules.');return}this.modulesSuspendedGroup=false;if(this.playAllActive||this.allRunning()){this.stopAll();if(!playing){this.sharedEpochAt=null;this.sharedBeat=0}return}const token=++this.request;const c=await this.prepare();if(token!==this.request)return;const anyRunning=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!anyRunning&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.playAllActive=true;Object.values(this.mods).forEach(m=>{if(!this.bypassed(m)&&(!m.can||m.can())&&!(m.running&&m.running()))this.launch(m,point.at,point.step,true,false)});this.syncPlayAllBtn();this.syncTempoDisplays()},
  async startFrom(id){const token=++this.request,c=await this.prepare();if(token!==this.request)return;const src=this.mods[id];if(!src||!this.available(src,true))return;if(c.resume)c.resume();const running=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!running&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.launch(src,point.at,point.step,true,false)},
  stopFrom(id){this.request++;const src=this.mods[id];if(src)this.halt(src);if(!playing&&!Object.values(this.mods).some(m=>m.running?.()))GLCTC_CLOCK.clear()},
  toggleFrom(id){const src=this.mods[id];if(!src)return;if(src.running&&src.running())this.stopFrom(id);else this.startFrom(id)},
@@ -1677,15 +1682,15 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
   this.modulesOn=!!on;try{localStorage.setItem('glctc1.modulesOn',on?'1':'0')}catch(e){}
   const button=this.el('modulesBtn');if(button){button.textContent=this.modulesOn?'MODULES ON':'MODULES OFF';button.classList.toggle('active',this.modulesOn);button.setAttribute('aria-pressed',String(this.modulesOn))}
   if(!this.modulesOn){this.modulesSuspendedGroup=this.playAllActive||this.modulesSuspendedGroup;this.stopAll();window.GLCTC_SONG?.suspendModules?.();return}
-  if(!playing&&!this.modulesSuspendedGroup&&!window.GLCTC_SONG?.running())return;
+  
   const token=++this.request;await this.prepare();if(token!==this.request||!this.modulesOn)return;
-  const point=this.nextLaunchPoint(ensureAudio());
+  const c=ensureAudio();let point;if(!playing&&!Object.values(this.mods).some(m=>m.running?.())){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0)}else point=this.nextLaunchPoint(c);
   if(window.GLCTC_SONG?.running()){window.GLCTC_SONG.joinModules(point);return}
   const all=!!this.modulesSuspendedGroup;this.modulesSuspendedGroup=false;
   Object.values(this.mods).forEach(m=>{if(this.available(m)&&(all||this.sends(m))&&!m.running?.())this.launch(m,point.at,point.step,false,false)});
   if(all)this.playAllActive=true;this.syncPlayAllBtn();
  },
- initBypass(){for(const m of Object.values(this.mods)){const e=this.el(m.bypassEl),p=this.el(m.panel);if(!e)continue;const apply=()=>{if(p)p.classList.toggle('bypassed',e.checked)};apply();e.addEventListener('change',()=>{apply();if(e.checked&&m.running&&m.running())this.halt(m);toast(m.name+(e.checked?' bypassed — out of group transport':' available to group transport'))})}const mb=this.el('modulesBtn');if(mb)mb.onclick=()=>{this.setModules(!this.modulesOn);toast(this.modulesOn?'Master transport starts enabled modules':'Master transport plays timeline only')};const all=this.el('playAllModulesBtn');if(all)all.onclick=()=>this.playAll();let on=true;try{const v=localStorage.getItem('glctc1.modulesOn');if(v!==null)on=v==='1'}catch(e){}this.setModules(on)}
+ initBypass(){for(const m of Object.values(this.mods)){const e=this.el(m.bypassEl),p=this.el(m.panel);if(!e)continue;const apply=()=>{if(p)p.classList.toggle('bypassed',e.checked)};apply();e.addEventListener('change',()=>{apply();if(e.checked&&m.running&&m.running())this.halt(m);toast(m.name+(e.checked?' bypassed — out of group transport':' available to group transport'))})}const mb=this.el('modulesBtn');if(mb)mb.onclick=()=>{this.setModules(!this.modulesOn);toast(this.modulesOn?'Master transport starts enabled modules':'Master transport plays timeline only')};const all=this.el('playAllModulesBtn');if(all)all.onclick=()=>this.playAll();this.setModules(false)}
 };
 /* The hub's shared epoch/beat/bpm now live in the ONE master clock (accessors keep the old field names working). */
 Object.defineProperties(GLCTC_HUB,{sharedEpochAt:{configurable:true,get(){return GLCTC_CLOCK.anchored()?GLCTC_CLOCK._t:null},set(v){if(v===null||v===undefined){GLCTC_CLOCK.clear();return}GLCTC_CLOCK.anchor(v,GLCTC_CLOCK._b)}},sharedBeat:{configurable:true,get(){return GLCTC_CLOCK._b},set(v){GLCTC_CLOCK._b=Math.max(0,Number(v)||0);if(GLCTC_CLOCK.anchored())GLCTC_CLOCK.anchor(GLCTC_CLOCK._t,GLCTC_CLOCK._b)}},sharedBpm:{configurable:true,get(){return GLCTC_CLOCK.bpm},set(v){}}});
@@ -1820,7 +1825,7 @@ T('lpBounce',async(s,L)=>{if(!s.proc)return toast('Record or load a sample first
 $('lpCreate').onclick=()=>{const n=project.tracks.filter(t=>t.looper).length+1;addTrack('audio');const t=project.tracks[project.tracks.length-1];t.name='Looper '+n;ensure(t);selectedTrackId=t.id;renderAll();markDirty();$('lpTrack').value=t.id;ui()};
 for(let i=0;i<16;i++){const b=h('button',{className:'pad',textContent:i+1});let dn=false;b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);dn=true;hit(i,true)};b.onpointerup=b.onpointercancel=()=>{if(dn){dn=false;hit(i,false)}};$('lpPads').append(b);pads.push(b)}
 $('lpMode').onchange=e=>{const s=cur();if(s){s.L.mode=e.target.value;markDirty()}};
-function lpTransportStart(manual){const s=cur();if(!s||!s.proc){if(manual!==false)toast('Load or record a loop first.');return}stop(s);s.L.loop=true;play(s);ui()}function lpTransportStop(){const s=cur();if(s)stop(s);ui()}GLCTC_HUB.reg('lp',{reset:()=>{lpTransportStop();project.tracks.filter(x=>x.looper&&x.looper.pads).forEach(t=>{(LP[t.id]||[]).forEach(s=>{if(s&&s.v)stop(s)});t.looper.pads.forEach(p=>Object.assign(p,D));t.looper.sel=0;(LP[t.id]||[]).forEach(s=>{if(s&&s.buf){s.L=t.looper.pads[LP[t.id].indexOf(s)]||s.L;proc(s)}})});$('lpTransportLength').value='2';window.lpLoadDemo(false);const cs=cur();if(cs&&cs.proc){cs.L.bars=cs.L.bars||2;draw(cs)}ui()},name:'Looper',can:()=>{const s=cur();return !!(s&&s.proc)},start:m=>lpTransportStart(m),stop:()=>lpTransportStop(),stopAt:at=>{const s=cur();if(s?.v){try{s.v.src.stop(at)}catch(e){}}},running:()=>{const s=cur();return !!(s&&s.v)},sendEl:'lpSendMaster',bypassEl:'lpBypass',panel:'looperPanel'});$('lpTransportPlay').onclick=()=>GLCTC_HUB.toggleFrom('lp');$('lpTransportStop').onclick=()=>GLCTC_HUB.stopFrom('lp');
+function lpTransportStart(manual){const s=cur();if(!s||!s.proc){if(manual!==false)toast('Load or record a loop first.');return}stop(s);s.L.loop=true;play(s);ui()}function lpTransportStop(){if(!project)return;const s=cur();if(s)stop(s);ui()}GLCTC_HUB.reg('lp',{reset:()=>{lpTransportStop();project.tracks.filter(x=>x.looper&&x.looper.pads).forEach(t=>{(LP[t.id]||[]).forEach(s=>{if(s&&s.v)stop(s)});t.looper.pads.forEach(p=>Object.assign(p,D));t.looper.sel=0;(LP[t.id]||[]).forEach(s=>{if(s&&s.buf){s.L=t.looper.pads[LP[t.id].indexOf(s)]||s.L;proc(s)}})});$('lpTransportLength').value='2';window.lpLoadDemo(false);const cs=cur();if(cs&&cs.proc){cs.L.bars=cs.L.bars||2;draw(cs)}ui()},name:'Looper',can:()=>{const s=cur();return !!(s&&s.proc)},start:m=>lpTransportStart(m),stop:()=>lpTransportStop(),stopAt:at=>{const s=cur();if(s?.v){try{s.v.src.stop(at)}catch(e){}}},running:()=>{const s=cur();return !!(s&&s.v)},sendEl:'lpSendMaster',bypassEl:'lpBypass',panel:'looperPanel'});$('lpTransportPlay').onclick=()=>GLCTC_HUB.toggleFrom('lp');$('lpTransportStop').onclick=()=>GLCTC_HUB.stopFrom('lp');
 })();
 
 // ===== GLCTC1 80LA8 DRUM LAB =====
@@ -3924,7 +3929,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  let taps=[];
  UI.bpm=el('strong',{text:'130'});UI.pos=el('strong',{text:'1:1:000'});UI.clk=el('strong',{text:'00:00:000'});
  const ro=(v,l)=>el('div',{class:'ws-readout'},v,el('small',{text:l}));
- UI.play=el('button',{class:'primary',text:'▶',title:'Master play / pause: timeline + every module set to PLAY WITH MASTER',onclick:()=>{ensureBuses();$('playBtn').click()}});
+ UI.play=el('button',{class:'primary',text:'▶',title:'Play / pause the timeline. Use MODULES ON/OFF to start or stop instruments.',onclick:()=>{ensureBuses();$('playBtn').click()}});
  UI.metro=el('button',{text:'CLICK',title:'Metronome',onclick:()=>{const m=$('metronome');m.checked=!m.checked;m.dispatchEvent(new Event('change'))}});
  UI.loop=el('button',{text:'⟲',title:'Loop on / off',onclick:()=>$('loopBtn').click()});
  UI.recBtn=el('button',{class:'rec',text:'● REC',title:'Record the sources chosen in RECORD ANYTHING',onclick:()=>recToggle()});
@@ -5244,7 +5249,7 @@ async function startSong(){
  try{
   const want=Math.max(30,Math.min(300,Number(byId('bpm').value)||130)),be=byId('bpm');
   if(be&&Number(be.value)!==want){be.value=want;fire(be)}
-  h.stopAll();if(!h.modulesOn)await h.setModules(true);h.reanchorBpm();
+  if(!h.modulesOn){status('Switch MODULES ON before playing the song.');return}h.stopAll();h.reanchorBpm();
   status('PREPARING MODULES…');
   await h.prepare();if(request!==songRequest)return;
   let c=ctxOf();
@@ -5622,7 +5627,7 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
 </script>
 
 
-<!-- GLCTC1 v49 PAD-64 & TRANSPORT FIXES: unified pattern selection, explicit demo loading, group transport suspend/resume; adaptive voice budget, effect curve caching, reduced visual refresh, ended-node cleanup; shared scheduler, exact composer section selection, queued-source stop, audio-clock timeline; central master BPM mirror; module tempo controls remain slaves; composer key/scale is visible; fresh genre/key/tempo/pattern demo is generated on every page load without auto-playing. -->
+<!-- GLCTC1 v50 TRANSPORT SEPARATION: Play never enables or starts modules; module switch is explicit; unified pattern selection, explicit demo loading, group transport suspend/resume; adaptive voice budget, effect curve caching, reduced visual refresh, ended-node cleanup; shared scheduler, exact composer section selection, queued-source stop, audio-clock timeline; central master BPM mirror; module tempo controls remain slaves; composer key/scale is visible; fresh genre/key/tempo/pattern demo is generated on every page load without auto-playing. -->
 <script>
 /* GLCTC1 MASTER SYNC HARDENING — single master tempo, one launch epoch, fresh composer demo on every page load. */
 (()=>{'use strict';

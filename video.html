@@ -2525,6 +2525,45 @@ function refitPhase(sg,bpm,hint,centre){
   const t0 = best.off*FS;
   return ((t0 % Psec) + Psec) % Psec;
 }
+
+/* ---- beat grid that follows small tempo drift (re-checked every 4 s) ---- */
+const DRIFT_STEP = 4;
+function buildDrift(sg){
+  const FS = sg.FS, fr = sg.fr, P = 60/sg.gridBpm/FS;
+  const n = Math.max(2,Math.ceil(fr*FS/DRIFT_STEP) + 1);
+  const raw = new Float32Array(n);
+  const base = sg.t0/FS;
+  for(let k=0;k<n;k++){
+    const cen = k*DRIFT_STEP;
+    const a = Math.max(0,Math.floor((cen - 6)/FS)), b = Math.min(fr,Math.floor((cen + 6)/FS));
+    if(b - a < P*6){ raw[k] = 0; continue; }
+    const at = scoreOn(sg.on2,fr,P,base,a,b);
+    let best = at, bo = base;
+    for(let off=base - P*.3; off<=base + P*.3; off+=1){
+      const s = scoreOn(sg.on2,fr,P,off,a,b);
+      if(s > best){ best = s; bo = off; }
+    }
+    raw[k] = best > at*1.08 ? (bo - base)*FS : 0;
+  }
+  const med = new Float32Array(n);
+  for(let k=0;k<n;k++){
+    const v = [raw[Math.max(0,k-1)],raw[k],raw[Math.min(n-1,k+1)]].sort((x,y) => x - y);
+    med[k] = v[1];
+  }
+  const out = new Float32Array(n);
+  for(let k=0;k<n;k++){
+    out[k] = (med[Math.max(0,k-1)] + med[k] + med[Math.min(n-1,k+1)])/3;
+  }
+  sg.drift = out;
+}
+function driftAt(sg,t){
+  const d = sg.drift;
+  if(!d || !d.length){ return 0; }
+  const x = clamp(t/DRIFT_STEP,0,d.length - 1);
+  const i = Math.floor(x);
+  return lerp(d[i],d[Math.min(d.length - 1,i + 1)],x - i);
+}
+
 function showBpm(bpm){
   bpmInput.value = String(+bpm.toFixed(2));
   readBpm.textContent = Math.round(bpm);
@@ -2534,7 +2573,9 @@ function applyBpm(bpm,hint,local){
   if(!sg){ return; }
   bpm = clamp(bpm,40,240);
   sg.bpm = bpm;
+  sg.gridBpm = bpm;
   sg.t0 = refitPhase(sg,bpm,hint,local ? S.est : null);
+  buildDrift(sg);
   S.external.bpm = bpm;
   S.bpm = bpm;
   S.move.bar = -1;
@@ -2549,7 +2590,13 @@ async function analyseSong(file){
     if(p && p.catch){ p.catch(rej); }
   });
   const sr = buf.sampleRate;
-  const maxN = Math.min(buf.length,Math.floor(sr*240));
+  /* mono mix for the ANALYSE-page tempo engine */
+  const mono = new Float32Array(buf.length);
+  for(let ch=0; ch<buf.numberOfChannels; ch++){
+    const dch = buf.getChannelData(ch);
+    for(let q=0; q<buf.length; q++){ mono[q] += dch[q]/buf.numberOfChannels; }
+  }
+  const maxN = Math.min(buf.length,Math.floor(sr*480));
   const c0 = buf.getChannelData(0);
   const c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : c0;
   const hop = Math.max(1,Math.round(sr*.005));
@@ -2598,13 +2645,28 @@ async function analyseSong(file){
   const meanOn = tot/Math.max(1,fr) + 1e-9;
   await tick();
 
-  /* coarse: 70–200 BPM, then fine */
-  let top = searchTempo(on2,fr,FS,70,200,.5,true);
+  /* TEMPO: the exact detector used on the ANALYSE page */
+  let det = null;
+  try{ det = detectBPMDetailed(mono,sr); }catch(err){ console.warn("tempo engine:",err); }
   await tick();
-  const fin = fineTempo(on2,fr,FS,top.bpm,top.off,.6,.01);
-  const Psec = 60/fin.bpm;
-  let t0 = fin.off*FS;
-  t0 = ((t0 % Psec) + Psec) % Psec;
+  let bpmFound, fallback = false;
+  if(det && det.bpm > 0){ bpmFound = det.bpm; }
+  else{
+    fallback = true;
+    const top = searchTempo(on2,fr,FS,70,200,.5,true);
+    bpmFound = fineTempo(on2,fr,FS,top.bpm,top.off,.6,.01).bpm;
+  }
+  const sgObj = { bpm:bpmFound, gridBpm:bpmFound, t0:0, on2, fr, FS, drift:null, detail:det, fallback };
+  sgObj.t0 = refitPhase(sgObj,bpmFound,null,null);
+  /* the grid may use a hair-finer tempo than the (rounded) analyser value */
+  {
+    const P0 = 60/bpmFound/FS;
+    const s0 = scoreOn(on2,fr,P0,sgObj.t0/FS,0,fr);
+    const fine = fineTempo(on2,fr,FS,bpmFound,sgObj.t0/FS,.35,.01);
+    if(fine.raw > s0*1.03){ sgObj.gridBpm = fine.bpm; sgObj.t0 = refitPhase(sgObj,fine.bpm,null,null); }
+  }
+  buildDrift(sgObj);
+  const fin = { raw:scoreOn(on2,fr,60/sgObj.gridBpm/FS,sgObj.t0/FS,0,fr) };
 
   /* loudness curve: one value every 0.5 s */
   const win = Math.round(.5/FS);
@@ -2620,13 +2682,9 @@ async function analyseSong(file){
   const loudN = Array.from(loud).map(v => clamp(v/ref,0,1));
   const smooth = loudN.map((v,k) => (loudN[Math.max(0,k-1)] + v + loudN[Math.min(nWin-1,k+1)])/3);
 
-  return {
-    bpm:Math.round(fin.bpm*100)/100,
-    t0,
-    loud:smooth,
-    conf:fin.raw/meanOn,
-    on2, fr, FS
-  };
+  sgObj.loud = smooth;
+  sgObj.conf = fin.raw/meanOn;
+  return sgObj;
 }
 
 /* =========================================================
@@ -3261,6 +3319,210 @@ STAGE_FN.crystal = (g,ts,pulse) => {
     { id:"crystal", name:"CRYSTAL CAVE" }
   );
 })();
+/* ===== BPM engine — identical to the GLCTC1 ANALYSE page ===== */
+function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds, centerFrac) {
+  const duration = samples.length / sampleRate;
+  if (!Number.isFinite(duration) || duration < 8) return null;
+  // Analyse the middle of long tracks (skips quiet intros / outros).
+  const windowSeconds = Math.min(maxSeconds || 90, duration);
+  const cf = (typeof centerFrac === "number") ? centerFrac : 0.5;
+  const startSample = Math.floor((duration - windowSeconds) * cf * sampleRate);
+  const endSample = startSample + Math.floor(windowSeconds * sampleRate);
+  const hop = Math.max(1, Math.round(sampleRate / 250));   // ~250 envelope frames / second
+  const rate = sampleRate / hop;
+  const frames = Math.floor((endSample - startSample) / hop);
+  if (frames < rate * 6) return null;
+  const lpCoef = 1 - Math.exp(-2 * Math.PI * 150 / sampleRate); // ~150 Hz low-pass for kick
+  const lowEnv = new Float32Array(frames);
+  const highEnv = new Float32Array(frames);
+  let lp = 0, prev = 0, pos = startSample, totalEnergy = 0;
+  for (let f = 0; f < frames; f++) {
+    let le = 0, he = 0;
+    for (let k = 0; k < hop; k++, pos++) {
+      const x = samples[pos] || 0;
+      lp += lpCoef * (x - lp);
+      const d = x - prev; prev = x;     // first difference = high-frequency emphasis
+      le += lp * lp;
+      he += d * d;
+    }
+    totalEnergy += le + he;
+    lowEnv[f] = Math.log1p(Math.sqrt(le / hop) * 30);
+    highEnv[f] = Math.log1p(Math.sqrt(he / hop) * 30);
+  }
+  if (totalEnergy / (frames * hop) < 1e-9) return null;           // silence
+  // Half-wave-rectified novelty vs. the previous few frames.
+  const novelty = env => {
+    const out = new Float32Array(frames);
+    let sq = 0;
+    for (let i = 3; i < frames; i++) {
+      const ref = (env[i - 1] + env[i - 2] + env[i - 3]) / 3;
+      const v = Math.max(0, env[i] - ref);
+      out[i] = v; sq += v * v;
+    }
+    const sd = Math.sqrt(sq / frames) || 1;
+    for (let i = 0; i < frames; i++) out[i] /= sd;
+    return out;
+  };
+  const low = novelty(lowEnv), high = novelty(highEnv);
+  const merged = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) merged[i] = low[i] * 0.55 + high[i] * 0.45;
+  // Remove the slow-moving baseline (±0.25 s), keep only peaks, light smoothing.
+  const half = Math.round(rate * 0.25);
+  const prefix = new Float64Array(frames + 1);
+  for (let i = 0; i < frames; i++) prefix[i + 1] = prefix[i] + merged[i];
+  const onset = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const a = Math.max(0, i - half), b = Math.min(frames, i + half + 1);
+    const mean = (prefix[b] - prefix[a]) / (b - a);
+    onset[i] = Math.max(0, merged[i] - mean);
+  }
+  const smooth = new Float32Array(frames);
+  for (let i = 1; i < frames - 1; i++) smooth[i] = onset[i - 1] * 0.25 + onset[i] * 0.5 + onset[i + 1] * 0.25;
+  return { onset: smooth, rate, frames };
+}
+function glctc1TempoFromEnv(env) {
+  if (!env) return null;
+  const { onset, rate, frames } = env;
+  // Autocorrelation of the onset curve out to ~9 s (covers 2 bars at 60 BPM / 4 bars at 120).
+  const maxLag = Math.min(frames - 2, Math.ceil(rate * 9));
+  const acf = new Float32Array(maxLag + 2);
+  let r0 = 0;
+  for (let i = 0; i < frames; i++) r0 += onset[i] * onset[i];
+  r0 /= frames;
+  if (r0 < 1e-9) return null;
+  for (let lag = 1; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = lag; i < frames; i++) sum += onset[i] * onset[i - lag];
+    acf[lag] = (sum / (frames - lag)) / r0;
+  }
+  const acfAt = x => {
+    if (x < 1 || x >= maxLag) return 0;
+    const i = Math.floor(x), f = x - i;
+    return acf[i] * (1 - f) + acf[i + 1] * f;
+  };
+  // Peak-tolerant lookup: breaks drift a little, so take the best value within ±0.3 %.
+  const acfPeak = x => {
+    const w = Math.max(0.6, x * 0.003);
+    let m = -1;
+    for (let d = -w; d <= w; d += Math.max(0.5, w / 3)) { const v = acfAt(x + d); if (v > m) m = v; }
+    return m < 0 ? 0 : m;
+  };
+  // Comb filter over POWER-OF-TWO beat lags only (1/2, 1, 2, 4 and 8 beats). A real tempo repeats at
+  // those distances. A false "2/3 tempo" (e.g. 113 for a 170 break) lands on 3-beat / 6-beat / 12-beat
+  // distances, which don't repeat, so adding the 8-beat (two bar) lag removes it.
+  const LO = 60, HI = 200, STEP = 0.05;
+  const n = Math.round((HI - LO) / STEP) + 1;
+  const raw = new Float32Array(n);
+  const LAGS = [[0.5, 0.30], [1, 0.55], [2, 0.90], [4, 1.00], [8, 0.80]];
+  for (let k = 0; k < n; k++) {
+    const bpm = LO + k * STEP;
+    const P = (60 / bpm) * rate;
+    let s = 0, w = 0;
+    for (const [beats, weight] of LAGS) {
+      const lag = P * beats;
+      if (lag < maxLag - 2) { s += weight * acfPeak(lag); w += weight; }
+    }
+    // Wide, flat prior over the dance-music range (breaks, house, DnB, jungle all live here).
+    const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 140) / 1.1, 2));
+    raw[k] = (w ? s / w : 0) * prior;
+  }
+  const scores = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, k - 3); j <= Math.min(n - 1, k + 3); j++) { s += raw[j]; c++; }
+    scores[k] = s / c;
+  }
+  const bestIn = (lo, hi) => {
+    let bk = -1, bs = -Infinity;
+    const a = Math.max(0, Math.round((lo - LO) / STEP)), b = Math.min(n - 1, Math.round((hi - LO) / STEP));
+    for (let k = a; k <= b; k++) if (scores[k] > bs) { bs = scores[k]; bk = k; }
+    return bk < 0 ? null : { bpm: LO + bk * STEP, score: bs };
+  };
+  let best = bestIn(LO, HI);
+  if (!best || !(best.score > 0)) return null;
+  // Related-tempo check (ratios 2:1, 3:2, 4:3). If a related tempo is scored nearly as well
+  // and sits in a more plausible zone for the groove, prefer it.
+  const near = (f) => bestIn(best.bpm * f * 0.985, best.bpm * f * 1.015);
+  const zoneBonus = b => (b >= 160 && b <= 182) ? 1.10 : (b >= 118 && b <= 150) ? 1.04 : 1.0;
+  const candidates = [best];
+  for (const f of [1.5, 4 / 3, 0.75, 2 / 3]) {   // octaves (x2, /2) are handled separately below
+    const alt = near(f);
+    if (alt && alt.bpm >= LO && alt.bpm <= HI) candidates.push(alt);
+  }
+  // 3:2 / 4:3 relatives are only accepted when clearly better supported (they are the classic false peaks).
+  let pick = best;
+  for (const alt of candidates) {
+    if (alt === best) continue;
+    const ratio = alt.bpm / best.bpm;
+    const octave = Math.abs(ratio - 2) < 0.05 || Math.abs(ratio - 0.5) < 0.03;
+    const need = octave ? 0.90 : 1.15;
+    if (alt.score * zoneBonus(alt.bpm) >= pick.score * zoneBonus(pick.bpm) * need) pick = alt;
+  }
+  best = pick;
+  // Octave correction for half-time grooves: a snare on every 2nd beat makes a 170-ish break look like ~85.
+  const dbl = best.bpm * 2;
+  if (dbl <= HI + 0.5) {
+    const alt = bestIn(dbl * 0.985, dbl * 1.015);
+    if (alt) {
+      const needed = best.bpm < 70 ? 0.95 : (best.bpm >= 82 && best.bpm <= 89.5 ? 0.92 : 2);
+      if (alt.score >= best.score * needed) best = alt;
+    }
+  }
+  // Above 185 is almost always double-time of a ~93 groove (but real 186-190 DnB is rare).
+  if (best.bpm > 190) {
+    const alt = bestIn(best.bpm * 0.5 * 0.985, best.bpm * 0.5 * 1.015);
+    if (alt && alt.score >= best.score * 0.85) best = alt;
+  }
+  // Refine: parabolic-free local re-search on the finest grid around the winner.
+  const refined = bestIn(best.bpm - 0.6, best.bpm + 0.6);
+  let result = refined ? refined.bpm : best.bpm;
+  const nearest = Math.round(result);
+  if (Math.abs(result - nearest) <= 0.3) result = nearest; // most tracks sit on whole BPM
+  result = Math.round(result * 10) / 10;
+  const support = bpm => { const o = bestIn(bpm * 0.99, bpm * 1.01); return o ? Math.max(0, o.score) / best.score : 0; };
+  return { bpm: result, score: best.score, support };
+}
+// Multi-section tempo detection. Breaks have intros, breakdowns and fills that fool a single slice,
+// so several sections of the track vote and the strongest agreeing group wins.
+function detectBPMDetailed(samples, sampleRate) {
+  const duration = samples.length / sampleRate;
+  if (!Number.isFinite(duration) || duration < 8) return null;
+  const jobs = [[120, 0.5]];
+  if (duration >= 100) jobs.push([45, 0.12], [45, 0.5], [45, 0.88]);
+  else if (duration >= 50) jobs.push([30, 0.2], [30, 0.8]);
+  const votes = [];
+  for (const [secs, frac] of jobs) {
+    const t = glctc1TempoFromEnv(glctc1OnsetEnvelope(samples, sampleRate, secs, frac));
+    if (t) votes.push(t);
+  }
+  if (!votes.length) return null;
+  // group votes that agree within 1.5 %
+  const groups = [];
+  for (const v of votes) {
+    let g = groups.find(g => Math.abs(g.bpm / v.bpm - 1) < 0.015);
+    if (!g) { g = { bpm: v.bpm, weight: 0, votes: [] }; groups.push(g); }
+    g.weight += v.score; g.votes.push(v);
+    g.bpm = g.votes.reduce((a, x) => a + x.bpm * x.score, 0) / g.weight;
+  }
+  groups.sort((a, b) => b.weight - a.weight);
+  const win = groups[0];
+  let bpm = Math.round(win.bpm * 10) / 10;
+  const nearest = Math.round(bpm);
+  if (Math.abs(bpm - nearest) <= 0.3) bpm = nearest;
+  const total = groups.reduce((a, g) => a + g.weight, 0) || 1;
+  const sup = x => votes.reduce((a, v) => a + v.support(x), 0) / votes.length;
+  return {
+    bpm,
+    confidence: Math.round(100 * win.weight / total),
+    agree: win.votes.length + "/" + votes.length,
+    alternatives: groups.slice(1, 3).map(g => Math.round(g.bpm * 10) / 10),
+    support: sup
+  };
+}
+function detectBPM(samples, sampleRate) {
+  const d = detectBPMDetailed(samples, sampleRate);
+  return d ? d.bpm : "—";
+}
 
 
 /* =========================================================
@@ -3293,7 +3555,7 @@ function update(dt){
   /* beat pulse (hit exactly on each beat) */
   let bpReal = null;
   if(S.playing && sg){
-    bpReal = (t - sg.t0 - S.nudge/1000)/(60/sg.bpm);
+    bpReal = (t - sg.t0 - driftAt(sg,t) - S.nudge/1000)/(60/sg.gridBpm);
     const f = bpReal - Math.floor(bpReal);
     S.pulse = f < .45 ? Math.pow(1 - f/.45,2) : 0;
   }
@@ -4436,7 +4698,7 @@ songInput.onchange = () => {
     S.bpm = res.bpm;
     showBpm(res.bpm);
     bpmInput.disabled = false;
-    status.textContent = "BEAT FOUND — " + Math.round(res.bpm) + " BPM — " + CHARS[S.char].name + " IS READY. PRESS PLAY. (WRONG BPM? USE ×2 / ½ / TAP BELOW THE VIDEO.)";
+    status.textContent = "BEAT FOUND — " + (+res.bpm.toFixed(1)) + " BPM (SAME ENGINE AS THE ANALYSE PAGE) — " + CHARS[S.char].name + " IS READY. PRESS PLAY. (WRONG BPM? USE ×2 / ½ / TAP BELOW THE VIDEO.)";
   }).catch(err => {
     console.warn("Beat analysis failed:",err);
     if(S.songURL !== mine){ return; }

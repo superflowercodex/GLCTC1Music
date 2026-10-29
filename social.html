@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6695,9 +6696,7 @@ async function loadGLCTC1LiveArtists() {
     }
   );
 }
-glctc1GoLiveButton && glctc1GoLiveButton.addEventListener(
-  "click",
-  async function() {
+async function startGLCTC1LiveInThisPage() {
     const {
       data,
       error
@@ -6706,6 +6705,11 @@ glctc1GoLiveButton && glctc1GoLiveButton.addEventListener(
       alert(
         "Please sign in to go live."
       );
+      return;
+    }
+    const pageArtist = new URLSearchParams(window.location.search).get("artist");
+    if (pageArtist && pageArtist !== data.user.id) {
+      alert("Only this artist can start this broadcast.");
       return;
     }
     const user = data.user, {
@@ -6783,7 +6787,6 @@ glctc1GoLiveButton && glctc1GoLiveButton.addEventListener(
       return;
     }
   }
-);
 async function createGLCTC1LiveOffer() {
   try {
     if (!glctc1PeerConnection)
@@ -8493,7 +8496,12 @@ document.addEventListener(
     }
   }
 );
+let glctc1StudioWindow = null;
 async function openGLCTC1ArtistLiveWatchWindow() {
+  if (glctc1StudioWindow && !glctc1StudioWindow.closed) {
+    glctc1StudioWindow.focus();
+    return true;
+  }
   let preWindow = null;
   try {
     preWindow = window.open("", "_blank");
@@ -8526,9 +8534,12 @@ async function openGLCTC1ArtistLiveWatchWindow() {
       "⚠️ GLCTC1 ARTIST PROFILE READ WARNING:",
       profileError
     ), artistName = profile?.artist_name || null;
-    const watchUrl = window.location.pathname + "?artist=" + encodeURIComponent(
-      artistUserId
-    );
+    const studioUrl = new URL(window.location.href);
+    studioUrl.search = "";
+    studioUrl.hash = "";
+    studioUrl.searchParams.set("artist", artistUserId);
+    studioUrl.searchParams.set("studio", "1");
+    const watchUrl = studioUrl.href;
     setGLCTC1WatchSession(
       artistUserId,
       artistName
@@ -8536,6 +8547,7 @@ async function openGLCTC1ArtistLiveWatchWindow() {
     let watchWindow = preWindow;
     if (watchWindow ? watchWindow.location.href = watchUrl : watchWindow = window.open(watchUrl, "_blank"), !watchWindow)
       return console.warn("⚠️ GLCTC1 WATCH PAGE WINDOW BLOCKED"), alert("🪟 Your browser blocked the live window. Please allow pop-ups for this site, then press GO LIVE again."), !1;
+    glctc1StudioWindow = watchWindow;
     try {
       watchWindow.focus();
     } catch (error2) {
@@ -8557,11 +8569,22 @@ const glctc1ArtistPageId = new URLSearchParams(
 ).get(
   "artist"
 );
-glctc1GoLiveButton && !glctc1ArtistPageId && glctc1GoLiveButton.addEventListener(
+if (glctc1GoLiveButton && (glctc1ArtistPageId || new URLSearchParams(window.location.search).get("studio") === "1")) {
+  glctc1GoLiveButton.textContent = "🔴 LIVE";
+}
+let glctc1GoLivePending = false;
+glctc1GoLiveButton && glctc1GoLiveButton.addEventListener(
   "click",
   async function(event) {
     event.preventDefault(), event.stopImmediatePropagation();
+    if (glctc1GoLivePending) return;
+    glctc1GoLivePending = true;
     try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("artist") || params.get("studio") === "1") {
+        await startGLCTC1LiveInThisPage();
+        return;
+      }
       if (!await openGLCTC1ArtistLiveWatchWindow()) {
         console.warn(
           "⚠️ GLCTC1 ARTIST WATCH PAGE COULD NOT OPEN"
@@ -8573,6 +8596,8 @@ glctc1GoLiveButton && !glctc1ArtistPageId && glctc1GoLiveButton.addEventListener
         "❌ GLCTC1 STEP 43 ERROR:",
         error
       );
+    } finally {
+      glctc1GoLivePending = false;
     }
   },
   !0
@@ -8902,6 +8927,8 @@ function getGLCTC1ViewerArtistId() {
 async function startGLCTC1ViewerFromArtistURL() {
   try {
     const artistUserId = getGLCTC1ViewerArtistId();
+    const { data: viewerAuth } = await supabaseClient.auth.getUser();
+    if (viewerAuth?.user?.id === artistUserId) return false;
     if (!artistUserId)
       return console.warn(
         "⚠️ GLCTC1 VIEWER — NO ARTIST ID"

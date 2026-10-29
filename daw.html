@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=1280,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#08090c">
 <meta name="description" content="GLCTC1 MUSIC browser DAW: record, arrange audio, MIDI and video clips, mix, and export WAV.">
-<title>GLCTC1 MUSIC — DAW v45 Pad Banks A-D + 80LA8 Start + PAD-64 Composer Link</title>
+<title>GLCTC1 MUSIC — DAW v46 Master Sync + Composer Refresh Fix</title>
 <style>
 :root{--bg:#07080b;--panel:#101116;--panel2:#171820;--line:#34333a;--gold:#ffd36a;--gold2:#a97820;--text:#f4f1e8;--muted:#a6a4ad;--blue:#19baff;--purple:#bd54ff;--green:#4af59b;--orange:#ff8a2a;--red:#ff4568}
 *{box-sizing:border-box}html,body{min-width:1280px;margin:0;min-height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}body{background:radial-gradient(ellipse at 70% -15%,#17253b 0,transparent 36%),#07080b}
@@ -4610,6 +4610,7 @@ panel.innerHTML=`<style>
 <div class="gsc-bar">
  <div><label for="gscGenre">GENRE / GROOVE</label><select id="gscGenre"><option value="techno">Techno</option><option value="house">Deep / Tribal House</option><option value="dnb">Jungle / Drum &amp; Bass</option><option value="hiphop">Hip Hop</option><option value="ambient">Meditation / Ambient</option><option value="pop">Pop / Electronic</option></select></div>
  <div><label for="gscBpm">AI → MASTER BPM</label><strong id="gscBpm" style="display:block;padding:8px 4px;color:#f2ca70">130</strong><small style="display:block;opacity:.72">AI sets the DAW master; all modules follow</small></div>
+ <div><label for="gscKey">AI → KEY / SCALE</label><strong id="gscKey" style="display:block;padding:8px 4px;color:#f2ca70">C MINOR</strong><small style="display:block;opacity:.72">One key shared by every generated pattern</small></div>
  <div><label for="gscLen">LENGTH</label><select id="gscLen"><option value="demo">Demo · 36 bars</option><option value="16">16 bars</option><option value="32">32 bars</option><option value="64">64 bars</option></select></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px"><input id="gscLoop" type="checkbox">LOOP SONG</label></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label></div>
@@ -5005,7 +5006,7 @@ let fillN=0;
 function fillPatterns(genre,txt){
  const seed=PAT.hash(genre+'|'+txt+'|'+(++fillN)+'|'+(Date.now()&0xffff));
  const pack=PAT.build(genre,seed,{text:txt}),done=PAT.apply(pack);
- const info=byId('gscFillInfo');if(info)info.textContent='PATTERNS WRITTEN · KEY '+pack.name+' · '+done.length+' modules · seed '+seed;
+ const info=byId('gscFillInfo');if(info)info.textContent='PATTERNS WRITTEN · KEY '+pack.name+' · '+done.length+' modules · seed '+seed;const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=pack.name.toUpperCase();
  try{window.GLCTC_SONG_PATTERN_KEY=pack.name}catch(e){}
  return pack}
 byId('gscFill').addEventListener('click',()=>{if(S){status('STOP THE SONG FIRST, then fill patterns');return}try{const p=fillPatterns(byId('gscGenre').value,(byId('gscPrompt').value||'').toLowerCase());status('PATTERNS FILLED · '+p.name+' · press PLAY SONG')}catch(e){console.error(e);status('Pattern fill failed; see console')}});
@@ -5079,7 +5080,7 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    const pack=prepareSong(g,'',true);
    try{applyPresets()}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
-   window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};
+   window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=String(pack&&pack.name||'C MINOR').toUpperCase();
    status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press ♪ PLAY SONG');
   }catch(e){console.error('new song on load failed',e)}
  }
@@ -5145,5 +5146,60 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
 })();
 </script>
 
+
+<!-- GLCTC1 v46 FIXES: central master BPM mirror; module tempo controls remain slaves; composer key/scale is visible; fresh genre/key/tempo/pattern demo is generated on every page load without auto-playing. -->
+<script>
+/* GLCTC1 MASTER SYNC HARDENING — single master tempo, one launch epoch, fresh composer demo on every page load. */
+(()=>{'use strict';
+ const $=id=>document.getElementById(id);
+ const fmt=v=>String(+(Number(v)||130).toFixed(1));
+ function syncDisplays(){
+  const K=window.GLCTC_CLOCK,H=window.GLCTC_HUB;if(!K)return;
+  try{H&&H.syncTempoDisplays&&H.syncTempoDisplays()}catch(e){}
+  const bpm=fmt(K.bpm);
+  ['lpTempo','blTempo','s101Tempo','goTempo','voxTempo','mine909Tempo','lee303TempoVal','gscBpm'].forEach(id=>{const el=$(id);if(el)el.textContent=bpm+(id==='gscBpm'?'':' BPM')});
+  const masterKey=$('.glctc-tempo-box input[type="number"]');if(masterKey&&document.activeElement!==masterKey)masterKey.value=bpm;
+  if(window.__glctcLeeState)window.__glctcLeeState.tempo=K.bpm;
+ }
+ function applyMasterBpm(value){
+  const K=window.GLCTC_CLOCK,el=$('bpm');if(!K||!el)return;
+  const n=Number(value);if(!Number.isFinite(n))return;
+  const target=Math.max(30,Math.min(300,Math.round(n*10)/10));
+  if(Math.abs(Number(el.value)-target)>.0001)el.value=String(target);
+  K.setBpm(target);
+  try{if(window.GLCTC_HUB){window.GLCTC_HUB.sharedBpm=target;window.GLCTC_HUB.syncTempoDisplays()}}catch(e){}
+  try{if(window.GLCTC_MIX&&window.GLCTC_MIX.syncTempo)window.GLCTC_MIX.syncTempo(target)}catch(e){}
+  syncDisplays();
+ }
+ window.GLCTC_MASTER_SYNC={setBpm:applyMasterBpm,sync:syncDisplays,clock:()=>window.GLCTC_CLOCK};
+ const master=$('bpm');
+ if(master){
+  master.addEventListener('input',()=>{const K=window.GLCTC_CLOCK;if(K)K.sync(false);syncDisplays()});
+  master.addEventListener('change',()=>{const K=window.GLCTC_CLOCK;if(K)K.sync(true);syncDisplays()});
+ }
+ /* Module tempo displays are mirrors, never independent clocks. Keep the tap-tempo controls only on the master controller. */
+ document.querySelectorAll('#beatLabPanel input[id*="bpm" i],#mine909Panel input[id*="bpm" i],#lee303Panel input[id*="bpm" i],#s101Panel input[id*="bpm" i],#galacticOnePanel input[id*="bpm" i],#voxPanel input[id*="bpm" i],#looperPanel input[id*="bpm" i]').forEach(el=>{
+  el.value=window.GLCTC_CLOCK?fmt(window.GLCTC_CLOCK.bpm):'130';
+  el.title='Locked to GLCTC1 master transport BPM';
+  el.addEventListener('input',()=>{el.value=fmt(window.GLCTC_CLOCK?window.GLCTC_CLOCK.bpm:130)});
+ });
+ /* Re-check mirrors after dynamically-created module UI appears and whenever the master tempo changes. */
+ document.addEventListener('input',e=>{if(e.target&&e.target.id==='bpm')syncDisplays()},true);
+ document.addEventListener('change',e=>{if(e.target&&e.target.id==='bpm')syncDisplays()},true);
+ /* A fresh composer-generated song is required every refresh; do not let a remembered opt-out silently disable it. */
+ try{localStorage.setItem('glctc1.autoSongOnLoad','1')}catch(e){}
+ const auto=$('gscAutoLoad');if(auto)auto.checked=true;
+ function forceFreshDemo(){
+  const box=$('gscAutoLoad');if(box)box.checked=true;
+  try{localStorage.setItem('glctc1.autoSongOnLoad','1')}catch(e){}
+  syncDisplays();
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',forceFreshDemo,{once:true});
+ else forceFreshDemo();
+ window.addEventListener('load',()=>{forceFreshDemo();setTimeout(syncDisplays,1800)},{once:true});
+})();
+</script>
+
 </body>
 </html>
+

@@ -1668,11 +1668,26 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
  halt(m){m.soloMode=false;GLCTC_CLOCK.cancelSources(m.id);try{m.stop()}catch(err){console.error('GLCTC1 module stop:',m.name,err)}},
  stopAll(){this.request++;Object.values(this.mods).forEach(m=>this.halt(m));this.playAllActive=false;this.syncPlayAllBtn();},
  master(type,at,beat){
-  if(type==='stop'){this.setModules(false);this.sharedEpochAt=null;this.sharedBeat=0;return}
+  if(type==='stop'){
+   this.stopAll();this.modulesOn=false;this.modulesSuspendedGroup=false;
+   try{localStorage.setItem('glctc1.modulesOn','0')}catch(e){}
+   const mb=this.el('modulesBtn');if(mb){mb.textContent='MODULES OFF';mb.classList.remove('active');mb.setAttribute('aria-pressed','false')}
+   this.sharedEpochAt=null;this.sharedBeat=0;return;
+  }
   if(type!=='play')return;
-  // Transport Play never changes the module switch or launches an instrument.
-  if(!Object.values(this.mods).some(m=>m.running?.()))GLCTC_CLOCK.anchor(at,Math.max(0,beat||0));
-  this.syncTempoDisplays();
+  // The Master Keyboard is the transport owner: launch every registered module on the same master-clock edge.
+  this.modulesOn=true;this.modulesSuspendedGroup=false;this.playAllActive=true;
+  try{localStorage.setItem('glctc1.modulesOn','1')}catch(e){}
+  const mb=this.el('modulesBtn');if(mb){mb.textContent='MODULES ON';mb.classList.add('active');mb.setAttribute('aria-pressed','true')}
+  const c=audioCtx||ensureAudio(),b=Math.max(0,Number(beat)||0),step=Math.round(b*4);
+  if(!GLCTC_CLOCK.anchored())GLCTC_CLOCK.anchor(at,b);
+  Object.values(this.mods).forEach(m=>{
+   if(m.running&&m.running())return;
+   if(m.can&&!m.can())return;
+   // Master transport intentionally overrides per-module send toggles; bypass remains a mixer/audibility control, not a transport lock.
+   this.launch(m,at,step,true,false);
+  });
+  this.syncPlayAllBtn();this.syncTempoDisplays();
  },
  allRunning(){const list=Object.values(this.mods).filter(m=>!this.bypassed(m)&&(!m.can||m.can()));return list.length>0&&list.every(m=>m.running&&m.running())},
  syncPlayAllBtn(){const b=this.el('playAllModulesBtn');if(!b)return;const on=this.playAllActive||this.allRunning();const t=on?'■ STOP ALL MODULES':'▶ PLAY ALL MODULES';if(b.textContent!==t)b.textContent=t;b.classList.toggle('active',on)},
@@ -3988,7 +4003,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  body.append(rackC.c);
  /* ---------- MASTER KEYBOARD CONTROLLER · ANALOG PERFORMANCE CONSOLE ---------- */
  const mkC=card('MASTER KEYBOARD CONTROLLER','GALACTIC ONE · hands-on performance · live sound control · master of every module');
- const mkSelected=new Set(['go']);
+ const mkSelected=new Set(MODS.map(m=>m.id));
  const mkStatus=el('div',{class:'k37-l1',text:'SYSTEM READY · PICK A TARGET AND PLAY'});
  const mkTarg=el('div',{class:'k37-l2'}),mkInfo=el('div',{class:'k37-l3'});
  const mkNoteNames=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
@@ -4172,10 +4187,10 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  const mkTempoTap=el('button',{type:'button',text:'TAP TEMPO',title:'Tap repeatedly to set the master transport BPM'});
  const mkTempoBox=el('div',{class:'glctc-tempo-box'},el('label',{text:'MASTER BPM'}),mkTempoInput,mkTempoTap);
  let mkStopLatched=false;
- const mkTransportBtn=el('button',{type:'button',text:'▶ START',title:'Start playback. First STOP pauses; press STOP again to return the playhead to the beginning.'});
+ const mkTransportBtn=el('button',{type:'button',text:'▶ START',title:'Starts every module in sync. First STOP pauses all modules; press STOP again to return the playhead home.'});
  const mkTransportBox=el('div',{class:'glctc-transport-box'},el('label',{text:'MASTER TRANSPORT'}),mkTransportBtn);
  const mkTransportSync=()=>{const on=!!(window.glctcTimeline&&window.glctcTimeline.playing());mkTransportBtn.textContent=on?'■ STOP':(mkStopLatched?'↤ RETURN HOME':'▶ START');mkTransportBtn.classList.toggle('playing',on);mkTransportBtn.setAttribute('aria-pressed',String(on))};
- mkTransportBtn.addEventListener('click',()=>{if(window.GLCTC_SONG?.running()){window.GLCTC_SONG.stop();mkStopLatched=true;mkTransportSync();return}if(window.glctcTimeline?.playing()){stopPlayback(false);mkStopLatched=true;mkStatus.textContent='MASTER TRANSPORT PAUSED · PRESS STOP AGAIN TO RETURN HOME'}else if(mkStopLatched){stopPlayback(true);mkStopLatched=false;mkStatus.textContent='PLAYHEAD RETURNED HOME'}else{startPlayback();mkStopLatched=false;mkStatus.textContent='MASTER TRANSPORT PLAYING'}mkTransportSync()});
+ mkTransportBtn.addEventListener('click',()=>{if(window.GLCTC_SONG?.running()){window.GLCTC_SONG.stop();try{HUB.stopAll()}catch(e){}mkStopLatched=true;mkTransportSync();return}if(window.glctcTimeline?.playing()){stopPlayback(false);try{HUB.stopAll()}catch(e){}mkStopLatched=true;mkStatus.textContent='MASTER STOP · ALL MODULES PAUSED · PRESS STOP AGAIN TO RETURN HOME'}else if(mkStopLatched){stopPlayback(true);try{HUB.stopAll()}catch(e){}mkStopLatched=false;mkStatus.textContent='PLAYHEAD RETURNED HOME · ALL MODULES STOPPED'}else{ensureBuses();startPlayback();mkStopLatched=false;mkStatus.textContent='MASTER PLAY · ALL MODULES STARTING IN SYNC'}mkTransportSync()});
  const mkDisplayMain=el('div',{class:'glctc-display-main'},mkLcd,mkBtnGrid);
  const mkDisp=el('div',{class:'k37-disp glctc-tempo'},mkTransportBox,mkTempoBox,mkDisplayMain);
  window.addEventListener('glctc-master-play',()=>{mkStopLatched=false;mkTransportSync()});window.addEventListener('glctc-master-stop',()=>mkTransportSync());window.addEventListener('glctc-timeline-state',mkTransportSync);setInterval(mkTransportSync,250);
@@ -4742,7 +4757,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
 })();
 
 
-(function initModuleTransportPrefs(){const pairs=[['lpSendMaster','glctc1.send.lp'],['blSendMaster','glctc1.send.80la8'],['mine909SendMaster','glctc1.send.90mine'],['lee303SendMaster','glctc1.send.30lee'],['s101SendMaster','glctc1.send.0010110'],['goSendMaster','glctc1.send.galactic-one'],['voxSendMaster','glctc1.send.vox'],['wsSendMaster','glctc1.send.ws'],['wsBypass','glctc1.byp.ws'],['lpBypass','glctc1.byp.lp'],['blBypass','glctc1.byp.80la8'],['mine909Bypass','glctc1.byp.90mine'],['lee303Bypass','glctc1.byp.30lee'],['s101Bypass','glctc1.byp.0010110'],['goBypass','glctc1.byp.galactic-one'],['voxBypass','glctc1.byp.vox']];pairs.forEach(([id,key])=>{const el=$(id);if(!el)return;try{const v=localStorage.getItem(key);if(v!==null)el.checked=v==='1'}catch(e){}el.addEventListener('change',()=>{try{localStorage.setItem(key,el.checked?'1':'0')}catch(e){}})});GLCTC_HUB.initBypass();GLCTC_HUB.initSolo();GLCTC_HUB.injectResetButtons();GLCTC_HUB.syncTempoDisplays();})();
+(function initModuleTransportPrefs(){const pairs=[['lpSendMaster','glctc1.send.lp'],['blSendMaster','glctc1.send.80la8'],['mine909SendMaster','glctc1.send.90mine'],['lee303SendMaster','glctc1.send.30lee'],['s101SendMaster','glctc1.send.0010110'],['goSendMaster','glctc1.send.galactic-one'],['voxSendMaster','glctc1.send.vox'],['wsSendMaster','glctc1.send.ws'],['wsBypass','glctc1.byp.ws'],['lpBypass','glctc1.byp.lp'],['blBypass','glctc1.byp.80la8'],['mine909Bypass','glctc1.byp.90mine'],['lee303Bypass','glctc1.byp.30lee'],['s101Bypass','glctc1.byp.0010110'],['goBypass','glctc1.byp.galactic-one'],['voxBypass','glctc1.byp.vox']];pairs.forEach(([id,key])=>{const el=$(id);if(!el)return;try{const v=localStorage.getItem(key);if(id==='voxSendMaster'){el.checked=true}else if(v!==null)el.checked=v==='1'}catch(e){if(id==='voxSendMaster')el.checked=true}el.addEventListener('change',()=>{try{localStorage.setItem(key,el.checked?'1':'0')}catch(e){}})});try{$('voxSendMaster').checked=true;$('voxSendMaster').dispatchEvent(new Event('change',{bubbles:true}))}catch(e){}GLCTC_HUB.initBypass();GLCTC_HUB.initSolo();GLCTC_HUB.injectResetButtons();GLCTC_HUB.syncTempoDisplays();})();
 init();
 })();
 

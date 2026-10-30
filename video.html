@@ -156,9 +156,6 @@ WAV or MP3. The song is analysed in your browser to find the tempo and
 the beat, so the dancing lands exactly on the music.
 </div>
 <input id="songInput" type="file" accept="audio/*,.wav,.mp3">
-<div class="media-description" style="margin-top:14px;">OPTIONAL — VOCAL STEM. Got the vocal on its own (an acapella or vocal stem)? Load it here for perfect lip sync. Without it, the app isolates the voice from your song by itself.</div>
-<input id="stemInput" type="file" accept="audio/*,.wav,.mp3">
-<div id="stemStatus" class="file-status">NO STEM — BUILT-IN VOCAL ISOLATION WILL BE USED</div>
 <div id="songStatus" class="file-status">NO SOUND LOADED</div>
 </div>
 </section>
@@ -745,7 +742,7 @@ const a = i + j, b = a + half; const xr = re[b]*cr - im[b]*ci, xi = re[b]*ci + i
 function median13(a,n){ for(let i = 1; i < n; i++){ const v = a[i]; let j = i - 1; while(j >= 0 && a[j] > v){ a[j + 1] = a[j]; j--; }
 a[j + 1] = v; }
 return a[n >> 1]; }
-async function analyseVocals(buf,isStem,onProgress){ const sr0 = buf.sampleRate; const dec = Math.max(1,Math.round(sr0/11025)); const sr = sr0/dec; const c0 = buf.getChannelData(0);
+async function analyseVocals(buf,onProgress,beat){ const isStem = false; const sr0 = buf.sampleRate; const dec = Math.max(1,Math.round(sr0/11025)); const sr = sr0/dec; const c0 = buf.getChannelData(0);
 const c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : c0; const len = Math.min(Math.floor(buf.length/dec),Math.floor(sr*480)); const mid = new Float32Array(len), side = new Float32Array(len);
 for(let i = 0; i < len; i++){ let a = 0, b = 0; for(let k = 0; k < dec; k++){ const j = i*dec + k; a += c0[j]; b += c1[j]; }
 mid[i] = (a + b)/(2*dec); side[i] = (a - b)/(2*dec); }
@@ -758,8 +755,9 @@ fftInPlace(re,im); for(let k = k0; k <= k1; k++){ const s = Math.hypot(re[k],im[
 }
 if(f%500 === 0){ if(onProgress){ onProgress(.4*f/frames); } await tick(); }
 }
-const useCentre = Sg && stereo > monoE*.04; const Wt = 6, tmp = new Float32Array(2*Wt + 1); const e = new Float32Array(frames), F1 = new Float32Array(frames), F2 = new Float32Array(frames);
-const vf = new Float32Array(nk); const NQ = 96, PQ = 12; const cosT = new Float32Array((PQ + 1)*nk), qHz = new Float32Array(NQ); const eCos = new Float32Array(NQ*(PQ + 1)), eSin = new Float32Array(NQ*(PQ + 1));
+const useCentre = Sg && stereo > monoE*.04; const Wt = 8, tmp = new Float32Array(2*Wt + 1); const e = new Float32Array(frames), F1 = new Float32Array(frames), F2 = new Float32Array(frames);
+const vf = new Float32Array(nk); const eRaw = new Float32Array(frames), hist = [new Float32Array(nk),new Float32Array(nk),new Float32Array(nk)]; const NQ = 96, PQ = 12;
+const cosT = new Float32Array((PQ + 1)*nk), qHz = new Float32Array(NQ); const eCos = new Float32Array(NQ*(PQ + 1)), eSin = new Float32Array(NQ*(PQ + 1));
 for(let lag = 0; lag <= PQ; lag++){ for(let kk = 0; kk < nk; kk++){ cosT[lag*nk + kk] = Math.cos(2*Math.PI*(kk + k0)*lag/N); } }
 for(let q = 0; q < NQ; q++){ qHz[q] = 200 + q*(3200 - 200)/(NQ - 1); const w = 2*Math.PI*qHz[q]/sr; for(let j = 0; j <= PQ; j++){ eCos[q*(PQ + 1) + j] = Math.cos(w*j); eSin[q*(PQ + 1) + j] = Math.sin(w*j); }
 }
@@ -767,7 +765,7 @@ const rr = new Float64Array(PQ + 1), lp = new Float64Array(PQ + 1), lt = new Flo
 const m = Mg[f*nk + kk]; if(m < 1e-7){ continue; }
 let n = 0; for(let d = -Wt; d <= Wt; d++){ const ff = f + d; if(ff >= 0 && ff < frames){ tmp[n++] = Mg[ff*nk + kk]; } }
 const H = median13(tmp,n); n = 0; for(let d = -Wt; d <= Wt; d++){ const k2 = kk + d; if(k2 >= 0 && k2 < nk){ tmp[n++] = Mg[f*nk + k2]; } }
-const P = median13(tmp,n); let mask = isStem ? .35 + .65*H*H/(H*H + P*P + 1e-12) : H*H/(H*H + P*P + 1e-12); if(useCentre){ const s = Sg[f*nk + kk]; mask *= m*m/(m*m + 2.5*s*s + 1e-12); }
+const P = median13(tmp,n); const h2 = H*H, p2 = P*P; let mask = isStem ? .35 + .65*h2/(h2 + p2 + 1e-12) : (h2*h2)/(h2*h2 + p2*p2 + 1e-24); if(useCentre){ const s = Sg[f*nk + kk]; mask *= m*m/(m*m + 2.5*s*s + 1e-12); }
 const v = m*mask, pw = v*v; es += pw; vf[kk] = pw; }
 const P = 12; for(let lag = 0; lag <= P; lag++){ let s = 0; for(let kk = 0; kk < nk; kk++){ s += vf[kk]*cosT[lag*nk + kk]; }
 rr[lag] = s; }
@@ -783,15 +781,35 @@ for(let q = 1; q < NQ - 1; q++){ if(lpcEnv[q] > lpcEnv[q - 1] && lpcEnv[q] >= lp
 }
 }
 }
-e[f] = Math.sqrt(es); if(p1 >= 0 && p2 >= 0){ F1[f] = qHz[p1]; F2[f] = qHz[p2]; }
+eRaw[f] = Math.sqrt(es); { let sm = 0; const cur = hist[f%3]; for(let kk = 0; kk < nk; kk++){ cur[kk] = Math.sqrt(vf[kk]); sm += cur[kk]; }
+sm = sm || 1e-12; for(let kk = 0; kk < nk; kk++){ cur[kk] /= sm; }
+let fx = 0; if(f >= 2){ const old = hist[(f - 2)%3]; for(let kk = 0; kk < nk; kk++){ fx += Math.abs(cur[kk] - old[kk]); } }
+e[f] = fx; }
+if(p1 >= 0 && p2 >= 0){ F1[f] = qHz[p1]; F2[f] = qHz[p2]; }
 else if(p1 >= 0){ F1[f] = qHz[p1]; F2[f] = qHz[p1] < 700 ? 900 : 1500; }
 else{ F1[f] = 500; F2[f] = 1500; }
 if(f%300 === 0){ if(onProgress){ onProgress(.4 + .55*f/frames); } await tick(); }
 }
-const sorted = Array.from(e).sort((x,y) => x - y); const ref = (sorted[Math.floor(sorted.length*.96)] || 1e-6) + 1e-9; const floor = sorted[Math.floor(sorted.length*.35)]/ref;
+const fpsV = sr/hop; { const srt = Array.from(eRaw).sort((x,y) => x - y); const med = srt[Math.floor(srt.length*.5)] + 1e-12; for(let f = 0; f < frames; f++){ e[f] *= clamp(eRaw[f]/(.35*med),0,1); }
+const sm = new Float32Array(frames); for(let f = 0; f < frames; f++){ let a = 0, n = 0; for(let d = -1; d <= 1; d++){ const g = f + d; if(g >= 0 && g < frames){ a += e[g]; n++; } } sm[f] = a/n; }
+e.set(sm); }
+if(beat && beat.bpm > 40 && !isStem){ const cyc = 2*60/beat.bpm*fpsV;               /* two beats = kick + snare */
+const NB = 24, blockF = Math.round(cyc*8); const binOf = f => { let ph = ((f/fpsV - (beat.t0 || 0))*fpsV/cyc)%1; if(ph < 0){ ph += 1; } return Math.min(NB - 1,Math.floor(ph*NB)); }; const out = new Float32Array(frames);
+for(let b0 = 0; b0 < frames; b0 += blockF){ const b1 = Math.min(frames,b0 + blockF); const lists = Array.from({length:NB},() => []);
+for(let f = Math.max(0,b0 - (blockF >> 1)); f < Math.min(frames,b1 + (blockF >> 1)); f++){ lists[binOf(f)].push(e[f]); }
+const prof = lists.map(L => { if(!L.length){ return 0; } L.sort((x,y) => x - y); return L[Math.floor(L.length*.5)]; }); for(let f = b0; f < b1; f++){ out[f] = Math.max(0,e[f] - prof[binOf(f)]*1.15); }
+}
+e.set(out); await tick(); }
+const bed = new Float32Array(frames); { const half = Math.round(3*fpsV), stepF = 8; const win = []; for(let c = 0; c < frames; c += stepF){ win.length = 0;
+for(let f = Math.max(0,c - half); f < Math.min(frames,c + half); f += 2){ win.push(e[f]); }
+win.sort((x,y) => x - y); const v = win[Math.floor(win.length*(isStem ? .05 : .2))] || 0; for(let f = c; f < Math.min(frames,c + stepF); f++){ bed[f] = v; }
+}
+for(let f = 0; f < frames; f++){ e[f] = Math.max(0,e[f] - bed[f]*(isStem ? .5 : 1.15)); }
+}
+await tick(); const sorted = Array.from(e).sort((x,y) => x - y); const ref = (sorted[Math.floor(sorted.length*.92)] || 1e-6) + 1e-9; const floor = .06;
 const mouth = new Float32Array(frames), wide = new Float32Array(frames), round = new Float32Array(frames), pres = new Float32Array(frames); let env = 0, pe = 0, wv = .5, rv = 0; for(let f = 0; f < frames; f++){
 const lv = clamp((e[f]/ref - floor*1.1)/(1 - floor*1.1),0,1); env = lv > env ? env + (lv - env)*.65 : env + (lv - env)*.28; pe = lerp(pe,lv,.08); const open = clamp((F1[f] - 300)/450,0,1);
-wv = lerp(wv,clamp((F2[f] - 1300)/1100,0,1),.35); rv = lerp(rv,clamp((1300 - F2[f])/450,0,1)*(1 - open*.6),.35); mouth[f] = clamp(env*(.28 + .95*open),0,1); wide[f] = wv; round[f] = rv; pres[f] = pe; }
+wv = lerp(wv,clamp((F2[f] - 1300)/1100,0,1),.35); rv = lerp(rv,clamp((1300 - F2[f])/450,0,1)*(1 - open*.6),.35); mouth[f] = clamp(env*(.28 + .95*open)*1.35,0,1); wide[f] = wv; round[f] = rv; pres[f] = pe; }
 if(onProgress){ onProgress(1); }
 return { fps:sr/hop, n:frames, mouth, wide, round, pres, stem:!!isStem }; }
 function voxAt(t){ const v = S.vox; if(!v){ return null; }
@@ -1840,9 +1858,10 @@ const rate = S.playing ? .6 : .2; PK.forEach(k => { S.pose[k] = lerp(S.pose[k],t
 mo = Math.max(mo,clamp(.12 + .6*S.pulse + .5*S.A.mid,0,1)*mouthGain); }
 let voxPres = -1; if(S.vox && S.playing && S.mouthMode !== "beat"){ const v = voxAt(t + .045); mo = v.mouth*mouthGain; S.vocal.width = lerp(S.vocal.width,.75 + .5*v.wide - .3*v.round,.4);
 S.vis = [lerp((S.vis || [0,0])[0],v.wide,.4),lerp((S.vis || [0,0])[1],v.round,.4)]; voxPres = v.pres; }
-else{ S.vis = [0,0]; }
-const singing = S.playing && (S.mouthMode === "beat" ? loud > .15 : (voxPres >= 0 ? voxPres > .1 : S.vocal.presence > .16)); { const busy = S.floorMove || (S.move.cur && (S.move.cur.flips || S.move.cur.carts));
-S.mic = lerp(S.mic,singing && !busy ? 1 : 0,busy ? .35 : .1); if(busy && S.mic < .08){ S.mic = 0; }
+else{ S.vis = [0,0]; if(S.mouthMode !== "beat" && S.voxPending && !S.voxFailed){ mo = 0; }
+}
+const singing = S.playing && (S.mouthMode === "beat" ? loud > .15 : (voxPres >= 0 ? voxPres > .1 : (S.voxPending && !S.voxFailed ? false : S.vocal.presence > .16))); {
+const busy = S.floorMove || (S.move.cur && (S.move.cur.flips || S.move.cur.carts)); S.mic = lerp(S.mic,singing && !busy ? 1 : 0,busy ? .35 : .1); if(busy && S.mic < .08){ S.mic = 0; }
 }
 beatDot.style.opacity = String(.2 + .8*S.pulse); beatDot.style.transform = "scale(" + (1 + .5*S.pulse) + ")"; const bt = ts % 3.4; S.pop *= .9; if(S.playing && sg){
 const ago = (loudAt(t - 1.5) + loudAt(t - 3) + loudAt(t - 4.5))/3; if(loud > .6 && loud - ago > .2 && t - (S.lastDrop || -99) > 10){ S.lastDrop = t; S.camKick = 1; S.flash = 1; S.camFast = 1; S.dropBurst = true;
@@ -2152,30 +2171,21 @@ applyBpm(fin.bpm,hint,false); status.textContent = "LOCKED TO " + (+fin.bpm.toFi
 stop(); if(S.songURL){ URL.revokeObjectURL(S.songURL); }
 S.songURL = URL.createObjectURL(file); S.song = null; S.external.bpm = null; S.analysing = true; readBpm.textContent = "…"; bpmInput.value = ""; bpmInput.disabled = true; sourceAudio.src = S.songURL; sourceAudio.load();
 songStatus.textContent = "SOUND LOADED — " + file.name; songStatus.classList.add("loaded"); status.textContent = "LISTENING TO YOUR SONG — FINDING THE BEAT…"; sourceAudio.onloadedmetadata = () => {
-timeline.disabled = false; timeline.max = 100; duration.textContent = fmt(sourceAudio.duration); ensureAutoOn(); ready(); }; const mine = S.songURL; S.vox = null; S.voxStem = false;
-const stemIn = document.getElementById("stemInput"); if(stemIn){ stemIn.value = ""; }
-const stemSt = document.getElementById("stemStatus"); if(stemSt){ stemSt.textContent = "NO STEM — BUILT-IN VOCAL ISOLATION WILL BE USED"; stemSt.classList.remove("loaded"); }
+timeline.disabled = false; timeline.max = 100; duration.textContent = fmt(sourceAudio.duration); ensureAutoOn(); ready(); }; const mine = S.songURL; S.vox = null; S.voxPending = true; S.voxFailed = false; {
+const vm0 = document.getElementById("vocalMeter"); if(vm0){ vm0.textContent = "SEPARATING THE VOCAL FROM THE MUSIC…"; }
+}
 analyseSong(file).then(res => { if(S.songURL !== mine){ return; }
-const buf = res.buf; delete res.buf; if(buf && !S.voxStem){ const vm = document.getElementById("vocalMeter");
-analyseVocals(buf,false,p => { if(vm && !S.voxStem){ vm.textContent = "ISOLATING THE VOCAL FROM THE MIX… " + Math.round(p*100) + "%"; } })
-.then(v => { if(S.songURL !== mine || S.voxStem){ return; }
-S.vox = v; if(vm){ vm.textContent = "VOCAL ISOLATED — LIP SYNC READY"; }
+const buf = res.buf; if(!buf){ S.voxPending = false; }
+delete res.buf; if(buf){ const vm = document.getElementById("vocalMeter");
+analyseVocals(buf,p => { if(vm){ vm.textContent = "SEPARATING THE VOCAL FROM THE MUSIC… " + Math.round(p*100) + "%"; } },{ bpm:res.gridBpm || res.bpm, t0:res.t0 || 0 })
+.then(v => { if(S.songURL !== mine){ return; }
+S.vox = v; S.voxPending = false; if(vm){ vm.textContent = "VOCAL SEPARATED — LIP SYNC LOCKED TO THE VOICE"; }
 })
-.catch(err => console.warn("vocal isolation:",err)); }
+.catch(err => { console.warn("vocal isolation:",err); S.voxPending = false; S.voxFailed = true; }); }
 S.song = res; S.analysing = false; S.external.bpm = res.bpm; S.bpm = res.bpm; showBpm(res.bpm); bpmInput.disabled = false;
 status.textContent = "BEAT FOUND — " + (+res.bpm.toFixed(1)) + " BPM (SAME ENGINE AS THE ANALYSE PAGE) — " + CHARS[S.char].name + " IS READY. PRESS PLAY. (WRONG BPM? USE ×2 / ½ / TAP BELOW THE VIDEO.)"; }).catch(err => {
 console.warn("Beat analysis failed:",err); if(S.songURL !== mine){ return; }
-S.analysing = false; status.textContent = "COULD NOT PRE-ANALYSE THE SONG — USING THE LIVE BEAT. PRESS PLAY."; }); }; { const stemIn = document.getElementById("stemInput");
-const stemSt = document.getElementById("stemStatus"); if(stemIn){ stemIn.onchange = async () => { const f = stemIn.files[0]; if(!f){ return; }
-stemSt.textContent = "READING THE VOCAL STEM… " + f.name; try{ const ab = await f.arrayBuffer(); const buf = await new Promise((res,rej) => { const p = getAC().decodeAudioData(ab,res,rej);
-if(p && p.catch){ p.catch(rej); }
-}); S.voxStem = true; const v = await analyseVocals(buf,true,p => { stemSt.textContent = "READING THE VOCAL STEM… " + Math.round(p*100) + "%"; }); S.vox = v;
-stemSt.textContent = "VOCAL STEM LOADED — PERFECT LIP SYNC — " + f.name; stemSt.classList.add("loaded"); const vm = document.getElementById("vocalMeter"); if(vm){ vm.textContent = "USING YOUR VOCAL STEM FOR LIP SYNC"; }
-}
-catch(err){ S.voxStem = false; stemSt.textContent = "COULD NOT READ THAT FILE — USING BUILT-IN VOCAL ISOLATION"; console.warn("stem:",err); }
-}; }
-}
-async function audio(){ if(S.src){ return; }
+S.voxPending = false; S.voxFailed = true; S.analysing = false; status.textContent = "COULD NOT PRE-ANALYSE THE SONG — USING THE LIVE BEAT. PRESS PLAY."; }); }; async function audio(){ if(S.src){ return; }
 const ac = getAC(); S.src = ac.createMediaElementSource(sourceAudio); S.an = ac.createAnalyser(); S.an.fftSize = 2048; S.an.smoothingTimeConstant = .72; S.dest = ac.createMediaStreamDestination(); S.src.connect(S.an);
 S.an.connect(ac.destination); S.an.connect(S.dest); S.freq = new Uint8Array(S.an.frequencyBinCount); S.wave = new Uint8Array(S.an.fftSize); }
 playButton.onclick = async () => { if(!S.songURL){ return; }

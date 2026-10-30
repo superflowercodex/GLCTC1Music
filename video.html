@@ -851,7 +851,15 @@ details.advanced summary{cursor:pointer;font:700 12px Orbitron,Arial,sans-serif;
 .bpm-label{font:700 12px Orbitron,Arial,sans-serif;letter-spacing:.14em;color:var(--cyan);}
 .bpm-input{width:92px;padding:8px 10px;border-radius:10px;border:1px solid #00ffff55;background:#04040e;color:#fff;font:700 14px Orbitron,Arial,sans-serif;}
 
+.result-panel{margin-top:18px;padding:16px;border-radius:16px;border:1px solid var(--pink);background:#0a0418;box-shadow:0 0 24px #ff2bd655;}
+.result-panel[hidden]{display:none;}
+.result-title{font:700 14px Orbitron,Arial,sans-serif;letter-spacing:.18em;color:var(--pink);margin-bottom:12px;}
+.result-video{width:100%;max-height:70vh;border-radius:12px;background:#000;display:block;}
+.result-caption{width:100%;margin-top:12px;padding:10px;border-radius:10px;border:1px solid #00ffff40;background:#04040e;color:#e2e8f0;font:13px/1.5 Arial,sans-serif;resize:vertical;}
+.chip.hot{border-color:var(--pink);background:#ff2bd62e;}
+
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <!-- =======================================================
@@ -926,7 +934,7 @@ ENTER THE SHOP
 <div class="hero-subtitle">PICK A CHARACTER — LOAD A SONG — WATCH THEM PERFORM</div>
 <div class="hero-copy">
 <strong>1. PICK.&nbsp; 2. LOAD.&nbsp; 3. PLAY.</strong><br><br>
-Your character finds the beat of your song, dances in time and sings along.
+Your character finds the beat of your song, then dances in time — spins, kicks, jumps, head spins — and sings along. The realistic aliens are fully 3D.
 Then add the psychedelic filters and download the video.
 </div>
 </section>
@@ -974,15 +982,28 @@ the beat, so the dancing lands exactly on the music.
 <div class="player-buttons">
 <button id="playButton" type="button" disabled>▶ PLAY</button>
 <button id="stopButton" type="button" disabled>■ STOP</button>
-<button id="downloadButton" type="button" disabled>⇩ DOWNLOAD VIDEO</button>
+<button id="downloadButton" type="button" disabled>● RENDER VIDEO (MP4)</button>
 </div>
 <div class="timeline">
 <input id="timeline" type="range" min="0" max="100" value="0" step=".1" disabled>
 <div class="time-row"><span id="currentTime">0:00</span><span id="duration">0:00</span></div>
 </div>
 <div class="export-note">
-DOWNLOAD VIDEO records the live canvas and the song locally as WebM.
+RENDER VIDEO records the whole song from the start — character, stage and filters — and gives you an MP4 to save, share or post to your artist story.
 </div>
+</div>
+<div id="resultPanel" class="result-panel" hidden>
+<div class="result-title">YOUR VIDEO IS READY</div>
+<video id="resultVideo" class="result-video" controls playsinline></video>
+<div id="resultInfo" class="export-note"></div>
+<textarea id="resultCaption" class="result-caption" rows="2" placeholder="Caption…"></textarea>
+<div class="chip-row">
+<button id="saveBtn" class="chip" type="button">⇩ SAVE MP4</button>
+<button id="shareBtn" class="chip" type="button">↗ SHARE</button>
+<button id="storyBtn" class="chip hot" type="button">★ POST TO ARTIST STORY</button>
+<button id="copyCapBtn" class="chip" type="button">COPY CAPTION</button>
+</div>
+<div id="resultMsg" class="auto-status" style="margin-top:10px;"></div>
 </div>
 <div class="bpm-row">
 <span id="beatDot" class="beat-dot"></span>
@@ -1006,6 +1027,13 @@ type your song's BPM, or press TAP on the beat four times while it plays.
 <button class="chip" type="button" data-v="0.5">HALF</button>
 <button class="chip selected" type="button" data-v="1">NORMAL</button>
 <button class="chip" type="button" data-v="2">DOUBLE</button>
+</div>
+<div class="sub-title">3D QUALITY</div>
+<div id="qualRow" class="chip-row">
+<button class="chip selected" type="button" data-v="auto">AUTO</button>
+<button class="chip" type="button" data-v="0.9">HIGH</button>
+<button class="chip" type="button" data-v="0.65">MEDIUM</button>
+<button class="chip" type="button" data-v="0.45">LOW</button>
 </div>
 <div class="sub-title">MOUTH FOLLOWS</div>
 <div id="mouthRow" class="chip-row">
@@ -1665,7 +1693,7 @@ const CHARS = [
 ========================================================= */
 const HOP = 120;
 
-function drawCharacter(g,ch,st){
+function drawCharacterFlat(g,ch,st){
   const P = ch.p, pose = st.pose;
   const sin = Math.sin, cos = Math.cos;
 
@@ -1690,7 +1718,7 @@ function drawCharacter(g,ch,st){
   const shL = { x:sc.x - px*P.shW, y:sc.y - py*P.shW };
   const shR = { x:sc.x + px*P.shW, y:sc.y + py*P.shW };
   const hd = P.torso + P.neck + P.headR;
-  const head = { x:hx + sx*hd, y:hy + sy*hd + pose.nod };
+  const head = { x:hx + sx*hd, y:hy + sy*hd + pose.nod + (pose.pitch || 0)*50 };
   const tilt = pose.tilt + pose.lean*.6;
   const R = P.headR;
 
@@ -1781,7 +1809,8 @@ function drawCharacter(g,ch,st){
   g.translate(head.x,head.y);
   g.rotate(tilt);
   const hs = 1 + .05*st.pulse;
-  g.scale(hs,hs);
+  const hc = Math.cos(st.hyaw || 0);
+  g.scale(hs*(Math.abs(hc) < .18 ? (hc < 0 ? -.18 : .18) : hc),hs);
   ch.head(g,G,st);
   g.restore();
 
@@ -1798,6 +1827,21 @@ function drawCharacter(g,ch,st){
     g.moveTo(mb.x,mb.y-10); g.lineTo(mb.x,mb.y+10); g.stroke();
     g.restore();
   }
+}
+
+
+/* turning: a flat character "turns" by squashing sideways (3D characters turn for real) */
+function drawCharacter(g,ch,st){
+  const yw = st.yaw || 0;
+  const c = Math.cos(yw);
+  if(Math.abs(yw) < .02){ drawCharacterFlat(g,ch,st); return; }
+  const sx = Math.abs(c) < .16 ? (c < 0 ? -.16 : .16) : c;
+  g.save();
+  g.translate(st.pose.sway,0);
+  g.scale(sx,1);
+  g.translate(-st.pose.sway,0);
+  drawCharacterFlat(g,ch,st);
+  g.restore();
 }
 
 /* =========================================================
@@ -2331,77 +2375,192 @@ const REAL = [
   }
 }
 ];
+REAL[0].glType = 0; REAL[1].glType = 1; REAL[2].glType = 2; REAL[3].glType = 3;
+REAL.push({
+  name:"ANDROID", glOnly:true, glType:4, real:true, my:.5, skin:SK_GREY,
+  p:{ leg:106, arm:94, torso:140, headR:70, neck:10, hipW:28, shW:46, limbW:22 },
+  torso(){}, head(){}
+});
 CHARS.unshift(...REAL);
 
 /* =========================================================
    DANCE MOVES
    Poses are keyframes — one keyframe per beat. The pose
    reaches the next keyframe exactly ON the next beat.
+   a* / l*  = limb angle (0 = down, ± = out to the side)
+   g**      = swing plane (0 = sideways, ±90° = forward/back)
+   yaw/hyaw = body turn / head turn, pitch = lean forward
 ========================================================= */
+const HP = Math.PI/2;
 const REST = {
   aLu:-.18, aLl:-.1, aRu:.18, aRl:.1,
   lLu:-.1, lLl:-.02, lRu:.1, lRl:.02,
-  lean:0, tilt:0, sway:0, hop:0, nod:0
+  lean:0, tilt:0, sway:0, hop:0, nod:0,
+  gAL:0, gAR:0, gLL:0, gLR:0, yaw:0, hyaw:0, pitch:0, depth:0
 };
 const PK = Object.keys(REST);
+const NOSCALE = { gAL:1, gAR:1, gLL:1, gLR:1 };
 const K = o => Object.assign({},REST,o);
 
 const MOVES = {
+  /* ---- grooves ---- */
   sway:{ len:2, kf:[
-    K({sway:-26,lean:-.10,tilt:-.12,aLu:-.9,aLl:-.4,aRu:.5,aRl:.9,lLu:-.25,lLl:.05,lRu:.1,lRl:-.1}),
-    K({sway:26,lean:.10,tilt:.12,aLu:-.5,aLl:-.9,aRu:.9,aRl:.4,lLu:-.1,lLl:.1,lRu:.25,lRl:-.05})
+    K({sway:-26,lean:-.10,tilt:-.12,aLu:-.9,aLl:-.4,aRu:.5,aRl:.9,lLu:-.25,lLl:.05,lRu:.1,lRl:-.1,yaw:.25}),
+    K({sway:26,lean:.10,tilt:.12,aLu:-.5,aLl:-.9,aRu:.9,aRl:.4,lLu:-.1,lLl:.1,lRu:.25,lRl:-.05,yaw:-.25})
   ]},
   bounce:{ len:2, kf:[
     K({lLu:-.8,lLl:.25,lRu:.8,lRl:-.25,aLu:-.45,aLl:-1.1,aRu:.45,aRl:1.1,nod:14}),
     K({lLu:-.2,lLl:0,lRu:.2,lRl:0,aLu:-.8,aLl:-.3,aRu:.8,aRl:.3,hop:.5,nod:-4})
   ]},
+  glide:{ len:4, kf:[
+    K({sway:-40,lLu:-.3,lLl:.1,lRu:.3,lRl:-.2,aLu:-.9,aLl:-.2,aRu:.7,aRl:.5,lean:.1,yaw:.4}),
+    K({sway:-10,lLu:-.1,lLl:.05,lRu:.45,lRl:.1,aLu:-.7,aLl:-.5,aRu:.9,aRl:.3,lean:.05,yaw:.2}),
+    K({sway:40,lLu:-.3,lLl:.2,lRu:.3,lRl:-.1,aLu:-.7,aLl:-.3,aRu:.9,aRl:.2,lean:-.1,yaw:-.4}),
+    K({sway:10,lLu:-.45,lLl:-.1,lRu:.1,lRl:-.05,aLu:-.9,aLl:-.5,aRu:.7,aRl:.4,lean:-.05,yaw:-.2})
+  ]},
+  twist:{ len:2, kf:[
+    K({aLu:-1.1,aLl:.3,aRu:1.1,aRl:-.3,lean:-.18,sway:-24,lLu:-.45,lLl:.1,lRu:.3,lRl:-.1,tilt:.15,yaw:.55}),
+    K({aLu:-1.1,aLl:.3,aRu:1.1,aRl:-.3,lean:.18,sway:24,lLu:-.3,lLl:.1,lRu:.45,lRl:-.1,tilt:-.15,yaw:-.55})
+  ]},
+  floss:{ len:2, snap:true, kf:[
+    K({aLu:.9,aLl:1.0,aRu:1.2,aRl:1.3,gAL:-HP*.5,gAR:HP*.5,sway:-30,lean:-.12,lLu:-.4,lLl:.15,lRu:.4,lRl:-.15,nod:6}),
+    K({aLu:-1.2,aLl:-1.3,aRu:-.9,aRl:-1.0,gAL:-HP*.5,gAR:HP*.5,sway:30,lean:.12,lLu:-.4,lLl:.15,lRu:.4,lRl:-.15,nod:6})
+  ]},
+  wave:{ len:2, kf:[
+    K({aLu:-2.3,aLl:-2.4,aRu:3.7,aRl:3.7,sway:-18,lean:-.1,lLu:-.3,lLl:.1,lRu:.2,lRl:-.1,hyaw:.4}),
+    K({aLu:-3.7,aLl:-3.7,aRu:2.3,aRl:2.4,sway:18,lean:.1,lLu:-.2,lLl:.1,lRu:.3,lRl:-.1,hyaw:-.4})
+  ]},
+  /* ---- footwork ---- */
   step:{ len:2, kf:[
     K({lLu:-.75,lLl:-.75,aLu:-.7,aLl:-1.6,aRu:.4,aRl:.3,lean:.08,sway:14}),
     K({lRu:.75,lRl:.75,aRu:.7,aRl:1.6,aLu:-.4,aLl:-.3,lean:-.08,sway:-14})
   ]},
-  disco:{ len:4, kf:[
-    K({aRu:2.55,aRl:2.55,aLu:-.9,aLl:.5,lean:.12,sway:16,lLu:-.4,lLl:.1,lRu:.2,lRl:-.2}),
-    K({aRu:2.55,aRl:2.55,aLu:-.9,aLl:.5,lean:.04,sway:6,lLu:-.2,lLl:.05,lRu:.35,lRl:-.1,nod:8}),
-    K({aLu:-2.55,aLl:-2.55,aRu:.9,aRl:-.5,lean:-.12,sway:-16,lRu:.4,lRl:-.1,lLu:-.2,lLl:.2}),
-    K({aLu:-2.55,aLl:-2.55,aRu:.9,aRl:-.5,lean:-.04,sway:-6,lRu:.2,lRl:-.05,lLu:-.35,lLl:.1,nod:8})
+  charleston:{ len:2, kf:[
+    K({lLu:-.5,lLl:.45,lRu:.5,lRl:-.45,aLu:-.8,aLl:-.4,gAL:-HP*.7,aRu:.8,aRl:.4,gAR:HP*.7,nod:8}),
+    K({lLu:.35,lLl:-.1,lRu:-.35,lRl:.1,aLu:-1.2,aLl:-.8,aRu:1.2,aRl:.8,nod:-4,hop:.2})
   ]},
+  runningMan:{ len:2, kf:[
+    K({lRu:1.3,gLR:HP,lRl:-.3,aLu:-.9,gAL:-HP,aLl:-1.4,aRu:.9,gAR:-HP,aRl:.5,hop:.25,lean:.06,pitch:.1}),
+    K({lLu:-1.3,gLL:-HP,lLl:.3,aRu:.9,gAR:HP,aRl:1.4,aLu:-.9,gAL:HP,aLl:-.5,hop:.25,lean:-.06,pitch:.1})
+  ]},
+  shuffle:{ len:2, kf:[
+    K({sway:-18,lLu:-.35,lLl:.1,lRu:.15,lRl:-.2,aLu:-.9,aLl:-1.2,aRu:.4,aRl:.9,nod:5,yaw:.3}),
+    K({sway:18,lLu:-.15,lLl:.2,lRu:.35,lRl:-.1,aLu:-.4,aLl:-.9,aRu:.9,aRl:1.2,nod:5,yaw:-.3})
+  ]},
+  turnStep:{ len:4, kf:[
+    K({yaw:1.1,lLu:-.5,lLl:.2,lRu:.2,aLu:-1.2,aLl:-.6,aRu:.9,aRl:.9,lean:.1}),
+    K({yaw:.0,lRu:.5,lRl:-.2,aLu:-.5,aLl:-1.0,aRu:1.2,aRl:.6,hop:.3}),
+    K({yaw:-1.1,lLu:-.2,lRu:.5,lRl:-.2,aLu:-.9,aLl:-.9,aRu:1.2,aRl:.6,lean:-.1}),
+    K({yaw:.0,lLu:-.5,lLl:.2,aLu:-1.2,aLl:-.6,aRu:.5,aRl:1.0,hop:.3})
+  ]},
+  /* ---- arms ---- */
+  disco:{ len:4, kf:[
+    K({aRu:2.55,aRl:2.55,aLu:-.9,aLl:.5,lean:.12,sway:16,lLu:-.4,lLl:.1,lRu:.2,lRl:-.2,yaw:-.3}),
+    K({aRu:2.55,aRl:2.55,aLu:-.9,aLl:.5,lean:.04,sway:6,lLu:-.2,lLl:.05,lRu:.35,lRl:-.1,nod:8,yaw:-.15}),
+    K({aLu:-2.55,aLl:-2.55,aRu:.9,aRl:-.5,lean:-.12,sway:-16,lRu:.4,lRl:-.1,lLu:-.2,lLl:.2,yaw:.3}),
+    K({aLu:-2.55,aLl:-2.55,aRu:.9,aRl:-.5,lean:-.04,sway:-6,lRu:.2,lRl:-.05,lLu:-.35,lLl:.1,nod:8,yaw:.15})
+  ]},
+  pump:{ len:2, kf:[
+    K({aRu:2.7,aRl:3.0,aLu:-.4,aLl:-1.2,lLu:-.5,lLl:.15,lRu:.4,lRl:-.1,lean:.1,tilt:.1,yaw:-.3}),
+    K({aLu:-2.7,aLl:-3.0,aRu:.4,aRl:1.2,lLu:-.4,lLl:.1,lRu:.5,lRl:-.15,lean:-.1,tilt:-.1,yaw:.3})
+  ]},
+  armCircles:{ len:4, kf:[
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.4,lLl:.1,lRu:.4,lRl:-.1,hop:.2}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1}),
+    K({aLu:-.25,aLl:-.2,aRu:.25,aRl:.2,lLu:-.5,lLl:.2,lRu:.5,lRl:-.2,pitch:.12}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,gAL:-HP,gAR:HP,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1})
+  ]},
+  robot:{ len:4, snap:true, kf:[
+    K({aLu:-1.57,aLl:-3.14,aRu:.2,aRl:.2,hyaw:.7,yaw:.35,lLu:-.15,lRu:.15}),
+    K({aRu:1.57,aRl:3.14,aLu:-.2,aLl:-.2,hyaw:-.7,yaw:-.35,lLu:-.15,lRu:.15}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,gAL:-HP,gAR:HP,hyaw:0,lLu:-.25,lRu:.25}),
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,hyaw:.5,lLu:-.15,lRu:.15})
+  ]},
+  dab:{ len:4, snap:true, kf:[
+    K({lLu:-.5,lLl:.25,lRu:.5,lRl:-.25,aLu:-.7,aLl:-1.4,aRu:.7,aRl:1.4}),
+    K({aRu:2.5,aRl:3.6,aLu:-2.3,aLl:-2.3,nod:20,tilt:.35,yaw:.3,lLu:-.35,lRu:.35,pitch:.2}),
+    K({aRu:2.5,aRl:3.6,aLu:-2.3,aLl:-2.3,nod:20,tilt:.35,yaw:.3,lLu:-.35,lRu:.35,pitch:.2,hop:.15}),
+    K({lLu:-.2,lRu:.2})
+  ]},
+  /* ---- big energy ---- */
   armsUp:{ len:2, kf:[
     K({aLu:-2.5,aLl:-2.9,aRu:2.5,aRl:2.9,lLu:-.5,lLl:.1,lRu:.5,lRl:-.1,hop:.35,tilt:-.08}),
     K({aLu:-2.9,aLl:-2.5,aRu:2.9,aRl:2.5,lLu:-.15,lLl:0,lRu:.15,lRl:0,hop:.35,tilt:.08})
-  ]},
-  wave:{ len:2, kf:[
-    K({aLu:-2.3,aLl:-2.4,aRu:3.7,aRl:3.7,sway:-18,lean:-.1,lLu:-.3,lLl:.1,lRu:.2,lRl:-.1}),
-    K({aLu:-3.7,aLl:-3.7,aRu:2.3,aRl:2.4,sway:18,lean:.1,lLu:-.2,lLl:.1,lRu:.3,lRl:-.1})
   ]},
   jump:{ len:2, kf:[
     K({lLu:-.7,lLl:.2,lRu:.7,lRl:-.2,aLu:-.5,aLl:-.2,aRu:.5,aRl:.2,nod:16}),
     K({lLu:-.1,lLl:-.1,lRu:.1,lRl:.1,aLu:-2.6,aLl:-2.8,aRu:2.6,aRl:2.8,hop:1})
   ]},
+  starJump:{ len:2, kf:[
+    K({lLu:-.45,lLl:.25,lRu:.45,lRl:-.25,aLu:-.4,aLl:-.2,aRu:.4,aRl:.2,nod:14,pitch:.12}),
+    K({lLu:-.75,lLl:-.75,lRu:.75,lRl:.75,aLu:-2.6,aLl:-2.6,aRu:2.6,aRl:2.6,hop:1.15,nod:-8,pitch:-.1})
+  ]},
+  scissorKick:{ len:2, kf:[
+    K({lLu:-1.0,gLL:-HP,lLl:-1.0,lRu:1.0,gLR:-HP,lRl:.6,aLu:-.8,gAL:HP,aLl:-.8,aRu:.8,gAR:-HP,aRl:.8,hop:1,pitch:-.1}),
+    K({lLu:-1.0,gLL:HP,lLl:-.6,lRu:1.0,gLR:HP,lRl:1.0,aLu:-.8,gAL:-HP,aLl:-.8,aRu:.8,gAR:HP,aRl:.8,hop:1,pitch:-.1})
+  ]},
   headbang:{ len:2, kf:[
-    K({aLu:-.7,aLl:-2.0,aRu:.7,aRl:2.0,lLu:-.5,lLl:.15,lRu:.5,lRl:-.15,nod:26,lean:.05}),
-    K({aLu:-.5,aLl:-1.7,aRu:.5,aRl:1.7,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1,nod:-6,lean:-.05})
+    K({aLu:-.7,aLl:-2.0,aRu:.7,aRl:2.0,lLu:-.5,lLl:.15,lRu:.5,lRl:-.15,nod:26,lean:.05,pitch:.55}),
+    K({aLu:-.5,aLl:-1.7,aRu:.5,aRl:1.7,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1,nod:-6,lean:-.05,pitch:-.1})
   ]},
-  pump:{ len:2, kf:[
-    K({aRu:2.7,aRl:3.0,aLu:-.4,aLl:-1.2,lLu:-.5,lLl:.15,lRu:.4,lRl:-.1,lean:.1,tilt:.1}),
-    K({aLu:-2.7,aLl:-3.0,aRu:.4,aRl:1.2,lLu:-.4,lLl:.1,lRu:.5,lRl:-.15,lean:-.1,tilt:-.1})
+  /* ---- kicks ---- */
+  kick:{ len:4, kf:[
+    K({lRu:1.5,lRl:1.55,gLR:HP,aLu:-1.2,aLl:-1.0,aRu:.8,aRl:.6,lean:-.12,pitch:-.12,hop:.2,yaw:-.35,nod:6}),
+    K({lLu:-.2,lRu:.2,aLu:-.6,aLl:-.5,aRu:.6,aRl:.5}),
+    K({lLu:-1.5,lLl:-1.55,gLL:-HP,aRu:1.2,aRl:1.0,aLu:-.8,aLl:-.6,lean:.12,pitch:-.12,hop:.2,yaw:.35,nod:6}),
+    K({lLu:-.2,lRu:.2,aLu:-.6,aLl:-.5,aRu:.6,aRl:.5})
   ]},
-  twist:{ len:2, kf:[
-    K({aLu:-1.1,aLl:.3,aRu:1.1,aRl:-.3,lean:-.18,sway:-24,lLu:-.45,lLl:.1,lRu:.3,lRl:-.1,tilt:.15}),
-    K({aLu:-1.1,aLl:.3,aRu:1.1,aRl:-.3,lean:.18,sway:24,lLu:-.3,lLl:.1,lRu:.45,lRl:-.1,tilt:-.15})
+  highKick:{ len:4, snap:true, kf:[
+    K({lRu:2.3,lRl:2.3,gLR:HP,aLu:-1.57,aLl:-1.57,aRu:1.2,aRl:1.4,lean:-.18,pitch:-.3,yaw:-.5,hop:.15}),
+    K({lLu:-.25,lRu:.25,aLu:-1.2,aLl:-.8,aRu:1.0,aRl:.8}),
+    K({lLu:-2.3,lLl:-2.3,gLL:-HP,aRu:1.57,aRl:1.57,aLu:-1.2,aLl:-1.4,lean:.18,pitch:-.3,yaw:.5,hop:.15}),
+    K({lLu:-.25,lRu:.25,aLu:-1.0,aLl:-.8,aRu:1.2,aRl:.8})
+  ]},
+  /* ---- epic: turns & spins ---- */
+  spin:{ len:4, turns:1, kf:[
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1,hop:.3,lean:.05}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,lLu:-.15,lLl:0,lRu:.15,lRl:0,hop:.35}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,lLu:-.3,lLl:.1,lRu:.3,lRl:-.1,hop:.3,lean:-.05}),
+    K({aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,lLu:-.15,lLl:0,lRu:.15,lRl:0,hop:.35})
+  ]},
+  doubleSpin:{ len:4, turns:2, kf:[
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.08,lLl:0,lRu:.08,lRl:0,hop:.55}),
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.05,lLl:0,lRu:.05,lRl:0,hop:.7}),
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.08,lLl:0,lRu:.08,lRl:0,hop:.55}),
+    K({aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.05,lLl:0,lRu:.05,lRl:0,hop:.7})
+  ]},
+  pirouette:{ len:4, turns:2, kf:[
+    K({lRu:1.35,gLR:HP,lRl:-.15,aLu:-2.8,aLl:-2.8,aRu:2.8,aRl:2.8,lLu:-.05,lLl:-.02,lean:0}),
+    K({lRu:1.45,gLR:HP,lRl:-.2,aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.03,lLl:0,hop:.15}),
+    K({lRu:1.35,gLR:HP,lRl:-.15,aLu:-2.8,aLl:-2.8,aRu:2.8,aRl:2.8,lLu:-.05,lLl:-.02}),
+    K({lRu:1.45,gLR:HP,lRl:-.2,aLu:-2.9,aLl:-2.9,aRu:2.9,aRl:2.9,lLu:-.03,lLl:0,hop:.15})
+  ]},
+  tornado:{ len:4, turns:1, kf:[
+    K({lRu:1.55,lRl:1.55,gLR:HP,aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,hop:.35,pitch:-.12}),
+    K({lRu:1.55,lRl:1.55,gLR:HP,aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,hop:.45,pitch:-.12}),
+    K({lRu:1.55,lRl:1.55,gLR:HP,aLu:-1.57,aLl:-1.57,aRu:1.57,aRl:1.57,hop:.35,pitch:-.12}),
+    K({lRu:.3,lRl:.1,aLu:-1.2,aLl:-1.0,aRu:1.2,aRl:1.0,hop:.2})
+  ]},
+  headspin:{ len:2, hturns:3, kf:[
+    K({lLu:-.6,lLl:.2,lRu:.6,lRl:-.2,aLu:-.9,aLl:-2.0,aRu:.9,aRl:2.0,nod:10,pitch:.1}),
+    K({lLu:-.25,lLl:0,lRu:.25,lRl:0,aLu:-1.1,aLl:-1.5,aRu:1.1,aRl:1.5,hop:.5,nod:-4})
   ]}
 };
+Object.keys(MOVES).forEach(k => { MOVES[k].name = k; });
 const POOLS = [
-  ["sway","bounce","twist","wave"],
-  ["bounce","step","disco","pump","twist","wave"],
-  ["jump","armsUp","headbang","pump","disco","step"]
+  ["sway","bounce","twist","wave","floss","glide","turnStep","robot"],
+  ["bounce","step","disco","pump","twist","charleston","runningMan","dab","armCircles","kick","shuffle","robot","turnStep","floss"],
+  ["jump","armsUp","headbang","starJump","kick","highKick","scissorKick","runningMan","disco","spin","armCircles"]
 ];
+const EPIC = ["doubleSpin","headspin","pirouette","tornado","spin","highKick","scissorKick"];
 
 function movePose(m,bp){
   const L = m.len;
   const b = Math.floor(bp), f = bp - b;
   const A = m.kf[((b % L) + L) % L];
   const B = m.kf[(((b + 1) % L) + L) % L];
-  const s = .5 - .5*Math.cos(Math.PI*f);
+  let s = .5 - .5*Math.cos(Math.PI*f);
+  if(m.snap){ s = f < .3 ? .5 - .5*Math.cos(Math.PI*f/.3) : 1; }
   const o = {};
   PK.forEach(k => { o[k] = A[k] + (B[k] - A[k])*s; });
   o.hop = A.hop*Math.sin(Math.PI*f);
@@ -2414,10 +2573,23 @@ function hash(n){
   x ^= x >>> 13;
   return (x >>> 0) / 4294967296;
 }
-function pickMove(bar,loud){
-  const tier = loud < .35 ? 0 : loud < .7 ? 1 : 2;
+/* the choreography evolves: calm -> big -> epic, never repeats back-to-back */
+function rawPick(bar,loud){
+  if(loud > .55 && bar%8 === 7){ return EPIC[Math.floor(hash(bar*3 + 1)*EPIC.length)]; }
+  if(loud > .78 && hash(bar + 91) < .22){ return EPIC[Math.floor(hash(bar + 17)*EPIC.length)]; }
+  const tier = loud < .33 ? 0 : loud < .68 ? 1 : 2;
   const pool = POOLS[tier];
-  return MOVES[pool[Math.floor(hash(bar + 7)*pool.length)]];
+  return pool[Math.floor(hash(bar + 7)*pool.length)];
+}
+function pickMove(bar,loud){
+  /*__DBGFORCE__*/
+  let n = rawPick(bar,loud);
+  const prev = rawPick(bar - 1,loud);
+  if(n === prev){
+    const pool = POOLS[loud < .33 ? 0 : loud < .68 ? 1 : 2];
+    n = pool[(pool.indexOf(n) + 1 + Math.floor(hash(bar + 55)*(pool.length - 1)))%pool.length];
+  }
+  return MOVES[n];
 }
 function idlePose(t){
   const o = Object.assign({},REST);
@@ -2427,12 +2599,16 @@ function idlePose(t){
   o.nod = Math.sin(t*2.2)*2.5;
   o.aLu += Math.sin(t*1.3)*.06;
   o.aRu -= Math.sin(t*1.3)*.06;
+  o.hyaw = Math.sin(t*.5)*.25;
+  o.yaw = Math.sin(t*.35)*.2;
   return o;
 }
 S.pose = Object.assign({},REST);
-S.st = { pose:S.pose, mouth:0, mw:1, t:0, pulse:0, mic:0, blink:0, look:0 };
+S.st = { pose:S.pose, yaw:0, hyaw:0, mouth:0, mw:1, t:0, pulse:0, mic:0, blink:0, look:0 };
 S.pulse = 0;
 S.danceAmp = 0;
+S.yawSpin = 0;
+S.hSpin = 0;
 
 function loudAt(t){
   const s = S.song;
@@ -3526,6 +3702,780 @@ function detectBPM(samples, sampleRate) {
 
 
 /* =========================================================
+   REAL-TIME 3D CHARACTERS (WebGL ray-marched solids)
+   Lighting, soft shadows, ambient occlusion, reflections.
+   The character is a true 3D body — it can turn, spin,
+   kick and head-spin like a real dancer.
+========================================================= */
+const GLR = {
+  ok:false, canvas:null, gl:null, prog:null, u:{}, scale:.7, w:0, h:0, err:""
+};
+
+const GL_VERT = `
+attribute vec2 aPos;
+void main(){ gl_Position = vec4(aPos,0.,1.); }
+`;
+
+const GL_FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uCamPos, uCamR, uCamU, uCamF;
+uniform vec2 uTan;
+uniform vec3 uPel, uChest, uShL, uShR, uElL, uElR, uWrL, uWrR;
+uniform vec3 uHipL, uHipR, uKnL, uKnR, uAnL, uAnR, uToeL, uToeR;
+uniform vec3 uHead, uMic, uMicHand, uTail1, uTail2, uTail3, uTail4;
+uniform vec3 uHX, uHY, uHZ, uCX, uCY, uCZ;
+uniform vec4 uRa, uRb, uRc, uX;
+uniform float uType, uTime, uMouth, uBlink, uBeat, uMicW, uYaw, uGlow;
+uniform vec3 uSkyTop, uSkyHor, uGround, uKeyCol, uKeyDir, uRimA, uRimB, uAccent;
+
+float sdEll(vec3 p, vec3 r){ float k0 = length(p/r); float k1 = length(p/(r*r)); return k0*(k0 - 1.0)/k1; }
+float limbR(vec3 p, vec3 a, vec3 b, float r0, float r1){
+  vec3 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return length(pa - ba*h) - mix(r0,r1,h);
+}
+float smin(float a, float b, float k){ float h = max(k - abs(a - b),0.0)/k; return min(a,b) - h*h*k*0.25; }
+float smax(float a, float b, float k){ return -smin(-a,-b,k); }
+vec3 rotY(vec3 v, float a){ float c = cos(a), s = sin(a); return vec3(v.x*c + v.z*s, v.y, -v.x*s + v.z*c); }
+
+float hash31(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x + p.y + p.z)); }
+float noise(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f*f*(3.0 - 2.0*f);
+  return mix(mix(mix(hash31(i),hash31(i + vec3(1,0,0)),f.x),
+                 mix(hash31(i + vec3(0,1,0)),hash31(i + vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash31(i + vec3(0,0,1)),hash31(i + vec3(1,0,1)),f.x),
+                 mix(hash31(i + vec3(0,1,1)),hash31(i + vec3(1,1,1)),f.x),f.y),f.z);
+}
+
+/* ---------- hands ---------- */
+float hand(vec3 p, vec3 wr, vec3 el, float sg){
+  vec3 q = p - wr;
+  if(dot(q,q) > 0.05){ return length(q) - 0.21; }
+  vec3 u = normalize(wr - el);
+  vec3 s = normalize(cross(u, uCZ + 0.2*uCX*sg));
+  vec3 n = cross(s,u);
+  float d = limbR(p,wr,wr + u*0.07,0.017,0.014);
+  float fl = uX.y, fr = uX.z;
+  for(int i = 0; i < 4; i++){
+    float k = float(i) - 1.5;
+    vec3 b = wr + u*0.07 + s*k*0.0135;
+    vec3 t = b + u*fl*(1.0 - 0.1*abs(k)) + n*0.02*sg + s*k*0.008;
+    d = min(d,limbR(p,b,t,fr,fr*0.6));
+  }
+  vec3 tb = wr + u*0.03 + s*0.024*sg;
+  d = min(d,limbR(p,tb,tb + u*0.045 + s*0.03*sg + n*0.012*sg,fr*1.15,fr*0.7));
+  return d;
+}
+
+/* ---------- heads (q = head-local coordinates) ---------- */
+vec2 headGrey(vec3 q){
+  float cr = sdEll(q - vec3(0.0,0.05,-0.005),vec3(0.15,0.185,0.158));
+  float ch = sdEll(q - vec3(0.0,-0.115,0.035),vec3(0.082,0.085,0.088));
+  float d = smin(cr,ch,0.1);
+  vec3 eq = vec3(abs(q.x),q.y,q.z) - vec3(0.074,-0.012,0.116);
+  float a = 0.5;
+  eq.xy = vec2(eq.x*cos(a) + eq.y*sin(a), -eq.x*sin(a) + eq.y*cos(a));
+  float k = max(0.08,1.0 - uBlink*0.92);
+  float de = sdEll(eq,vec3(0.064,0.033*k,0.03));
+  float m = 1.0;
+  if(de < d) m = 2.0;
+  d = smin(d,de,0.012);
+  vec3 mq = q - vec3(0.0,-0.09,0.128);
+  float cut = sdEll(mq,vec3(0.02 + uMouth*0.015,0.0035 + uMouth*0.03,0.03));
+  if(-cut > d) m = 3.0;
+  d = smax(d,-cut,0.004);
+  float ns = sdEll(vec3(abs(q.x) - 0.011,q.y + 0.05,q.z - 0.146),vec3(0.004,0.008,0.012));
+  if(-ns > d) m = 3.0;
+  d = smax(d,-ns,0.002);
+  return vec2(d,m);
+}
+
+vec2 headRept(vec3 q){
+  float cr = sdEll(q - vec3(0.0,0.03,-0.01),vec3(0.115,0.115,0.125));
+  float sn = sdEll(q - vec3(0.0,-0.045,0.11),vec3(0.078,0.062,0.115));
+  float d = smin(cr,sn,0.06);
+  float oj = uMouth*0.5;
+  vec3 jq = q - vec3(0.0,-0.07,0.015);
+  jq.yz = vec2(jq.y*cos(oj) + jq.z*sin(oj), -jq.y*sin(oj) + jq.z*cos(oj));
+  float jw = sdEll(jq - vec3(0.0,-0.012,0.1),vec3(0.066,0.03,0.105));
+  d = smin(d,jw,0.018);
+  float m = 1.0;
+  float cav = sdEll(q - vec3(0.0,-0.072,0.075),vec3(0.05,0.006 + uMouth*0.03,0.075));
+  if(cav < d + 0.002){ m = 3.0; }
+  d = min(d,cav);
+  vec3 bq = vec3(abs(q.x),q.y,q.z);
+  float br = limbR(bq,vec3(0.115,0.078,0.06),vec3(0.03,0.098,0.145),0.02,0.016);
+  d = smin(d,br,0.02);
+  float k = max(0.1,1.0 - uBlink*0.9);
+  float de = sdEll(bq - vec3(0.084,0.046,0.098),vec3(0.032,0.026*k,0.022));
+  if(de < d) m = 2.0;
+  d = smin(d,de,0.006);
+  float cs = 1e3;
+  for(int i = 0; i < 5; i++){
+    float fi = float(i);
+    float hh = 0.13 - 0.012*abs(fi - 2.0);
+    vec3 b = vec3(0.0,hh,-0.07 + 0.045*fi);
+    vec3 t = b + vec3(0.0,0.075 - 0.014*abs(fi - 2.0),-0.025);
+    cs = min(cs,limbR(q,b,t,0.011,0.002));
+  }
+  if(cs < d){ m = 4.0; }
+  d = min(d,cs);
+  /* teeth */
+  float te = 1e3;
+  for(int i = 0; i < 4; i++){
+    float fi = float(i);
+    vec3 b = vec3(0.035 - 0.0,-0.07 - 0.002,0.05 + 0.04*fi);
+    te = min(te,limbR(bq,vec3(0.04,-0.062,0.05 + 0.045*fi),vec3(0.04,-0.062 - 0.012 - uMouth*0.01,0.05 + 0.045*fi),0.004,0.0015));
+  }
+  if(te < d){ m = 4.0; }
+  d = min(d,te);
+  return vec2(d,m);
+}
+
+vec2 headMantis(vec3 q){
+  float sk = sdEll(q - vec3(0.0,0.045,0.0),vec3(0.115,0.078,0.08));
+  float chn = limbR(q,vec3(0.0,0.0,0.03),vec3(0.0,-0.115,0.05),0.058,0.016);
+  float d = smin(sk,chn,0.045);
+  float m = 1.0;
+  vec3 eq = vec3(abs(q.x),q.y,q.z) - vec3(0.098,0.05,0.04);
+  float a = -0.35;
+  eq.xy = vec2(eq.x*cos(a) - eq.y*sin(a), eq.x*sin(a) + eq.y*cos(a));
+  float k = max(0.1,1.0 - uBlink*0.9);
+  float de = sdEll(eq,vec3(0.05,0.078*k,0.05));
+  if(de < d) m = 2.0;
+  d = smin(d,de,0.01);
+  vec3 bq = vec3(abs(q.x),q.y,q.z);
+  /* antennae */
+  float sw = sin(uTime*3.0)*0.02;
+  float an = limbR(bq,vec3(0.04,0.1,0.0),vec3(0.09,0.22 + sw,0.03),0.004,0.003);
+  an = min(an,limbR(bq,vec3(0.09,0.22 + sw,0.03),vec3(0.17,0.33 + sw,0.0),0.003,0.0025));
+  an = min(an,length(bq - vec3(0.17,0.33 + sw,0.0)) - 0.009);
+  if(an < d) m = 4.0;
+  d = min(d,an);
+  /* mandibles */
+  float op = uMouth*0.05;
+  float md = limbR(bq,vec3(0.022,-0.09,0.07),vec3(0.04 + op,-0.145,0.105),0.013,0.004);
+  md = min(md,limbR(bq,vec3(0.04 + op,-0.145,0.105),vec3(0.02 + op*0.4,-0.17,0.13),0.005,0.002));
+  if(md < d) m = 4.0;
+  d = min(d,md);
+  float cav = sdEll(q - vec3(0.0,-0.1,0.085),vec3(0.018 + uMouth*0.012,0.008 + uMouth*0.025,0.02));
+  if(cav < d + 0.002) m = 3.0;
+  d = min(d,cav);
+  return vec2(d,m);
+}
+
+vec2 headLumi(vec3 q){
+  float dm = sdEll(q - vec3(0.0,0.06,0.0),vec3(0.16,0.15,0.16));
+  float lo = sdEll(q - vec3(0.0,-0.02,0.01),vec3(0.12,0.1,0.12));
+  float d = smin(dm,lo,0.06);
+  float m = 1.0;
+  vec3 bq = vec3(abs(q.x),q.y,q.z);
+  float k = max(0.1,1.0 - uBlink*0.9);
+  float de = sdEll(bq - vec3(0.07,0.03,0.128),vec3(0.044,0.056*k,0.028));
+  if(de < d) m = 2.0;
+  d = smin(d,de,0.01);
+  float cut = sdEll(q - vec3(0.0,-0.068,0.136),vec3(0.028 + uMouth*0.014,0.011 + uMouth*0.03,0.03));
+  if(-cut > d) m = 3.0;
+  d = smax(d,-cut,0.004);
+  float tn = 1e3;
+  for(int i = 0; i < 5; i++){
+    float fi = float(i) - 2.0;
+    float sw = sin(uTime*2.0 + fi*1.3);
+    vec3 b = vec3(fi*0.05,-0.02,-0.1);
+    vec3 e1 = b + vec3(sw*0.04,-0.14,-0.07);
+    vec3 e2 = e1 + vec3(sin(uTime*2.4 + fi)*0.05,-0.15,-0.04);
+    tn = min(tn,limbR(q,b,e1,0.009,0.006));
+    tn = min(tn,limbR(q,e1,e2,0.006,0.0025));
+  }
+  if(tn < d) m = 5.0;
+  d = min(d,tn);
+  return vec2(d,m);
+}
+
+vec2 headAndroid(vec3 q){
+  float d = sdEll(q - vec3(0.0,0.02,0.0),vec3(0.088,0.108,0.098));
+  float jw = sdEll(q - vec3(0.0,-0.06,0.03),vec3(0.06,0.05,0.06));
+  d = smin(d,jw,0.04);
+  float m = 1.0;
+  float cut = sdEll(q - vec3(0.0,-0.075,0.088),vec3(0.022,0.004 + uMouth*0.02,0.02));
+  if(-cut > d) m = 3.0;
+  d = smax(d,-cut,0.003);
+  float ear = length(vec3(abs(q.x) - 0.088,q.y - 0.0,q.z)) - 0.022;
+  if(ear < d) m = 7.0;
+  d = min(d,ear);
+  return vec2(d,m);
+}
+
+vec2 map(vec3 p){
+  float d = limbR(p,uPel,uChest,uRb.w,uRc.x);
+  d = smin(d,sdEll(p - uPel,vec3(uRc.z,uRc.w,uRc.z*0.85)),0.05);
+  d = smin(d,limbR(p,uShL,uShR,uRa.w,uRa.w),0.06);
+  vec3 nk = uHead - uHY*uX.x;
+  d = smin(d,limbR(p,uChest,nk,uRc.y,uRc.y*0.85),0.04);
+  d = smin(d,limbR(p,uShL,uElL,uRa.x,uRa.y),0.035);
+  d = smin(d,limbR(p,uElL,uWrL,uRa.y,uRa.z),0.02);
+  d = smin(d,limbR(p,uShR,uElR,uRa.x,uRa.y),0.035);
+  d = smin(d,limbR(p,uElR,uWrR,uRa.y,uRa.z),0.02);
+  d = smin(d,limbR(p,uHipL,uKnL,uRb.x,uRb.y),0.05);
+  d = smin(d,limbR(p,uKnL,uAnL,uRb.y,uRb.z),0.03);
+  d = smin(d,limbR(p,uHipR,uKnR,uRb.x,uRb.y),0.05);
+  d = smin(d,limbR(p,uKnR,uAnR,uRb.y,uRb.z),0.03);
+  d = smin(d,limbR(p,uAnL,uToeL,uRb.z,uRb.z*0.75),0.02);
+  d = smin(d,limbR(p,uAnR,uToeR,uRb.z,uRb.z*0.75),0.02);
+  vec2 res = vec2(d,1.0);
+  /* tail (reptoid) */
+  if(uType > 0.5 && uType < 1.5){
+    float t = limbR(p,uPel,uTail1,0.07,0.06);
+    t = smin(t,limbR(p,uTail1,uTail2,0.06,0.045),0.03);
+    t = smin(t,limbR(p,uTail2,uTail3,0.045,0.03),0.03);
+    t = smin(t,limbR(p,uTail3,uTail4,0.03,0.008),0.02);
+    res.x = smin(res.x,t,0.05);
+  }
+  /* android ball joints */
+  if(uType > 3.5){
+    float j = length(p - uShL) - 0.05;
+    j = min(j,length(p - uShR) - 0.05);
+    j = min(j,length(p - uElL) - 0.032);
+    j = min(j,length(p - uElR) - 0.032);
+    j = min(j,length(p - uKnL) - 0.048);
+    j = min(j,length(p - uKnR) - 0.048);
+    j = min(j,length(p - uHipL) - 0.058);
+    j = min(j,length(p - uHipR) - 0.058);
+    j = min(j,length(p - uWrL) - 0.022);
+    j = min(j,length(p - uWrR) - 0.022);
+    if(j < res.x) res.y = 7.0;
+    res.x = min(res.x,j);
+  }
+  float hd = hand(p,uWrL,uElL,-1.0);
+  hd = min(hd,hand(p,uWrR,uElR,1.0));
+  res.x = smin(res.x,hd,0.012);
+  /* head */
+  float hs = uX.w;
+  vec3 dh = p - uHead;
+  if(dot(dh,dh) > 0.2*hs*hs){
+    res.x = min(res.x,length(dh) - 0.4*hs);
+  }
+  else{
+    vec3 q = vec3(dot(dh,uHX),dot(dh,uHY),dot(dh,uHZ))/hs;
+    vec2 h;
+    if(uType < 0.5) h = headGrey(q);
+    else if(uType < 1.5) h = headRept(q);
+    else if(uType < 2.5) h = headMantis(q);
+    else if(uType < 3.5) h = headLumi(q);
+    else h = headAndroid(q);
+    h.x *= hs;
+    if(h.x < res.x){ res.y = h.y; }
+    res.x = smin(res.x,h.x,0.03);
+    if(h.y > 1.5 && h.x < res.x + 0.004){ res.y = h.y; }
+  }
+  /* microphone */
+  if(uMicW > 0.05){
+    float mc = limbR(p,uMicHand,uMic,0.011,0.009);
+    mc = min(mc,length(p - uMic) - 0.026*uMicW);
+    if(mc < res.x){ res.y = 6.0; }
+    res.x = min(res.x,mc);
+  }
+  return res;
+}
+
+vec3 calcNormal(vec3 p){
+  const vec2 e = vec2(1.0,-1.0)*0.0009;
+  return normalize(e.xyy*map(p + e.xyy).x + e.yyx*map(p + e.yyx).x +
+                   e.yxy*map(p + e.yxy).x + e.xxx*map(p + e.xxx).x);
+}
+float softShadow(vec3 ro, vec3 rd){
+  float res = 1.0, t = 0.02;
+  for(int i = 0; i < 14; i++){
+    float h = map(ro + rd*t).x;
+    res = min(res,8.0*h/t);
+    t += clamp(h,0.02,0.25);
+    if(res < 0.005 || t > 2.5) break;
+  }
+  return clamp(res,0.0,1.0);
+}
+float calcAO(vec3 p, vec3 n){
+  float occ = 0.0, sca = 1.0;
+  for(int i = 0; i < 4; i++){
+    float h = 0.01 + 0.09*float(i);
+    float d = map(p + n*h).x;
+    occ += (h - d)*sca;
+    sca *= 0.8;
+  }
+  return clamp(1.0 - 2.2*occ,0.0,1.0);
+}
+
+vec3 envMap(vec3 d){
+  float h = d.y;
+  vec3 up = mix(uSkyHor,uSkyTop,smoothstep(0.0,0.8,h));
+  vec3 c = mix(uGround,up,smoothstep(-0.25,0.2,h));
+  c += uKeyCol*2.4*pow(max(dot(d,normalize(uKeyDir)),0.0),22.0);
+  c += uRimA*1.8*pow(max(dot(d,normalize(vec3(-0.8,0.3,-0.6))),0.0),10.0);
+  c += uRimB*1.8*pow(max(dot(d,normalize(vec3(0.8,0.3,-0.6))),0.0),10.0);
+  c += vec3(1.0)*0.9*pow(max(dot(d,normalize(vec3(0.0,0.9,0.45))),0.0),30.0);
+  return c;
+}
+
+vec3 shade(vec3 p, vec3 rd, float mat){
+  vec3 n = calcNormal(p);
+  vec3 q = rotY(p - uPel,-uYaw);
+  vec3 dH = p - uHead;
+  vec3 hq = vec3(dot(dH,uHX),dot(dH,uHY),dot(dH,uHZ))/uX.w;
+  float inHead = step(length(dH),0.26*uX.w);
+  vec3 alb = vec3(0.5);
+  float gloss = 0.3, spec = 0.2, metal = 0.0, sss = 0.0;
+  vec3 emis = vec3(0.0);
+  float fr0 = 1.0 - clamp(dot(n,-rd),0.0,1.0);
+
+  if(uType < 0.5){                       /* GREY */
+    if(mat < 1.5){
+      float n1 = noise(q*16.0)*0.5 + noise(q*55.0)*0.25;
+      alb = vec3(0.43,0.47,0.455)*(0.85 + 0.3*n1);
+      alb = mix(alb,vec3(0.5,0.52,0.56),smoothstep(0.1,0.4,abs(hq.y + 0.02)*inHead));
+      n = normalize(n + (vec3(noise(q*150.0),noise(q*150.0 + 5.0),noise(q*150.0 + 9.0)) - 0.5)*0.12);
+      gloss = 0.35; spec = 0.22; sss = 0.45;
+    }
+    else if(mat < 2.5){ alb = vec3(0.004,0.005,0.007); gloss = 1.0; spec = 1.2; }
+    else if(mat < 3.5){ alb = vec3(0.09,0.012,0.02); gloss = 0.7; spec = 0.5; }
+  }
+  else if(uType < 1.5){                  /* REPTOID */
+    vec3 ql = inHead > 0.5 ? hq*1.25 : q;
+    float sc = abs(sin(ql.x*44.0)*sin(ql.y*44.0 + ql.x*22.0));
+    float n1 = noise(q*11.0);
+    if(mat < 1.5){
+      alb = mix(vec3(0.17,0.30,0.10),vec3(0.46,0.54,0.20),n1);
+      alb *= 0.55 + 0.7*smoothstep(0.0,0.55,sc);
+      float band = smoothstep(0.55,0.8,sin(q.y*22.0 + n1*4.0));
+      alb = mix(alb,vec3(0.10,0.17,0.06),band*0.6);
+      vec3 fwd = vec3(sin(uYaw),0.0,cos(uYaw));
+      float belly = smoothstep(0.25,0.6,dot(n,fwd))*(1.0 - inHead)*step(q.y,0.55)*(1.0 - smoothstep(0.06,0.1,abs(q.x)));
+      vec3 plates = vec3(0.80,0.70,0.40)*(0.7 + 0.3*abs(sin(q.y*60.0)));
+      alb = mix(alb,plates,belly);
+      n = normalize(n + (vec3(noise(ql*90.0),noise(ql*90.0 + 4.0),noise(ql*90.0 + 8.0)) - 0.5)*0.35*smoothstep(0.1,0.7,sc));
+      gloss = 0.5; spec = 0.35; sss = 0.12;
+    }
+    else if(mat < 2.5){
+      vec3 e = vec3(abs(hq.x) - 0.084,hq.y - 0.046,hq.z - 0.098);
+      float r = length(e.xy*vec2(1.0,1.15));
+      alb = mix(vec3(1.0,0.72,0.08),vec3(0.65,0.28,0.02),smoothstep(0.0,0.03,r));
+      float slit = step(abs(e.x),0.0055)*step(abs(e.y),0.026);
+      alb = mix(alb,vec3(0.005),slit);
+      emis = vec3(0.7,0.45,0.04)*(1.0 - slit)*0.55;
+      gloss = 1.0; spec = 1.0;
+    }
+    else if(mat < 3.5){ alb = vec3(0.45,0.05,0.09); gloss = 0.8; spec = 0.6; }
+    else{ alb = mix(vec3(0.42,0.2,0.08),vec3(0.85,0.8,0.62),step(hq.y,0.0)); gloss = 0.5; spec = 0.4; }
+  }
+  else if(uType < 2.5){                  /* MANTIS */
+    if(mat < 1.5){
+      float g = smoothstep(-0.2,1.7,p.y);
+      alb = mix(vec3(0.05,0.30,0.27),vec3(0.30,0.80,0.55),g);
+      alb = mix(alb,vec3(0.45,0.2,0.75),pow(fr0,2.0)*0.7);
+      alb *= 0.65 + 0.5*smoothstep(0.05,0.3,abs(sin(q.y*38.0)));
+      gloss = 0.85; spec = 0.9; metal = 0.25;
+    }
+    else if(mat < 2.5){
+      vec2 f = n.xy*22.0 + n.z*7.0;
+      f = vec2(f.x*0.866 + f.y*0.5,f.y);
+      float cell = length(fract(f) - 0.5);
+      alb = mix(vec3(0.95,0.5,0.06),vec3(0.35,0.1,0.02),smoothstep(0.2,0.5,cell));
+      emis = vec3(0.7,0.3,0.03)*(1.0 - smoothstep(0.15,0.5,cell))*0.6;
+      gloss = 0.95; spec = 1.0;
+    }
+    else if(mat < 3.5){ alb = vec3(0.08,0.01,0.03); gloss = 0.6; spec = 0.4; }
+    else{ alb = vec3(0.04,0.17,0.15); gloss = 0.8; spec = 0.8; metal = 0.2; }
+  }
+  else if(uType < 3.5){                  /* LUMINOID */
+    float v = noise(q*8.0 + vec3(0.0,uTime*0.4,0.0));
+    v = smoothstep(0.55,0.8,v);
+    if(mat < 1.5){
+      alb = vec3(0.03,0.07,0.32);
+      emis = vec3(0.2,0.85,1.0)*v*1.3 + vec3(0.25,0.7,1.0)*pow(fr0,2.2)*1.3;
+      vec3 sp = fract(hq*13.0) - 0.5;
+      float dots = (1.0 - smoothstep(0.1,0.22,length(sp)))*inHead*step(0.0,hq.y);
+      float pl = 0.55 + 0.45*sin(uTime*3.0 + hq.x*30.0) + uBeat*0.6;
+      emis += mix(vec3(1.0,0.4,0.9),vec3(0.8,1.0,1.0),step(0.5,hash31(floor(hq*13.0))))*dots*pl;
+      gloss = 0.8; spec = 0.8;
+    }
+    else if(mat < 2.5){
+      vec3 e = vec3(abs(hq.x) - 0.07,hq.y - 0.03,hq.z - 0.128);
+      float ring = smoothstep(0.045,0.05,length(e.xy*vec2(1.0,0.8)));
+      alb = vec3(0.0,0.003,0.01);
+      emis = vec3(0.2,0.9,1.0)*ring*0.9;
+      gloss = 1.0; spec = 1.0;
+    }
+    else if(mat < 3.5){ alb = vec3(0.02,0.0,0.04); emis = vec3(1.0,0.3,0.8)*(0.5 + uMouth); }
+    else{
+      float tt = smoothstep(-0.2,0.2,sin(p.y*14.0 - uTime*3.0));
+      alb = vec3(0.0);
+      emis = mix(vec3(0.2,0.9,1.0),vec3(1.0,0.35,0.85),tt)*1.4;
+    }
+  }
+  else{                                  /* ANDROID */
+    if(mat < 1.5){
+      alb = vec3(0.92,0.93,0.96);
+      metal = 1.0; gloss = 0.96; spec = 0.8;
+      float seam = smoothstep(0.0,0.004,abs(sin(q.y*18.0)) - 0.985);
+      alb *= 1.0 - 0.6*(1.0 - smoothstep(0.0,0.03,abs(fract(q.y*7.0) - 0.5) - 0.47));
+    }
+    else if(mat < 3.5){ alb = vec3(0.02); emis = vec3(0.1,0.8,1.0)*(0.3 + uMouth); gloss = 0.9; }
+    else{ alb = vec3(0.07,0.075,0.09); gloss = 0.7; spec = 0.6; metal = 0.6; }
+    if(mat < 1.5 && inHead > 0.5){
+      float vz = step(0.028,hq.z)*step(abs(hq.x),0.072)*step(abs(hq.y - 0.03),0.03);
+      float eq = step(abs(hq.y - 0.03),0.004 + 0.022*(0.25 + uMouth + uBeat*0.4))*(0.5 + 0.5*sin(hq.x*90.0 + uTime*8.0));
+      alb = mix(alb,vec3(0.01),vz);
+      emis += vec3(0.1,0.9,1.0)*vz*(0.18 + eq*1.4);
+      gloss = mix(gloss,1.0,vz);
+    }
+  }
+
+  vec3 L = normalize(uKeyDir);
+  vec3 Hh = normalize(L - rd);
+  float sh = softShadow(p + n*0.012,L);
+  float ao = calcAO(p,n);
+  float dif = clamp((dot(n,L) + 0.25)/1.25,0.0,1.0);
+  float fill = clamp(dot(n,normalize(vec3(0.6,0.2,0.7)))*0.5 + 0.5,0.0,1.0);
+  vec3 amb = mix(uGround,uSkyTop,n.y*0.5 + 0.5)*0.32;
+  vec3 col = alb*(uKeyCol*dif*sh*1.15 + uSkyHor*fill*0.1 + amb*ao);
+  vec3 ra = normalize(vec3(-0.8,0.25,-0.55));
+  vec3 rb = normalize(vec3(0.8,0.25,-0.55));
+  col += alb*(uRimA*pow(max(dot(n,ra),0.0),1.5) + uRimB*pow(max(dot(n,rb),0.0),1.5))*0.6*ao;
+  col += alb*sss*vec3(0.55,0.2,0.14)*(fr0*0.6 + 0.2)*dif;
+  float sp = pow(max(dot(n,Hh),0.0),mix(8.0,180.0,gloss))*spec*sh;
+  col += uKeyCol*sp*(1.0 + gloss*3.0);
+  vec3 r = reflect(rd,n);
+  vec3 e = envMap(r);
+  float F0 = mix(0.04,0.9,metal);
+  float fres = F0 + (1.0 - F0)*pow(fr0,5.0);
+  vec3 tint = mix(vec3(1.0),alb*1.05,metal);
+  col = mix(col,e*tint*mix(1.0,ao,0.6)*(1.0 + metal*0.35),clamp(fres*gloss*1.25,0.0,1.0));
+  col += emis;
+  col = (col*(2.51*col + 0.03))/(col*(2.43*col + 0.59) + 0.14);
+  return pow(clamp(col,0.0,1.0),vec3(1.0/2.2));
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy/uRes)*2.0 - 1.0;
+  vec3 rd = normalize(uCamF + uCamR*uv.x*uTan.x*uTan.y + uCamU*uv.y*uTan.x);
+  vec3 ro = uCamPos;
+  vec3 bc = (uPel + uHead)*0.5;
+  float BR = 1.55;
+  vec3 oc = ro - bc;
+  float b = dot(oc,rd);
+  float c = dot(oc,oc) - BR*BR;
+  float hh = b*b - c;
+  float t = 0.0, t1 = 0.0, dmin = 1e3, mat = 0.0;
+  bool hit = false;
+  if(hh > 0.0){
+    hh = sqrt(hh);
+    t = max(-b - hh,0.0);
+    t1 = -b + hh;
+    for(int i = 0; i < 80; i++){
+      vec3 pp = ro + rd*t;
+      vec2 r = map(pp);
+      dmin = min(dmin,r.x);
+      if(r.x < 0.0011*t){ hit = true; mat = r.y; break; }
+      t += r.x*0.85;
+      if(t > t1) break;
+    }
+  }
+  if(hit){
+    vec3 col = shade(ro + rd*t,rd,mat);
+    gl_FragColor = vec4(col,1.0);
+    return;
+  }
+  vec4 outc = vec4(0.0);
+  if(rd.y < -0.001){
+    float tg = -ro.y/rd.y;
+    vec3 g = ro + rd*tg;
+    float dd = length(g.xz - uPel.xz);
+    if(dd < 2.6){
+      float sh = softShadow(g + vec3(0.0,0.004,0.0),normalize(uKeyDir));
+      float occ = map(g + vec3(0.0,0.12,0.0)).x;
+      float a = (1.0 - sh)*0.5 + (1.0 - clamp(occ/0.26,0.0,1.0))*0.55;
+      a *= 1.0 - smoothstep(1.2,2.6,dd);
+      outc = vec4(0.0,0.0,0.0,clamp(a,0.0,0.7));
+    }
+  }
+  if(uGlow > 0.0){
+    float gl = exp(-dmin*13.0)*uGlow;
+    gl = clamp(gl,0.0,0.9);
+    vec3 gc = uAccent*gl;
+    outc = vec4(gc + outc.rgb*(1.0 - gl),max(outc.a,gl));
+  }
+  gl_FragColor = outc;
+}
+`;
+
+function glInit(){
+  try{
+    const c = document.createElement("canvas");
+    c.width = Math.round(W*GLR.scale);
+    c.height = Math.round(H*GLR.scale);
+    const gl = c.getContext("webgl",{ alpha:true, premultipliedAlpha:true, antialias:false, preserveDrawingBuffer:false })
+            || c.getContext("experimental-webgl");
+    if(!gl){ throw new Error("no webgl"); }
+    const mk = (type,src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s,src);
+      gl.compileShader(s);
+      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
+        throw new Error(gl.getShaderInfoLog(s));
+      }
+      return s;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog,mk(gl.VERTEX_SHADER,GL_VERT));
+    gl.attachShader(prog,mk(gl.FRAGMENT_SHADER,GL_FRAG));
+    gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ throw new Error(gl.getProgramInfoLog(prog)); }
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog,"aPos");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+    GLR.canvas = c; GLR.gl = gl; GLR.prog = prog;
+    GLR.ok = true;
+  }
+  catch(err){
+    GLR.ok = false;
+    GLR.err = String(err && err.message || err);
+    console.warn("3D renderer unavailable:",GLR.err);
+  }
+}
+function glU(name){
+  if(!(name in GLR.u)){ GLR.u[name] = GLR.gl.getUniformLocation(GLR.prog,name); }
+  return GLR.u[name];
+}
+function glSet3(name,v){ GLR.gl.uniform3f(glU(name),v[0],v[1],v[2]); }
+function glSet1(name,v){ GLR.gl.uniform1f(glU(name),v); }
+function glSet4(name,v){ GLR.gl.uniform4f(glU(name),v[0],v[1],v[2],v[3]); }
+
+/* ---------- vector helpers ---------- */
+const v3add = (a,b) => [a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const v3sub = (a,b) => [a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const v3mul = (a,s) => [a[0]*s,a[1]*s,a[2]*s];
+const v3len = a => Math.hypot(a[0],a[1],a[2]);
+const v3norm = a => { const l = v3len(a) || 1; return [a[0]/l,a[1]/l,a[2]/l]; };
+const v3dot = (a,b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const v3cross = (a,b) => [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const rotYv = (v,a) => { const c = Math.cos(a), s = Math.sin(a); return [v[0]*c + v[2]*s,v[1],-v[0]*s + v[2]*c]; };
+const rotXv = (v,a) => { const c = Math.cos(a), s = Math.sin(a); return [v[0],v[1]*c - v[2]*s,v[1]*s + v[2]*c]; };
+const rotZv = (v,a) => { const c = Math.cos(a), s = Math.sin(a); return [v[0]*c - v[1]*s,v[0]*s + v[1]*c,v[2]]; };
+const limbDir = (a,g) => [Math.sin(a)*Math.cos(g),-Math.cos(a),Math.sin(a)*Math.sin(g)];
+
+/* two-bone IK in 3D */
+function ik3(S0,T,L1,L2,pole){
+  let ax = v3sub(T,S0);
+  let d = v3len(ax);
+  d = Math.min(Math.max(d,Math.abs(L1 - L2) + .01),L1 + L2 - .005);
+  ax = v3norm(ax);
+  const a = (L1*L1 - L2*L2 + d*d)/(2*d);
+  const h = Math.sqrt(Math.max(L1*L1 - a*a,0));
+  const mid = v3add(S0,v3mul(ax,a));
+  let pv = v3sub(pole,v3mul(ax,v3dot(pole,ax)));
+  pv = v3norm(pv);
+  return { elbow:v3add(mid,v3mul(pv,h)), wrist:v3add(S0,v3mul(ax,d)) };
+}
+
+/* ---------- per-character 3D specs ---------- */
+const GLSPEC = [
+ /* 0 GREY */
+ { thigh:.42, shin:.4, upper:.33, fore:.31, torso:.4, neck:.09, headUp:.25, neckEnd:.18, hs:1.3,
+   hipW:.095, shW:.105, ankleH:.06, foot:.19,
+   ra:[.027,.021,.014,.03], rb:[.048,.034,.021,.06], rc:[.05,.03,.085,.085],
+   fl:.092, fr:.0065, mouth:[0,-.09,.13], glow:0 },
+ /* 1 REPTOID */
+ { thigh:.46, shin:.45, upper:.35, fore:.33, torso:.48, neck:.08, headUp:.2, neckEnd:.13, hs:1.2,
+   hipW:.105, shW:.17, ankleH:.06, foot:.22,
+   ra:[.05,.04,.03,.06], rb:[.08,.06,.035,.1], rc:[.13,.06,.13,.1],
+   fl:.075, fr:.0085, mouth:[0,-.07,.12], glow:0 },
+ /* 2 MANTIS */
+ { thigh:.48, shin:.48, upper:.35, fore:.33, torso:.42, neck:.06, headUp:.17, neckEnd:.12, hs:1.25,
+   hipW:.08, shW:.1, ankleH:.05, foot:.2,
+   ra:[.018,.014,.01,.02], rb:[.03,.022,.014,.04], rc:[.035,.022,.06,.06],
+   fl:.07, fr:.0045, mouth:[0,-.1,.09], glow:0 },
+ /* 3 LUMINOID */
+ { thigh:.46, shin:.46, upper:.34, fore:.32, torso:.44, neck:.07, headUp:.2, neckEnd:.13, hs:1.15,
+   hipW:.08, shW:.09, ankleH:.06, foot:.1,
+   ra:[.022,.017,.012,.025], rb:[.034,.026,.016,.045], rc:[.04,.025,.07,.07],
+   fl:.075, fr:.0055, mouth:[0,-.07,.135], glow:.75 },
+ /* 4 ANDROID */
+ { thigh:.45, shin:.44, upper:.34, fore:.32, torso:.5, neck:.07, headUp:.17, neckEnd:.11, hs:1.15,
+   hipW:.105, shW:.19, ankleH:.06, foot:.22,
+   ra:[.033,.027,.02,.045], rb:[.06,.046,.032,.075], rc:[.095,.036,.1,.08],
+   fl:.075, fr:.0095, mouth:[0,-.075,.09], glow:0 }
+];
+
+/* stage lighting colours (so the characters sit inside the scene) */
+const GLENV = {
+  alien:{ top:[.10,.12,.42], hor:[1.0,.42,.62], ground:[.07,.04,.14], key:[1.0,.86,.8], rimA:[.15,.95,.85], rimB:[1.0,.35,.8], acc:[.3,.95,1.0] },
+  nebula:{ top:[.05,.06,.22], hor:[.55,.3,.85], ground:[.03,.05,.14], key:[1.0,.9,.82], rimA:[.2,.7,1.0], rimB:[1.0,.4,.9], acc:[.4,.8,1.0] },
+  city:{ top:[.1,.04,.25], hor:[.95,.3,.6], ground:[.08,.03,.14], key:[1.0,.8,.85], rimA:[.1,.9,1.0], rimB:[1.0,.2,.8], acc:[1.0,.3,.9] },
+  volcano:{ top:[.18,.05,.04], hor:[1.0,.4,.12], ground:[.18,.05,.02], key:[1.0,.7,.45], rimA:[1.0,.45,.1], rimB:[1.0,.2,.05], acc:[1.0,.6,.2] },
+  aurora:{ top:[.03,.12,.2], hor:[.15,.6,.55], ground:[.03,.07,.1], key:[.85,.95,1.0], rimA:[.2,1.0,.6], rimB:[.6,.3,1.0], acc:[.3,1.0,.8] },
+  crystal:{ top:[.12,.06,.3], hor:[.5,.3,.9], ground:[.06,.03,.14], key:[.9,.85,1.0], rimA:[.2,1.0,1.0], rimB:[1.0,.3,.9], acc:[.5,.9,1.0] },
+  neon:{ top:[.14,.04,.3], hor:[1.0,.3,.8], ground:[.07,.02,.15], key:[1.0,.85,.9], rimA:[.1,.9,1.0], rimB:[1.0,.2,.8], acc:[1.0,.3,.9] },
+  space:{ top:[.03,.03,.14], hor:[.3,.2,.6], ground:[.02,.05,.1], key:[.9,.95,1.0], rimA:[.2,.9,1.0], rimB:[.9,.4,1.0], acc:[.4,.9,1.0] },
+  sunset:{ top:[.3,.1,.25], hor:[1.0,.5,.35], ground:[.12,.05,.14], key:[1.0,.8,.6], rimA:[1.0,.4,.7], rimB:[1.0,.6,.2], acc:[1.0,.6,.5] },
+  club:{ top:[.08,.03,.18], hor:[.8,.2,.9], ground:[.05,.02,.1], key:[1.0,.9,.95], rimA:[.1,.9,1.0], rimB:[1.0,.2,.7], acc:[1.0,.4,.9] }
+};
+
+/* ---------- skeleton from the dance pose ---------- */
+function glSkeleton(spec,st){
+  const p = st.pose, yaw = st.yaw || 0;
+  const lift = (p.hop || 0)*.42;
+  const loc = (a,g,len) => v3mul(limbDir(a,g),len);
+  const hipLb = [-spec.hipW,0,0], hipRb = [spec.hipW,0,0];
+  const knLb = v3add(hipLb,loc(p.lLu,p.gLL,spec.thigh));
+  const anLb = v3add(knLb,loc(p.lLl,p.gLL,spec.shin));
+  const knRb = v3add(hipRb,loc(p.lRu,p.gLR,spec.thigh));
+  const anRb = v3add(knRb,loc(p.lRl,p.gLR,spec.shin));
+  const low = Math.min(anLb[1],anRb[1]);
+  const pel = [p.sway*.0034,spec.ankleH - low + lift,(p.depth || 0)*.01];
+  const Rp = v => v3add(pel,rotYv(v,yaw));
+  const hipL = Rp(hipLb), hipR = Rp(hipRb);
+  const knL = Rp(knLb), knR = Rp(knRb), anL = Rp(anLb), anR = Rp(anRb);
+  const fwdFoot = [0,-.035,spec.foot];
+  const toeL = v3add(anL,rotYv(fwdFoot,yaw)), toeR = v3add(anR,rotYv(fwdFoot,yaw));
+
+  const Rc = v => rotYv(rotXv(rotZv(v,-p.lean),p.pitch || 0),yaw);
+  const chest = v3add(pel,Rc([0,spec.torso,0]));
+  const cX = Rc([1,0,0]), cY = Rc([0,1,0]), cZ = Rc([0,0,1]);
+  const shL = v3add(chest,Rc([-spec.shW,-.03,0]));
+  const shR = v3add(chest,Rc([spec.shW,-.03,0]));
+  const elL = v3add(shL,Rc(loc(p.aLu,p.gAL,spec.upper)));
+  const wrL = v3add(elL,Rc(loc(p.aLl,p.gAL,spec.fore)));
+  let elR = v3add(shR,Rc(loc(p.aRu,p.gAR,spec.upper)));
+  let wrR = v3add(elR,Rc(loc(p.aRl,p.gAR,spec.fore)));
+
+  /* head */
+  const hyaw = st.hyaw || 0;
+  const Rh = v => Rc(rotYv(rotXv(rotZv(v,-p.tilt),(p.nod || 0)*.012),hyaw));
+  const neckTop = v3add(chest,Rc([0,spec.neck,0]));
+  const head = v3add(neckTop,Rc([0,spec.headUp,0]));
+  const hX = Rh([1,0,0]), hY = Rh([0,1,0]), hZ = Rh([0,0,1]);
+  const mouthW = v3add(head,Rh(v3mul(spec.mouth,spec.hs)));
+
+  /* microphone in the right hand */
+  let mic = v3add(wrR,[0,0,0]), micHand = wrR;
+  const mw = st.mic || 0;
+  if(mw > .02){
+    const ball = v3add(mouthW,Rh(v3mul([.05,-.012,.075],spec.hs)));
+    const hand = v3add(ball,Rh(v3mul([.055,-.075,.015],spec.hs)));
+    const sol = ik3(shR,hand,spec.upper,spec.fore,Rc([.6,-1,-.25]));
+    elR = v3add(v3mul(elR,1 - mw),v3mul(sol.elbow,mw));
+    wrR = v3add(v3mul(wrR,1 - mw),v3mul(sol.wrist,mw));
+    mic = ball; micHand = wrR;
+  }
+  /* tail */
+  const t = st.t || 0;
+  const tail = [];
+  for(let i = 1; i <= 4; i++){
+    tail.push(v3add(pel,rotYv([Math.sin(t*2.6 + i*.9)*.07*i,-.02*i + .05*Math.sin(t*2 + i),-.2*i],yaw)));
+  }
+  return { pel,chest,shL,shR,elL,elR,wrL,wrR,hipL,hipR,knL,knR,anL,anR,toeL,toeR,
+           head,mic,micHand,tail,hX,hY,hZ,cX,cY,cZ,yaw,mw };
+}
+
+/* ---------- camera ---------- */
+const SHOTS = [
+  { d:6.4, cy:1.25, ly:1.25, az:0 },      /* wide */
+  { d:4.7, cy:1.2,  ly:1.2,  az:.22 },    /* medium */
+  { d:3.0, cy:1.5,  ly:1.5,  az:-.2 },    /* close-up */
+  { d:5.6, cy:.45,  ly:1.3,  az:0 },      /* low hero angle */
+  { d:5.4, cy:1.5,  ly:1.2,  az:0 }       /* orbit */
+];
+S.cam = { d:6.4, cy:1.25, ly:1.25, az:0 };
+S.shot = 0;
+function pickShot(bar,epic){
+  if(epic){ return hash(bar + 301) < .5 ? 0 : 4; }
+  const r = hash(bar*5 + 11);
+  return r < .32 ? 0 : r < .55 ? 1 : r < .7 ? 2 : r < .86 ? 3 : 4;
+}
+function camPose(t,pulse){
+  const c = S.cam;
+  let az = c.az;
+  if(S.shot === 4){ az += Math.sin(t*.45)*.55; }
+  const shake = pulse*.012;
+  const tgt = [0,c.ly + shake,0];
+  const pos = [Math.sin(az)*c.d,c.cy + shake*2,Math.cos(az)*c.d];
+  const F = v3norm(v3sub(tgt,pos));
+  const R = v3norm(v3cross(F,[0,1,0]));
+  const U = v3cross(R,F);
+  return { pos,F,R,U };
+}
+
+/* ---------- draw ---------- */
+function glRender(type,st,envId,camOverride){
+  const gl = GLR.gl, spec = GLSPEC[type];
+  const w = Math.round(W*GLR.scale), h = Math.round(H*GLR.scale);
+  if(GLR.canvas.width !== w || GLR.canvas.height !== h){
+    GLR.canvas.width = w; GLR.canvas.height = h;
+  }
+  gl.viewport(0,0,w,h);
+  gl.clearColor(0,0,0,0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  const sk = glSkeleton(spec,st);
+  const cam = camOverride || camPose(st.t,st.pulse);
+  const env = GLENV[envId] || GLENV.neon;
+  const beat = st.pulse || 0;
+  glSet3("uCamPos",cam.pos); glSet3("uCamR",cam.R); glSet3("uCamU",cam.U); glSet3("uCamF",cam.F);
+  gl.uniform2f(glU("uTan"),Math.tan(15*Math.PI/180),W/H);
+  gl.uniform2f(glU("uRes"),w,h);
+  glSet3("uPel",sk.pel); glSet3("uChest",sk.chest);
+  glSet3("uShL",sk.shL); glSet3("uShR",sk.shR); glSet3("uElL",sk.elL); glSet3("uElR",sk.elR);
+  glSet3("uWrL",sk.wrL); glSet3("uWrR",sk.wrR);
+  glSet3("uHipL",sk.hipL); glSet3("uHipR",sk.hipR); glSet3("uKnL",sk.knL); glSet3("uKnR",sk.knR);
+  glSet3("uAnL",sk.anL); glSet3("uAnR",sk.anR); glSet3("uToeL",sk.toeL); glSet3("uToeR",sk.toeR);
+  glSet3("uHead",sk.head); glSet3("uMic",sk.mic); glSet3("uMicHand",sk.micHand);
+  glSet3("uTail1",sk.tail[0]); glSet3("uTail2",sk.tail[1]); glSet3("uTail3",sk.tail[2]); glSet3("uTail4",sk.tail[3]);
+  glSet3("uHX",sk.hX); glSet3("uHY",sk.hY); glSet3("uHZ",sk.hZ);
+  glSet3("uCX",sk.cX); glSet3("uCY",sk.cY); glSet3("uCZ",sk.cZ);
+  glSet4("uRa",spec.ra); glSet4("uRb",spec.rb); glSet4("uRc",spec.rc);
+  glSet4("uX",[spec.neckEnd,spec.fl,spec.fr,spec.hs]);
+  glSet1("uType",type); glSet1("uTime",st.t || 0);
+  glSet1("uMouth",st.mouth || 0); glSet1("uBlink",st.blink || 0);
+  glSet1("uBeat",beat); glSet1("uMicW",sk.mw); glSet1("uYaw",sk.yaw);
+  glSet1("uGlow",spec.glow);
+  glSet3("uSkyTop",env.top); glSet3("uSkyHor",env.hor); glSet3("uGround",env.ground);
+  glSet3("uKeyCol",v3mul(env.key,1 + .3*beat)); glSet3("uKeyDir",v3norm([-.45,.8,.6]));
+  glSet3("uRimA",env.rimA); glSet3("uRimB",env.rimB); glSet3("uAccent",env.acc);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+
+/* a still of a 3D character for the picker */
+function glThumb(c,type){
+  if(!GLR.ok){ return; }
+  const old = GLR.scale;
+  GLR.scale = .5;
+  const st = {
+    pose:Object.assign({},REST), yaw:.25, hyaw:0, mouth:0, blink:0, t:0, pulse:0, mic:0, look:0
+  };
+  const cam = { pos:[1.2,1.35,5.6], F:null, R:null, U:null };
+  const tgt = [0,1.0,0];
+  cam.F = v3norm(v3sub(tgt,cam.pos));
+  cam.R = v3norm(v3cross(cam.F,[0,1,0]));
+  cam.U = v3cross(cam.R,cam.F);
+  glRender(type,st,"neon",cam);
+  const g = c.getContext("2d");
+  g.clearRect(0,0,c.width,c.height);
+  const bg = g.createLinearGradient(0,0,0,c.height);
+  bg.addColorStop(0,"#120626"); bg.addColorStop(1,"#2a0b52");
+  g.fillStyle = bg; g.fillRect(0,0,c.width,c.height);
+  const sw = GLR.canvas.width, sh = GLR.canvas.height;
+  /* crop the central part of the frame that holds the character */
+  g.drawImage(GLR.canvas,sw*.08,sh*.1,sw*.84,sh*.86,0,0,c.width,c.height);
+  GLR.scale = old;
+}
+
+glInit();
+
+
+/* =========================================================
    PER-FRAME UPDATE — works out the pose, mouth, beat pulse
 ========================================================= */
 function update(dt){
@@ -3578,6 +4528,7 @@ function update(dt){
       M.prev = M.cur;
       M.cur = pickMove(bar,loud);
       M.bar = bar;
+      if(bar%2 === 0 || EPIC.indexOf(M.cur.name) >= 0){ S.shot = pickShot(Math.floor(bar/2),EPIC.indexOf(M.cur.name) >= 0); }
     }
     const wt = clamp(bp - bar*4,0,1);
     const w = .5 - .5*Math.cos(Math.PI*wt);
@@ -3586,7 +4537,11 @@ function update(dt){
       const b = movePose(M.prev,bp);
       PK.forEach(k => { target[k] = lerp(b[k],target[k],w); });
     }
-    PK.forEach(k => { target[k] = REST[k] + (target[k] - REST[k])*S.danceAmp; });
+    PK.forEach(k => { if(!NOSCALE[k]){ target[k] = REST[k] + (target[k] - REST[k])*S.danceAmp; } });
+    const wph = clamp((bp - bar*4)/4,0,1);
+    const ease = wph - Math.sin(Math.PI*2*wph)/(Math.PI*2);
+    S.yawSpin = (M.cur.turns || 0)*Math.PI*2*ease;
+    S.hSpin = (M.cur.hturns || 0)*Math.PI*2*wph;
     /* every beat: knees dip + head nods, so the tempo is obvious */
     const dip = S.pulse*S.danceAmp;
     target.lLu -= .34*dip; target.lLl += .26*dip;
@@ -3596,6 +4551,19 @@ function update(dt){
   else{
     target = idlePose(ts);
     S.move.bar = -1;
+    S.yawSpin = 0; S.hSpin = 0;
+  }
+  {
+    const sh = SHOTS[S.playing ? S.shot : 0];
+    ["d","cy","ly","az"].forEach(k => { S.cam[k] = lerp(S.cam[k],sh[k],.05); });
+    /* keep the 3D frame rate healthy */
+    S.dtAvg = lerp(S.dtAvg || 16,dt,.04);
+    S.qTick = (S.qTick || 0) + 1;
+    if(S.qTick > 120 && !S.qLock && S.playing && GLR.ok && CHARS[S.char].glType !== undefined){
+      S.qTick = 0;
+      if(S.dtAvg > 42 && GLR.scale > .45){ GLR.scale = Math.max(.45,GLR.scale - .1); }
+      else if(S.dtAvg < 21 && GLR.scale < .85){ GLR.scale = Math.min(.85,GLR.scale + .05); }
+    }
   }
   const rate = S.playing ? .6 : .2;
   PK.forEach(k => { S.pose[k] = lerp(S.pose[k],target[k],rate); });
@@ -3614,6 +4582,8 @@ function update(dt){
   S.pop *= .9;
   S.st = {
     pose:S.pose,
+    yaw:S.pose.yaw + (S.yawSpin || 0),
+    hyaw:S.pose.hyaw + (S.hSpin || 0),
     mouth:clamp(mo,0,1),
     mw:clamp(S.vocal.width,.5,1.25),
     t:ts,
@@ -3640,21 +4610,28 @@ function drawScene(t,values){
   const st = S.st;
   charCtx.setTransform(1,0,0,1,0,0);
   charCtx.clearRect(0,0,W,H);
-  const k = 1 + S.pop*.12;
-  charCtx.save();
-  charCtx.translate(W/2,FLOOR);
-  charCtx.scale(k,k);
-  drawCharacter(charCtx,ch,st);
-  charCtx.restore();
+  const use3D = ch.glType !== undefined && GLR.ok;
+  if(use3D){
+    glRender(ch.glType,st,STAGES[S.stage].id);
+    charCtx.drawImage(GLR.canvas,0,0,W,H);
+  }
+  else{
+    const k = 1 + S.pop*.12;
+    charCtx.save();
+    charCtx.translate(W/2,FLOOR);
+    charCtx.scale(k,k);
+    drawCharacter(charCtx,ch,st);
+    charCtx.restore();
 
-  /* floor shadow */
-  const air = clamp(st.pose.hop,0,1.2);
-  g.fillStyle = "#000";
-  g.globalAlpha = .38 - air*.14;
-  g.beginPath();
-  g.ellipse(W/2 + st.pose.sway,FLOOR + 6,120 - air*34,17,0,0,Math.PI*2);
-  g.fill();
-  g.globalAlpha = 1;
+    /* floor shadow */
+    const air = clamp(st.pose.hop,0,1.2);
+    g.fillStyle = "#000";
+    g.globalAlpha = .38 - air*.14;
+    g.beginPath();
+    g.ellipse(W/2 + st.pose.sway,FLOOR + 6,120 - air*34,17,0,0,Math.PI*2);
+    g.fill();
+    g.globalAlpha = 1;
+  }
 
   /* CLONES (the old OBJECT FLOAT filter) */
   const c = values.objectFloat;
@@ -4529,8 +5506,10 @@ function render(timestamp){
 /* =========================================================
    CHARACTER + STAGE PICKERS
 ========================================================= */
+if(!GLR.ok){ for(let i=CHARS.length - 1;i>=0;i--){ if(CHARS[i].glOnly){ CHARS.splice(i,1); } } }
 const cards = [];
 function drawThumb(c,ch,hot){
+  if(ch.glType !== undefined && GLR.ok){ glThumb(c,ch.glType); return; }
   const g = c.getContext("2d");
   g.clearRect(0,0,c.width,c.height);
   const bg = g.createLinearGradient(0,0,0,c.height);
@@ -4607,6 +5586,7 @@ function chipGroup(id,onPick){
 }
 chipGroup("speedRow",v => { S.speed = +v; S.move.bar = -1; });
 chipGroup("mouthRow",v => { S.mouthMode = v; });
+chipGroup("qualRow",v => { if(v === "auto"){ S.qLock = false; } else { S.qLock = true; GLR.scale = +v; } });
 
 syncSlider.oninput = () => {
   S.nudge = +syncSlider.value;
@@ -6535,205 +7515,232 @@ function updateFXUI(
 /* =========================================================
    DOWNLOAD
 ========================================================= */
-downloadButton.onclick =
-  async () => {
-    if(
-      S.recording
-    ){
-      finishRecording();
-      return;
-    }
-    try{
-      await audio();
-      if(
-        S.ac.state ===
-        "suspended"
-      ){
-        await S.ac.resume();
-      }
-      if(
-        !S.playing
-      ){
-        await sourceAudio.play();
-        S.playing =
-          true;
-        playButton.textContent =
-          "❚❚ PLAYING";
-      }
-      startRecording();
-    }
-    catch(error){
-      console.error(
-        error
-      );
-      status.textContent =
-        "DOWNLOAD RECORDING COULD NOT START.";
-    }
-  };
+
 /* =========================================================
-   START RECORDING
+   RENDER  ->  MP4  ->  SHARE  ->  ARTIST STORY
 ========================================================= */
-function startRecording(){
-  if(
-    !canvas.captureStream ||
-    !window.MediaRecorder
-  ){
-    status.textContent =
-      "THIS BROWSER DOES NOT SUPPORT VISUAL RECORDING.";
-    return;
-  }
-  S.chunks =
-    [];
-  const videoStream =
-    canvas.captureStream(
-      30
-    );
-  const tracks =
-    [
-      ...videoStream.getVideoTracks()
-    ];
-  if(
-    S.dest
-  ){
-    S.dest
-      .stream
-      .getAudioTracks()
-      .forEach(
-        track => {
-          tracks.push(
-            track
-          );
-        }
-      );
-  }
-  S.recStream =
-    new MediaStream(
-      tracks
-    );
+/* Change these if your Story page uses different names. */
+const STORY_CONFIG = {
+  supabaseUrl:"https://zdlaloiruxamxsduxqxw.supabase.co",
+  anonKey:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ",
+  bucket:"tracks",          /* storage bucket the video is uploaded to   */
+  folder:"stories",         /* folder inside the bucket                  */
+  table:"stories",          /* table the story row is written to         */
+  hours:24                  /* how long a story stays up                 */
+};
+
+const resultPanel = $("resultPanel");
+const resultVideo = $("resultVideo");
+const resultInfo = $("resultInfo");
+const resultCaption = $("resultCaption");
+const saveBtn = $("saveBtn");
+const shareBtn = $("shareBtn");
+const storyBtn = $("storyBtn");
+const copyCapBtn = $("copyCapBtn");
+const resultMsg = $("resultMsg");
+let take = null;
+let recStart = 0;
+let recTimer = null;
+
+function pickMime(){
   const types = [
+    "video/mp4;codecs=avc1.640028,mp4a.40.2",
+    "video/mp4;codecs=avc1.4D0028,mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1,mp4a.40.2",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm"
   ];
-  const mime =
-    types.find(
-      type =>
-        MediaRecorder.isTypeSupported(
-          type
-        )
-    );
+  return types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+}
+function setMsg(t){ resultMsg.textContent = t; }
+
+downloadButton.onclick = async () => {
+  if(S.recording){ finishRecording(); return; }
   try{
-    S.rec =
-      new MediaRecorder(
-        S.recStream,
-        mime
-          ? {
-              mimeType:mime
-            }
-          : undefined
-      );
+    await audio();
+    if(S.ac.state === "suspended"){ await S.ac.resume(); }
+    /* the render always covers the whole song, from the start */
+    sourceAudio.pause();
+    sourceAudio.currentTime = 0;
+    S.est = 0;
+    S.move.bar = -1;
+    S.paused = false;
+    await sourceAudio.play();
+    S.playing = true;
+    playButton.textContent = "❚❚ PLAYING";
+    status.classList.add("active");
+    startRecording();
   }
   catch(error){
-    console.error(
-      error
-    );
-    S.rec =
-      new MediaRecorder(
-        videoStream
-      );
+    console.error(error);
+    status.textContent = "THE VIDEO RENDER COULD NOT START.";
   }
-  S.rec.ondataavailable =
-    event => {
-      if(
-        event.data &&
-        event.data.size
-      ){
-        S.chunks.push(
-          event.data
-        );
-      }
-    };
-  S.rec.onstop =
-    () => {
-      const blob =
-        new Blob(
-          S.chunks,
-          {
-            type:
-              S.rec?.mimeType ||
-              "video/webm"
-          }
-        );
-      const url =
-        URL.createObjectURL(
-          blob
-        );
-      const a =
-        document.createElement(
-          "a"
-        );
-      a.href =
-        url;
-      a.download =
-        `GLCTC1-Video-Space-${Date.now()}.webm`;
-      document.body.appendChild(
-        a
-      );
-      a.click();
-      a.remove();
-      setTimeout(
-        () => {
-          URL.revokeObjectURL(
-            url
-          );
-        },
-        1500
-      );
-      downloadButton.textContent =
-        "⇩ DOWNLOAD VISUAL";
-      downloadButton.classList.remove(
-        "recording"
-      );
-      S.recording =
-        false;
-      status.textContent =
-        "VISUAL DOWNLOAD READY.";
-    };
-  S.rec.start(
-    250
-  );
-  S.recording =
-    true;
-  downloadButton.textContent =
-    "■ STOP & DOWNLOAD";
-  downloadButton.classList.add(
-    "recording"
-  );
-  status.textContent =
-    "RECORDING PSYCHEDELIC SPACE — PRESS STOP & DOWNLOAD.";
+};
+
+function startRecording(){
+  if(!canvas.captureStream || !window.MediaRecorder){
+    status.textContent = "THIS BROWSER CANNOT RECORD VIDEO — TRY CHROME, EDGE OR SAFARI.";
+    return;
+  }
+  S.chunks = [];
+  resultPanel.hidden = true;
+  const videoStream = canvas.captureStream(30);
+  const tracks = [...videoStream.getVideoTracks()];
+  if(S.dest){ S.dest.stream.getAudioTracks().forEach(t => tracks.push(t)); }
+  S.recStream = new MediaStream(tracks);
+  const mime = pickMime();
+  const opts = { videoBitsPerSecond:8000000, audioBitsPerSecond:192000 };
+  if(mime){ opts.mimeType = mime; }
+  try{ S.rec = new MediaRecorder(S.recStream,opts); }
+  catch(error){
+    console.error(error);
+    S.rec = new MediaRecorder(S.recStream);
+  }
+  S.rec.ondataavailable = ev => { if(ev.data && ev.data.size){ S.chunks.push(ev.data); } };
+  S.rec.onstop = () => {
+    clearInterval(recTimer);
+    const type = (S.rec && S.rec.mimeType) || mime || "video/webm";
+    const isMp4 = /mp4/i.test(type);
+    const blob = new Blob(S.chunks,{ type:isMp4 ? "video/mp4" : "video/webm" });
+    const ext = isMp4 ? "mp4" : "webm";
+    const name = "GLCTC1-" + CHARS[S.char].name + "-" + Date.now() + "." + ext;
+    take = { blob, name, ext, isMp4 };
+    if(resultVideo.dataset.url){ URL.revokeObjectURL(resultVideo.dataset.url); }
+    const url = URL.createObjectURL(blob);
+    resultVideo.dataset.url = url;
+    resultVideo.src = url;
+    resultInfo.textContent = ext.toUpperCase() + " — " + (blob.size/1048576).toFixed(1) + " MB — " + CHARS[S.char].name;
+    resultCaption.value = "Made with GLCTC1 Video Space — " + CHARS[S.char].name + " dancing to " + Math.round(S.song ? S.song.bpm : S.bpm) + " BPM #GLCTC1";
+    setMsg(isMp4
+      ? "YOUR MP4 IS READY."
+      : "THIS BROWSER ONLY WRITES WEBM. USE CHROME, EDGE OR SAFARI TO GET MP4 STRAIGHT FROM THE RENDER.");
+    resultPanel.hidden = false;
+    resultPanel.scrollIntoView({ behavior:"smooth", block:"center" });
+    downloadButton.textContent = "● RENDER VIDEO (MP4)";
+    downloadButton.classList.remove("recording");
+    S.recording = false;
+    status.textContent = "VIDEO RENDERED — SAVE IT, SHARE IT OR POST IT TO YOUR ARTIST STORY.";
+  };
+  S.rec.start(250);
+  S.recording = true;
+  recStart = performance.now();
+  downloadButton.textContent = "■ STOP RENDER";
+  downloadButton.classList.add("recording");
+  recTimer = setInterval(() => {
+    const el = (performance.now() - recStart)/1000;
+    const du = sourceAudio.duration || 0;
+    status.textContent = "RENDERING — " + fmt(el) + (du ? " / " + fmt(du) : "") + " — THE VIDEO FINISHES WHEN THE SONG ENDS.";
+  },500);
 }
-/* =========================================================
-   FINISH RECORDING
-========================================================= */
+
 function finishRecording(){
-  if(
-    S.rec &&
-    S.rec.state !==
-    "inactive"
-  ){
-    S.rec.stop();
-  }
-  if(
-    S.recStream
-  ){
-    S.recStream
-      .getVideoTracks()
-      .forEach( track => track.stop() );
-  }
+  if(S.rec && S.rec.state !== "inactive"){ S.rec.stop(); }
+  if(S.recStream){ S.recStream.getVideoTracks().forEach(track => track.stop()); }
 }
-/* =========================================================
-   NUMBER HELPER
-========================================================= */
+
+/* ---------- save / share / copy ---------- */
+saveBtn.onclick = () => {
+  if(!take){ return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(take.blob);
+  a.download = take.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href),4000);
+  setMsg("SAVED " + take.name.toUpperCase());
+};
+copyCapBtn.onclick = async () => {
+  try{ await navigator.clipboard.writeText(resultCaption.value); setMsg("CAPTION COPIED."); }
+  catch(error){ resultCaption.select(); setMsg("PRESS COPY ON YOUR KEYBOARD — CAPTION SELECTED."); }
+};
+shareBtn.onclick = async () => {
+  if(!take){ return; }
+  const file = new File([take.blob],take.name,{ type:take.blob.type });
+  try{
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title:"GLCTC1 Video Space", text:resultCaption.value });
+      setMsg("SHARED.");
+    }
+    else if(navigator.share){
+      await navigator.share({ title:"GLCTC1 Video Space", text:resultCaption.value, url:location.href });
+      setMsg("SHARED THE LINK — THIS DEVICE CANNOT SEND VIDEO FILES DIRECTLY. SAVE THE MP4 AND ATTACH IT.");
+    }
+    else{
+      saveBtn.onclick();
+      copyCapBtn.onclick();
+      setMsg("THIS BROWSER HAS NO SHARE MENU — THE VIDEO WAS SAVED AND THE CAPTION COPIED. POST IT FROM YOUR APP.");
+    }
+  }
+  catch(error){
+    if(error && error.name === "AbortError"){ setMsg("SHARE CANCELLED."); }
+    else{ console.error(error); setMsg("SHARING FAILED: " + (error.message || error)); }
+  }
+};
+
+/* ---------- post to artist story (Supabase) ---------- */
+let sbClient = null;
+function getSupabase(){
+  if(!sbClient && window.supabase){
+    sbClient = window.supabase.createClient(STORY_CONFIG.supabaseUrl,STORY_CONFIG.anonKey);
+  }
+  return sbClient;
+}
+storyBtn.onclick = async () => {
+  if(!take){ return; }
+  const sb = getSupabase();
+  if(!sb){ setMsg("THE STORY SERVICE DID NOT LOAD — CHECK YOUR CONNECTION AND TRY AGAIN."); return; }
+  storyBtn.disabled = true;
+  try{
+    setMsg("CHECKING YOUR ARTIST ACCOUNT…");
+    const { data:ud, error:ue } = await sb.auth.getUser();
+    const user = ud && ud.user;
+    if(ue || !user){
+      setMsg("SIGN IN TO YOUR GLCTC1 ACCOUNT FIRST (ACCOUNT PAGE), THEN COME BACK AND POST. YOUR VIDEO IS STILL HERE — SAVE IT IF YOU NEED.");
+      return;
+    }
+    let artist = "";
+    try{
+      const { data:pr } = await sb.from("profiles").select("artist_name").eq("id",user.id).maybeSingle();
+      artist = (pr && pr.artist_name) || "";
+    }catch(e){}
+    setMsg("UPLOADING YOUR VIDEO…");
+    const path = STORY_CONFIG.folder + "/" + user.id + "/" + Date.now() + "." + take.ext;
+    const up = await sb.storage.from(STORY_CONFIG.bucket).upload(path,take.blob,{
+      contentType:take.blob.type, cacheControl:"3600", upsert:false
+    });
+    if(up.error){ throw new Error("Upload failed: " + up.error.message); }
+    const pub = sb.storage.from(STORY_CONFIG.bucket).getPublicUrl(path);
+    const mediaUrl = pub && pub.data && pub.data.publicUrl;
+    setMsg("POSTING TO YOUR ARTIST STORY…");
+    const expires = new Date(Date.now() + STORY_CONFIG.hours*3600*1000).toISOString();
+    const full = {
+      user_id:user.id, artist_name:artist, media_url:mediaUrl, media_path:path,
+      media_type:"video", caption:resultCaption.value, expires_at:expires
+    };
+    let res = await sb.from(STORY_CONFIG.table).insert(full);
+    if(res.error){
+      const minimal = { user_id:user.id, media_url:mediaUrl, caption:resultCaption.value };
+      res = await sb.from(STORY_CONFIG.table).insert(minimal);
+    }
+    if(res.error){
+      try{ await navigator.clipboard.writeText(mediaUrl || ""); }catch(e){}
+      setMsg("VIDEO UPLOADED, BUT THE STORY ENTRY WAS REJECTED (" + res.error.message + "). THE VIDEO LINK WAS COPIED. THE TABLE NAME IN STORY_CONFIG NEEDS TO MATCH YOUR STORY PAGE.");
+      return;
+    }
+    setMsg("POSTED TO YOUR ARTIST STORY ✓ — IT STAYS UP FOR " + STORY_CONFIG.hours + " HOURS.");
+  }
+  catch(error){
+    console.error(error);
+    setMsg("COULD NOT POST: " + (error.message || error));
+  }
+  finally{
+    storyBtn.disabled = false;
+  }
+};
+
 
 function numberOrNull(
   value

@@ -1,7 +1,7 @@
 <!DOCTYPE html>  <html lang="en">  
 <head>  
   <meta charset="UTF-8">
-  <!-- v35: Master Library search runs on Enter (wired at top level, honours filter menu); track + playlist shares attach cover-art image; playlist link compact + truncated text. v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
+  <!-- v47: Simple View shows only the player + Master Library (player first, studio tabs hidden behind FULL STUDIO); every share link auto-plays with a TAP TO PLAY fallback; shared track links match any track ID; mixer bay no longer docks into Deck A when both decks are hidden; MIDI only requested in Full Studio; late patches moved inside </body>. v35: Master Library search runs on Enter (wired at top level, honours filter menu); track + playlist shares attach cover-art image; playlist link compact + truncated text. v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
   <title>GLCTC1 – Play Space · Cosmic Decks</title>    <style>  
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');  
   
@@ -3477,7 +3477,7 @@ localStorage.setItem(
 </div>
 
 <button id="sendBanksToLive">
-  🔴 GO LIVE · SEND BANKS
+  📡 SEND BANKS TO LIVE
 </button>
 
 <div id="bankTracks" class="details-panel">
@@ -8961,7 +8961,7 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
   }
 
   const shareUrl =
-    `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}`;
+    `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}&autoplay=1`;
 
   // 📱 Native Share menu with the cover art attached (v35)
   try {
@@ -9280,8 +9280,10 @@ async function playPlaylistMasterTrack(
       "glctc1PlaylistArtwork"
     );
 
-  if (artworkEl && artwork) {
-    artworkEl.src = artwork;
+  if (artworkEl) {
+    // v47: clear the previous track's cover when this one has none
+    if (artwork) { artworkEl.src = artwork; artworkEl.style.display = ""; }
+    else artworkEl.removeAttribute("src");
   }
 
   const positionEl =
@@ -11251,38 +11253,9 @@ liveBanksPayload
 )
 );
 
-// Open the Live window straight away (inside the tap, so pop-up blockers allow it)
-const liveNavLink =
-Array.from(document.querySelectorAll("#glctc1Nav a"))
-.find(a => /LIVE/i.test(a.textContent));
-
-const liveBase =
-(liveNavLink && liveNavLink.getAttribute("href")) ||
-"social.html";
-
-const liveWindow =
-window.open("", "_blank");
-
-if (!liveWindow) {
 alert(
-"📡 Banks sent to Live.\n\n" +
-"Your browser blocked the new window - allow pop-ups for this site, then press GO LIVE again."
+"📡 BANKS SENT TO LIVE"
 );
-} else {
-
-// Signed in = go straight to your own live window, otherwise the Live page
-supabaseClient.auth.getUser()
-.then(({ data }) => {
-liveWindow.location.href =
-data && data.user
-? liveBase + "?artist=" + encodeURIComponent(data.user.id)
-: liveBase;
-})
-.catch(() => {
-liveWindow.location.href = liveBase;
-});
-
-}
 
 console.log(
 "📡 GLCTC1 PLAY / UPLOAD BANKS SENT TO LIVE",
@@ -14665,7 +14638,7 @@ if (glctc1PlaylistShareTrack) {
       const shareUrl =
         `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(
           trackId
-        )}`;
+        )}&autoplay=1`;
 
 
       try {
@@ -14765,7 +14738,7 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
+        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}&autoplay=1`;
 
 
       // Short share text: truncated name + track count
@@ -15326,8 +15299,9 @@ if (sharedTrackId) {
 
   const sharedTrack =
     library.find(track =>
-      String(track.id) ===
-      String(sharedTrackId)
+      String(track.id) === String(sharedTrackId) ||
+      String(track.id_cat_no) === String(sharedTrackId) ||
+      String(track["ID Cat No"]) === String(sharedTrackId)
     );
 
   if (sharedTrack) {
@@ -17170,7 +17144,15 @@ async function initMIDI() {
   // 🚀 START GLCTC1 MIDI
   // ===================================================
 
-  initMIDI();
+  // v47: MIDI is only requested when FULL STUDIO is opened, so
+  // listeners never see a "connect to MIDI devices" prompt.
+  var glctc1MidiStarted = false;
+  window.glctc1StartMIDI = function () {
+    if (glctc1MidiStarted) return;
+    glctc1MidiStarted = true;
+    initMIDI();
+  };
+  if (window.glctc1StudioOpen) window.glctc1StartMIDI();
 
 })();
 
@@ -17458,7 +17440,7 @@ body.glctc1-simple-view .mixer-bay-controls {
 
     var parent = start.parentNode;
     var wrap = document.createElement("div");
-    wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "");
+    wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "") + (def.open ? "" : " mod-advanced");
     parent.insertBefore(wrap, start);
 
     // Move start … end (and anything between) into the wrapper
@@ -17629,59 +17611,110 @@ body.glctc1-simple-view .mixer-bay-controls {
 
 
   // -----------------------------------------------------
-  // One-touch HIDE ALL / SHOW ALL bar above the first module
+  // v47 VIEW SWITCH
+  //  • SIMPLE VIEW (default for new visitors + every share
+  //    link): only the player + Master Library are on the
+  //    page. Studio tabs, decks heading and deck-only buttons
+  //    are removed from view, the player sits at the top.
+  //  • FULL STUDIO: every module tab returns, with its own
+  //    remembered HIDE / SHOW state.
   // -----------------------------------------------------
+  var VIEW_KEY = "glctc1.view.play";
+  var qs = new URLSearchParams(location.search);
+  var shareVisit = qs.has("track") || qs.has("playlist");
+
+  // Studio-only blocks that are not modules themselves
+  var deckCard = $("deckA") ? $("deckA").closest(".glow-card") : null;
+  if (deckCard) {
+    deckCard.classList.add("glctc1-studio-only");
+    var prev = deckCard.previousElementSibling;
+    for (var p = 0; p < 2 && prev; p++) {
+      if (prev.tagName === "H1" || prev.classList.contains("subtitle")) prev.classList.add("glctc1-studio-only");
+      prev = prev.previousElementSibling;
+    }
+  }
+
+  var shopBanner = document.querySelector("a.glctc1-shop-ad");
+  var playModule = $("glctc1PlayModule");
+  var bar = null, hint = null, btns = {};
+
+  function mkBtn(label, key, fn) {
+    var b = document.createElement("div");
+    b.className = "mod-allbtn mod-btn-" + key;
+    b.setAttribute("role", "button");
+    b.setAttribute("tabindex", "0");
+    b.textContent = label;
+    b.addEventListener("click", fn);
+    b.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); fn(); }
+    });
+    btns[key] = b;
+    return b;
+  }
+
+  function placeShop(simple) {
+    if (!shopBanner || !bar) return;
+    if (simple && playModule) playModule.parentNode.insertBefore(shopBanner, playModule.nextSibling);
+    else bar.parentNode.insertBefore(shopBanner, bar);
+  }
+
+  function setView(simple, save) {
+    document.body.classList.toggle("glctc1-simple-view", simple);
+    document.body.classList.toggle("glctc1-full-view", !simple);
+    if (simple) {
+      // the listening modules are always open in Simple View
+      items.forEach(function (i) { if (i.defOpen) apply(i, false, false); });
+    } else {
+      window.glctc1StudioOpen = true;
+      if (typeof window.glctc1StartMIDI === "function") window.glctc1StartMIDI();
+    }
+    if (btns.simple) {
+      btns.simple.classList.toggle("on", simple);
+      btns.simple.setAttribute("aria-pressed", simple ? "true" : "false");
+      btns.full.classList.toggle("on", !simple);
+      btns.full.setAttribute("aria-pressed", simple ? "false" : "true");
+    }
+    placeShop(simple);
+    if (save) { try { localStorage.setItem(VIEW_KEY, simple ? "simple" : "full"); } catch (e) {} }
+    setTimeout(function () { window.dispatchEvent(new Event("resize")); }, 30);
+  }
+
+  function simpleView() { setView(true, true); }
+
   function setAll(collapsed) {
-    document.body.classList.remove("glctc1-simple-view");
+    setView(false, true);
     items.forEach(function (i) { apply(i, collapsed, true); });
   }
 
-  // SIMPLE VIEW = Playlist Master + Master Library only; hide loose mixer controls too.
-  function simpleView() {
-    document.body.classList.add("glctc1-simple-view");
-    items.forEach(function (i) { apply(i, !i.defOpen, true); });
-  }
-
   if (items.length) {
-
-    var bar = document.createElement("div");
+    bar = document.createElement("div");
     bar.className = "mod-allbar";
+    bar.appendChild(mkBtn("◎ SIMPLE VIEW", "simple", simpleView));
+    bar.appendChild(mkBtn("🎛 FULL STUDIO", "full", function () {
+      setView(false, true);
+      var first = items[0] && items[0].el;
+      if (first) first.scrollIntoView({ behavior: "smooth", block: "start" });
+    }));
+    bar.appendChild(mkBtn("▲ SHOW ALL", "showall", function () { setAll(false); }));
+    bar.appendChild(mkBtn("▼ HIDE ALL", "hideall", function () { setAll(true); }));
 
-    function mkBtn(label, collapsed) {
-      var b = document.createElement("div");
-      b.className = "mod-allbtn";
-      b.setAttribute("role", "button");
-      b.setAttribute("tabindex", "0");
-      b.textContent = label;
-      function run() { if (collapsed === null) simpleView(); else setAll(collapsed); }
-      b.addEventListener("click", run);
-      b.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-          e.preventDefault();
-          run();
-        }
-      });
-      return b;
-    }
+    hint = document.createElement("div");
+    hint.className = "mod-viewhint";
+    hint.textContent = "Decks · mixer · banks · add track · editor → FULL STUDIO";
+    bar.appendChild(hint);
 
-    bar.appendChild(mkBtn("◎ SIMPLE VIEW", null));
-    bar.appendChild(mkBtn("▲ SHOW ALL MODULES", false));
-    bar.appendChild(mkBtn("▼ HIDE ALL MODULES", true));
-
-    // Keep the shop advert above the Simple View / module visibility controls.
-    // It is a banner, not a collapsible module.
-    var shopBanner = document.querySelector("a.glctc1-shop-ad");
+    items[0].el.parentNode.insertBefore(bar, items[0].el);
     if (shopBanner) {
       shopBanner.style.display = "block";
-      shopBanner.style.visibility = "visible";
       shopBanner.style.position = "relative";
       shopBanner.style.zIndex = "1";
     }
-    items[0].el.parentNode.insertBefore(bar, items[0].el);
-    if (shopBanner) {
-      bar.parentNode.insertBefore(shopBanner, bar);
-    }
   }
+
+  var saved = null;
+  try { saved = localStorage.getItem(VIEW_KEY); } catch (e) {}
+  // Share links always open in Simple View (without changing the saved choice)
+  setView(shareVisit || saved !== "full", false);
 
 
   // Small helper for the browser console / other scripts
@@ -17690,6 +17723,7 @@ body.glctc1-simple-view .mixer-bay-controls {
     hideAll: function () { setAll(true); },
     showAll: function () { setAll(false); },
     simpleView: simpleView,
+    fullStudio: function () { setView(false, true); },
     set: function (key, collapsed) {
       items.forEach(function (i) { if (i.key === key) apply(i, !!collapsed, true); });
     }
@@ -19251,9 +19285,6 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
 })();
 </script>
 
-</body>
-</html>
-
 <!-- v37: ROOMY MIXER BAY WITH MASTER VOLUME + CROSSFADER -->
 <style>
 /* A hidden deck becomes a spacious, functional mixer bay. Keep all real
@@ -19352,7 +19383,9 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     var aw = a.closest('.mod-wrap') || a;
     var bw = b.closest('.mod-wrap') || b;
     var mw = mixer.closest('.mod-wrap') || mixer;
-    var nodes = [mw, master, cross];
+    /* v47: move the MASTER VOLUME / CROSSFADER tabs with their controls
+       (moving only the inner controls left empty tabs behind). */
+    var nodes = [mw, master.closest('.mod-wrap') || master, cross.closest('.mod-wrap') || cross];
     var markers = nodes.map(function (node, i) {
       var marker = document.createComment('GLCTC1 mixer bay original position ' + i);
       node.parentNode.insertBefore(marker, node);
@@ -19374,8 +19407,10 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     }
     function update() {
       var ac = collapsed(aw), bc = collapsed(bw);
-      /* Dock into whichever deck is hidden. If both are hidden, use A's bay. */
-      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : ((ac && bc) ? aw : null));
+      /* Dock into whichever deck is hidden. v47: when BOTH decks are hidden
+         the mixer goes back to its own full-width place (docking into Deck A
+         left a cramped box under the DECK A tab). */
+      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : null);
       if (target === activeHost) return;
       if (activeHost) activeHost.classList.remove('mixer-bay-host');
       activeHost = null;
@@ -19402,4 +19437,262 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
 })();
 </script>
 
+
+<!-- GLCTC1 FINAL LIVE PATCH v38
+     Mixer order: CHANNEL 1 + CHANNEL 2, MASTER VOLUME, CROSSFADER.
+     Retains the v37 mixer-bay behaviour: when Deck A or Deck B is hidden,
+     the full usable mixer docks into the hidden deck's space. -->
+<style id="glctc1-final-mixer-layout">
+  /* Keep the mixer, master output and crossfader as one spacious vertical stack. */
+  .glctc1-mixer-module {
+    overflow: visible !important;
+    min-width: 0 !important;
+  }
+  .glctc1-mixer-module .glctc1-channel-mixer {
+    margin-bottom: clamp(14px, 2vw, 22px) !important;
+  }
+  .mixer-bay-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: clamp(14px, 2vw, 22px) !important;
+    min-width: 0 !important;
+  }
+  .mixer-bay-controls .glctc1-mixer-module,
+  .mixer-bay-controls .glctc1-master-volume-wrap,
+  .mixer-bay-controls .crossfader-wrap {
+    order: initial !important;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .mixer-bay-controls .glctc1-master-volume-wrap,
+  .mixer-bay-controls .crossfader-wrap {
+    padding: clamp(14px, 2vw, 22px) !important;
+    border-radius: 14px !important;
+    background: rgba(5, 12, 34, .78) !important;
+    border: 1px solid rgba(0, 220, 255, .24) !important;
+  }
+  .mixer-bay-controls .glctc1-master-volume {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 34px !important;
+    margin: 10px 0 4px !important;
+  }
+  .mixer-bay-controls .crossfader {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 34px !important;
+    margin: 10px 0 4px !important;
+  }
+  .mixer-bay-controls .crossfader-wrap {
+    margin-top: 0 !important;
+  }
+  @media (max-width: 760px) {
+    .mixer-bay-controls {
+      padding: 10px !important;
+      gap: 14px !important;
+    }
+    .mixer-bay-controls .glctc1-headphone-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+    .mixer-bay-controls .glctc1-channel-mixer {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+  }
+  @media (max-width: 420px) {
+    .mixer-bay-controls .glctc1-channel-mixer {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+  }
+</style>
+
+<!-- =====================================================
+     GLCTC1 v47 — SIMPLE VIEW LAYOUT + SHARE-LINK AUTO PLAY
+     • Simple View: only the player + Master Library show,
+       with the player itself at the top of Playlist Master.
+     • Every ?track= / ?playlist= link plays automatically.
+       If the browser blocks sound until the visitor taps,
+       a full-screen TAP TO PLAY card appears instead of a
+       silent page.
+     ===================================================== -->
+<style id="glctc1-v47-simple-view">
+body.glctc1-simple-view .mod-advanced,
+body.glctc1-simple-view .glctc1-studio-only,
+body.glctc1-simple-view .mod-btn-showall,
+body.glctc1-simple-view .mod-btn-hideall,
+body.glctc1-simple-view .glctc1-playlist-bank-actions,
+body.glctc1-simple-view div:has(> #glctc1PlaylistLoadDeckA) {
+  display: none !important;
+}
+.mod-allbar .mod-allbtn.on {
+  border-color: #39ff14;
+  color: #8bff6b;
+  text-shadow: 0 0 8px #39ff14;
+  box-shadow: 0 0 12px #39ff1466, inset 0 0 10px #39ff1433;
+}
+body.glctc1-simple-view .mod-allbar .mod-allbtn { min-width: 0; }
+.mod-viewhint {
+  flex-basis: 100%;
+  text-align: center;
+  font: 600 11px system-ui, sans-serif;
+  letter-spacing: .08em;
+  color: #8a94bd;
+}
+body.glctc1-full-view .mod-viewhint { display: none; }
+
+/* Player first: header → player → share/actions → favourites → playlists */
+body.glctc1-simple-view #glctc1PlaylistMasterModule { display: flex; flex-direction: column; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > * { order: 10; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-master-header { order: 0; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-player { order: 1; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-action-centre { order: 2; margin-bottom: 14px; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > #glctc1FavouritePlaylist { order: 3; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-selected { order: 4; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-library { order: 5; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-create { order: 6; }
+body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-actions { order: 7; }
+
+/* TAP TO PLAY card (only when the browser blocks auto play) */
+#glctc1TapToPlay {
+  position: fixed; inset: 0; z-index: 99999;
+  display: none; align-items: center; justify-content: center;
+  padding: 24px; box-sizing: border-box;
+  background: rgba(2, 3, 14, .88);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+#glctc1TapToPlay.open { display: flex; }
+#glctc1TapToPlay .ttp-card {
+  width: min(360px, 100%);
+  padding: 22px 20px 24px;
+  border-radius: 22px;
+  text-align: center;
+  color: #fff;
+  background: radial-gradient(circle at 50% 0%, rgba(168,85,247,.28), transparent 60%), #070a1c;
+  border: 1px solid rgba(25, 247, 255, .55);
+  box-shadow: 0 0 30px rgba(25,186,255,.35), 0 0 60px rgba(236,72,153,.2);
+  cursor: pointer;
+}
+#glctc1TapToPlay img {
+  display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+  border-radius: 16px; margin: 0 0 16px; background: #0b1030;
+}
+#glctc1TapToPlay img[hidden] { display: none; }
+#glctc1TapToPlay .ttp-title { font: 800 18px 'Orbitron', system-ui, sans-serif; letter-spacing: .06em; overflow-wrap: anywhere; }
+#glctc1TapToPlay .ttp-artist { margin-top: 4px; font: 600 13px system-ui, sans-serif; color: #9fe9ff; letter-spacing: .08em; }
+#glctc1TapToPlay .ttp-btn {
+  display: inline-block; margin-top: 18px; padding: 14px 30px;
+  border: 0; border-radius: 999px; cursor: pointer;
+  font: 800 14px system-ui, sans-serif; letter-spacing: .16em; color: #fff;
+  background: linear-gradient(90deg, #ec4899, #a855f7, #06b6d4);
+  box-shadow: 0 0 18px rgba(236,72,153,.55), 0 0 34px rgba(6,182,212,.35);
+}
+
+/* No cover art: show a neon GLCTC1 disc instead of a broken image icon */
+.glctc1-playlist-artwork {
+  background: radial-gradient(circle at 50% 50%, #0a0620 0 14%, #1a1040 14.5% 30%, transparent 30.5%),
+              repeating-radial-gradient(circle at 50% 50%, #070a14 0 2px, #121830 2px 4px);
+}
+#glctc1PlaylistArtwork:not([src]), #glctc1PlaylistArtwork[src=""] { visibility: hidden; }
+body.glctc1-simple-view .mod-wrap:not(.mod-advanced) > .mod-toggle { display: none !important; }
+</style>
+
+<div id="glctc1TapToPlay" role="dialog" aria-modal="true" aria-labelledby="glctc1TapTitle">
+  <div class="ttp-card">
+    <img id="glctc1TapArt" alt="" hidden>
+    <div class="ttp-title" id="glctc1TapTitle">Shared track</div>
+    <div class="ttp-artist" id="glctc1TapArtist"></div>
+    <button class="ttp-btn" id="glctc1TapBtn" type="button">▶ TAP TO PLAY</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var img = document.getElementById("glctc1PlaylistArtwork");
+  if (img) img.addEventListener("error", function () { img.removeAttribute("src"); });
+})();
+</script>
+<script id="glctc1-v47-share-autoplay">
+(function () {
+  "use strict";
+  var qs = new URLSearchParams(location.search);
+  if (!qs.has("track") && !qs.has("playlist")) return;   // not a share link
+
+  var audio = document.getElementById("glctc1PlaylistAudio");
+  var box = document.getElementById("glctc1TapToPlay");
+  if (!audio || !box) return;
+
+  var done = false;          // stop helping once the track has played
+  var scrolled = false;
+
+  function txt(id) {
+    var el = document.getElementById(id);
+    return el ? el.textContent.trim() : "";
+  }
+
+  function showCard() {
+    if (done) return;
+    document.getElementById("glctc1TapTitle").textContent = txt("glctc1PlaylistTitle") || "Shared track";
+    document.getElementById("glctc1TapArtist").textContent = txt("glctc1PlaylistArtist");
+    var src = document.getElementById("glctc1PlaylistArtwork");
+    var art = document.getElementById("glctc1TapArt");
+    if (src && src.getAttribute("src")) { art.src = src.src; art.hidden = false; }
+    else art.hidden = true;
+    box.classList.add("open");
+    document.getElementById("glctc1TapBtn").focus({ preventScroll: true });
+  }
+
+  function hideCard() { box.classList.remove("open"); }
+
+  function showPlayer() {
+    if (scrolled) return;
+    scrolled = true;
+    var player = document.querySelector(".glctc1-playlist-player") ||
+                 document.getElementById("glctc1PlaylistMasterModule");
+    if (player) player.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function tryPlay() {
+    if (done || !audio.currentSrc && !audio.src) return;
+    if (!audio.paused) return;
+    var p = audio.play();
+    if (p && p.catch) {
+      p.catch(function (err) {
+        if (err && err.name === "NotAllowedError") showCard();
+      });
+    }
+  }
+
+  // Tap anywhere on the card: play inside the tap, which every browser allows
+  box.addEventListener("click", function () {
+    hideCard();
+    var p = audio.play();
+    if (p && p.catch) p.catch(function (e) { console.log("GLCTC1 tap-to-play:", e); });
+  });
+
+  audio.addEventListener("playing", function () { done = true; hideCard(); showPlayer(); });
+
+  // The page loads the shared track into the player; try again as soon as it can play
+  ["loadedmetadata", "canplay"].forEach(function (ev) {
+    audio.addEventListener(ev, function () { showPlayer(); tryPlay(); });
+  });
+
+  // The existing loader already calls play(); if the browser refused, it stays
+  // paused with a source set — catch that case too.
+  var checks = 0;
+  var t = setInterval(function () {
+    checks++;
+    if (done || checks > 60) { clearInterval(t); return; }
+    if (audio.src && audio.paused && audio.readyState >= 2) tryPlay();
+  }, 500);
+})();
+</script>
+
+</body>
+</html>
 

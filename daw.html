@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=1280,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#08090c">
 <meta name="description" content="GLCTC1 MUSIC browser DAW: record, arrange audio, MIDI and video clips, mix, and export WAV.">
-<title>GLCTC1 MUSIC — DAW v61 · Sync Fix · Keyboard START restored</title>
+<title>GLCTC1 MUSIC — DAW v65 · Keys + Record dock in every room</title>
 <style>
 :root{--bg:#07080b;--panel:#101116;--panel2:#171820;--line:#34333a;--gold:#ffd36a;--gold2:#a97820;--text:#f4f1e8;--muted:#a6a4ad;--blue:#19baff;--purple:#bd54ff;--green:#4af59b;--orange:#ff8a2a;--red:#ff4568}
 *{box-sizing:border-box}html,body{min-width:1280px;margin:0;min-height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}body{background:radial-gradient(ellipse at 70% -15%,#17253b 0,transparent 36%),#07080b}
@@ -1684,7 +1684,10 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
  syncTempoDisplays(){const raw=this.bpm(),bpm=GLCTC_CLOCK.fmt(raw);['lpTempo','blTempo','s101Tempo','goTempo','voxTempo','mine909Tempo'].forEach(id=>{const e=this.el(id);if(e)e.textContent=bpm+' BPM'});const o=this.el('lee303TempoVal');if(o)o.textContent=bpm+' BPM';const g=this.el('gscBpm');if(g)g.textContent=bpm;if(window.__glctcLeeState)window.__glctcLeeState.tempo=raw},
  bypassed(m){const e=this.el(m.bypassEl);return !!(e&&e.checked)},
  sends(m){const e=this.el(m.sendEl);return !e||e.checked},
- available(m,manual=false){if(this.bypassed(m)&&!manual)return false;if(!manual&&!this.modulesOn)return false;if(m.can&&!m.can())return false;return true},
+ room:null,
+ inRoom(m){return !this.room||this.room.has(m.id)},
+ addToRoom(id){if(this.room&&!this.room.has(id)){this.room.add(id);try{window.dispatchEvent(new CustomEvent('glctc-room-change',{detail:{id,on:true}}))}catch(e){}}},
+ available(m,manual=false){if(!manual&&!this.inRoom(m))return false;if(this.bypassed(m)&&!manual)return false;if(!manual&&!this.modulesOn)return false;if(m.can&&!m.can())return false;return true},
  launch(m,at,step,manual,solo){
   m.soloMode=!!solo;const prevAt=window.__glctcMasterStartAt,prevStep=window.__glctcStartStep;
   window.__glctcMasterStartAt=at;window.__glctcStartStep=step||0;
@@ -1710,19 +1713,20 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
   if(!GLCTC_CLOCK.anchored())GLCTC_CLOCK.anchor(at,b);
   Object.values(this.mods).forEach(m=>{
    if(m.running&&m.running())return;
+   if(!this.inRoom(m))return;
    if(m.can&&!m.can())return;
    // Master transport intentionally overrides per-module send toggles; bypass remains a mixer/audibility control, not a transport lock.
    this.launch(m,at,step,true,false);
   });
   this.syncPlayAllBtn();this.syncTempoDisplays();
  },
- allRunning(){const list=Object.values(this.mods).filter(m=>!this.bypassed(m)&&(!m.can||m.can()));return list.length>0&&list.every(m=>m.running&&m.running())},
+ allRunning(){const list=Object.values(this.mods).filter(m=>this.inRoom(m)&&!this.bypassed(m)&&(!m.can||m.can()));return list.length>0&&list.every(m=>m.running&&m.running())},
  syncPlayAllBtn(){const b=this.el('playAllModulesBtn');if(!b)return;const on=this.playAllActive||this.allRunning();const t=on?'■ STOP ALL MODULES':'▶ PLAY ALL MODULES';if(b.textContent!==t)b.textContent=t;b.classList.toggle('active',on)},
- async playAll(){if(!this.modulesOn){toast('Switch MODULES ON to play the modules.');return}this.modulesSuspendedGroup=false;if(this.playAllActive||this.allRunning()){this.stopAll();if(!playing){this.sharedEpochAt=null;this.sharedBeat=0}return}const token=++this.request;const c=await this.prepare();if(token!==this.request)return;const anyRunning=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!anyRunning&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.playAllActive=true;Object.values(this.mods).forEach(m=>{if(!this.bypassed(m)&&(!m.can||m.can())&&!(m.running&&m.running()))this.launch(m,point.at,point.step,true,false)});this.syncPlayAllBtn();this.syncTempoDisplays()},
- async startFrom(id){const token=++this.request,c=await this.prepare();if(token!==this.request)return;const src=this.mods[id];if(!src||!this.available(src,true))return;if(c.resume)c.resume();const running=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!running&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.launch(src,point.at,point.step,true,false)},
+ async playAll(){if(!this.modulesOn){toast('Switch MODULES ON to play the modules.');return}this.modulesSuspendedGroup=false;if(this.playAllActive||this.allRunning()){this.stopAll();if(!playing){this.sharedEpochAt=null;this.sharedBeat=0}return}const token=++this.request;const c=await this.prepare();if(token!==this.request)return;const anyRunning=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!anyRunning&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.playAllActive=true;Object.values(this.mods).forEach(m=>{if(this.inRoom(m)&&!this.bypassed(m)&&(!m.can||m.can())&&!(m.running&&m.running()))this.launch(m,point.at,point.step,true,false)});this.syncPlayAllBtn();this.syncTempoDisplays()},
+ async startFrom(id){this.addToRoom(id);const token=++this.request,c=await this.prepare();if(token!==this.request)return;const src=this.mods[id];if(!src||!this.available(src,true))return;if(c.resume)c.resume();const running=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!running&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.launch(src,point.at,point.step,true,false)},
  stopFrom(id){this.request++;const src=this.mods[id];if(src)this.halt(src);if(!playing&&!Object.values(this.mods).some(m=>m.running?.()))GLCTC_CLOCK.clear()},
  toggleFrom(id){const src=this.mods[id];if(!src)return;if(src.running&&src.running())this.stopFrom(id);else this.startFrom(id)},
- async soloFrom(id){const token=++this.request;await this.prepare();if(token!==this.request)return;const src=this.mods[id];if(!src||!this.available(src,true))return;const isRunning=!!(src.running&&src.running());const existingSolo=Object.values(this.mods).filter(m=>m!==src&&m.soloMode&&m.running&&m.running());if(isRunning&&src.soloMode){this.halt(src);return}if(!existingSolo.length){Object.values(this.mods).forEach(m=>{if(m!==src)this.halt(m)});if(isRunning)this.halt(src)}else if(isRunning){this.halt(src)}const c=ensureAudio();if(c.resume)c.resume();const running=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!running&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.launch(src,point.at,point.step,true,true)},
+ async soloFrom(id){this.addToRoom(id);const token=++this.request;await this.prepare();if(token!==this.request)return;const src=this.mods[id];if(!src||!this.available(src,true))return;const isRunning=!!(src.running&&src.running());const existingSolo=Object.values(this.mods).filter(m=>m!==src&&m.soloMode&&m.running&&m.running());if(isRunning&&src.soloMode){this.halt(src);return}if(!existingSolo.length){Object.values(this.mods).forEach(m=>{if(m!==src)this.halt(m)});if(isRunning)this.halt(src)}else if(isRunning){this.halt(src)}const c=ensureAudio();if(c.resume)c.resume();const running=Object.values(this.mods).some(m=>m.running&&m.running());let point;if(!running&&!playing){point={at:c.currentTime+.45,beat:0,step:0};GLCTC_CLOCK.anchor(point.at,0);this.sharedBpm=this.bpm()}else{point=this.nextLaunchPoint(c);if(!GLCTC_CLOCK.anchored()){this.sharedBeat=point.beat;this.sharedEpochAt=point.at}}this.launch(src,point.at,point.step,true,true)},
  initSolo(){const map={lp:'lpSolo',bl:'blSolo',mine:'mine909Solo',lee:'lee303Solo',s101:'s101Solo',go:'goSolo',vox:'voxSolo'},playMap={lp:'lpTransportPlay',bl:'blPlay',mine:'mine909Play',lee:'lee303Play',s101:'s101TransportPlay',go:'goPlay',vox:'voxPlay'};for(const [id,bid] of Object.entries(map)){const b=this.el(bid);if(b)b.onclick=()=>this.soloFrom(id)}setInterval(()=>{this.syncPlayAllBtn();this.syncTempoDisplays();for(const [id,bid] of Object.entries(map)){const b=this.el(bid),m=this.mods[id];if(!b||!m)continue;const on=!!(m.soloMode&&m.running&&m.running());b.classList.toggle('active',on);const label=on?'■ SOLO ON':'◉ SOLO PLAY';if(b.textContent!==label)b.textContent=label}for(const [id,bid] of Object.entries(playMap)){const b=this.el(bid),m=this.mods[id];if(!b||!m)continue;const on=!!(m.running&&m.running());b.classList.toggle('active',on);const label=on?'Ⅱ PLAYING':'▶ PLAY PATTERN';if(b.textContent!==label)b.textContent=label}},250)},
  resetBtns:{lp:'lpTransportStop',bl:'blStop',mine:'mine909Stop',lee:'lee303Stop',s101:'s101TransportStop',go:'goStop',vox:'voxStop'},
  resetFrom(id,quiet){const m=this.mods[id];if(!m||!m.reset)return false;try{this.halt(m);m.reset();this.syncTempoDisplays();if(!quiet)toast(m.name+' reset: factory settings, demo pattern, master BPM');return true}catch(err){console.error('GLCTC1 reset',m.name,err);toast('Reset failed for '+m.name);return false}},
@@ -6187,6 +6191,142 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
  const mm=document.createElement('span');mm.className='mm';bar.append(mm);
  const app=document.querySelector('main.app');if(app)app.insertAdjacentElement('beforebegin',bar);else document.body.prepend(bar);
  setInterval(()=>{const H=window.GLCTC_HUB;if(H)for(const k in dots){const m=H.mods[k];dots[k].classList.toggle('on',!!(m&&m.running&&m.running()))}const on=!!window.__glctcModMode;mm.textContent=on?'MOD MODE ON · master transport sequencer off':'';mm.classList.toggle('on',on)},400);
+})();
+</script>
+
+<script>
+/* v62 STUDIO MODES: one tap opens just the modules for a job (drums, synths, voice, remix…) and tucks the rest away.
+   Hidden modules keep playing. FULL STUDIO shows everything again. Your choice is remembered on this device. */
+(()=>{'use strict';
+ const $=id=>document.getElementById(id),q=s=>document.querySelector(s);
+ const PANELS={
+  console:()=>$('wsPanel'),drum80:()=>$('beatLabPanel'),divine:()=>$('mine909Panel'),lee:()=>$('lee303Panel'),s101:()=>$('s101Panel'),
+  go:()=>$('galacticOnePanel'),vox:()=>$('voxPanel'),looper:()=>$('looperPanel'),mixer:()=>q('.panel.mixer'),
+  stage:()=>{const v=$('videoPreview');return v&&v.closest('.panel')},editor:()=>{const e=$('editorTitle');return e&&e.closest('.panel')},
+  timeline:()=>q('.panel.timeline-panel'),browser:()=>q('.layout .panel.browser'),actions:()=>$('glctc1ActionSequencer'),composer:()=>$('glctc1SongComposer')
+ };
+ const ALL=Object.keys(PANELS);
+ const MODES=[
+  {k:'all',t:'FULL STUDIO',s:'Every module + controller',i:'☰',c:'#19baff',show:ALL,go:null,mods:'all'},
+  {k:'seq',t:'SEQUENCE',s:'Arrange audio & video',i:'▤',c:'#ffd36a',show:['timeline','browser','editor','stage','mixer'],go:'timeline',mods:[],dock:true},
+  {k:'drums',t:'DRUM CREATE',s:'Every drum machine',i:'◉',c:'#ff5bb0',show:['drum80','divine','console','looper','mixer'],go:'drum80',mods:['bl','mine','ws','lp'],keys:['bl','mine','ws'],dock:true,pad:true},
+  {k:'synths',t:'SYNTHS',s:'30LEE · 0010110 · Galactic One',i:'∿',c:'#bd54ff',show:['lee','s101','go','mixer'],go:'lee',mods:['lee','s101','go'],keys:['lee','s101','go'],dock:true},
+  {k:'voice',t:'VOICE EDIT',s:'Sing, tune & shape vocals',i:'♪',c:'#ff7ad9',show:['vox','console','looper','mixer'],go:'vox',mods:['vox'],keys:['vox'],dock:true},
+  {k:'mix',t:'MODULE MIX',s:'Every module on the faders',i:'⫶',c:'#4af59b',show:['console','mixer'],go:'console',mods:'all'},
+  {k:'live',t:'LIVE',s:'Perform everything live',i:'♛',c:'#b6ff3c',show:['console','looper','actions','mixer'],go:'console',mods:'all'},
+  {k:'remix',t:'REMIX',s:'Master Library & stems',i:'★',c:'#ff8a2a',show:['console','timeline','mixer'],go:'console',tab:'WAVE',lib:true,mods:[]},
+  {k:'sample',t:'SAMPLE LAB',s:'Chop, crush & split stems',i:'✂',c:'#40eaff',show:['console','looper'],go:'console',tab:'WAVE',mods:[]},
+  {k:'compose',t:'SONG COMPOSER',s:'One song · every module',i:'✦',c:'#f2ca70',show:['composer','console','mixer'],go:'composer',mods:'all',dock:true},
+  {k:'video',t:'VIDEO',s:'Visual stage & clips',i:'▶',c:'#ff8a2a',show:['stage','timeline','editor','browser'],go:'stage',mods:[],dock:true},
+  {k:'record',t:'RECORD',s:'Capture anything you play',i:'●',c:'#ff4568',show:['console','timeline','mixer'],go:'console',tab:'RECORD',mods:'all'}
+ ];
+ const KEY='glctc1.studioMode';
+ const CONTROLLER=['console','mixer'];
+ /* KEYS + RECORD DOCK: the real Master Controller folds down to keyboard, ARM strip, START/MOD MODE/BPM and the recorder.
+    ⤢ OPEN FULL CONSOLE unfolds the whole thing in place; the choice is remembered per room. */
+ const dockCss=document.createElement('style');dockCss.textContent=`
+#wsPanel.ws-compact>.gpc-bar,#wsPanel.ws-compact:not(.ws-show-pad) .cn>.ws-card,#wsPanel.ws-compact .cn-mixer,#wsPanel.ws-compact .cn-keysec>.glctc-perf,#wsPanel.ws-compact .cn-drawer,#wsPanel.ws-compact .cn-wavepane>*:not(.cn-glass):not(.cn-sinfo){display:none!important}
+#wsPanel.ws-compact .cn-wave{height:120px!important;min-height:0!important}
+#wsPanel.ws-compact .cn-wavepane{padding-bottom:6px}
+.ws-dock{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 10px 0;padding:8px 10px;border:1px solid #2c5a73;border-radius:9px;background:linear-gradient(90deg,#071018,#0d0e14)}
+.ws-dock b{font-size:11px;letter-spacing:.2em;color:#4fd8ff}
+.ws-dock span{font-size:10px;color:var(--muted);letter-spacing:.06em;flex:1 1 220px}
+.ws-dock button{padding:8px 14px;font-size:11px;font-weight:900;letter-spacing:.1em;border-color:#19baff;color:#bfeaff;background:linear-gradient(#10263a,#0a1622)}
+#wsPanel:not(.ws-compact) .ws-dock{border-color:#4a3c1e}`;document.head.append(dockCss);
+ let dockRoom='all';
+ const dockBar=document.createElement('div');dockBar.className='ws-dock';
+ const dockTitle=document.createElement('b'),dockNote=document.createElement('span'),dockBtn=document.createElement('button');dockBtn.type='button';
+ dockBar.append(dockTitle,dockNote,dockBtn);
+ function dockPaint(){const ws=$('wsPanel');const c=!!(ws&&ws.classList.contains('ws-compact'));dockTitle.textContent=c?'KEYS + RECORD':'FULL MASTER CONSOLE';dockNote.textContent=c?'KEYBOARD · ARM · START · REC — EVERYTHING ELSE IS FOLDED AWAY AND STILL RUNNING':'PAD-64 · SCREEN & SAMPLE LAB · MIXER · PERFORMANCE PADS · KEYBOARD';dockBtn.textContent=c?'⤢ OPEN FULL CONSOLE':'⤡ COMPACT KEYS + RECORD';dockBtn.title=c?'Unfold the whole Master Console here':'Fold the console down to keyboard + recorder'}
+ function dockSet(compact,save){const ws=$('wsPanel');if(!ws)return;ws.classList.toggle('ws-compact',!!compact);if(save)try{localStorage.setItem('glctc1.consoleFull.'+dockRoom,compact?'0':'1')}catch(e){}dockPaint();setTimeout(()=>window.dispatchEvent(new Event('resize')),60)}
+ dockBtn.onclick=()=>{const ws=$('wsPanel');dockSet(!(ws&&ws.classList.contains('ws-compact')),true);if(ws&&!ws.classList.contains('ws-compact'))ws.scrollIntoView({behavior:'smooth',block:'start'})};
+ function dockApply(m){const ws=$('wsPanel');if(!ws)return;if(!dockBar.isConnected){const tg=ws.querySelector(':scope>.mod-toggle');if(tg)tg.insertAdjacentElement('afterend',dockBar);else ws.prepend(dockBar)}dockRoom=m.k;ws.classList.toggle('ws-show-pad',!!m.pad);let full=null;try{full=localStorage.getItem('glctc1.consoleFull.'+m.k)}catch(e){}const compact=m.dock?full!=='1':full==='0';dockSet(compact,false)}
+ /* the keyboard plays the room's instruments */
+ const KEYNAME={lp:'LOOPER',bl:'80LA8',mine:'DIVINE09',lee:'30LEE',s101:'0010110',go:'GALACTIC ONE',vox:'GALACTIC VOX',ws:'PAD-64'};
+ function setKeyTargets(ids){const want=new Set(ids.map(i=>KEYNAME[i]));document.querySelectorAll('#wsPanel .cn-arm').forEach(c=>{const m=/ARM: play (.+?) from the keyboard/.exec(c.title||'');if(!m)return;const on=c.classList.contains('on');if(want.has(m[1])!==on)c.click()})}
+ const css=document.createElement('style');css.textContent=`
+.gm-wrap{margin:10px 12px 0;padding:12px 12px 6px;border:1px solid #2a2b33;border-radius:12px;background:linear-gradient(180deg,#0d0e14,#08090c)}
+.gm-head{display:flex;align-items:center;gap:10px;margin:0 2px 10px}
+.gm-head b{font-size:11px;letter-spacing:.32em;color:#4fd8ff;text-shadow:0 0 10px #19baff66}
+.gm-head span{font-size:10px;color:var(--muted);letter-spacing:.08em}
+.gm-head .gm-now{margin-left:auto;color:#ffd36a;font-weight:800;letter-spacing:.14em}
+.gm-head button{padding:4px 10px;font-size:10px;letter-spacing:.12em}
+.gm-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;padding-bottom:6px}
+.gm-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-height:118px;padding:12px 12px 10px;text-align:left;border-radius:14px;border:1.5px solid color-mix(in srgb,var(--mc) 70%,transparent);background:radial-gradient(120% 90% at 0% 0%,color-mix(in srgb,var(--mc) 22%,transparent),transparent 60%),linear-gradient(160deg,#16171f,#0b0c11);box-shadow:0 0 14px color-mix(in srgb,var(--mc) 30%,transparent),inset 0 1px 0 #ffffff14;color:#fff;cursor:pointer;overflow:hidden}
+.gm-card:before{content:'';position:absolute;left:10px;right:10px;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--mc);box-shadow:0 0 12px var(--mc)}
+.gm-card:hover{transform:translateY(-1px);box-shadow:0 0 22px color-mix(in srgb,var(--mc) 55%,transparent),inset 0 1px 0 #ffffff1c;color:#fff;border-color:var(--mc)}
+.gm-card.on{border-color:var(--mc);box-shadow:0 0 0 2px var(--mc),0 0 26px color-mix(in srgb,var(--mc) 70%,transparent)}
+.gm-ico{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-size:20px;font-weight:900;color:#0a0a10;background:var(--mc);box-shadow:0 0 12px color-mix(in srgb,var(--mc) 60%,transparent)}
+.gm-t{font-size:14px;font-weight:900;letter-spacing:.12em;text-shadow:0 0 10px #ffffff33;line-height:1.1}
+.gm-s{font-size:11px;color:color-mix(in srgb,var(--mc) 55%,#fff);line-height:1.3;padding-right:14px}
+.gm-arr{position:absolute;right:10px;bottom:8px;color:var(--mc);font-size:16px;font-weight:900}
+.gm-hide{display:none!important}
+.gm-act{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-2px 2px 10px;font-size:10px;letter-spacing:.1em;color:var(--muted)}.gm-act i{font-style:normal;padding:3px 8px;border-radius:999px;border:1px solid #2f3a2f;color:#8bff9b;background:#0c160e}.gm-act i.off{color:#6d6f78;border-color:#2a2b33;background:#0d0e12;text-decoration:line-through}
+.gm-wrap.gm-min .gm-grid{display:none}
+@media(max-width:1100px){.gm-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}`;
+ document.head.append(css);
+ const wrap=document.createElement('section');wrap.className='gm-wrap';wrap.setAttribute('aria-label','Studio modes');
+ const head=document.createElement('div');head.className='gm-head';
+ const now=document.createElement('span');now.className='gm-now';
+ const minB=document.createElement('button');minB.type='button';
+ const act=document.createElement('div');act.className='gm-act';
+ head.append(Object.assign(document.createElement('b'),{textContent:'STUDIO MODES'}),Object.assign(document.createElement('span'),{textContent:'KEYBOARD + RECORDER IN EVERY ROOM · ⤢ OPENS THE FULL CONSOLE · A ROOM PICKS WHICH MODULES PLAY · OPEN ANY OTHER MODULE TO ADD IT'}),now,minB);
+ const grid=document.createElement('div');grid.className='gm-grid';
+ const cards={};
+ MODES.forEach(m=>{const b=document.createElement('button');b.type='button';b.className='gm-card';b.style.setProperty('--mc',m.c);b.title=m.t+' · '+m.s;
+  b.innerHTML='<span class="gm-ico"></span><span class="gm-t"></span><span class="gm-s"></span><span class="gm-arr">›</span>';
+  b.querySelector('.gm-ico').textContent=m.i;b.querySelector('.gm-t').textContent=m.t;b.querySelector('.gm-s').textContent=m.s;
+  b.onclick=()=>apply(m.k,true);cards[m.k]=b;grid.append(b)});
+ wrap.append(head,act,grid);
+ let min=false;try{min=localStorage.getItem(KEY+'.min')==='1'}catch(e){}
+ const syncMin=()=>{wrap.classList.toggle('gm-min',min);minB.textContent=min?'▼ SHOW ROOMS':'▲ HIDE ROOMS'};
+ minB.onclick=()=>{min=!min;try{localStorage.setItem(KEY+'.min',min?'1':'0')}catch(e){}syncMin()};syncMin();
+ function setVisible(el,on){if(!el)return;const tg=el.querySelector(':scope>.mod-toggle');if(tg){el.classList.remove('gm-hide');if(el.classList.contains('mod-collapsed')===on)tg.click()}else el.classList.toggle('gm-hide',!on)}
+ function consoleTab(name){const t=[...document.querySelectorAll('#wsPanel .cn-tab')].find(b=>b.textContent.toUpperCase().includes(name));if(t&&!t.classList.contains('on'))t.click()}
+ const MODNAME={lp:'LOOPER',bl:'80LA8',mine:'DIVINE09',lee:'30LEE',s101:'0010110',go:'GALACTIC ONE',vox:'VOX'};
+ const PANEL_MOD={drum80:'bl',divine:'mine',lee:'lee',s101:'s101',go:'go',vox:'vox',looper:'lp'};
+ let applying=false,applyingUntil=0;
+ const H=()=>window.GLCTC_HUB;
+ const playingNow=()=>{try{return !!(window.glctcTimeline&&glctcTimeline.playing()&&!window.__glctcModMode)||Object.values(H().mods).some(m=>m.running&&m.running())}catch(e){return false}};
+ function paintActive(){const h=H();act.innerHTML='';if(!h)return;act.append(Object.assign(document.createElement('span'),{textContent:'MASTER CONTROLLER ✓ · '+(h.room?'ACTIVE MODULES:':'ALL MODULES ACTIVE:')}));Object.keys(MODNAME).forEach(id=>{const on=!h.room||h.room.has(id);const x=document.createElement('i');x.textContent=MODNAME[id];if(!on)x.className='off';x.title=on?'Plays with START':'Not in this room · open it to add it';act.append(x)})}
+ function syncRoom(){const h=H();if(!h)return;const song=!!(window.GLCTC_SONG&&GLCTC_SONG.running());Object.values(h.mods).forEach(m=>{if(!h.inRoom(m)&&m.running&&m.running())h.stopFrom(m.id)});if(!song&&playingNow()&&h.modulesOn!==false){const list=Object.values(h.mods).filter(m=>h.inRoom(m)&&!(m.running&&m.running())&&!h.bypassed(m)&&(!m.can||m.can()));if(list.length)h.prepare().then(c=>{const pt=h.nextLaunchPoint(c);list.forEach(m=>{if(h.inRoom(m)&&!(m.running&&m.running()))h.launch(m,pt.at,pt.step,true,false)})}).catch(e=>console.warn('room join',e))}paintActive()}
+ function apply(k,scroll){const m=MODES.find(x=>x.k===k)||MODES[0];
+  const h=H();if(h)h.room=m.mods==='all'?null:new Set(m.mods.concat(['ws']));
+  try{setKeyTargets(m.keys||Object.keys(KEYNAME))}catch(e){}
+  applying=true;applyingUntil=performance.now()+400;const show=new Set(m.show);CONTROLLER.forEach(x=>show.add(x));try{ALL.forEach(id=>{try{setVisible(PANELS[id](),show.has(id))}catch(e){}})}finally{applying=false}
+  try{dockApply(m)}catch(e){console.warn('dock',e)}
+  syncRoom();
+  const bar=q('.mod-allbar');if(bar)bar.classList.toggle('gm-hide',m.k!=='all');
+  if(m.tab)try{consoleTab(m.tab)}catch(e){}
+  if(m.lib)try{const b=[...document.querySelectorAll('#wsPanel .sw-tools button')].find(x=>x.textContent.includes('MASTER LIBRARY'));const box=q('#wsPanel .ml-box');if(b&&box&&box.style.display==='none')b.click()}catch(e){}
+  Object.entries(cards).forEach(([kk,b])=>b.classList.toggle('on',kk===m.k));now.textContent='ROOM · '+m.t;
+  try{localStorage.setItem(KEY,m.k)}catch(e){}
+  if(scroll&&m.go){setTimeout(()=>{let el=PANELS[m.go]();if(m.tab&&m.go==='console'){const sc=q('#wsPanel .cn-screen');if(sc)el=sc}if(el)el.scrollIntoView({behavior:'smooth',block:'start'})},60)}
+  setTimeout(()=>window.dispatchEvent(new Event('resize')),80)}
+ function layoutUnits(){
+  const ws=$('wsPanel'),comp=$('glctc1SongComposer'),tb=q('main.app .toolbar');
+  if(ws&&tb&&tb.nextElementSibling!==ws)tb.insertAdjacentElement('afterend',ws);
+  if(comp&&ws&&ws.nextElementSibling!==comp)ws.insertAdjacentElement('afterend',comp);
+  if(comp&&!comp.querySelector(':scope>.mod-toggle')){
+   const btn=document.createElement('button');btn.type='button';btn.className='mod-toggle';
+   const nm=document.createElement('span');nm.className='mt-name';nm.textContent='GLCTC1 SONG COMPOSER';
+   const run=document.createElement('span');run.className='mt-run';run.textContent='● PLAYING';
+   const actB=document.createElement('span');actB.className='mt-act';btn.append(nm,run,actB);comp.insertBefore(btn,comp.firstChild);
+   const set=(c,save)=>{comp.classList.toggle('mod-collapsed',c);actB.textContent=c?'▲ SHOW':'▼ HIDE';btn.setAttribute('aria-expanded',c?'false':'true');if(save)try{localStorage.setItem('glctc1.collapse.composer',c?'1':'0')}catch(e){}};
+   btn.addEventListener('click',()=>set(!comp.classList.contains('mod-collapsed'),true));
+   let c0=false;try{c0=localStorage.getItem('glctc1.collapse.composer')==='1'}catch(e){}set(c0,false);
+   setInterval(()=>{const on=!!(window.GLCTC_SONG&&GLCTC_SONG.running());run.classList.toggle('on',on&&comp.classList.contains('mod-collapsed'))},500);
+  }
+ }
+ function watchToggles(){Object.entries(PANEL_MOD).forEach(([pk,id])=>{const el=PANELS[pk]();const tg=el&&el.querySelector(':scope>.mod-toggle');if(!tg||tg.__gmWatch)return;tg.__gmWatch=true;
+   tg.addEventListener('click',()=>setTimeout(()=>{if(applying||performance.now()<applyingUntil)return;const h=H();if(!h||!h.room)return;const open=!el.classList.contains('mod-collapsed');
+    if(open&&!h.room.has(id)){h.room.add(id);if(playingNow()&&!(window.GLCTC_SONG&&GLCTC_SONG.running()))h.startFrom(id)}
+    else if(!open&&h.room.has(id)){h.room.delete(id);h.stopFrom(id)}paintActive()},0))})}
+ window.addEventListener('glctc-room-change',e=>{try{const id=e.detail&&e.detail.id,pk=Object.keys(PANEL_MOD).find(k=>PANEL_MOD[k]===id),el=pk&&PANELS[pk]();if(el){applying=true;try{setVisible(el,true)}finally{applying=false}}}catch(_){}paintActive()});
+ window.GLCTC_STUDIO_MODE={set:k=>apply(k,true),modes:MODES.map(m=>m.k),active:()=>{const h=H();return h&&h.room?[...h.room]:'all'}};
+ function mount(){const nav=q('nav.nav');if(nav)nav.insertAdjacentElement('afterend',wrap);else{const app=q('main.app');if(app)app.insertAdjacentElement('beforebegin',wrap);else document.body.prepend(wrap)}
+  layoutUnits();watchToggles();let k='all';try{k=localStorage.getItem(KEY)||'all'}catch(e){}apply(MODES.some(m=>m.k===k)?k:'all',false)}
+ if(document.readyState==='complete')setTimeout(mount,50);else window.addEventListener('load',()=>setTimeout(mount,50),{once:true});
 })();
 </script>
 </body>

@@ -5343,7 +5343,18 @@ async function startSong(){
  try{
   const want=Math.max(30,Math.min(300,Number(byId('bpm').value)||130)),be=byId('bpm');
   if(be&&Number(be.value)!==want){be.value=want;fire(be)}
-  if(!h.modulesOn){status('Switch MODULES ON before playing the song.');return}h.stopAll();h.reanchorBpm();
+  /* The Song Composer owns its own four-button workflow. The global hub
+     defaults to MODULES OFF during page initialisation, so enable the module
+     group here without launching anything early. The composer then starts
+     every selected module together on its scheduled master-clock edge. */
+  if(!h.modulesOn){
+   h.modulesOn=true;
+   h.modulesSuspendedGroup=false;
+   try{localStorage.setItem('glctc1.modulesOn','1')}catch(e){}
+   const modulesButton=byId('modulesBtn');
+   if(modulesButton){modulesButton.textContent='MODULES ON';modulesButton.classList.add('active');modulesButton.setAttribute('aria-pressed','true')}
+  }
+  h.stopAll();h.reanchorBpm();
   status('PREPARING MODULES…');
   await h.prepare();if(request!==songRequest)return;
   let c=ctxOf();
@@ -5394,13 +5405,18 @@ async function startSong(){
 }
 function stopSong(msg){
  songRequest++;GLCTC_CLOCK.cancel(timer);timer=0;const h=H();
+ /* STOP is a true return-to-start command: cancel module schedulers/sources,
+    reset the shared step origin and put the DAW timeline at bar 1. */
  try{
   if(S){MODS.forEach(m=>{if(m.tr)return;const g=busGain(m);if(g){try{g.cancelScheduledValues(0);g.setValueAtTime(1,S.ctx.currentTime)}catch(e){}}})}
  }catch(e){}
- try{if(h){h.stopAll();h.sharedEpochAt=null;h.sharedBeat=0}}catch(e){}
+ try{if(h){h.stopAll();h.sharedEpochAt=null;h.sharedBeat=0;h.playAllActive=false}}catch(e){}
  try{window.glctcTimeline&&window.glctcTimeline.halt()}catch(e){}
+ try{window.__glctcStartStep=0;window.__glctcMasterStartAt=(S&&S.ctx?S.ctx.currentTime:GLCTC_CLOCK.now())+.06;GLCTC_CLOCK.anchor(window.__glctcMasterStartAt,0)}catch(e){try{GLCTC_CLOCK.clear();GLCTC_CLOCK.ensureAnchor(0)}catch(_){}}
+ try{playheadBeats=0;renderPlayhead();updatePosition();syncVideo()}catch(e){}
+ try{const p=byId('playBtn');if(p){p.textContent='▶';p.classList.remove('active')}}catch(e){}
  try{restoreGo()}catch(e){}
- S=null;setBtn();markNow(-1);status(msg||'SONG STOPPED');
+ S=null;setBtn();markNow(-1);status(msg||'STOPPED · RETURNED TO START');
 }
 function tick(){
  if(!S)return;
@@ -5724,7 +5740,7 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
 </script>
 
 
-<!-- GLCTC1 v52 TRANSPORT SEPARATION: Play never enables or starts modules; module switch is explicit; unified pattern selection, explicit demo loading, group transport suspend/resume; adaptive voice budget, effect curve caching, reduced visual refresh, ended-node cleanup; shared scheduler, exact composer section selection, queued-source stop, audio-clock timeline; central master BPM mirror; module tempo controls remain slaves; composer key/scale is visible; fresh genre/key/tempo/pattern demo is generated on every page load without auto-playing. -->
+<!-- GLCTC1 v55 STOP RETURNS ALL MODULES TO START: Play never enables or starts modules; module switch is explicit; unified pattern selection, explicit demo loading, group transport suspend/resume; adaptive voice budget, effect curve caching, reduced visual refresh, ended-node cleanup; shared scheduler, exact composer section selection, queued-source stop, audio-clock timeline; central master BPM mirror; module tempo controls remain slaves; composer key/scale is visible; fresh genre/key/tempo/pattern demo is generated on every page load without auto-playing. -->
 <script>
 /* GLCTC1 MASTER SYNC HARDENING — single master tempo, one launch epoch, fresh composer demo on every page load. */
 (()=>{'use strict';
@@ -5780,4 +5796,6 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
 </body>
 </html>
 
+
+<!-- GLCTC1 v55: SONG COMPOSER STOP now halts all registered modules and scheduled audio, resets shared module start step and master clock to beat zero, and returns the DAW timeline playhead/position to bar 1. -->
 

@@ -5137,12 +5137,16 @@ panel.innerHTML=`<style>
 #glctc1SongComposer td input[type=range]{width:78px;accent-color:#d8ae4e}
 #glctc1SongComposer .gsc-now{background:rgba(214,173,78,.16)}
 #glctc1SongComposer .gsc-off select,#glctc1SongComposer .gsc-off input[type=range]{opacity:.35}
-#glctc1SongComposer .gsc-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}
+#glctc1SongComposer .gsc-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}
+#glctc1SongComposer .gsc-actions button{min-height:52px;font-size:12px;letter-spacing:.04em}
+#glctc1SongComposer .gsc-actions #gscStop{border-color:#9b4652;color:#ff9aa8;background:#211217}
+#glctc1SongComposer .gsc-actions #gscStop:disabled{opacity:.35}
+@media(max-width:699px){#glctc1SongComposer .gsc-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #glctc1SongComposer button{min-height:40px;border:1px solid #80672c;border-radius:8px;background:#201b11;color:#f7d987;font-weight:800;padding:8px;touch-action:manipulation}
 #glctc1SongComposer button.primary{background:#d6ad4e;color:#15120a;border-color:#e9cb7b}
 #glctc1SongComposer .gsc-status{font-size:11px;color:#9de2b1;margin-top:9px;min-height:16px}
 #glctc1SongComposer .gsc-note{font-size:10px;color:#aaa;line-height:1.45;margin-top:8px}
-@media(min-width:700px){#glctc1SongComposer .gsc-actions{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
 </style>
 <div class="gsc-title">GLCTC1 SONG COMPOSER</div>
 <div class="gsc-sub">MODULES ONLY · every module plays the whole song in sync; each section picks its pattern and whether it is heard. Nothing goes to the timeline or MIDI.</div>
@@ -5156,20 +5160,15 @@ panel.innerHTML=`<style>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label></div>
 </div>
 <div class="gsc-wrap"><table id="gscGrid"></table></div>
-<div class="gsc-actions">
- <button class="primary" id="gscGen">✦ GENERATE SONG &amp; PLAY</button>
- <button class="primary" id="gscPlay">♪ PLAY SONG</button>
- <button id="gscFill" title="Write genre patterns (drums, bass, synths, vox, pads) into every module without playing">✦ FILL PATTERNS (NO PLAY)</button>
- <button id="gscUnfill" title="Put back the patterns that were in the modules before the first AI fill">↩ RESTORE MY PATTERNS</button>
- <button id="gscAuto">✦ AUTO-ARRANGE (NO PLAY)</button>
- <button id="gscDemo">↺ LOAD DEMO SONG</button>
- <button id="gscImport">＋ ADD YOUR AUDIO / SAMPLES</button>
- <button id="gscBounce">⬇ BOUNCE MIX (WAV)</button>
- <button id="gscExport">⬇ EXPORT SONG (WAV)</button>
+<div class="gsc-actions" aria-label="Song controls">
+ <button class="primary" id="gscGen" title="Generate a new song arrangement from the settings above">✦ GENERATE SONG</button>
+ <button class="primary" id="gscPlay" title="Play the generated song">▶ PLAY</button>
+ <button id="gscStop" class="danger" title="Stop all song modules and playback" disabled>■ STOP</button>
+ <button id="gscExport" title="Render and download the song as a WAV file">⬇ EXPORT SONG (WAV)</button>
 </div>
 <div class="gsc-status" id="gscStatus" role="status">READY</div>
 <div class="gsc-status" id="gscFillInfo" style="opacity:.8"></div>
-<div class="gsc-note">Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. The selected PRESET is applied once at song start; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. The two WAV buttons render the main timeline, as before.</div>`;
+<div class="gsc-note">Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. The selected PRESET is applied once at song start; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
 const ws=byId('wsPanel');
 if(ws)ws.insertAdjacentElement('afterend',panel);else document.body.append(panel);
 const status=t=>{const s=byId('gscStatus');if(s)s.textContent=t};
@@ -5318,10 +5317,13 @@ function applyPresets(){
  });
 }
 function setBtn(){
- const on=!!S;
- ['gscPlay','songPlayBtn'].forEach(id=>{const b=byId(id);if(b){b.textContent=on?'■ STOP SONG':'♪ PLAY SONG';b.classList.toggle('active',on)}});
+ const on=!!S,busy=on||starting;
+ const gen=byId('gscGen'),play=byId('gscPlay'),stop=byId('gscStop');
+ if(gen)gen.disabled=busy;
+ if(play){play.disabled=busy;play.textContent='▶ PLAY';play.classList.remove('active')}
+ if(stop){stop.disabled=!on&&!starting;stop.classList.toggle('active',on)}
  const pa=byId('playAllModulesBtn');if(pa)pa.disabled=on;const ts=byId('timeSig');if(ts)ts.disabled=on;
- ['gscLen','gscAuto','gscDemo','gscGenre'].forEach(id=>{const e=byId(id);if(e)e.disabled=on});
+ ['gscLen','gscGenre'].forEach(id=>{const e=byId(id);if(e)e.disabled=on});
  panel.querySelectorAll('th select').forEach(s=>s.disabled=on);
 }
 /* edits made while the song plays: levels / mutes now, go pattern chain rebuilt */
@@ -5388,7 +5390,7 @@ async function startSong(){
   GLCTC_CLOCK.cancel(timer);timer=GLCTC_CLOCK.every('composer',tick);
   setBtn();status('▶ SONG STARTING · '+n+' modules locked to one clock');
  }catch(err){console.error('GLCTC1 song composer:',err);try{stopSong('Song stopped safely · see console')}catch(e){S=null}}
- finally{starting=false}
+ finally{starting=false;setBtn()}
 }
 function stopSong(msg){
  songRequest++;GLCTC_CLOCK.cancel(timer);timer=0;const h=H();
@@ -5579,8 +5581,6 @@ function fillPatterns(genre,txt){
  const info=byId('gscFillInfo');if(info)info.textContent='PATTERNS WRITTEN · KEY '+pack.name+' · '+done.length+' modules · seed '+seed;const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=pack.name.toUpperCase();
  try{window.GLCTC_SONG_PATTERN_KEY=pack.name}catch(e){}
  return pack}
-byId('gscFill').addEventListener('click',()=>{if(S){status('STOP THE SONG FIRST, then fill patterns');return}try{const p=fillPatterns(byId('gscGenre').value,(byId('gscPrompt').value||'').toLowerCase());status('PATTERNS FILLED · '+p.name+' · press PLAY SONG')}catch(e){console.error(e);status('Pattern fill failed; see console')}});
-byId('gscUnfill').addEventListener('click',()=>{if(S){status('STOP THE SONG FIRST');return}status(PAT.restore()?'YOUR PATTERNS WERE RESTORED':'NOTHING TO RESTORE (no AI fill yet this session)');const info=byId('gscFillInfo');if(info)info.textContent=''});
 window.GLCTC_PATTERNS=PAT;
 /* ---------------- AI tempo → single DAW master BPM ---------------- */
 function chooseComposerBpm(genreKey,promptText){
@@ -5625,12 +5625,14 @@ function prepareSong(genreKey,txt,forceFill){
  return pack;
 }
 async function generate(){
- if(starting)return;
- if(S)stopSong('RE-GENERATING…');
+ if(starting||S)return;
  const genreKey=byId('gscGenre').value,txt=(byId('gscPrompt').value||'').toLowerCase();
- prepareSong(genreKey,txt,false);
- status('AI TEMPO SET · MASTER '+st.bpm+' BPM · GENERATING SONG');
- await startSong();
+ try{
+  prepareSong(genreKey,txt,false);
+  try{applyPresets()}catch(e){console.warn('preset apply',e)}
+  status('SONG GENERATED · '+st.bpm+' BPM · '+(byId('gscKey')?.textContent||'KEY')+' · PRESS PLAY WHEN READY');
+ }catch(e){console.error('Song generation failed:',e);status('SONG GENERATION FAILED · SEE CONSOLE')}
+ setBtn();
 }
 /* ---------- NEW SONG ON EVERY LOAD: random genre, key, tempo; every module written into the same key / tempo / genre ---------- */
 const AUTO_LS='glctc1.autoSongOnLoad';
@@ -5651,13 +5653,14 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    try{applyPresets()}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
    window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=String(pack&&pack.name||'C MINOR').toUpperCase();
-   status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press ♪ PLAY SONG');
+   status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press PLAY');
   }catch(e){console.error('new song on load failed',e)}
  }
  if(document.readyState==='complete')setTimeout(run,1500);else window.addEventListener('load',()=>setTimeout(run,1500),{once:true});
 })();
 /* ---------------- controls ---------------- */
 byId('gscPlay').addEventListener('click',startSong);
+byId('gscStop').addEventListener('click',()=>stopSong('SONG STOPPED'));
 byId('gscGen').addEventListener('click',generate);
 byId('gscGenre').addEventListener('change',()=>{if(!S){st.bpm=Math.max(30,Math.min(300,Number(byId('bpm').value)||130));save()}});
 /* Song Composer tempo is read-only: the DAW master BPM is the only tempo control. */
@@ -5665,11 +5668,7 @@ byId('gscLoop').addEventListener('change',e=>{st.loop=e.target.checked;save()});
 byId('gscLen').addEventListener('change',e=>{
  if(S)return;const v=e.target.value;st.len=v;st.secs=mkSecs(v);st.cells=v==='demo'?demoState().cells:autoCells(st.secs);save();renderGrid();status('NEW SONG LAYOUT · sections arranged from the modules');
 });
-byId('gscAuto').addEventListener('click',()=>{if(S)return;st.cells=autoCells(st.secs);save();renderGrid();status('AUTO-ARRANGED · adjust any cell, then press PLAY SONG')});
-byId('gscDemo').addEventListener('click',()=>{if(S)return;st=demoState();save();renderGrid();status('DEMO SONG LOADED · 130 BPM · C minor · press PLAY SONG')});
-byId('gscImport').addEventListener('click',()=>{const b=byId('importAudio');if(b)b.click();else status('Use the existing asset browser to import audio samples.')});
 const exportMix=async()=>{const api=window.GLCTC_WS;if(!api||typeof api.exportWav!=='function'){status('The original WAV renderer was not found; no changes made.');return}try{status('RENDERING WAV · Keep this tab open…');await api.exportWav();status('WAV render finished. Check your downloads and the DAW status message.')}catch(e){console.error(e);status('WAV render failed; see the DAW status message.')}};
-byId('gscBounce').addEventListener('click',exportMix);
 byId('gscExport').addEventListener('click',exportMix);
 
 const pa=byId('playAllModulesBtn');
@@ -5780,4 +5779,5 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
 
 </body>
 </html>
+
 

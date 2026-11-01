@@ -8874,6 +8874,7 @@ function glctc1DeckToast(msg) {
   }
   t.textContent = msg;
   t.style.display = "block";
+  if (window.glctc1PinCentre) window.glctc1PinCentre(t, 0.5, 0.86, 0, 0.3);
   clearTimeout(t._t);
   t._t = setTimeout(() => { t.style.display = "none"; }, 3500);
 }
@@ -9029,6 +9030,47 @@ async function playLibraryTrack(track) {
 }
 
 // =====================================================
+// 🖼️ v56: PLAYLIST MASTER COVER (URL, data: image or storage path)
+// =====================================================
+let glctc1ArtworkToken = 0;
+
+async function glctc1SetPlaylistArtwork(artwork) {
+
+  const el = document.getElementById("glctc1PlaylistArtwork");
+  if (!el) return;
+
+  const my = ++glctc1ArtworkToken;
+  const value = String(artwork || "").trim();
+
+  const clear = () => {
+    el.removeAttribute("src");
+    el.style.display = "none";
+  };
+
+  if (!value) { clear(); return; }
+
+  let url = value;
+
+  if (!/^(https?:|data:image\/|blob:)/i.test(value)) {
+    try {
+      const { data, error } =
+        await supabaseClient.storage
+          .from("tracks")
+          .createSignedUrl(value, 60 * 60 * 24);
+      url = (!error && data && data.signedUrl) ? data.signedUrl : "";
+    } catch (e) {
+      url = "";
+    }
+    if (my !== glctc1ArtworkToken) return;      // a newer track took over
+  }
+
+  if (!url) { clear(); return; }
+
+  el.style.display = "block";
+  el.src = url;
+}
+
+// =====================================================
 // 🎵 GLCTC1 PLAYLIST MASTER — LOAD SELECTED TRACK
 // =====================================================
 async function playPlaylistMasterTrack(
@@ -9137,14 +9179,9 @@ async function playPlaylistMasterTrack(
     artistEl.textContent = artist;
   }
 
-  const artworkEl =
-    document.getElementById(
-      "glctc1PlaylistArtwork"
-    );
-
-  if (artworkEl && artwork) {
-    artworkEl.src = artwork;
-  }
+  // v56: storage paths are turned into a viewable link, and a track
+  // without a cover clears the previous track's cover.
+  glctc1SetPlaylistArtwork(artwork);
 
   const positionEl =
     document.getElementById(
@@ -13562,6 +13599,29 @@ if (
 
 
       // -------------------------------------------------
+      // ▶️ v56: A TRACK IS ALREADY LOADED (first track preloaded,
+      // shared link, library pick) -> just play it. No playlist needed.
+      // -------------------------------------------------
+
+      if (glctc1PlaylistAudio.getAttribute("src")) {
+
+        try {
+
+          await glctc1PlaylistAudio.play();
+
+        } catch (error) {
+
+          console.log(
+            "Playlist playback waiting:",
+            error
+          );
+        }
+
+        return;
+      }
+
+
+      // -------------------------------------------------
       // ▶️ MAKE SURE A PLAYLIST EXISTS
       // -------------------------------------------------
 
@@ -13685,6 +13745,44 @@ if (glctc1PlaylistAudio) {
 
 
 // -----------------------------------------------------
+// v56: with no playlist selected, Previous / Next / song-ended follow the
+// Master Library in the order of the table (respecting shuffle).
+// -----------------------------------------------------
+function glctc1LibraryStep(direction) {
+
+  if (typeof library === "undefined" || !Array.isArray(library) || !library.length) {
+    return false;
+  }
+
+  const list = sortGLCTC1Library(library).filter(t =>
+    t && (t.master_audio || t["Master Audio"])
+  );
+
+  if (!list.length) return false;
+
+  const cur = window.glctc1MasterTrack;
+
+  const at = cur
+    ? list.findIndex(t => String(t.id) === String(cur.id))
+    : -1;
+
+  let next;
+
+  if (glctc1PlaylistShuffleOn && list.length > 1) {
+    do {
+      next = Math.floor(Math.random() * list.length);
+    } while (next === at);
+  } else {
+    next = at < 0 ? 0 : (at + direction + list.length) % list.length;
+  }
+
+  playLibraryTrack(list[next]);
+
+  return true;
+}
+
+
+// -----------------------------------------------------
 // ⏮ PREVIOUS — PLAY PREVIOUS PLAYLIST TRACK
 // -----------------------------------------------------
 
@@ -13701,6 +13799,7 @@ if (glctc1PlaylistPrev) {
         !Array.isArray(playlist.tracks) ||
         !playlist.tracks.length
       ) {
+        glctc1LibraryStep(-1);   // v56
         return;
       }
 
@@ -13761,6 +13860,7 @@ if (glctc1PlaylistNext) {
         !Array.isArray(playlist.tracks) ||
         !playlist.tracks.length
       ) {
+        glctc1LibraryStep(1);    // v56
         return;
       }
 
@@ -13970,6 +14070,13 @@ if (glctc1PlaylistAudio) {
         !Array.isArray(playlist.tracks) ||
         !playlist.tracks.length
       ) {
+        // v56: no playlist selected -> repeat, or carry on through the Master Library
+        if (glctc1PlaylistRepeatOn) {
+          glctc1PlaylistAudio.currentTime = 0;
+          glctc1PlaylistAudio.play().catch(() => {});
+        } else if (glctc1PlaylistAutoPlayOn) {
+          glctc1LibraryStep(1);
+        }
         return;
       }
 
@@ -18892,12 +18999,11 @@ html, body { overscroll-behavior-x: none; }
      button is tapped the phone lets the share go straight through.
      A link opened by a visitor still opens the page and plays that song. -->
 <style>
-#glctc1ShareSheet{position:fixed;inset:0;z-index:100000;display:flex;align-items:flex-end;justify-content:center;
-  background:rgba(2,4,14,.72);-webkit-tap-highlight-color:transparent}
-#glctc1ShareSheet .gs-panel{width:100%;max-width:520px;box-sizing:border-box;padding:16px 16px 22px;border-radius:20px 20px 0 0;
-  background:linear-gradient(170deg,#0b1535,#0a0a24);border:1px solid #19f7ff;border-bottom:0;
-  box-shadow:0 -6px 30px rgba(25,247,255,.28);color:#e8ecff;font-family:system-ui,Segoe UI,Roboto,sans-serif;
-  max-height:92vh;overflow:auto}
+#glctc1ShareSheet{position:fixed;inset:0;z-index:100000;background:rgba(2,4,14,.72);-webkit-tap-highlight-color:transparent}
+#glctc1ShareSheet .gs-panel{position:fixed;left:50%;top:50%;width:420px;box-sizing:border-box;padding:16px 16px 18px;border-radius:20px;
+  background:linear-gradient(170deg,#0b1535,#0a0a24);border:1px solid #19f7ff;
+  box-shadow:0 0 34px rgba(25,247,255,.35);color:#e8ecff;font-family:system-ui,Segoe UI,Roboto,sans-serif;
+  max-height:86vh;overflow:auto;transform:translate(-50%,-50%)}
 #glctc1ShareSheet .gs-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 #glctc1ShareSheet .gs-art{flex:0 0 68px;width:68px;height:68px;border-radius:12px;overflow:hidden;position:relative;
   background:radial-gradient(circle at 50% 40%,#3b1a6b,#06091c);border:1px solid #19f7ff66;
@@ -18940,18 +19046,62 @@ html, body { overscroll-behavior-x: none; }
   function safeName(v) { return String(v).replace(/[\\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "GLCTC1"; }
   function mb(n) { return (n / 1048576).toFixed(1) + " MB"; }
 
+  /* ---- keep pop-ups centred in the part of the page you can SEE, at a readable size ----
+     This page has no mobile scaling, so phones show it zoomed out. A normal fixed pop-up
+     would sit at the bottom of the whole page and look tiny. These helpers use the
+     visual viewport (what is actually on screen) and undo the zoom-out. */
+  var tracked = [];
+  function vv() {
+    var v = window.visualViewport;
+    return {
+      s: v && v.scale ? v.scale : 1,
+      w: v ? v.width : window.innerWidth, h: v ? v.height : window.innerHeight,
+      x: v ? v.offsetLeft : 0, y: v ? v.offsetTop : 0
+    };
+  }
+  // fx, fy = where in the visible screen (0..1) the centre of the element goes
+  function pin(el, fx, fy, maxW, maxHFrac) {
+    var v = vv();
+    el.style.position = "fixed";
+    el.style.left = (v.x + v.w * fx) + "px";
+    el.style.top = (v.y + v.h * fy) + "px";
+    el.style.bottom = "auto"; el.style.right = "auto";
+    el.style.transformOrigin = "center center";
+    el.style.transform = "translate(-50%,-50%) scale(" + (1 / v.s) + ")";
+    // sizes below are real on-screen CSS pixels (before the zoom correction)
+    var screenW = v.w * v.s, screenH = v.h * v.s;
+    if (maxW) el.style.width = Math.min(screenW * 0.94, maxW) + "px";
+    el.style.maxWidth = (screenW * 0.94) + "px";
+    el.style.maxHeight = (screenH * (maxHFrac || 0.86)) + "px";
+  }
+  function keepPinned(el, fx, fy, maxW, maxHFrac) {
+    tracked.push({ el: el, fx: fx, fy: fy, maxW: maxW, mh: maxHFrac });
+    pin(el, fx, fy, maxW, maxHFrac);
+  }
+  function refreshPinned() {
+    tracked = tracked.filter(function (t) { return document.body.contains(t.el); });
+    tracked.forEach(function (t) { pin(t.el, t.fx, t.fy, t.maxW, t.mh); });
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", refreshPinned);
+    window.visualViewport.addEventListener("scroll", refreshPinned);
+  }
+  window.addEventListener("resize", refreshPinned);
+  window.glctc1PinCentre = keepPinned;
+
   function toast(msg, ms) {
     var t = document.getElementById("glctc1ShareToast");
     if (!t) {
       t = document.createElement("div");
       t.id = "glctc1ShareToast";
-      t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:100001;" +
-        "max-width:90vw;padding:10px 16px;border-radius:12px;background:#101636;border:1px solid #ec4899;" +
-        "color:#e8ecff;font:600 .8rem sans-serif;text-align:center;box-shadow:0 0 18px rgba(236,72,153,.5);" +
-        "pointer-events:none;display:none";
+      t.style.cssText = "z-index:100001;padding:10px 16px;border-radius:12px;background:#101636;border:1px solid #ec4899;" +
+        "color:#e8ecff;font:600 .85rem sans-serif;text-align:center;box-shadow:0 0 18px rgba(236,72,153,.5);" +
+        "pointer-events:none;display:none;box-sizing:border-box";
       document.body.appendChild(t);
+      keepPinned(t, 0.5, 0.86, 0, 0.3);
     }
     t.textContent = msg; t.style.display = "block";
+    pin(t, 0.5, 0.86, 0, 0.3);
     clearTimeout(t._t); t._t = setTimeout(function () { t.style.display = "none"; }, ms || 3000);
   }
 
@@ -19101,6 +19251,7 @@ html, body { overscroll-behavior-x: none; }
     [bSong, bCover, bLink, bCopy].forEach(function (b) { if (b) panel.appendChild(b); });
     sheet.appendChild(panel);
     document.body.appendChild(sheet);
+    keepPinned(panel, 0.5, 0.5, 420, 0.86);
 
     sheet.addEventListener("click", function (e) { if (e.target === sheet) closeSheet(); });
     escHandler = function (e) { if (e.key === "Escape") closeSheet(); };
@@ -19209,15 +19360,16 @@ html, body { overscroll-behavior-x: none; }
       var btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = "▶ TAP TO PLAY SHARED TRACK";
-      btn.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;" +
-        "padding:14px 22px;border-radius:999px;border:1px solid #00e5ff;background:#0b1230;color:#9cf0ff;" +
-        "font:700 .85rem sans-serif;letter-spacing:.08em;box-shadow:0 0 22px rgba(0,229,255,.6)";
+      btn.style.cssText = "z-index:99999;padding:14px 22px;border-radius:999px;border:1px solid #00e5ff;" +
+        "background:#0b1230;color:#9cf0ff;font:700 .9rem sans-serif;letter-spacing:.08em;" +
+        "box-shadow:0 0 22px rgba(0,229,255,.6);white-space:nowrap";
       btn.addEventListener("click", function () {
         a.play().catch(function () {});
         btn.remove();
       });
       a.addEventListener("play", function () { btn.remove(); });
       document.body.appendChild(btn);
+      keepPinned(btn, 0.5, 0.9, 0, 0.2);
     }, 500);
   }
 })();

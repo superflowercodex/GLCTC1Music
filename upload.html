@@ -825,7 +825,7 @@ body .deck .cx-flash{background:var(--acc)!important;color:#000!important}
 body .deck .pitch-wrap{width:64px!important;flex-basis:64px!important}
 
 /* ===== v27: decks always visible, no hide tab; beat flash ===== */
-.mod-wrap.mod-deck{flex:1 1 340px;max-width:560px}
+.mod-wrap.mod-deck{flex:1 1 360px;max-width:560px}
 body .deck .beat-flash.flash{background:var(--acc)!important;box-shadow:0 0 8px var(--acc),0 0 16px var(--acc)!important;transform:scale(1.25)!important}
 body .deck .beat-flash.flash.cx-down{background:#fff!important;box-shadow:0 0 10px #fff,0 0 22px var(--acc)!important;transform:scale(1.6)!important}
 body .deck .beat-flash{transition:none!important}
@@ -1225,6 +1225,7 @@ body .deck .cx-lat{gap:3px}
 
 <style>
 .glctc1-add-track-welcome {
+  box-sizing: border-box;
   width: 100%;
   max-width: 900px;
   margin: 30px auto;
@@ -4260,6 +4261,23 @@ if (masterLibraryEditorModule) {
 
   object-fit:cover;
 }
+
+/* v52: no cover yet -> tidy placeholder, never a broken-image icon */
+.glctc1-playlist-artwork::before {
+  content:"♫";
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:64px;
+  color:rgba(34,211,238,0.35);
+  text-shadow:0 0 22px rgba(168,85,247,0.55);
+  background:radial-gradient(circle at 50% 40%, rgba(88,28,135,0.35), rgba(2,6,23,0) 70%);
+}
+.glctc1-playlist-artwork img { position:relative; z-index:1; }
+#glctc1PlaylistArtwork:not([src]),
+#glctc1PlaylistArtwork[src=""] { display:none !important; }
 
 
 /* =====================================================
@@ -12383,6 +12401,15 @@ const glctc1PlaylistAudio =
     "glctc1PlaylistAudio"
   );
 
+// v52: a cover that fails to load falls back to the placeholder
+document.addEventListener("error", function (e) {
+  const t = e.target;
+  if (t && t.id === "glctc1PlaylistArtwork") {
+    t.removeAttribute("src");
+    t.style.display = "none";
+  }
+}, true);
+
 const glctc1PlaylistArtwork =
   document.getElementById(
     "glctc1PlaylistArtwork"
@@ -17000,13 +17027,6 @@ if (sharedTrackId) {
 
 <style>
 
-/* Simple View must also hide mixer controls that are nested/repositioned by the deck layout. */
-body.glctc1-simple-view #glctc1MixerModule,
-body.glctc1-simple-view .glctc1-master-volume-wrap,
-body.glctc1-simple-view .crossfader-wrap,
-body.glctc1-simple-view .mixer-bay-controls {
-  display: none !important;
-}
 
 /* ===== NEON MODULE HIDE TABS ===== */
 
@@ -17152,6 +17172,15 @@ body.glctc1-simple-view .mixer-bay-controls {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* the view that is currently on screen */
+.mod-allbar .mod-allbtn.on {
+  color: #02131a;
+  background: linear-gradient(180deg, #9cf0ff, #19f7ff);
+  border-color: #fff;
+  text-shadow: none;
+  box-shadow: 0 0 16px #19f7ffaa;
+}
+
 @media (max-width: 600px) {
   .mod-allbar .mod-allbtn {
     min-width: 140px;
@@ -17200,6 +17229,7 @@ body.glctc1-simple-view .mixer-bay-controls {
   };
 
   var items = [];
+  var barBtns = [];
 
 
   // Playlist Master now lives directly above the Master Library inside
@@ -17299,6 +17329,7 @@ body.glctc1-simple-view .mixer-bay-controls {
       (collapsed ? "Show " : "Hide ") + it.name +
       (it.live ? " (keeps playing while hidden)" : "");
     if (save) store.set(it.key, collapsed);
+    if (typeof markBar === "function") markBar();
     if (!collapsed) {
       setTimeout(function () {
         window.dispatchEvent(new Event("resize"));
@@ -17393,14 +17424,23 @@ body.glctc1-simple-view .mixer-bay-controls {
   // -----------------------------------------------------
   // One-touch HIDE ALL / SHOW ALL bar above the first module
   // -----------------------------------------------------
+  // Which of the three view buttons matches what is on screen right now
+  function markBar() {
+    if (!barBtns || !barBtns.length) return;
+    var open = items.filter(function (i) { return !i.el.classList.contains("mod-collapsed"); });
+    var simple = items.every(function (i) {
+      return i.el.classList.contains("mod-collapsed") === !i.defOpen;
+    });
+    var state = open.length === items.length ? "all" : (open.length === 0 ? "none" : (simple ? "simple" : "custom"));
+    barBtns.forEach(function (b) { b.el.classList.toggle("on", b.view === state); });
+  }
+
   function setAll(collapsed) {
-    document.body.classList.remove("glctc1-simple-view");
     items.forEach(function (i) { apply(i, collapsed, true); });
   }
 
-  // SIMPLE VIEW = Playlist Master + Master Library only; hide loose mixer controls too.
+  // SIMPLE VIEW = Playlist Master + Master Library only. Everything else is a closed tab.
   function simpleView() {
-    document.body.classList.add("glctc1-simple-view");
     items.forEach(function (i) { apply(i, !i.defOpen, true); });
   }
 
@@ -17423,12 +17463,14 @@ body.glctc1-simple-view .mixer-bay-controls {
           run();
         }
       });
+      barBtns.push({ el: b, view: collapsed === null ? "simple" : (collapsed ? "none" : "all") });
       return b;
     }
 
     bar.appendChild(mkBtn("◎ SIMPLE VIEW", null));
     bar.appendChild(mkBtn("▲ SHOW ALL MODULES", false));
     bar.appendChild(mkBtn("▼ HIDE ALL MODULES", true));
+    markBar();
 
     // Keep the shop advert above the Simple View / module visibility controls.
     // It is a banner, not a collapsible module.
@@ -18711,10 +18753,9 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
         own edge-swipe gesture) stays on this page instead of leaving it.
         To allow Back again, change BLOCK_BACK below to false. -->
 <style>
-html, body { touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
-body { overflow-x: clip; }
-/* inner scrollers must not hand a sideways swipe to the page either */
-* { overscroll-behavior-x: contain; }
+/* v52: only stop the browser's swipe back/forward overscroll. (The earlier
+   touch-action / overflow clip rules also blocked sideways scrolling of the
+   nav tabs, the library table and a zoomed-in page, so they were removed.) */
 html, body { overscroll-behavior-x: none; }
 </style>
 <script>
@@ -19047,7 +19088,9 @@ html, body { overscroll-behavior-x: none; }
     var aw = a.closest('.mod-wrap') || a;
     var bw = b.closest('.mod-wrap') || b;
     var mw = mixer.closest('.mod-wrap') || mixer;
-    var nodes = [mw, master, cross];
+    var mvw = master.closest('.mod-wrap') || master;
+    var cfw = cross.closest('.mod-wrap') || cross;
+    var nodes = [mw, mvw, cfw];
     var markers = nodes.map(function (node, i) {
       var marker = document.createComment('GLCTC1 mixer bay original position ' + i);
       node.parentNode.insertBefore(marker, node);
@@ -19069,8 +19112,9 @@ html, body { overscroll-behavior-x: none; }
     }
     function update() {
       var ac = collapsed(aw), bc = collapsed(bw);
-      /* Dock into whichever deck is hidden. If both are hidden, use A's bay. */
-      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : ((ac && bc) ? aw : null));
+      /* Dock into the empty slot only when exactly one deck is hidden.
+         Both hidden (Simple View, Hide All) or both open: modules stay in page order. */
+      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : null);
       if (target === activeHost) return;
       if (activeHost) activeHost.classList.remove('mixer-bay-host');
       activeHost = null;

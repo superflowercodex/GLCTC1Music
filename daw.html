@@ -4788,34 +4788,74 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  async function swImport(){swFillSrc();const v=swSrc.value;try{if(v==='file'){swFile.click();return}if(v.startsWith('lib:')){const a=project.assets.find(x=>x.id===v.slice(4));if(!a)return;if(!a.audioBuffer)a.audioBuffer=await swDecode(await a.blob.arrayBuffer());cnTake(a.audioBuffer,a.name)}else if(v.startsWith('pad:')){const i=+v.slice(4),p=masterSamples[i];if(!p)return;if(!p.buf)p.buf=await swDecode(await p.blob.arrayBuffer());cnTake(p.buf,p.name)}swSay('IMPORTED · '+swInfo())}catch(e){toast('Import failed: '+e.message)}}
  /* ---------- 4-STEM SPLIT (runs in a background worker; the four stems always add back up to the original) ---------- */
  const STEM_WORKER=function(){
-  self.onmessage=function(e){try{
-   const L=e.data.L,R=e.data.R,sr=e.data.sr,N=2048,H=N/2,B=N/2+1,len=L.length,frames=Math.ceil((len+N)/H)+1;
-   const win=new Float32Array(N);for(let i=0;i<N;i++)win[i]=Math.sqrt(.5-.5*Math.cos(2*Math.PI*i/N));
-   const rev=new Uint32Array(N);for(let i=0,bits=Math.log2(N);i<N;i++){let x=i,r=0;for(let b=0;b<bits;b++){r=(r<<1)|(x&1);x>>=1}rev[i]=r}
-   const cs=new Float64Array(N/2),sn=new Float64Array(N/2);for(let i=0;i<N/2;i++){cs[i]=Math.cos(2*Math.PI*i/N);sn[i]=-Math.sin(2*Math.PI*i/N)}
-   function fft(re,im){for(let i=0;i<N;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}for(let s=2;s<=N;s<<=1){const h=s>>1,st=N/s;for(let i=0;i<N;i+=s)for(let k=0;k<h;k++){const wr=cs[k*st],wi=sn[k*st],a=i+k,b=a+h,xr=re[b]*wr-im[b]*wi,xi=re[b]*wi+im[b]*wr;re[b]=re[a]-xr;im[b]=im[a]-xi;re[a]+=xr;im[a]+=xi}}}
-   const off=N/2,get=(d,i)=>{const j=i-off;return j>=0&&j<len?d[j]:0};
+  /* v64: chunked (any length up to 8 min), sharper masks, mask smoothing and a vocal gate; 3 isolation strengths */
+  const N=2048,H=N/2,B=N/2+1;
+  const win=new Float32Array(N);for(let i=0;i<N;i++)win[i]=Math.sqrt(.5-.5*Math.cos(2*Math.PI*i/N));
+  const rev=new Uint32Array(N);for(let i=0,bits=Math.log2(N);i<N;i++){let x=i,r=0;for(let b=0;b<bits;b++){r=(r<<1)|(x&1);x>>=1}rev[i]=r}
+  const cs=new Float64Array(N/2),sn=new Float64Array(N/2);for(let i=0;i<N/2;i++){cs[i]=Math.cos(2*Math.PI*i/N);sn[i]=-Math.sin(2*Math.PI*i/N)}
+  function fft(re,im){for(let i=0;i<N;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}for(let s=2;s<=N;s<<=1){const h=s>>1,st=N/s;for(let i=0;i<N;i+=s)for(let k=0;k<h;k++){const wr=cs[k*st],wi=sn[k*st],a=i+k,b=a+h,xr=re[b]*wr-im[b]*wi,xi=re[b]*wi+im[b]*wr;re[b]=re[a]-xr;im[b]=im[a]-xi;re[a]+=xr;im[a]+=xi}}}
+  const PRE={1:{p:2,cn:3,vlo:[140,320],vhi:[7000,13000],gate:.03,sm:0,comb:0},2:{p:3,cn:4,vlo:[160,340],vhi:[6500,11000],gate:.07,sm:1,comb:1,conf:3,sg:.012},3:{p:4,cn:6,vlo:[170,360],vhi:[5500,9500],gate:.12,sm:1,comb:1,conf:4,sg:.008}};
+  const ramp=(x,a,b)=>x<=a?0:x>=b?1:(x-a)/(b-a);
+  const K=8,tmp=new Float32Array(2*K+1);
+  function med(n){for(let i=1;i<n;i++){const v=tmp[i];let j=i-1;while(j>=0&&tmp[j]>v){tmp[j+1]=tmp[j];j--}tmp[j+1]=v}return tmp[n>>1]}
+  /* one chunk -> 8 arrays (vocals L/R, drums L/R, bass L/R, other L/R) */
+  function chunk(L,R,sr,P,rep){
+   const len=L.length,frames=Math.ceil((len+N)/H)+1,off=N/2,get=(d,i)=>{const j=i-off;return j>=0&&j<len?d[j]:0};
    const fr=new Float64Array(N),fi=new Float64Array(N),gr=new Float64Array(N),gi=new Float64Array(N);
    function frameSpec(t){for(let n=0;n<N;n++){const x=t*H+n;fr[n]=get(L,x)*win[n];fi[n]=0;gr[n]=get(R,x)*win[n];gi[n]=0}fft(fr,fi);fft(gr,gi)}
-   /* pass 1: stereo magnitude + how centred each bin is */
    const MAG=new Float32Array(frames*B),CEN=new Float32Array(frames*B);
-   for(let t=0;t<frames;t++){frameSpec(t);for(let k=0;k<B;k++){const lr=fr[k],li=fi[k],rr=gr[k],ri=gi[k],la=Math.hypot(lr,li),ra=Math.hypot(rr,ri),o=t*B+k;MAG[o]=Math.sqrt((la*la+ra*ra)/2);const den=la*ra;let corr=den>1e-12?(lr*rr+li*ri)/den:1;corr=Math.max(0,corr);CEN[o]=den>1e-12?corr*(2*Math.min(la,ra)/(la+ra)):1}if(t%64===0)self.postMessage({p:.05+.25*t/frames})}
-   /* harmonic (steady across time) vs percussive (spread across frequency) via median filters */
-   const K=8,tmp=new Float32Array(2*K+1);
-   function med(n){for(let i=1;i<n;i++){const v=tmp[i];let j=i-1;while(j>=0&&tmp[j]>v){tmp[j+1]=tmp[j];j--}tmp[j+1]=v}return tmp[n>>1]}
+   for(let t=0;t<frames;t++){frameSpec(t);for(let k=0;k<B;k++){const lr=fr[k],li=fi[k],rr=gr[k],ri=gi[k],la=Math.hypot(lr,li),ra=Math.hypot(rr,ri),o=t*B+k;MAG[o]=Math.sqrt((la*la+ra*ra)/2);const den=la*ra;let corr=den>1e-12?(lr*rr+li*ri)/den:1;corr=Math.max(0,corr);CEN[o]=den>1e-12?corr*(2*Math.min(la,ra)/(la+ra)):1}if(t%64===0)rep(.3*t/frames)}
    const HM=new Float32Array(frames*B),PM=new Float32Array(frames*B);
-   for(let k=0;k<B;k++){for(let t=0;t<frames;t++){let n=0;for(let d=-K;d<=K;d++){const u=t+d;if(u>=0&&u<frames)tmp[n++]=MAG[u*B+k]}HM[t*B+k]=med(n)}if(k%64===0)self.postMessage({p:.3+.2*k/B})}
-   for(let t=0;t<frames;t++){for(let k=0;k<B;k++){let n=0;for(let d=-K;d<=K;d++){const u=k+d;if(u>=0&&u<B)tmp[n++]=MAG[t*B+u]}PM[t*B+k]=med(n)}if(t%64===0)self.postMessage({p:.5+.2*t/frames})}
-   /* pass 2: masks -> 4 stems (vocals, drums, bass, other), inverse FFT with overlap-add */
+   for(let k=0;k<B;k++){for(let t=0;t<frames;t++){let n=0;for(let d=-K;d<=K;d++){const u=t+d;if(u>=0&&u<frames)tmp[n++]=MAG[u*B+k]}HM[t*B+k]=med(n)}if(k%64===0)rep(.3+.2*k/B)}
+   for(let t=0;t<frames;t++){for(let k=0;k<B;k++){let n=0;for(let d=-K;d<=K;d++){const u=k+d;if(u>=0&&u<B)tmp[n++]=MAG[t*B+u]}PM[t*B+k]=med(n)}if(t%64===0)rep(.5+.2*t/frames)}
+   const bassW=new Float32Array(B),vocW=new Float32Array(B);for(let k=0;k<B;k++){const f=k*sr/N;bassW[k]=1-ramp(f,110,240);vocW[k]=ramp(f,P.vlo[0],P.vlo[1])*(1-ramp(f,P.vhi[0],P.vhi[1]))}
+   /* vocal pitch tracking: keep only what lines up with the singer's note and its overtones (kills bass / synth / pad bleed) */
+   const binHz=sr/N,F0=new Float32Array(frames),sibW=new Float32Array(B);
+   for(let k=0;k<B;k++)sibW[k]=ramp(k*binHz,3500,6000)*.5;
+   if(P.comb){
+    const vw=new Float32Array(B);for(let k=0;k<B;k++){const f=k*binHz;vw[k]=ramp(f,150,400)*(1-ramp(f,3500,6000))}
+    const cands=[];for(let f=85;f<=700;f*=Math.pow(2,1/48))cands.push(f);
+    const A=new Float32Array(B+2),sal=new Float32Array(cands.length),best=new Float32Array(frames),cf=new Float32Array(frames),pick=new Int32Array(frames);
+    for(let t=0;t<frames;t++){let tot=0;for(let k=0;k<B;k++){const o=t*B+k,c=CEN[o];A[k]=HM[o]*c*c*vw[k];tot+=A[k]}
+     let bs=0,bi=-1;for(let ci=0;ci<cands.length;ci++){const f=cands[ci];let sm=0,ws=0;for(let h=1;h*f<5000&&h<=14;h++){const x=h*f/binHz,k0=Math.floor(x),fq=x-k0,v=A[k0]*(1-fq)+A[k0+1]*fq,wg=1/Math.sqrt(h);sm+=v*wg;ws+=wg}sm=sm/ws*(1+.12*Math.log2(700/f));sal[ci]=sm;if(sm>bs){bs=sm;bi=ci}}
+     if(bi>=48&&sal[bi-48]>=.7*bs)bi-=48;
+     best[t]=bs;cf[t]=bs/(tot/B+1e-12);pick[t]=bi}
+    let mx=0;for(let t=0;t<frames;t++)if(best[t]>mx)mx=best[t];
+    const tmpl=new Float32Array(5);
+    for(let t=0;t<frames;t++){let n=0;for(let d=-2;d<=2;d++){const u=t+d;if(u>=0&&u<frames&&pick[u]>=0)tmpl[n++]=pick[u]}
+     if(pick[t]>=0&&n>0&&cf[t]>P.conf&&best[t]>.02*mx){for(let i=1;i<n;i++){const v=tmpl[i];let j=i-1;while(j>=0&&tmpl[j]>v){tmpl[j+1]=tmpl[j];j--}tmpl[j+1]=v}F0[t]=cands[Math.round(tmpl[n>>1])]}else F0[t]=0}
+   }
+   const VM=new Float32Array(frames*B),DM=new Float32Array(frames*B),BM=new Float32Array(frames*B);
+   for(let t=0;t<frames;t++){const f0=F0[t];for(let k=0;k<B;k++){const o=t*B+k,hp=Math.pow(HM[o],P.p),qp=Math.pow(PM[o],P.p),hm=hp/(hp+qp+1e-30);DM[o]=1-hm;BM[o]=hm*bassW[k];let vo=hm*(1-bassW[k])*vocW[k]*Math.pow(CEN[o],P.cn);
+    if(P.comb){if(f0>0){const fk=k*binHz,h=Math.max(1,Math.round(fk/f0)),d=fk-h*f0,sg=binHz*.9+P.sg*h*f0;vo*=fk<f0*.7?0:Math.exp(-.5*d*d/(sg*sg))}else vo*=sibW[k]}
+    VM[o]=vo}}
+   if(P.sm){for(let k=0;k<B;k++){let a=VM[k];for(let t=0;t<frames;t++){const cur=VM[t*B+k],nxt=t+1<frames?VM[(t+1)*B+k]:cur;VM[t*B+k]=.25*a+.5*cur+.25*nxt;a=cur}}}
+   rep(.75);
    const out=Array.from({length:8},()=>new Float32Array(len));
-   const hz=k=>k*sr/N,ramp=(x,a,b)=>x<=a?0:x>=b?1:(x-a)/(b-a);
-   const bassW=new Float32Array(B),vocW=new Float32Array(B);for(let k=0;k<B;k++){const f=hz(k);bassW[k]=1-ramp(f,110,240);vocW[k]=ramp(f,140,320)*(1-ramp(f,7000,13000))}
-   const yr=new Float64Array(N),yi=new Float64Array(N);
+   const yr=new Float64Array(N),yi=new Float64Array(N),mk=[new Float32Array(B),new Float32Array(B),new Float32Array(B),new Float32Array(B)];
    for(let t=0;t<frames;t++){frameSpec(t);
-    const mk=[new Float32Array(B),new Float32Array(B),new Float32Array(B)];
-    for(let k=0;k<B;k++){const o=t*B+k,h2=HM[o]*HM[o],p2=PM[o]*PM[o],hm=h2/(h2+p2+1e-12),pm=1-hm,c=CEN[o];const dr=pm,ba=hm*bassW[k],vo=hm*(1-bassW[k])*vocW[k]*c*c*c;mk[0][k]=vo;mk[1][k]=dr;mk[2][k]=ba}
-    for(let s=0;s<4;s++)for(let side=0;side<2;side++){const sr_=side?gr:fr,si_=side?gi:fi;for(let k=0;k<B;k++){const m=s<3?mk[s][k]:Math.max(0,1-mk[0][k]-mk[1][k]-mk[2][k]);yr[k]=sr_[k]*m;yi[k]=-si_[k]*m}for(let k=B;k<N;k++){yr[k]=yr[N-k];yi[k]=-yi[N-k]}yi[0]=0;yi[B-1]=0;fft(yr,yi);const dst=out[s*2+side];for(let n=0;n<N;n++){const j=t*H+n-off;if(j>=0&&j<len)dst[j]+=yr[n]/N*win[n]}}
-    if(t%64===0)self.postMessage({p:.7+.3*t/frames})}
+    for(let k=0;k<B;k++){const o=t*B+k;let vo=VM[o],dr=DM[o],ba=BM[o];const s=vo+dr+ba;if(s>1){vo/=s;dr/=s;ba/=s}mk[0][k]=vo;mk[1][k]=dr;mk[2][k]=ba;mk[3][k]=Math.max(0,1-vo-dr-ba)}
+    for(let s=0;s<4;s++)for(let side=0;side<2;side++){const sr_=side?gr:fr,si_=side?gi:fi,m=mk[s];for(let k=0;k<B;k++){yr[k]=sr_[k]*m[k];yi[k]=-si_[k]*m[k]}for(let k=B;k<N;k++){yr[k]=yr[N-k];yi[k]=-yi[N-k]}yi[0]=0;yi[B-1]=0;fft(yr,yi);const dst=out[s*2+side];for(let n=0;n<N;n++){const j=t*H+n-off;if(j>=0&&j<len)dst[j]+=yr[n]/N*win[n]}}
+    if(t%64===0)rep(.75+.25*t/frames)}
+   return out}
+  /* quiet gaps between phrases: pull the bleed out of the vocal stem and put it in OTHER (so the stems still add up) */
+  function gateVocals(V0,V1,O0,O1,sr,rel){if(!(rel>0))return;const len=V0.length,w=Math.max(1,Math.round(sr*.02)),nW=Math.ceil(len/w),env=new Float32Array(nW);
+   for(let i=0;i<nW;i++){let s=0,n=0;for(let j=i*w,e=Math.min(len,j+w);j<e;j++){s+=V0[j]*V0[j]+V1[j]*V1[j];n+=2}env[i]=Math.sqrt(s/Math.max(1,n))}
+   const sorted=Float32Array.from(env).sort(),ref=sorted[Math.floor(.95*(nW-1))];if(!(ref>1e-6))return;const thr=ref*rel,g=new Float32Array(nW);
+   for(let i=0;i<nW;i++)g[i]=env[i]>=thr?1:Math.pow(env[i]/thr,2);
+   const f=new Float32Array(nW),bk=new Float32Array(nW);let a=0;for(let i=0;i<nW;i++){a=g[i]>a?a+(g[i]-a)*.7:a+(g[i]-a)*.12;f[i]=a}a=0;for(let i=nW-1;i>=0;i--){a=g[i]>a?a+(g[i]-a)*.7:a+(g[i]-a)*.12;bk[i]=a}
+   for(let i=0;i<nW;i++)g[i]=Math.max(f[i],bk[i]);
+   for(let j=0;j<len;j++){const x=j/w-.5,i0=Math.max(0,Math.min(nW-1,Math.floor(x))),i1=Math.min(nW-1,i0+1),fq=Math.max(0,Math.min(1,x-i0)),gg=g[i0]*(1-fq)+g[i1]*fq,m0=V0[j]*(1-gg),m1=V1[j]*(1-gg);V0[j]-=m0;V1[j]-=m1;O0[j]+=m0;O1[j]+=m1}}
+  self.onmessage=function(e){try{
+   const L=e.data.L,R=e.data.R,sr=e.data.sr,P=PRE[e.data.level]||PRE[2],len=L.length,CL=Math.round(sr*40),OV=Math.round(sr*3),X=Math.round(sr*.025),nCh=Math.max(1,Math.ceil(len/CL));
+   const out=Array.from({length:8},()=>new Float32Array(len));
+   for(let i=0;i<nCh;i++){
+    const a=i*CL,b=Math.min(len,(i+1)*CL),s=Math.max(0,a-OV),e2=Math.min(len,b+OV);
+    const res=chunk(L.subarray(s,e2),R.subarray(s,e2),sr,P,p=>self.postMessage({p:(i+p)/nCh*.97}));
+    const r0=i>0?Math.max(0,a-X):a,r1=i<nCh-1?Math.min(len,b+X):b;
+    for(let n=r0;n<r1;n++){let w=1;if(i>0&&n<a+X)w=Math.max(0,Math.min(1,(n-(a-X))/(2*X)));if(i<nCh-1&&n>=b-X)w=Math.min(w,Math.max(0,Math.min(1,(b+X-n)/(2*X))));
+     for(let c=0;c<8;c++)out[c][n]+=res[c][n-s]*w}}
+   gateVocals(out[0],out[1],out[6],out[7],sr,P.gate);
    self.postMessage({done:true,out},out.map(a=>a.buffer));
   }catch(err){self.postMessage({error:String(err&&err.message||err)})}};
  };
@@ -4825,26 +4865,46 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  function swStopAll(){swStemStop()}
  function swStemStop(){if(swStemSrc){try{swStemSrc.stop()}catch(e){}swStemSrc=null}swStemBox.querySelectorAll('.sw-play').forEach(b=>{b.textContent='▶';b.classList.remove('on')})}
  function swStemPlay(i,btn){const was=btn.classList.contains('on');swStemStop();scStopTake();if(was)return;const c=ensureBuses();c.resume().catch(()=>{});const n=c.createBufferSource();n.buffer=swStems[i];n.connect(c._sat||c.destination);n.onended=()=>{if(swStemSrc===n)swStemStop()};n.start();swStemSrc=n;btn.textContent='■';btn.classList.add('on')}
+ const spT=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
  function swRenderStems(base){swStemBox.innerHTML='';if(!swStems)return;
   swStems.forEach((b,i)=>{const SN=swStemNames[i]||('STEM '+(i+1)),nm=base+' · '+SN,play=el('button',{class:'cn-tb sw-play',type:'button',text:'▶',title:'Audition '+SN});play.onclick=()=>swStemPlay(i,play);
-   swStemBox.append(el('div',{class:'sw-stem',style:'--sc:'+STEM_COL[i%4]},el('b',{text:SN}),play,
-    scB('EDIT',()=>{swStemStop();cnTake(b,nm);swSay('STEM LOADED · '+swInfo())},'Load this stem into the WAVE editor'),
+   const open=el('button',{class:'sp-name',type:'button',title:'Open '+SN+' in the WAVE editor'},el('b',{text:SN}),el('small',{text:spT(b.duration)+' · '+nm}));
+   open.onclick=()=>{swStemStop();cnTake(b,nm);try{consoleTab('WAVE')}catch(e){}const sc=document.querySelector('#wsPanel .cn-screen');if(sc)sc.scrollIntoView({behavior:'smooth',block:'start'});swSay('OPENED '+SN+' IN THE WAVE EDITOR · '+swInfo());spSay('OPENED '+SN+' IN THE WAVE EDITOR')};
+   swStemBox.append(el('div',{class:'sp-row',style:'--sc:'+STEM_COL[i%4]},open,play,
+    scB('TRACK',()=>{swToTimeline(b,nm);toast(SN+' added to the timeline at the playhead')},'Add as a new timeline track'),
     scB('PAD',()=>scSavePad(b,nm),'Save this stem to the keyboard pad chosen above'),
-    scB('WAV',()=>swExport(b,nm),'Download using the export format above'),
-    scB('TRACK',()=>{swToTimeline(b,nm);toast(SN+' added to the timeline at the playhead')},'Add as a new timeline track')))});
-  swStemBox.append(el('div',{class:'sw-stem sw-all'},scB('ALL → TIMELINE',()=>{swStems.forEach((b,i)=>swToTimeline(b,base+' · '+(swStemNames[i]||'STEM '+(i+1))));toast(swStems.length+' stem tracks added at the playhead')},'Add every stem as a timeline track'),scB('■ STOP',swStemStop),scB('CLEAR STEMS',()=>{swStemStop();swStems=null;swRenderStems('')})))}
- async function swSplit(){try{const b=swEnsureTake();if(!b)return;if(swWorker){swWorker.terminate();swWorker=null;swSay('STEM SPLIT CANCELLED');swSplitB.textContent='✂ SPLIT 4 STEMS';return}
-   const sr=b.sampleRate,lo=Math.max(0,Math.round(SC.selA*sr)),hi=Math.min(b.length,Math.round(SC.selB*sr)),src=hi-lo>sr*.5?scSlice(b,lo/sr,hi/sr):b,max=Math.round(sr*180);
-   if(src.length>max){toast('Stem split works on up to 3 minutes. Select a shorter part.');return}
-   const L=src.getChannelData(0).slice(),R=(src.numberOfChannels>1?src.getChannelData(1):src.getChannelData(0)).slice(),base=SC.take.name||'Sample';
-   const url=URL.createObjectURL(new Blob(['('+STEM_WORKER.toString()+')()'],{type:'text/javascript'}));swWorker=new Worker(url);URL.revokeObjectURL(url);swSplitB.textContent='■ CANCEL SPLIT';swSay('SPLITTING… 0%');
-   swWorker.onmessage=ev=>{const d=ev.data;if(d.p!==undefined){swSay('SPLITTING INTO VOCALS · DRUMS · BASS · OTHER… '+Math.round(d.p*100)+'%');return}
-    swWorker.terminate();swWorker=null;swSplitB.textContent='✂ SPLIT 4 STEMS';if(d.error){swAfterSplit=null;toast('Stem split failed: '+d.error);swSay('STEM SPLIT FAILED');return}
-    const c=ensureBuses();swStems=[0,1,2,3].map(s=>{const o=c.createBuffer(2,d.out[0].length,sr);o.copyToChannel(d.out[s*2],0);o.copyToChannel(d.out[s*2+1],1);return o});swStemNames=STEM_NAMES.slice();swRenderStems(base);swSay('4 STEMS READY · ▶ AUDITION · EDIT · PAD · WAV · TRACK');if(swAfterSplit){const f=swAfterSplit;swAfterSplit=null;try{f()}catch(e){console.warn(e)}}};
-   swWorker.onerror=e=>{try{swWorker.terminate()}catch(_){}swWorker=null;swSplitB.textContent='✂ SPLIT 4 STEMS';toast('Stem split failed: '+(e.message||'worker error'))};
-   swWorker.postMessage({L,R,sr},[L.buffer,R.buffer])}catch(e){toast(e.message)}}
+    scB('WAV',()=>swExport(b,nm),'Download using the export format above')))});
+  swStemBox.append(el('div',{class:'sw-stem sw-all'},scB('ALL → TIMELINE',()=>{swStems.forEach((b,i)=>swToTimeline(b,base+' · '+(swStemNames[i]||'STEM '+(i+1))));toast(swStems.length+' stem tracks added at the playhead')},'Add every stem as a timeline track'),scB('■ STOP',swStemStop),scB('CLEAR STEMS',()=>{swStemStop();swStems=null;swRenderStems('');spSay('')})))}
+ let spT0=0;
+ async function swSplit(){try{
+   if(swWorker){swWorker.terminate();swWorker=null;swAfterSplit=null;spBar.style.display='none';swSplitB.textContent='✂ SPLIT 4 STEMS';spSay('SPLIT CANCELLED');swSay('STEM SPLIT CANCELLED');return}
+   const b=swEnsureTake();if(!b){spSay('NOTHING TO SPLIT YET · TAP ⤒ IMPORT FILE FIRST',true);return}
+   const sr=b.sampleRate,lo=Math.max(0,Math.round(SC.selA*sr)),hi=Math.min(b.length,Math.round(SC.selB*sr)),src=hi-lo>sr*.5?scSlice(b,lo/sr,hi/sr):b;
+   if(src.length>sr*480){spSay('THAT IS '+spT(src.length/sr)+' LONG · THE LIMIT IS 8:00 · DRAG ON THE WAVEFORM TO SELECT A SHORTER PART, THEN SPLIT AGAIN',true);return}
+   const L=src.getChannelData(0).slice(),R=(src.numberOfChannels>1?src.getChannelData(1):src.getChannelData(0)).slice(),base=SC.take.name||'Sample',level=+spLevel.value||2;
+   const url=URL.createObjectURL(new Blob(['('+STEM_WORKER.toString()+')()'],{type:'text/javascript'}));swWorker=new Worker(url);URL.revokeObjectURL(url);
+   swSplitB.textContent='■ CANCEL SPLIT';spBar.style.display='';spBarI.style.width='0%';spT0=Date.now();spSay('SPLITTING '+spT(src.length/sr)+' OF AUDIO · 0%');swSay('SPLITTING… 0%');
+   swWorker.onmessage=ev=>{const d=ev.data;if(d.p!==undefined){const pc=Math.round(d.p*100),sec=Math.round((Date.now()-spT0)/1000);spBarI.style.width=pc+'%';spSay('SPLITTING '+spT(src.length/sr)+' OF AUDIO · '+pc+'% · '+spT(sec)+' ELAPSED');swSay('SPLITTING INTO VOCALS · DRUMS · BASS · OTHER… '+pc+'%');return}
+    swWorker.terminate();swWorker=null;swSplitB.textContent='✂ SPLIT 4 STEMS';spBar.style.display='none';
+    if(d.error){swAfterSplit=null;spSay('SPLIT FAILED · '+d.error,true);swSay('STEM SPLIT FAILED');toast('Stem split failed: '+d.error);return}
+    const c=ensureBuses();swStems=[0,1,2,3].map(s=>{const o=c.createBuffer(2,d.out[0].length,sr);o.copyToChannel(d.out[s*2],0);o.copyToChannel(d.out[s*2+1],1);return o});swStemNames=STEM_NAMES.slice();swRenderStems(base);
+    spSay('4 STEMS READY IN '+spT(Math.round((Date.now()-spT0)/1000))+' · TAP A NAME TO OPEN IT IN THE WAVE EDITOR');swSay('4 STEMS READY · TAP A STEM NAME TO OPEN IT');if(swAfterSplit){const f=swAfterSplit;swAfterSplit=null;try{f()}catch(e){console.warn(e)}}};
+   swWorker.onerror=e=>{try{swWorker.terminate()}catch(_){}swWorker=null;swSplitB.textContent='✂ SPLIT 4 STEMS';spBar.style.display='none';spSay('SPLIT FAILED · '+(e.message||'worker error'),true);toast('Stem split failed: '+(e.message||'worker error'))};
+   swWorker.postMessage({L,R,sr,level},[L.buffer,R.buffer])}catch(e){spSay('SPLIT FAILED · '+e.message,true);toast(e.message)}}
  window.GLCTC_STEMS={get:()=>swStems,names:STEM_NAMES};
  const swSplitB=scB('✂ SPLIT 4 STEMS',swSplit,'Split the highlighted audio (or the whole take) into vocals, drums, bass and other');
+ const SP_LS='glctc1.splitLevel';
+ const spLevel=el('select',{class:'cn-sel','aria-label':'Isolation strength',title:'How hard the splitter cuts bleed. TIGHT is the default; MAX gives the cleanest vocal but can thin it out.'});
+ [['1','NORMAL'],['2','TIGHT'],['3','MAX']].forEach(([v,t])=>spLevel.append(el('option',{value:v,text:'ISOLATION · '+t})));
+ try{spLevel.value=localStorage.getItem(SP_LS)||'2'}catch(e){spLevel.value='2'}
+ spLevel.addEventListener('change',()=>{try{localStorage.setItem(SP_LS,spLevel.value)}catch(e){}});
+ const spInfo=el('div',{class:'sp-info'}),spMsg=el('div',{class:'sp-msg'}),spBarI=el('i'),spBar=el('div',{class:'sp-bar',style:'display:none'},spBarI);
+ const spSay=(t,err)=>{spMsg.textContent=t||'';spMsg.classList.toggle('err',!!err)};
+ function spRefresh(){let t='NO AUDIO LOADED · TAP ⤒ IMPORT FILE, OR LOAD A TRACK FROM ☁ MASTER LIBRARY';if(SC.take&&SC.take.buf){const b=SC.take.buf,sel=SC.selB-SC.selA,whole=!(sel>.5&&sel<b.duration-.05);t='SOURCE · '+SC.take.name+' · '+spT(b.duration)+(whole?' · WHOLE TRACK':' · SELECTION '+spT(SC.selA)+'–'+spT(SC.selB))}if(spInfo.textContent!==t)spInfo.textContent=t}
+ const spBox=el('div',{class:'sp-box'},el('div',{class:'sp-head'},el('b',{text:'✂ STEM SPLITTER'}),el('span',{text:'VOCALS · DRUMS · BASS · OTHER'})),spInfo,
+  el('div',{class:'sw-row'},scB('⤒ IMPORT FILE',()=>swFile.click(),'Choose a song or audio file from your device to split'),spLevel,swSplitB),spBar,spMsg,swStemBox);
+ setInterval(spRefresh,700);spRefresh();
+ {const st=document.createElement('style');st.textContent='.sp-box{border:1px solid #2c5a73;border-radius:9px;padding:10px;background:linear-gradient(180deg,#071018,#0b0c12);display:grid;gap:8px}.sp-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}.sp-head b{font-size:12px;letter-spacing:.2em;color:#4fd8ff}.sp-head span{font-size:10px;letter-spacing:.1em;color:var(--muted)}.sp-info{font-size:11px;letter-spacing:.06em;color:#bfeaff;overflow-wrap:anywhere}.sp-bar{height:8px;border-radius:5px;background:#10202c;overflow:hidden}.sp-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#19baff,#ff7ad9);transition:width .25s}.sp-msg{font-size:11px;letter-spacing:.05em;color:#8fe6a8;min-height:14px;overflow-wrap:anywhere}.sp-msg.err{color:#ff8a8a}.sp-box .sw-stems{display:grid;gap:6px}.sp-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px;border-left:3px solid var(--sc);background:#0a1118;border-radius:6px}.sp-name{flex:1 1 150px;min-width:0;text-align:left;display:grid;gap:1px;padding:6px 8px;border:1px solid #28485c;border-radius:6px;background:#0e1c28;color:#e8f6ff;cursor:pointer}.sp-name b{font-size:13px;letter-spacing:.12em;color:var(--sc)}.sp-name small{font-size:10px;opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}';document.head.append(st)}
  /* ---------- MASTER LIBRARY (GLCTC1 Play Space, read-only) → REMIX CENTRE ---------- */
  const ML={url:'https://zdlaloiruxamxsduxqxw.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbGFsb2lydXhhbXhzZHV4cXh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMTc3MTEsImV4cCI6MjEwMDg5MzcxMX0.m1MdepLYwqZuu3fGVzDfaFUkdW4rSsKt1Z85UDbpRBQ',client:null,rows:null,cache:new Map()};
  function mlScript(){return new Promise((res,rej)=>{if(window.supabase&&window.supabase.createClient)return res();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=()=>window.supabase&&window.supabase.createClient?res():rej(Error('Master Library code did not load'));s.onerror=()=>rej(Error('Could not reach the Master Library. Check your connection.'));document.head.append(s)})}
@@ -4879,8 +4939,8 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   el('div',{class:'sw-row'},swLab('IMPORT'),mlBtn,swSrc,scB('LOAD',swImport,'Load the chosen audio into the WAVE editor'),scB('→ TIMELINE',()=>{try{const b=scSelection();swToTimeline(b,scName.value.trim()||SC.take.name||'Master sample');toast('Added to the timeline at the playhead')}catch(e){toast(e.message)}},'Add the highlighted audio as a new timeline track'),swFile),
   el('div',{class:'sw-row'},swLab('LO-FI'),swBits,scB('APPLY BITS',swBitApply,'Reduce the bit depth of the highlighted audio'),swRate,scB('APPLY RATE',swRateApply,'Reduce the sample rate (classic sampler grit)'),swPitch,scB('APPLY PITCH',swPitchApply,'Repitch: changes pitch and speed together')),
   el('div',{class:'sw-row'},swLab('EDIT'),scB('NORMALIZE',swNorm),scB('+3 dB',()=>swGain(3)),scB('−3 dB',()=>swGain(-3)),scB('REVERSE',swRev),scB('FADE IN',()=>swFade(1)),scB('FADE OUT',()=>swFade(-1)),scB('MONO',swMono),scB('TRIM SILENCE',swTrimSilence)),
-  el('div',{class:'sw-row'},swLab('EXPORT'),swFmt,swExRate,scB('⬇ EXPORT WAV',()=>{try{swExport(scSelection(),scName.value.trim()||SC.take.name)}catch(e){toast(e.message)}},'Download the highlighted audio in the chosen format'),swLab('STEMS'),swSplitB),
-  mlBox,swStatus,swStemBox);
+  el('div',{class:'sw-row'},swLab('EXPORT'),swFmt,swExRate,scB('⬇ EXPORT WAV',()=>{try{swExport(scSelection(),scName.value.trim()||SC.take.name)}catch(e){toast(e.message)}},'Download the highlighted audio in the chosen format'),),
+  spBox,mlBox,swStatus);
  {const st=document.createElement('style');st.textContent='#wsPanel .sw-tools{display:grid;gap:7px;padding:0 10px 10px}#wsPanel .sw-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}#wsPanel .sw-lab{font-size:9px;letter-spacing:.16em;color:#ffd36a;min-width:56px;font-weight:800}#wsPanel .sw-tools select.cn-sel{max-width:230px}#wsPanel .sw-stems{display:grid;gap:6px}#wsPanel .sw-stem{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;border:1px solid #2a2c33;border-left:4px solid var(--sc,#ffd36a);border-radius:7px;background:#0b0d12}#wsPanel .sw-stem b{min-width:70px;font-size:11px;letter-spacing:.12em;color:var(--sc,#ffd36a)}#wsPanel .sw-stem.sw-all{border-left-color:#888}#wsPanel .sw-play.on{background:linear-gradient(#146a4b,#093322);color:#caffdf}#wsPanel .ml-box{border:1px solid #2c5a73;border-radius:8px;padding:8px;background:#071018;display:grid;gap:6px}#wsPanel .ml-search{flex:1 1 260px;min-width:0;background:#04080c;border:1px solid #2c5a73;border-radius:6px;color:#e6f6ff;padding:7px 9px}#wsPanel .ml-list{max-height:320px;overflow:auto;display:grid;gap:4px}#wsPanel .ml-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;border:1px solid #1d3442;border-radius:6px;background:#0a141c}#wsPanel .ml-meta{flex:1 1 240px;min-width:0;display:grid}#wsPanel .ml-meta b{font-size:12px;color:#bfeaff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#wsPanel .ml-meta small{font-size:10px;color:#7fa3b8;letter-spacing:.06em}#wsPanel .ml-empty{font-size:11px;color:#7fa3b8;padding:8px}';document.head.append(st)}
 
 

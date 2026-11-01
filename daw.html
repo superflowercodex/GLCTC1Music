@@ -5746,12 +5746,12 @@ function setGainNow(m,target){
  try{g.cancelScheduledValues(0);g.setValueAtTime(target,S.ctx.currentTime)}catch(e){}
  S.gv[m.k]=target;
 }
-function applyPresets(){
+function applyPresets(force){
  MODS.forEach(m=>{
   const v=st.presets[m.k];if(!v||!used(m))return;
   const el=byId(m.preset);if(!el)return;
   if(!Array.from(el.options).some(o=>o.value===v))return;
-  if(el.value!==v){el.value=v;fire(el)}
+  if(force||el.value!==v){el.value=v;fire(el)}
  });
 }
 function setBtn(){
@@ -6120,7 +6120,16 @@ function setMasterBpmFromComposer(value){
 }
 /* ---------------- generate ---------------- */
 /* prepare = everything GENERATE does except pressing play: genre, tempo, which modules are in, their sounds and key-aligned patterns */
+/* v9: remember how the drum / bass / synth knobs were when the page first made a song, and put them back before every later GENERATE - so every song starts from the same clean sound as the NEW SONG ON LOAD one */
+let BASE_KNOBS=null;
+const KNOB_RE=/^(blSwing|blVelocity|mine909|d09|lee303|s101PatternGate)/;
+function moduleKnobs(){return Array.from(document.querySelectorAll('input[type=range]')).filter(e=>e.id&&KNOB_RE.test(e.id)&&!e.closest('#glctc1SongComposer'))}
+function freshKnobs(){
+ if(!BASE_KNOBS){BASE_KNOBS={};moduleKnobs().forEach(e=>{BASE_KNOBS[e.id]=e.value});return}
+ moduleKnobs().forEach(e=>{const v=BASE_KNOBS[e.id];if(v===undefined||e.value===v)return;e.value=v;try{e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}))}catch(_){}});
+}
 function prepareSong(genreKey,txt,forceFill){
+ try{freshKnobs()}catch(e){console.warn('knob reset',e)}
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
  st.len=TPL[len]?len:'32';st.secs=mkSecs(st.len);st.cells=autoCells(st.secs);
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
@@ -6147,13 +6156,17 @@ async function generate(){
  const genreKey=byId('gscGenre').value,txt=(byId('gscPrompt').value||'').toLowerCase();
  try{
   prepareSong(genreKey,txt,false);
-  try{applyPresets()}catch(e){console.warn('preset apply',e)}
+  /* v9: same finishing steps as NEW SONG ON LOAD - reload every module's genre sound from scratch (even if the preset name is already selected, so earlier tweaks or a previous song cannot leak in) and load the Looper loop */
+  try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
+  try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
+  try{window.GLCTC_NEW_SONG={genre:genreKey,key:(byId('gscKey')||{}).textContent,bpm:st.bpm,seed:null}}catch(e){}
   status('SONG GENERATED · '+st.bpm+' BPM · '+(byId('gscKey')?.textContent||'KEY')+' · PRESS PLAY WHEN READY');
  }catch(e){console.error('Song generation failed:',e);status('SONG GENERATION FAILED · SEE CONSOLE')}
  setBtn();
 }
 /* ---------- NEW SONG ON EVERY LOAD: random genre, key, tempo; every module written into the same key / tempo / genre ---------- */
 const AUTO_LS='glctc1.autoSongOnLoad';
+(()=>{const cap=()=>setTimeout(()=>{try{if(!BASE_KNOBS)freshKnobs()}catch(e){}},1000);if(document.readyState==='complete')cap();else window.addEventListener('load',cap,{once:true})})();
 (()=>{
  const box=byId('gscAutoLoad');
  try{if(box)box.checked=localStorage.getItem(AUTO_LS)!=='0'}catch(e){}
@@ -6170,7 +6183,7 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    const keys=Object.keys(GENRE),g=keys[Math.floor(Math.random()*keys.length)];
    const sel=byId('gscGenre');if(sel)sel.value=g;
    const pack=prepareSong(g,'',true);
-   try{applyPresets()}catch(e){console.warn('preset apply',e)}
+   try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
    window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=String(pack&&pack.name||'C MINOR').toUpperCase();
    status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press PLAY');

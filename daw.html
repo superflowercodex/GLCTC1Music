@@ -4794,7 +4794,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   const rev=new Uint32Array(N);for(let i=0,bits=Math.log2(N);i<N;i++){let x=i,r=0;for(let b=0;b<bits;b++){r=(r<<1)|(x&1);x>>=1}rev[i]=r}
   const cs=new Float64Array(N/2),sn=new Float64Array(N/2);for(let i=0;i<N/2;i++){cs[i]=Math.cos(2*Math.PI*i/N);sn[i]=-Math.sin(2*Math.PI*i/N)}
   function fft(re,im){for(let i=0;i<N;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}for(let s=2;s<=N;s<<=1){const h=s>>1,st=N/s;for(let i=0;i<N;i+=s)for(let k=0;k<h;k++){const wr=cs[k*st],wi=sn[k*st],a=i+k,b=a+h,xr=re[b]*wr-im[b]*wi,xi=re[b]*wi+im[b]*wr;re[b]=re[a]-xr;im[b]=im[a]-xi;re[a]+=xr;im[a]+=xi}}}
-  const PRE={1:{p:2,cn:3,vlo:[140,320],vhi:[7000,13000],gate:.03,sm:0,comb:0},2:{p:3,cn:4,vlo:[160,340],vhi:[6500,11000],gate:.07,sm:1,comb:1,conf:3,sg:.012},3:{p:4,cn:6,vlo:[170,360],vhi:[5500,9500],gate:.12,sm:1,comb:1,conf:4,sg:.008}};
+  const PRE={1:{p:2,cn:3,vlo:[140,320],vhi:[7000,13000],gate:.03,sm:0,comb:0},2:{p:3,cn:4,vlo:[160,340],vhi:[6500,11000],gate:.07,sm:1,comb:1,conf:3,sg:.012,rt:[.9,2.0],sib:.3,hcap:8},3:{p:4,cn:6,vlo:[170,360],vhi:[5500,9500],gate:.12,sm:1,comb:1,conf:4,sg:.008,rt:[1.0,2.5],sib:.15,hcap:6},4:{p:4,cn:6,vlo:[170,360],vhi:[5000,8500],gate:.15,sm:1,comb:1,conf:4,sg:.008,rt:[1.3,3.5],sib:0,hcap:5}};
   const ramp=(x,a,b)=>x<=a?0:x>=b?1:(x-a)/(b-a);
   const K=8,tmp=new Float32Array(2*K+1);
   function med(n){for(let i=1;i<n;i++){const v=tmp[i];let j=i-1;while(j>=0&&tmp[j]>v){tmp[j+1]=tmp[j];j--}tmp[j+1]=v}return tmp[n>>1]}
@@ -4811,7 +4811,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    const bassW=new Float32Array(B),vocW=new Float32Array(B);for(let k=0;k<B;k++){const f=k*sr/N;bassW[k]=1-ramp(f,110,240);vocW[k]=ramp(f,P.vlo[0],P.vlo[1])*(1-ramp(f,P.vhi[0],P.vhi[1]))}
    /* vocal pitch tracking: keep only what lines up with the singer's note and its overtones (kills bass / synth / pad bleed) */
    const binHz=sr/N,F0=new Float32Array(frames),sibW=new Float32Array(B);
-   for(let k=0;k<B;k++)sibW[k]=ramp(k*binHz,3500,6000)*.5;
+   for(let k=0;k<B;k++)sibW[k]=ramp(k*binHz,3500,6000)*(P.sib!==undefined?P.sib:.5);
    if(P.comb){
     const vw=new Float32Array(B);for(let k=0;k<B;k++){const f=k*binHz;vw[k]=ramp(f,150,400)*(1-ramp(f,3500,6000))}
     const cands=[];for(let f=85;f<=700;f*=Math.pow(2,1/48))cands.push(f);
@@ -4826,8 +4826,8 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
      if(pick[t]>=0&&n>0&&cf[t]>P.conf&&best[t]>.02*mx){for(let i=1;i<n;i++){const v=tmpl[i];let j=i-1;while(j>=0&&tmpl[j]>v){tmpl[j+1]=tmpl[j];j--}tmpl[j+1]=v}F0[t]=cands[Math.round(tmpl[n>>1])]}else F0[t]=0}
    }
    const VM=new Float32Array(frames*B),DM=new Float32Array(frames*B),BM=new Float32Array(frames*B);
-   for(let t=0;t<frames;t++){const f0=F0[t];for(let k=0;k<B;k++){const o=t*B+k,hp=Math.pow(HM[o],P.p),qp=Math.pow(PM[o],P.p),hm=hp/(hp+qp+1e-30);DM[o]=1-hm;BM[o]=hm*bassW[k];let vo=hm*(1-bassW[k])*vocW[k]*Math.pow(CEN[o],P.cn);
-    if(P.comb){if(f0>0){const fk=k*binHz,h=Math.max(1,Math.round(fk/f0)),d=fk-h*f0,sg=binHz*.9+P.sg*h*f0;vo*=fk<f0*.7?0:Math.exp(-.5*d*d/(sg*sg))}else vo*=sibW[k]}
+   for(let t=0;t<frames;t++){const f0=F0[t];for(let k=0;k<B;k++){const o=t*B+k,hp=Math.pow(HM[o],P.p),qp=Math.pow(PM[o],P.p),hm=P.rt?Math.max(0,Math.min(1,(HM[o]/(PM[o]+1e-30)-P.rt[0])/(P.rt[1]-P.rt[0]))):hp/(hp+qp+1e-30);DM[o]=1-hm;BM[o]=hm*bassW[k];let vo=hm*(1-bassW[k])*vocW[k]*Math.pow(CEN[o],P.cn);
+    if(P.comb){if(f0>0){const fk=k*binHz,h=Math.max(1,Math.round(fk/f0)),d=fk-h*f0,sg=binHz*.9+P.sg*Math.min(h,P.hcap||99)*f0;vo*=fk<f0*.7?0:Math.exp(-.5*d*d/(sg*sg))}else vo*=sibW[k]}
     VM[o]=vo}}
    if(P.sm){for(let k=0;k<B;k++){let a=VM[k];for(let t=0;t<frames;t++){const cur=VM[t*B+k],nxt=t+1<frames?VM[(t+1)*B+k]:cur;VM[t*B+k]=.25*a+.5*cur+.25*nxt;a=cur}}}
    rep(.75);
@@ -4881,7 +4881,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    const b=swEnsureTake();if(!b){spSay('NOTHING TO SPLIT YET · TAP ⤒ IMPORT FILE FIRST',true);return}
    const sr=b.sampleRate,lo=Math.max(0,Math.round(SC.selA*sr)),hi=Math.min(b.length,Math.round(SC.selB*sr)),src=hi-lo>sr*.5?scSlice(b,lo/sr,hi/sr):b;
    if(src.length>sr*480){spSay('THAT IS '+spT(src.length/sr)+' LONG · THE LIMIT IS 8:00 · DRAG ON THE WAVEFORM TO SELECT A SHORTER PART, THEN SPLIT AGAIN',true);return}
-   const L=src.getChannelData(0).slice(),R=(src.numberOfChannels>1?src.getChannelData(1):src.getChannelData(0)).slice(),base=SC.take.name||'Sample',level=+spLevel.value||2;
+   const L=src.getChannelData(0).slice(),R=(src.numberOfChannels>1?src.getChannelData(1):src.getChannelData(0)).slice(),base=SC.take.name||'Sample',level=+spLevel.value||3;
    const url=URL.createObjectURL(new Blob(['('+STEM_WORKER.toString()+')()'],{type:'text/javascript'}));swWorker=new Worker(url);URL.revokeObjectURL(url);
    swSplitB.textContent='■ CANCEL SPLIT';spBar.style.display='';spBarI.style.width='0%';spT0=Date.now();spSay('SPLITTING '+spT(src.length/sr)+' OF AUDIO · 0%');swSay('SPLITTING… 0%');
    swWorker.onmessage=ev=>{const d=ev.data;if(d.p!==undefined){const pc=Math.round(d.p*100),sec=Math.round((Date.now()-spT0)/1000);spBarI.style.width=pc+'%';spSay('SPLITTING '+spT(src.length/sr)+' OF AUDIO · '+pc+'% · '+spT(sec)+' ELAPSED');swSay('SPLITTING INTO VOCALS · DRUMS · BASS · OTHER… '+pc+'%');return}
@@ -4894,9 +4894,9 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  window.GLCTC_STEMS={get:()=>swStems,names:STEM_NAMES};
  const swSplitB=scB('✂ SPLIT 4 STEMS',swSplit,'Split the highlighted audio (or the whole take) into vocals, drums, bass and other');
  const SP_LS='glctc1.splitLevel';
- const spLevel=el('select',{class:'cn-sel','aria-label':'Isolation strength',title:'How hard the splitter cuts bleed. TIGHT is the default; MAX gives the cleanest vocal but can thin it out.'});
- [['1','NORMAL'],['2','TIGHT'],['3','MAX']].forEach(([v,t])=>spLevel.append(el('option',{value:v,text:'ISOLATION · '+t})));
- try{spLevel.value=localStorage.getItem(SP_LS)||'2'}catch(e){spLevel.value='2'}
+ const spLevel=el('select',{class:'cn-sel','aria-label':'Isolation strength',title:'How hard the splitter cuts bleed. MAX is the default. CLEANEST removes the most bleed but can thin consonants and breath.'});
+ [['1','NORMAL'],['2','TIGHT'],['3','MAX'],['4','CLEANEST']].forEach(([v,t])=>spLevel.append(el('option',{value:v,text:'ISOLATION · '+t})));
+ try{spLevel.value=localStorage.getItem(SP_LS)||'3'}catch(e){spLevel.value='3'}
  spLevel.addEventListener('change',()=>{try{localStorage.setItem(SP_LS,spLevel.value)}catch(e){}});
  const spInfo=el('div',{class:'sp-info'}),spMsg=el('div',{class:'sp-msg'}),spBarI=el('i'),spBar=el('div',{class:'sp-bar',style:'display:none'},spBarI);
  const spSay=(t,err)=>{spMsg.textContent=t||'';spMsg.classList.toggle('err',!!err)};
@@ -6592,6 +6592,37 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
   }catch(e){console.warn('remix arrival',e);say('COULD NOT OPEN THE REMIX · '+e.message+' · USE ☁ MASTER LIBRARY → ★ REMIX',12000)}
  }
  if(document.readyState==='complete')go();else window.addEventListener('load',go,{once:true});
+})();
+</script>
+
+<style id="glctc1-bl-playhead-css">
+#blSteps{position:relative}
+.bl-playhead{position:absolute;top:0;bottom:0;left:0;width:3px;z-index:3;pointer-events:none;display:none;border-radius:2px;background:#4af59b;box-shadow:0 0 10px 1px #4af59b,0 0 22px 2px rgba(74,245,155,.45)}
+.bl-playhead::before{content:'';position:absolute;right:3px;top:0;bottom:0;width:46px;background:linear-gradient(90deg,rgba(74,245,155,0),rgba(74,245,155,.20))}
+.bl-playhead::after{content:'';position:absolute;left:-5px;top:-2px;border:6px solid transparent;border-top:8px solid #4af59b;border-bottom:0}
+</style>
+<script>
+/* v66 80LA8 TIME BAR: a smooth moving playhead across the 16-step grid (follows the real scheduled step, scrolls into view on phones) */
+(()=>{'use strict';
+ const root=document.getElementById('blSteps');if(!root)return;
+ const wrap=root.closest('.bl-steps-wrap')||root.parentElement;
+ const head=document.createElement('div');head.className='bl-playhead';head.setAttribute('aria-hidden','true');
+ let cur=-1,t0=0,running=false,pausedUntil=0;
+ const stepMs=()=>{try{return 60000/Math.max(30,GLCTC_CLOCK.bpm)/4}catch(e){return 125}};
+ const cell=n=>root.querySelector('.bl-step[data-step="'+n+'"]');
+ function frame(){
+  const now=performance.now(),playing=!!root.querySelector('.bl-step.playing');
+  if(!playing&&now-t0>700){head.style.display='none';cur=-1;running=false;return}
+  if(cur>=0){
+   if(!head.isConnected)root.append(head);           // renderSteps() rebuilds the grid, so re-attach
+   const a=cell(cur);
+   if(a){const f=Math.min(1,(now-t0)/stepMs()),nx=cur===15?a.offsetLeft+a.offsetWidth+4:(cell(cur+1)||a).offsetLeft,x=a.offsetLeft+f*(nx-a.offsetLeft);
+    head.style.display='block';head.style.transform='translateX('+x.toFixed(1)+'px)';
+    if(wrap&&wrap.scrollWidth>wrap.clientWidth+4&&now>pausedUntil){const vis0=wrap.scrollLeft+126,vis1=wrap.scrollLeft+wrap.clientWidth-24;if(x<vis0||x>vis1)wrap.scrollTo({left:Math.max(0,x-140),behavior:'smooth'}),pausedUntil=now+600}}}
+  requestAnimationFrame(frame)}
+ function onStep(n){cur=n;t0=performance.now();if(!running){running=true;requestAnimationFrame(frame)}}
+ new MutationObserver(ms=>{for(const m of ms){const t=m.target;if(m.type==='attributes'&&t.classList&&t.classList.contains('playing')&&t.dataset&&t.dataset.step!=null){onStep(+t.dataset.step);return}}}).observe(root,{subtree:true,attributes:true,attributeFilter:['class']});
+ ['pointerdown','wheel','touchstart'].forEach(ev=>wrap.addEventListener(ev,()=>{pausedUntil=performance.now()+4000},{passive:true}));
 })();
 </script>
 </body>

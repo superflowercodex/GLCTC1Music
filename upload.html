@@ -1,7 +1,7 @@
 <!DOCTYPE html>  <html lang="en">  
 <head>  
   <meta charset="UTF-8">
-  <!-- v51: shares attach the cover art again, with the play link in the caption (link-only fallback). v49: SHARE TRACK shares the track actually playing in the player (was a stale playlist position). v47: Simple View shows only the player + Master Library (player first, studio tabs hidden behind FULL STUDIO); every share link auto-plays with a TAP TO PLAY fallback; shared track links match any track ID; mixer bay no longer docks into Deck A when both decks are hidden; MIDI only requested in Full Studio; late patches moved inside </body>. v35: Master Library search runs on Enter (wired at top level, honours filter menu); track + playlist shares attach cover-art image; playlist link compact + truncated text. v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
+  <!-- v34: one visible Playlist Master player; Master Library search feeds the same player; legacy preview controls hidden (#glctc1PlayModule); lift script + dead platterScratch removed. GLCTC1 Play Space — favourites playlist and playback counters; neon HIDE/SHOW tabs on every module; new visitors see only Playlist Master + Master Library (see bottom of file) -->  
   <title>GLCTC1 – Play Space · Cosmic Decks</title>    <style>  
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');  
   
@@ -5179,11 +5179,7 @@ if (masterLibraryEditorModule) {
   <input
     type="text"
     id="librarySearch"
-    placeholder="Search library... (press Enter)"
-    enterkeyhint="search"
-    autocomplete="off"
-    autocapitalize="off"
-    spellcheck="false"
+    placeholder="Search library..."
     style="
       flex:1;
       padding:8px;
@@ -5498,128 +5494,6 @@ async function glctc1CopyText(text) {
   );
 
   return false;
-}
-
-
-// =====================================================
-// 🖼️ SHARE WITH ARTWORK IMAGE  (v35)
-// Attaches the cover art as an image file in the phone's
-// share sheet. Falls back to the plain link share if the
-// image or file-sharing is not available.
-// =====================================================
-
-function glctc1FindTrackArt(track) {
-
-  if (!track) return "";
-
-  let art = track.cover_art || track["Cover Art"] || "";
-
-  if (!art && typeof library !== "undefined" && Array.isArray(library)) {
-    const id = track.id || track.id_cat_no || track["ID Cat No"];
-    const match = library.find(t =>
-      String(t.id) === String(id) || String(t.id_cat_no) === String(id)
-    );
-    if (match) art = match.cover_art || "";
-  }
-
-  return art;
-}
-
-async function glctc1ResolveArtworkUrl(art) {
-
-  art = String(art || "").trim();
-
-  if (!art) return "";
-
-  if (/^(https?:|data:image\/|blob:)/i.test(art)) return art;
-
-  try {
-    const { data, error } =
-      await supabaseClient.storage
-        .from("tracks")
-        .createSignedUrl(art, 60 * 60);
-
-    if (!error && data && data.signedUrl) return data.signedUrl;
-  } catch (e) {
-    console.log("Artwork URL failed:", e);
-  }
-
-  return "";
-}
-
-async function glctc1BuildShareImage(art, baseName) {
-
-  try {
-
-    const url = await glctc1ResolveArtworkUrl(art);
-
-    if (!url) return null;
-
-    const res = await fetch(url);
-
-    if (!res.ok) return null;
-
-    const blob = await res.blob();
-
-    const type =
-      blob.type && blob.type.startsWith("image/")
-        ? blob.type
-        : "image/jpeg";
-
-    const ext =
-      type.includes("png") ? "png" :
-      type.includes("webp") ? "webp" :
-      type.includes("gif") ? "gif" : "jpg";
-
-    const safe =
-      String(baseName || "glctc1")
-        .replace(/[^\w\-]+/g, "_")
-        .slice(0, 40) || "glctc1";
-
-    return new File([blob], safe + "." + ext, { type });
-
-  } catch (e) {
-    console.log("Share image failed:", e);
-    return null;
-  }
-}
-
-// returns "shared" | "cancelled" | "copied"
-async function glctc1ShareWithImage({ title, text, url, art, name }) {
-
-  if (!navigator.share) {
-    await glctc1CopyText(url);
-    return "copied";
-  }
-
-  // v51: cover art goes back on, with the play link in the caption,
-  // so the message arrives as artwork + a tappable song/playlist link.
-  const caption = "🎵 " + text + "\n▶ Listen on GLCTC1 MUSIC:\n" + url;
-  const file = await glctc1BuildShareImage(art, name);
-
-  if (file && navigator.canShare && navigator.canShare({ files: [file], text: caption })) {
-    try {
-      await navigator.share({ title, text: caption, files: [file] });
-      return "shared";
-    } catch (e) {
-      if (e && e.name === "AbortError") return "cancelled";
-      console.log("Image share failed, trying link only:", e);
-    }
-  }
-
-  try {
-    await navigator.share({ title, text: "🎵 " + text + " · Listen on GLCTC1 MUSIC", url });
-    return "shared";
-  } catch (e) {
-    if (e && e.name === "AbortError") return "cancelled";
-    await glctc1CopyText(url);
-    return "copied";
-  }
-}
-
-function glctc1Truncate(str, max) {
-  str = String(str || "").trim();
-  return str.length > max ? str.slice(0, max - 1).trimEnd() + "…" : str;
 }
 
 
@@ -6378,8 +6252,7 @@ function buildBarGrid(
 // =====================================================
 
 async function analyseBeatGrid(
-  audioBuffer,
-  deck
+  audioBuffer
 ) {
 
   const kickPoints =
@@ -6419,19 +6292,10 @@ async function analyseBeatGrid(
   // BPM
   // ---------------------------------------------------
 
-  const kickBpm =
+  const bpm =
     calculateKickBPM(
       kickPoints
     );
-
-  // v49: one tempo for SNAP / TAP TEMPO / SYNC = Master Library BPM
-  // (refined by kick spacing when it agrees), else the tempo engine.
-  let bpm = kickBpm;
-  try {
-    bpm = glctc1ResolveBpm(deck, audioBuffer, kickBpm);
-  } catch (e) {
-    bpm = kickBpm;
-  }
 
 
   if (
@@ -6662,8 +6526,7 @@ async function buildTransientMap(
 
     const analysis =
       await analyseBeatGrid(
-        audioBuffer,
-        deck
+        audioBuffer
       );
 
 
@@ -7652,8 +7515,6 @@ function updateBpmMeter(deck, bpm) {
   if (!display) return;
 
   display.dataset.bpm = bpm || 120;
-  // v49: remember whether this BPM came from the library (a real value) or is just the 120 default
-  display.dataset.bpmKnown = (Number(bpm) >= 40 && Number(bpm) <= 220) ? "1" : "0";
 
 }
 
@@ -8962,30 +8823,13 @@ document.getElementById("shareTrackBtn").addEventListener("click", async () => {
   }
 
   const shareUrl =
-    `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}&autoplay=1`;
+    `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(trackId)}`;
 
-  // 📱 Native Share menu with the cover art attached (v35)
-  try {
-
-    const result = await glctc1ShareWithImage({
-      title: glctc1Truncate(selectedLibraryTrack.title || "GLCTC1 Track", 60),
-      text: glctc1Truncate(
-        `${selectedLibraryTrack.artist || ""} - ${selectedLibraryTrack.title || ""}`, 80),
-      url: shareUrl,
-      art: glctc1FindTrackArt(selectedLibraryTrack),
-      name: selectedLibraryTrack.title
-    });
-
-    if (result === "copied") {
-      alert("🔗 Track link copied to clipboard:\n\n" + shareUrl);
-    }
-
-  } catch (error) {
-    console.log("Share cancelled.", error);
-  }
+  // v51: share the SONG with its cover image attached (link kept in the message)
+  await glctc1ShareTrackMedia(selectedLibraryTrack, shareUrl);
 
 });
-
+  
 // --- LOADERS ---  
 // =====================================================
 // 🎚️ LOAD TRACK TO DECK  (v47 rebuilt)
@@ -9108,8 +8952,7 @@ async function loadToDeck(deck, track) {
   a.src = audioFile;
   a.load();
 
-  // v49: pass the real library BPM (or 0 when the track has none) so the decks know whether to trust it
-  const bpm = Number(track.bpm || track["BPM"]) || 0;
+  const bpm = Number(track.bpm || track["BPM"]) || 120;
 
   updateBpmMeter(deck, bpm);
   drawWaveform(deck);
@@ -9123,7 +8966,7 @@ function loadStemToDeck(deck, fileUrl, bpm) {
   const a = audio(deck);  
   a.src = fileUrl;  
   drawWaveform(deck);  
-  updateBpmMeter(deck, bpm || 0);  
+  updateBpmMeter(deck, bpm || 120);  
 }  
   
 // --- SELECTED SLOT + PLAYER ---  
@@ -9281,10 +9124,8 @@ async function playPlaylistMasterTrack(
       "glctc1PlaylistArtwork"
     );
 
-  if (artworkEl) {
-    // v47: clear the previous track's cover when this one has none
-    if (artwork) { artworkEl.src = artwork; artworkEl.style.display = ""; }
-    else artworkEl.removeAttribute("src");
+  if (artworkEl && artwork) {
+    artworkEl.src = artwork;
   }
 
   const positionEl =
@@ -10122,24 +9963,7 @@ function renderLibraryTable(searchTerm = "") {
       ];
 
 
-      // v35: honour the filter dropdown (All Fields or one column)
-      const filterEl =
-        document.getElementById("libraryFilter");
-
-      const filterField =
-        filterEl ? filterEl.value : "all";
-
-      let fieldsToSearch = searchableFields;
-
-      if (filterField && filterField !== "all") {
-        fieldsToSearch = [
-          filterField === "id_cat_no"
-            ? (track.id_cat_no || track.cat_no)
-            : track[filterField]
-        ];
-      }
-
-      return fieldsToSearch.some(
+      return searchableFields.some(
         value =>
           String(value || "")
             .toLowerCase()
@@ -14607,11 +14431,8 @@ if (glctc1PlaylistShareTrack) {
   glctc1PlaylistShareTrack.onclick =
     async function () {
 
-      // v49: share the track the player is actually showing / playing
-      // (library, search, favourites or playlist) — not a stale
-      // position in whichever playlist happens to be selected.
       const track =
-        glctc1TrackForDeckLoad();
+        glctc1GetCurrentPlaylistTrack();
 
       if (!track) {
 
@@ -14642,31 +14463,11 @@ if (glctc1PlaylistShareTrack) {
       const shareUrl =
         `${window.location.origin}${window.location.pathname}?track=${encodeURIComponent(
           trackId
-        )}&autoplay=1`;
+        )}`;
 
 
-      try {
-
-        const result = await glctc1ShareWithImage({
-          title: glctc1Truncate(glctc1TrackTitle(track), 60),
-          text: glctc1Truncate(
-            `${glctc1TrackTitle(track)} — ${glctc1TrackArtist(track)}`, 80),
-          url: shareUrl,
-          art: glctc1FindTrackArt(track),
-          name: glctc1TrackTitle(track)
-        });
-
-        if (result === "copied") {
-          alert("🔗 Track share link copied.");
-        }
-
-      } catch (error) {
-
-        console.log(
-          "Playlist track share cancelled:",
-          error
-        );
-      }
+      // v51: share the SONG with its cover image attached (link kept in the message)
+      await glctc1ShareTrackMedia(track, shareUrl);
     };
 }
 
@@ -14707,77 +14508,58 @@ if (glctc1PlaylistSharePlaylist) {
 
 
       // -----------------------------------------------
-      // CREATE SMALL SHARE PAYLOAD  (v35: compact)
-      // Only the name + track IDs travel in the link.
-      // The artwork is NOT stored in the URL any more
-      // (it made the link huge) — the receiver uses the
-      // first track's cover art instead.
+      // CREATE SMALL SHARE PAYLOAD
       // -----------------------------------------------
 
       const shareData = {
 
-        name:
-          glctc1Truncate(playlist.name || "Playlist", 60),
+  name:
+    playlist.name,
 
-        tracks:
-          playlist.tracks
-            .map(track =>
-              track.id ||
-              track.id_cat_no ||
-              track["ID Cat No"]
-            )
-            .filter(Boolean)
-      };
+  // 🖼️ PLAYLIST ARTWORK
+  // Use the first track's artwork as the
+  // shared playlist artwork reference.
+  artwork:
+    playlist.tracks[0]?.cover_art ||
+    playlist.tracks[0]?.["Cover Art"] ||
+    "",
+
+  tracks:
+    playlist.tracks
+      .map(track =>
+        track.id ||
+        track.id_cat_no ||
+        track["ID Cat No"]
+      )
+      .filter(Boolean)
+
+};
 
 
       // -----------------------------------------------
-      // ENCODE (UTF-8 → URL-safe base64, no padding)
+      // ENCODE PLAYLIST INTO URL
       // -----------------------------------------------
 
       const encodedPlaylist =
-        btoa(unescape(encodeURIComponent(JSON.stringify(shareData))))
-          .replace(/\+/g, "-")
-          .replace(/\//g, "_")
-          .replace(/=+$/g, "");
+        btoa(
+          encodeURIComponent(
+            JSON.stringify(
+              shareData
+            )
+          )
+        );
 
 
       const shareUrl =
-        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}&autoplay=1`;
+        `${window.location.origin}${window.location.pathname}?playlist=${encodedPlaylist}`;
 
 
-      // Short share text: truncated name + track count
-      const shareText =
-        `${glctc1Truncate(playlist.name || "Playlist", 40)} · ${shareData.tracks.length} track${shareData.tracks.length === 1 ? "" : "s"}`;
-
-
-      // Playlist image = playlist artwork or first track's cover
-      const playlistArt =
-        playlist.artwork ||
-        glctc1FindTrackArt(playlist.tracks[0]);
-
-
-      try {
-
-        const result = await glctc1ShareWithImage({
-          title: glctc1Truncate(playlist.name || "GLCTC1 Playlist", 40),
-          text: shareText,
-          url: shareUrl,
-          art: playlistArt,
-          name: playlist.name
-        });
-
-        if (result === "copied") {
-          alert("🔗 Playlist share link copied.");
-        }
-
-      } catch (error) {
-
-        console.log(
-          "Playlist share cancelled:",
-          error
-        );
-
-      }
+      // v51: share the playlist link with the playlist cover image attached
+      await glctc1ShareTrackMedia(
+        playlist.tracks[0] || {},
+        shareUrl,
+        { playlist: true, title: playlist.name }
+      );
 
     };
 
@@ -14806,28 +14588,14 @@ if (sharedPlaylistData) {
 
   try {
 
-    // v35: accepts new compact links AND older links
-    let decodedPlaylist = null;
-
-    {
-      let b64 =
-        String(sharedPlaylistData)
-          .replace(/ /g, "+")
-          .replace(/-/g, "+")
-          .replace(/_/g, "/");
-
-      while (b64.length % 4) b64 += "=";
-
-      const raw = atob(b64);
-
-      try {
-        decodedPlaylist =
-          JSON.parse(decodeURIComponent(escape(raw)));
-      } catch (e1) {
-        decodedPlaylist =
-          JSON.parse(decodeURIComponent(raw));
-      }
-    }
+    const decodedPlaylist =
+      JSON.parse(
+        decodeURIComponent(
+          atob(
+            sharedPlaylistData
+          )
+        )
+      );
 
 
     if (
@@ -14911,78 +14679,6 @@ glctc1UpdatePlaylistPlayer();
 // END GLCTC1 PLAYLIST MASTER
 // =====================================================
   
-// =====================================================
-// 🔍 MASTER LIBRARY SEARCH — ENTER / FILTER  (v35)
-// Wired at top level so a failure elsewhere during startup
-// can no longer stop the Enter key from working.
-// =====================================================
-
-function glctc1RunLibrarySearch() {
-
-  if (typeof renderLibraryTable !== "function") return;
-
-  const box = document.getElementById("librarySearch");
-
-  renderLibraryTable(box ? box.value : "");
-}
-
-function glctc1InitLibrarySearch() {
-
-  const box = document.getElementById("librarySearch");
-
-  if (!box || box.dataset.glctc1SearchWired === "1") return;
-
-  box.dataset.glctc1SearchWired = "1";
-
-  box.setAttribute("enterkeyhint", "search");
-
-  let timer = null;
-
-  // Live search while typing (debounced)
-  box.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(glctc1RunLibrarySearch, 300);
-  });
-
-  // ENTER = search now
-  box.addEventListener("keydown", event => {
-
-    const isEnter =
-      event.key === "Enter" ||
-      event.keyCode === 13 ||
-      event.which === 13;
-
-    if (!isEnter || event.isComposing) return;
-
-    event.preventDefault();
-
-    clearTimeout(timer);
-
-    glctc1RunLibrarySearch();
-
-    // close the phone keyboard so the results are visible
-    box.blur();
-  });
-
-  // Clear (x) button on type="search" browsers
-  box.addEventListener("search", glctc1RunLibrarySearch);
-
-  // Changing the filter menu re-runs the search
-  const filter = document.getElementById("libraryFilter");
-
-  if (filter) {
-    filter.addEventListener("change", glctc1RunLibrarySearch);
-  }
-
-  console.log("✅ GLCTC1 Master Library Search READY");
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", glctc1InitLibrarySearch);
-} else {
-  glctc1InitLibrarySearch();
-}
-
 // --- INIT ---
 document.addEventListener("DOMContentLoaded", async () => {
 
@@ -15214,10 +14910,7 @@ if (
     glctc1PendingSharedPlaylist.name,
 
   artwork:
-    glctc1PendingSharedPlaylist.artwork ||
-    sharedTracks[0]?.cover_art ||
-    sharedTracks[0]?.["Cover Art"] ||
-    "",
+    glctc1PendingSharedPlaylist.artwork || "",
 
   tracks:
     sharedTracks.map(
@@ -15303,9 +14996,8 @@ if (sharedTrackId) {
 
   const sharedTrack =
     library.find(track =>
-      String(track.id) === String(sharedTrackId) ||
-      String(track.id_cat_no) === String(sharedTrackId) ||
-      String(track["ID Cat No"]) === String(sharedTrackId)
+      String(track.id) ===
+      String(sharedTrackId)
     );
 
   if (sharedTrack) {
@@ -15375,8 +15067,100 @@ wireControls();
   drawWaveform("B");
 
 
-  // v35: search wiring lives in glctc1InitLibrarySearch() (top level)
-  glctc1InitLibrarySearch();
+  // ===================================================
+  // 🔍 MASTER LIBRARY SEARCH FILTER
+  // ===================================================
+
+  const librarySearch =
+    document.getElementById(
+      "librarySearch"
+    );
+
+
+  if (!librarySearch) {
+
+    console.log(
+      "❌ GLCTC1 librarySearch not found"
+    );
+
+    return;
+  }
+
+
+   librarySearch.addEventListener(
+    "input",
+    () => {
+
+      const searchTerm =
+        librarySearch.value
+          .trim()
+          .toLowerCase();
+
+      const rows =
+        document.querySelectorAll(
+          "#libraryBody .library-row"
+        );
+
+      rows.forEach(row => {
+
+        const rowText =
+          row.textContent
+            .toLowerCase();
+
+        row.style.display =
+          !searchTerm ||
+          rowText.includes(searchTerm)
+            ? ""
+            : "none";
+
+      });
+
+      console.log(
+        "🔍 GLCTC1 Library Filter:",
+        searchTerm
+      );
+
+    }
+  );
+
+
+  // ===================================================
+  // ⌨️ MASTER LIBRARY SEARCH — ENTER
+  // ===================================================
+
+  librarySearch.addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key !== "Enter"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const searchTerm =
+        librarySearch.value
+          .trim()
+          .toLowerCase();
+
+      renderLibraryTable(
+        searchTerm
+      );
+
+      console.log(
+        "🔎 GLCTC1 SEARCH ENTER:",
+        searchTerm
+      );
+
+    }
+  );
+
+
+  console.log(
+    "✅ GLCTC1 Master Library Search READY"
+  );
 
 });
 
@@ -17148,15 +16932,7 @@ async function initMIDI() {
   // 🚀 START GLCTC1 MIDI
   // ===================================================
 
-  // v47: MIDI is only requested when FULL STUDIO is opened, so
-  // listeners never see a "connect to MIDI devices" prompt.
-  var glctc1MidiStarted = false;
-  window.glctc1StartMIDI = function () {
-    if (glctc1MidiStarted) return;
-    glctc1MidiStarted = true;
-    initMIDI();
-  };
-  if (window.glctc1StudioOpen) window.glctc1StartMIDI();
+  initMIDI();
 
 })();
 
@@ -17444,7 +17220,7 @@ body.glctc1-simple-view .mixer-bay-controls {
 
     var parent = start.parentNode;
     var wrap = document.createElement("div");
-    wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "") + (def.open ? "" : " mod-advanced");
+    wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "");
     parent.insertBefore(wrap, start);
 
     // Move start … end (and anything between) into the wrapper
@@ -17615,110 +17391,59 @@ body.glctc1-simple-view .mixer-bay-controls {
 
 
   // -----------------------------------------------------
-  // v47 VIEW SWITCH
-  //  • SIMPLE VIEW (default for new visitors + every share
-  //    link): only the player + Master Library are on the
-  //    page. Studio tabs, decks heading and deck-only buttons
-  //    are removed from view, the player sits at the top.
-  //  • FULL STUDIO: every module tab returns, with its own
-  //    remembered HIDE / SHOW state.
+  // One-touch HIDE ALL / SHOW ALL bar above the first module
   // -----------------------------------------------------
-  var VIEW_KEY = "glctc1.view.play";
-  var qs = new URLSearchParams(location.search);
-  var shareVisit = qs.has("track") || qs.has("playlist");
-
-  // Studio-only blocks that are not modules themselves
-  var deckCard = $("deckA") ? $("deckA").closest(".glow-card") : null;
-  if (deckCard) {
-    deckCard.classList.add("glctc1-studio-only");
-    var prev = deckCard.previousElementSibling;
-    for (var p = 0; p < 2 && prev; p++) {
-      if (prev.tagName === "H1" || prev.classList.contains("subtitle")) prev.classList.add("glctc1-studio-only");
-      prev = prev.previousElementSibling;
-    }
-  }
-
-  var shopBanner = document.querySelector("a.glctc1-shop-ad");
-  var playModule = $("glctc1PlayModule");
-  var bar = null, hint = null, btns = {};
-
-  function mkBtn(label, key, fn) {
-    var b = document.createElement("div");
-    b.className = "mod-allbtn mod-btn-" + key;
-    b.setAttribute("role", "button");
-    b.setAttribute("tabindex", "0");
-    b.textContent = label;
-    b.addEventListener("click", fn);
-    b.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); fn(); }
-    });
-    btns[key] = b;
-    return b;
-  }
-
-  function placeShop(simple) {
-    if (!shopBanner || !bar) return;
-    if (simple && playModule) playModule.parentNode.insertBefore(shopBanner, playModule.nextSibling);
-    else bar.parentNode.insertBefore(shopBanner, bar);
-  }
-
-  function setView(simple, save) {
-    document.body.classList.toggle("glctc1-simple-view", simple);
-    document.body.classList.toggle("glctc1-full-view", !simple);
-    if (simple) {
-      // the listening modules are always open in Simple View
-      items.forEach(function (i) { if (i.defOpen) apply(i, false, false); });
-    } else {
-      window.glctc1StudioOpen = true;
-      if (typeof window.glctc1StartMIDI === "function") window.glctc1StartMIDI();
-    }
-    if (btns.simple) {
-      btns.simple.classList.toggle("on", simple);
-      btns.simple.setAttribute("aria-pressed", simple ? "true" : "false");
-      btns.full.classList.toggle("on", !simple);
-      btns.full.setAttribute("aria-pressed", simple ? "false" : "true");
-    }
-    placeShop(simple);
-    if (save) { try { localStorage.setItem(VIEW_KEY, simple ? "simple" : "full"); } catch (e) {} }
-    setTimeout(function () { window.dispatchEvent(new Event("resize")); }, 30);
-  }
-
-  function simpleView() { setView(true, true); }
-
   function setAll(collapsed) {
-    setView(false, true);
+    document.body.classList.remove("glctc1-simple-view");
     items.forEach(function (i) { apply(i, collapsed, true); });
   }
 
+  // SIMPLE VIEW = Playlist Master + Master Library only; hide loose mixer controls too.
+  function simpleView() {
+    document.body.classList.add("glctc1-simple-view");
+    items.forEach(function (i) { apply(i, !i.defOpen, true); });
+  }
+
   if (items.length) {
-    bar = document.createElement("div");
+
+    var bar = document.createElement("div");
     bar.className = "mod-allbar";
-    bar.appendChild(mkBtn("◎ SIMPLE VIEW", "simple", simpleView));
-    bar.appendChild(mkBtn("🎛 FULL STUDIO", "full", function () {
-      setView(false, true);
-      var first = items[0] && items[0].el;
-      if (first) first.scrollIntoView({ behavior: "smooth", block: "start" });
-    }));
-    bar.appendChild(mkBtn("▲ SHOW ALL", "showall", function () { setAll(false); }));
-    bar.appendChild(mkBtn("▼ HIDE ALL", "hideall", function () { setAll(true); }));
 
-    hint = document.createElement("div");
-    hint.className = "mod-viewhint";
-    hint.textContent = "Decks · mixer · banks · add track · editor → FULL STUDIO";
-    bar.appendChild(hint);
+    function mkBtn(label, collapsed) {
+      var b = document.createElement("div");
+      b.className = "mod-allbtn";
+      b.setAttribute("role", "button");
+      b.setAttribute("tabindex", "0");
+      b.textContent = label;
+      function run() { if (collapsed === null) simpleView(); else setAll(collapsed); }
+      b.addEventListener("click", run);
+      b.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+          e.preventDefault();
+          run();
+        }
+      });
+      return b;
+    }
 
-    items[0].el.parentNode.insertBefore(bar, items[0].el);
+    bar.appendChild(mkBtn("◎ SIMPLE VIEW", null));
+    bar.appendChild(mkBtn("▲ SHOW ALL MODULES", false));
+    bar.appendChild(mkBtn("▼ HIDE ALL MODULES", true));
+
+    // Keep the shop advert above the Simple View / module visibility controls.
+    // It is a banner, not a collapsible module.
+    var shopBanner = document.querySelector("a.glctc1-shop-ad");
     if (shopBanner) {
       shopBanner.style.display = "block";
+      shopBanner.style.visibility = "visible";
       shopBanner.style.position = "relative";
       shopBanner.style.zIndex = "1";
     }
+    items[0].el.parentNode.insertBefore(bar, items[0].el);
+    if (shopBanner) {
+      bar.parentNode.insertBefore(shopBanner, bar);
+    }
   }
-
-  var saved = null;
-  try { saved = localStorage.getItem(VIEW_KEY); } catch (e) {}
-  // Share links always open in Simple View (without changing the saved choice)
-  setView(shareVisit || saved !== "full", false);
 
 
   // Small helper for the browser console / other scripts
@@ -17727,7 +17452,6 @@ body.glctc1-simple-view .mixer-bay-controls {
     hideAll: function () { setAll(true); },
     showAll: function () { setAll(false); },
     simpleView: simpleView,
-    fullStudio: function () { setView(false, true); },
     set: function (key, collapsed) {
       items.forEach(function (i) { if (i.key === key) apply(i, !!collapsed, true); });
     }
@@ -18238,263 +17962,6 @@ body.glctc1-simple-view .mixer-bay-controls {
 })();
 </script>
 
-<script id="glctc1-tempo-engine">
-/* =====================================================
-   GLCTC1 TEMPO ENGINE (same engine as the ANALYSE page, v13 breakbeat-aware)
-   Used by the decks only when a track has NO Master Library BPM, and to keep
-   SNAP / TAP TEMPO / SYNC on the same tempo as the Master Library.
-   ===================================================== */
-function glctc1OnsetEnvelope(samples, sampleRate, maxSeconds, centerFrac) {
-  const duration = samples.length / sampleRate;
-  if (!Number.isFinite(duration) || duration < 8) return null;
-
-  // Analyse the middle of long tracks (skips quiet intros / outros).
-  const windowSeconds = Math.min(maxSeconds || 90, duration);
-  const cf = (typeof centerFrac === "number") ? centerFrac : 0.5;
-  const startSample = Math.floor((duration - windowSeconds) * cf * sampleRate);
-  const endSample = startSample + Math.floor(windowSeconds * sampleRate);
-
-  const hop = Math.max(1, Math.round(sampleRate / 250));   // ~250 envelope frames / second
-  const rate = sampleRate / hop;
-  const frames = Math.floor((endSample - startSample) / hop);
-  if (frames < rate * 6) return null;
-
-  const lpCoef = 1 - Math.exp(-2 * Math.PI * 150 / sampleRate); // ~150 Hz low-pass for kick
-  const lowEnv = new Float32Array(frames);
-  const highEnv = new Float32Array(frames);
-  let lp = 0, prev = 0, pos = startSample, totalEnergy = 0;
-
-  for (let f = 0; f < frames; f++) {
-    let le = 0, he = 0;
-    for (let k = 0; k < hop; k++, pos++) {
-      const x = samples[pos] || 0;
-      lp += lpCoef * (x - lp);
-      const d = x - prev; prev = x;     // first difference = high-frequency emphasis
-      le += lp * lp;
-      he += d * d;
-    }
-    totalEnergy += le + he;
-    lowEnv[f] = Math.log1p(Math.sqrt(le / hop) * 30);
-    highEnv[f] = Math.log1p(Math.sqrt(he / hop) * 30);
-  }
-  if (totalEnergy / (frames * hop) < 1e-9) return null;           // silence
-
-  // Half-wave-rectified novelty vs. the previous few frames.
-  const novelty = env => {
-    const out = new Float32Array(frames);
-    let sq = 0;
-    for (let i = 3; i < frames; i++) {
-      const ref = (env[i - 1] + env[i - 2] + env[i - 3]) / 3;
-      const v = Math.max(0, env[i] - ref);
-      out[i] = v; sq += v * v;
-    }
-    const sd = Math.sqrt(sq / frames) || 1;
-    for (let i = 0; i < frames; i++) out[i] /= sd;
-    return out;
-  };
-  const low = novelty(lowEnv), high = novelty(highEnv);
-  const merged = new Float32Array(frames);
-  for (let i = 0; i < frames; i++) merged[i] = low[i] * 0.55 + high[i] * 0.45;
-
-  // Remove the slow-moving baseline (±0.25 s), keep only peaks, light smoothing.
-  const half = Math.round(rate * 0.25);
-  const prefix = new Float64Array(frames + 1);
-  for (let i = 0; i < frames; i++) prefix[i + 1] = prefix[i] + merged[i];
-  const onset = new Float32Array(frames);
-  for (let i = 0; i < frames; i++) {
-    const a = Math.max(0, i - half), b = Math.min(frames, i + half + 1);
-    const mean = (prefix[b] - prefix[a]) / (b - a);
-    onset[i] = Math.max(0, merged[i] - mean);
-  }
-  const smooth = new Float32Array(frames);
-  for (let i = 1; i < frames - 1; i++) smooth[i] = onset[i - 1] * 0.25 + onset[i] * 0.5 + onset[i + 1] * 0.25;
-  return { onset: smooth, rate, frames };
-}
-
-function glctc1TempoFromEnv(env) {
-  if (!env) return null;
-  const { onset, rate, frames } = env;
-
-  // Autocorrelation of the onset curve out to ~9 s (covers 2 bars at 60 BPM / 4 bars at 120).
-  const maxLag = Math.min(frames - 2, Math.ceil(rate * 9));
-  const acf = new Float32Array(maxLag + 2);
-  let r0 = 0;
-  for (let i = 0; i < frames; i++) r0 += onset[i] * onset[i];
-  r0 /= frames;
-  if (r0 < 1e-9) return null;
-  for (let lag = 1; lag <= maxLag; lag++) {
-    let sum = 0;
-    for (let i = lag; i < frames; i++) sum += onset[i] * onset[i - lag];
-    acf[lag] = (sum / (frames - lag)) / r0;
-  }
-  const acfAt = x => {
-    if (x < 1 || x >= maxLag) return 0;
-    const i = Math.floor(x), f = x - i;
-    return acf[i] * (1 - f) + acf[i + 1] * f;
-  };
-  // Peak-tolerant lookup: breaks drift a little, so take the best value within ±0.3 %.
-  const acfPeak = x => {
-    const w = Math.max(0.6, x * 0.003);
-    let m = -1;
-    for (let d = -w; d <= w; d += Math.max(0.5, w / 3)) { const v = acfAt(x + d); if (v > m) m = v; }
-    return m < 0 ? 0 : m;
-  };
-
-  // Comb filter over POWER-OF-TWO beat lags only (1/2, 1, 2, 4 and 8 beats). A real tempo repeats at
-  // those distances. A false "2/3 tempo" (e.g. 113 for a 170 break) lands on 3-beat / 6-beat / 12-beat
-  // distances, which don't repeat, so adding the 8-beat (two bar) lag removes it.
-  const LO = 60, HI = 200, STEP = 0.05;
-  const n = Math.round((HI - LO) / STEP) + 1;
-  const raw = new Float32Array(n);
-  const LAGS = [[0.5, 0.30], [1, 0.55], [2, 0.90], [4, 1.00], [8, 0.80]];
-  for (let k = 0; k < n; k++) {
-    const bpm = LO + k * STEP;
-    const P = (60 / bpm) * rate;
-    let s = 0, w = 0;
-    for (const [beats, weight] of LAGS) {
-      const lag = P * beats;
-      if (lag < maxLag - 2) { s += weight * acfPeak(lag); w += weight; }
-    }
-    // Wide, flat prior over the dance-music range (breaks, house, DnB, jungle all live here).
-    const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 140) / 1.1, 2));
-    raw[k] = (w ? s / w : 0) * prior;
-  }
-  const scores = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
-    let s = 0, c = 0;
-    for (let j = Math.max(0, k - 3); j <= Math.min(n - 1, k + 3); j++) { s += raw[j]; c++; }
-    scores[k] = s / c;
-  }
-  const bestIn = (lo, hi) => {
-    let bk = -1, bs = -Infinity;
-    const a = Math.max(0, Math.round((lo - LO) / STEP)), b = Math.min(n - 1, Math.round((hi - LO) / STEP));
-    for (let k = a; k <= b; k++) if (scores[k] > bs) { bs = scores[k]; bk = k; }
-    return bk < 0 ? null : { bpm: LO + bk * STEP, score: bs };
-  };
-
-  let best = bestIn(LO, HI);
-  if (!best || !(best.score > 0)) return null;
-
-  // Related-tempo check (ratios 2:1, 3:2, 4:3). If a related tempo is scored nearly as well
-  // and sits in a more plausible zone for the groove, prefer it.
-  const near = (f) => bestIn(best.bpm * f * 0.985, best.bpm * f * 1.015);
-  const zoneBonus = b => (b >= 160 && b <= 182) ? 1.10 : (b >= 118 && b <= 150) ? 1.04 : 1.0;
-  const candidates = [best];
-  for (const f of [1.5, 4 / 3, 0.75, 2 / 3]) {   // octaves (x2, /2) are handled separately below
-    const alt = near(f);
-    if (alt && alt.bpm >= LO && alt.bpm <= HI) candidates.push(alt);
-  }
-  // 3:2 / 4:3 relatives are only accepted when clearly better supported (they are the classic false peaks).
-  let pick = best;
-  for (const alt of candidates) {
-    if (alt === best) continue;
-    const ratio = alt.bpm / best.bpm;
-    const octave = Math.abs(ratio - 2) < 0.05 || Math.abs(ratio - 0.5) < 0.03;
-    const need = octave ? 0.90 : 1.15;
-    if (alt.score * zoneBonus(alt.bpm) >= pick.score * zoneBonus(pick.bpm) * need) pick = alt;
-  }
-  best = pick;
-
-  // Octave correction for half-time grooves: a snare on every 2nd beat makes a 170-ish break look like ~85.
-  const dbl = best.bpm * 2;
-  if (dbl <= HI + 0.5) {
-    const alt = bestIn(dbl * 0.985, dbl * 1.015);
-    if (alt) {
-      const needed = best.bpm < 70 ? 0.95 : (best.bpm >= 82 && best.bpm <= 89.5 ? 0.92 : 2);
-      if (alt.score >= best.score * needed) best = alt;
-    }
-  }
-  // Above 185 is almost always double-time of a ~93 groove (but real 186-190 DnB is rare).
-  if (best.bpm > 190) {
-    const alt = bestIn(best.bpm * 0.5 * 0.985, best.bpm * 0.5 * 1.015);
-    if (alt && alt.score >= best.score * 0.85) best = alt;
-  }
-
-  // Refine: parabolic-free local re-search on the finest grid around the winner.
-  const refined = bestIn(best.bpm - 0.6, best.bpm + 0.6);
-  let result = refined ? refined.bpm : best.bpm;
-  const nearest = Math.round(result);
-  if (Math.abs(result - nearest) <= 0.3) result = nearest; // most tracks sit on whole BPM
-  result = Math.round(result * 10) / 10;
-  const support = bpm => { const o = bestIn(bpm * 0.99, bpm * 1.01); return o ? Math.max(0, o.score) / best.score : 0; };
-  return { bpm: result, score: best.score, support };
-}
-
-
-// Multi-section tempo detection. Breaks have intros, breakdowns and fills that fool a single slice,
-// so several sections of the track vote and the strongest agreeing group wins.
-function glctc1DetectTempoDetailed(samples, sampleRate) {
-  const duration = samples.length / sampleRate;
-  if (!Number.isFinite(duration) || duration < 8) return null;
-  const jobs = [[120, 0.5]];
-  if (duration >= 100) jobs.push([45, 0.12], [45, 0.5], [45, 0.88]);
-  else if (duration >= 50) jobs.push([30, 0.2], [30, 0.8]);
-  const votes = [];
-  for (const [secs, frac] of jobs) {
-    const t = glctc1TempoFromEnv(glctc1OnsetEnvelope(samples, sampleRate, secs, frac));
-    if (t) votes.push(t);
-  }
-  if (!votes.length) return null;
-  // group votes that agree within 1.5 %
-  const groups = [];
-  for (const v of votes) {
-    let g = groups.find(g => Math.abs(g.bpm / v.bpm - 1) < 0.015);
-    if (!g) { g = { bpm: v.bpm, weight: 0, votes: [] }; groups.push(g); }
-    g.weight += v.score; g.votes.push(v);
-    g.bpm = g.votes.reduce((a, x) => a + x.bpm * x.score, 0) / g.weight;
-  }
-  groups.sort((a, b) => b.weight - a.weight);
-  const win = groups[0];
-  let bpm = Math.round(win.bpm * 10) / 10;
-  const nearest = Math.round(bpm);
-  if (Math.abs(bpm - nearest) <= 0.3) bpm = nearest;
-  const total = groups.reduce((a, g) => a + g.weight, 0) || 1;
-  const sup = x => votes.reduce((a, v) => a + v.support(x), 0) / votes.length;
-  return {
-    bpm,
-    confidence: Math.round(100 * win.weight / total),
-    agree: win.votes.length + "/" + votes.length,
-    alternatives: groups.slice(1, 3).map(g => Math.round(g.bpm * 10) / 10),
-    support: sup
-  };
-}
-
-
-var glctc1TempoCache = {};
-function glctc1TempoForDeck(deck, audioBuffer) {
-  var a = document.getElementById("audio" + deck);
-  var key = a ? (a.currentSrc || a.src || "") : "";
-  if (key && glctc1TempoCache[key]) return glctc1TempoCache[key];
-  var n = audioBuffer.length, nc = audioBuffer.numberOfChannels, mono = new Float32Array(n), c, i, d;
-  for (c = 0; c < nc; c++) { d = audioBuffer.getChannelData(c); for (i = 0; i < n; i++) mono[i] += d[i] / nc; }
-  var res = glctc1DetectTempoDetailed(mono, audioBuffer.sampleRate);
-  if (res && key) glctc1TempoCache[key] = res;
-  return res;
-}
-/* Library BPM of the track on a deck (0 when the track has none). */
-function glctc1LibraryBpm(deck) {
-  var dd = document.getElementById("deckDisplay" + deck);
-  if (!dd || dd.dataset.bpmKnown !== "1") return 0;
-  var x = Number(dd.dataset.bpm);
-  return x >= 40 && x <= 220 ? x : 0;
-}
-/* ONE tempo for the whole deck: Master Library BPM first (it is checked and fixed in the BPM manager),
-   refined by the kick spacing when that agrees within 1.5 % (incl. half/double); tracks with no
-   library BPM use the tempo engine; the old kick-spacing value is only the last resort. */
-function glctc1ResolveBpm(deck, audioBuffer, kickBpm) {
-  var lib = glctc1LibraryBpm(deck);
-  if (lib) {
-    if (kickBpm) {
-      var ks = [1, 2, 0.5];
-      for (var i = 0; i < ks.length; i++) { var v = kickBpm * ks[i]; if (Math.abs(v / lib - 1) < 0.015) return v; }
-    }
-    return lib;
-  }
-  try { var t = glctc1TempoForDeck(deck, audioBuffer); if (t && t.bpm > 0) return t.bpm; } catch (e) { console.warn("GLCTC1 tempo engine:", e); }
-  return kickBpm || 0;
-}
-</script>
-
 <script id="cx-js">
 /* ===== GLCTC1 COSMIC 1200 v25 — analogue platter + hands-on controls (adds to, never replaces, existing wiring) ===== */
 (function(){
@@ -18719,12 +18186,7 @@ function ensureGrid(d){                      /* my lock if ready, else a grid bu
   return null}
 
 /* ---------- BEAT TRACKER: finds the true tempo + phase of the whole track (kick band), no drift ---------- */
-/* v50: exact deck beat state for SYNC (interpolated audible position + beat grid) */
-window.glctc1BeatState=function(d){try{var tk=ensureGrid(d),a=aud(d),s=S[d];if(!tk||!a||!s)return null;
-  var rate=a.playbackRate||1,ct=curTime(d),nw=performance.now(),ex=(nw-(s.c0||nw))/1000*rate;
-  var pos=(a.paused||s.touch||!isFinite(ex))?ct:ct+Math.min(.25,Math.max(0,ex));
-  return{pos:pos,rate:rate,bl:tk.bl,off:tk.off,bar0:tk.bar0||0,old:!!tk.old,playing:!a.paused&&!s.touch}}catch(e){return null}};
-function hintBpm(d){try{var x=(typeof glctc1LibraryBpm==='function')?glctc1LibraryBpm(d):0;if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
+function hintBpm(d){try{var x=Number($('deckDisplay'+d).dataset.bpm);if(x>0)return x;var an=beatAnalysis[d];if(an&&an.ready&&an.bpm>0)return an.bpm}catch(e){}return 0}
 function analyse(d){
   var bo=BUF[d],b=bo&&bo.buf;if(!b)return;
   var sr=b.sampleRate,H=128,c0=b.getChannelData(0),c1=b.numberOfChannels>1?b.getChannelData(1):null,nF=Math.floor(b.length/H),i,j,x,sm;
@@ -18737,8 +18199,7 @@ function analyse(d){
     for(q=2;q<end;q++)hist[(q-P*Math.floor(q/P))|0]+=o[q];
     var best=-1,bk=0,s;for(k=0;k<m;k++){s=hist[(k+m-1)%m]+2*hist[k]+hist[(k+1)%m];if(s>best){best=s;bk=k}}
     return{s:best/(end/P),k:bk,m:m}}
-  var h=hintBpm(d);if(!h){try{var te=glctc1TempoForDeck(d,b);if(te&&te.bpm>0)h=te.bpm}catch(x){}}   /* v49: no library BPM -> tempo engine, not a fake 120 */
-  var lo=h?h*.97:85,hi=h?h*1.03:175,bb=0,bs=-1,r,P;
+  var h=hintBpm(d),lo=h?h*.97:85,hi=h?h*1.03:175,bb=0,bs=-1,r,P;
   for(x=lo;x<=hi;x+=(h?.05:.25)){r=fold(60*fr/x,Math.min(nF,Math.floor(90*fr)));if(r.s>bs){bs=r.s;bb=x}}
   var fb=bb;bs=-1;
   for(x=bb-.4;x<=bb+.4;x+=.01){r=fold(60*fr/x,nF);if(r.s>bs){bs=r.s;fb=x}}
@@ -19138,67 +18599,22 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     });
   }
 
-  function release() { st.state = "idle"; st.ref = null; st.follower = null; render(); }
-
-  /* ---- v50: SYNC now matches the TEMPO exactly AND lines the BEATS up ---- */
-  function phaseShift(bRef, bFol) {            // beats the follower must move so its beat lands with the reference beat (-0.5 .. +0.5)
-    var d = (((bRef - bFol) % 1) + 1) % 1;
-    return d > 0.5 ? d - 1 : d;
-  }
-  function beatState(d) { return typeof window.glctc1BeatState === "function" ? window.glctc1BeatState(d) : null; }
-
-  function alignPhase(follower, ref, done, pass) {
-    pass = pass || 0;
-    var R = beatState(ref), F = beatState(follower);
-    if (!R || !F) { if (done) done("nogrid"); return; }
-    if (!R.playing || !F.playing) { if (done) done("idle"); return; }
-    var d = phaseShift((R.pos - R.off) / R.bl, (F.pos - F.off) / F.bl);
-    var err = d * F.bl / F.rate;                // error in real seconds
-    if (Math.abs(err) < 0.012 || pass >= 3) { if (done) done("ok", err); return; }
-    var a = $("audio" + follower), fin = false;
-    if (!a) return;
-    function next() {
-      if (fin) return; fin = true;
-      a.removeEventListener("seeked", next);
-      setTimeout(function () { alignPhase(follower, ref, done, pass + 1); }, 40);
-    }
-    a.addEventListener("seeked", next);
-    setTimeout(next, 700);
-    var t = a.currentTime + d * F.bl;
-    a.currentTime = Math.max(0, isFinite(a.duration) ? Math.min(a.duration - 0.05, t) : t);
-  }
-
-  function report(res, err) {
-    if (res === "ok") say("Matched - beats aligned" + (err != null ? " (" + Math.round(Math.abs(err) * 1000) + " ms)" : ""));
-    else if (res === "idle") say("Tempo matched - play both decks and the beats will line up");
-    else say("Tempo matched - beat grid not ready for exact alignment");
-  }
+  function release() { st.state = "idle"; st.ref = null; render(); }
 
   function match(follower, ref) {
     var a = $("audio" + follower), ps = pitchEl(follower);
-    var R = beatState(ref), F = beatState(follower);
-    var refBpm, cur, pitch;
-    if (R && F && R.bl > 0 && F.bl > 0) {       // exact numbers straight from the beat grids and the real playback rates
-      pitch = a && a.playbackRate ? a.playbackRate : (ps ? +ps.value || 1 : 1);
-      refBpm = (60 / R.bl) * R.rate;
-      cur = (60 / F.bl) * pitch;
-    } else {                                    // fallback: the numbers shown in the deck headers
-      refBpm = readBpm(ref); cur = readBpm(follower); pitch = ps ? +ps.value || 1 : 1;
-    }
+    var refBpm = readBpm(ref), cur = readBpm(follower);
     if (!a || !ps || !refBpm || !cur) { say("Load a track on both decks first"); return false; }
     if (a._slowMo && typeof toggleSlowMo === "function") { try { toggleSlowMo(follower); } catch (e) {} }
+    var pitch = +ps.value || 1;
     var r = pickRate(refBpm, cur, pitch, +ps.min, +ps.max);
-    ps.value = r.rate;                          // slider shows the nearest step ...
-    var applied = r.rate;                       // ... but the audio gets the exact rate
+    ps.value = r.rate;                          // slider snaps to its step
+    var applied = +ps.value;
     if (typeof setPitch === "function") { try { setPitch(follower, applied); } catch (e) { a.playbackRate = applied; } }
     else a.playbackRate = applied;
     try { tapTempoHistory[follower] = []; } catch (e) {}
-    st.follower = follower;
     if (r.clamped) say("Deck " + follower + " can't reach " + refBpm.toFixed(1) + " BPM - pitch range limit");
-    else {
-      if (r.mode) say("Matched at " + r.mode + " time");
-      setTimeout(function () { alignPhase(follower, ref, function (res, err) { if (!r.mode || res !== "ok") report(res, err); }); }, 80);
-    }
+    else if (r.mode) say("Matched at " + r.mode + " time");
     return true;
   }
 
@@ -19206,7 +18622,7 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     if (st.state === "locked") { release(); return; }
     if (st.state === "armed") {
       if (st.ref === d) { release(); return; }                 // cancel
-      if (match(d, st.ref)) { st.state = "locked"; st.follower = d; render(); }  // 2nd deck matches the 1st
+      if (match(d, st.ref)) { st.state = "locked"; render(); }  // 2nd deck matches the 1st
       return;
     }
     if (!readBpm(d)) { say("Load a track on Deck " + d + " first"); return; }
@@ -19267,9 +18683,6 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     }
     var a = $("audio" + d);
     if (a) a.addEventListener("loadedmetadata", function () { if (st.state !== "idle") release(); });
-    if (a) a.addEventListener("play", function () {   // v50: a deck starts while matched -> line the beats up again
-      if (st.state === "locked" && st.follower) setTimeout(function () { alignPhase(st.follower, other(st.follower), report); }, 250);
-    });
   }
 
   function start() {
@@ -19285,9 +18698,256 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
   if (document.readyState === "complete") setTimeout(start, 120);
   else window.addEventListener("load", function () { setTimeout(start, 120); });
 
-  window.glctc1SyncTest = { pickRate: pickRate, phaseShift: phaseShift };
+  window.glctc1SyncTest = { pickRate: pickRate };
 })();
 </script>
+
+
+<!-- GLCTC1 v50 - NO SIDE-SWIPE (stronger)
+     1. CSS: the page only accepts up/down touch panning, so the browser never
+        starts a sideways drag or its swipe back/forward navigation.
+        (Nav tabs, tables and faders that scroll/slide sideways keep working.)
+     2. History guard: a swipe-back / back-button press (including the phone's
+        own edge-swipe gesture) stays on this page instead of leaving it.
+        To allow Back again, change BLOCK_BACK below to false. -->
+<style>
+html, body { touch-action: pan-y pinch-zoom; overscroll-behavior-x: none; }
+body { overflow-x: clip; }
+/* inner scrollers must not hand a sideways swipe to the page either */
+* { overscroll-behavior-x: contain; }
+html, body { overscroll-behavior-x: none; }
+</style>
+<script>
+(function () {
+  "use strict";
+  var BLOCK_BACK = true;
+  if (!BLOCK_BACK || !window.history || !history.pushState) return;
+
+  var armed = false;
+  function push() { try { history.pushState({ glctc1: 1 }, "", location.href); } catch (e) {} }
+
+  // Arm after the first real tap/key press (browsers ignore history entries
+  // a page adds before the visitor has interacted with it).
+  function arm() {
+    if (armed) return;
+    armed = true;
+    push();
+  }
+  ["touchend", "pointerup", "click", "keydown"].forEach(function (ev) {
+    window.addEventListener(ev, arm, { capture: true, passive: true });
+  });
+
+  // Back swipe / back button: put the page straight back where it was.
+  window.addEventListener("popstate", function () {
+    if (armed) push();
+  });
+})();
+</script>
+
+
+<!-- GLCTC1 v51 - SHARE = SONG + COVER IMAGE
+     The Share Track buttons now send the actual audio file with the cover
+     image attached through the phone's Share menu (WhatsApp, Messages, Drive...),
+     and the link to this page is written in the message.
+     • The link still opens the page and plays that song when a visitor arrives.
+     • Share Playlist sends the playlist link with the cover image.
+     • If the phone / app can't take files, or the file is too big, it shares
+       the link instead. If the phone makes you wait too long while the song
+       is prepared, the button says "tap again" and the second tap shares at once. -->
+<script>
+(function () {
+  "use strict";
+
+  var MAX_AUDIO_BYTES = 60 * 1024 * 1024;     // bigger songs are shared as a link
+  var cache = {};                              // prepared files, so a 2nd tap is instant
+
+  var AUDIO_TYPES = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", mp4: "audio/mp4",
+                      aac: "audio/aac", ogg: "audio/ogg", oga: "audio/ogg", flac: "audio/flac", webm: "audio/webm" };
+  var IMAGE_TYPES = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+
+  function field(t, a, b) { return t ? String(t[a] || t[b] || "").trim() : ""; }
+  function isUrl(v) { return /^(https?:|blob:|data:)/i.test(v); }
+  function extOf(u) {
+    var m = String(u).split("#")[0].split("?")[0].match(/\.([a-z0-9]{2,5})$/i);
+    return m ? m[1].toLowerCase() : "";
+  }
+  function safeName(v) { return String(v).replace(/[\\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "GLCTC1"; }
+
+  function toast(msg, ms) {
+    var t = document.getElementById("glctc1ShareToast");
+    if (!t) {
+      t = document.createElement("div");
+      t.id = "glctc1ShareToast";
+      t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:99999;" +
+        "max-width:90vw;padding:10px 16px;border-radius:12px;background:#101636;border:1px solid #ec4899;" +
+        "color:#e8ecff;font:600 .8rem sans-serif;text-align:center;box-shadow:0 0 18px rgba(236,72,153,.5);" +
+        "pointer-events:none;display:none";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg; t.style.display = "block";
+    clearTimeout(t._t); t._t = setTimeout(function () { t.style.display = "none"; }, ms || 3500);
+  }
+
+  // storage path -> playable URL
+  async function resolve(path) {
+    if (!path) return "";
+    if (isUrl(path)) return path;
+    try {
+      var r = await supabaseClient.storage.from("tracks").createSignedUrl(path, 60 * 60);
+      if (r && r.data && r.data.signedUrl) return r.data.signedUrl;
+    } catch (e) {}
+    return "";
+  }
+
+  async function download(url, maxBytes) {
+    var res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    var len = Number(res.headers.get("content-length")) || 0;
+    if (maxBytes && len > maxBytes) throw new Error("too-big");
+    var blob = await res.blob();
+    if (maxBytes && blob.size > maxBytes) throw new Error("too-big");
+    return blob;
+  }
+
+  async function prepare(track, opts) {
+    var out = { audio: null, image: null };
+    var title = opts.title || field(track, "title", "Track Title") || "Track";
+    var artist = opts.playlist ? "" : field(track, "artist", "Artist");
+    var base = safeName((artist ? artist + " - " : "") + title);
+
+    // cover image (small, always attempted)
+    try {
+      var coverPath = field(track, "cover_art", "Cover Art");
+      var coverUrl = await resolve(coverPath);
+      if (!coverUrl) {
+        var img = document.getElementById("glctc1PlaylistArtwork");
+        if (img && img.complete && img.naturalWidth > 0 && isUrl(img.currentSrc || "")) coverUrl = img.currentSrc;
+      }
+      if (coverUrl) {
+        var ib = await download(coverUrl, 15 * 1024 * 1024);
+        var ie = extOf(coverUrl) || extOf(coverPath) || (ib.type.indexOf("image/") === 0 ? ib.type.slice(6).replace("jpeg", "jpg") : "jpg");
+        var itype = ib.type && ib.type.indexOf("image/") === 0 ? ib.type : (IMAGE_TYPES[ie] || "image/jpeg");
+        out.image = new File([ib], base + " (cover)." + (IMAGE_TYPES[ie] ? ie : "jpg"), { type: itype });
+      }
+    } catch (e) { console.log("GLCTC1 share: cover not attached:", e && e.message); }
+
+    // the song itself
+    if (!opts.playlist) {
+      try {
+        var audioPath = field(track, "master_audio", "Master Audio") || field(track, "sample", "audio") || field(track, "audio_url", "Audio URL");
+        var audioUrl = await resolve(audioPath);
+        if (audioUrl) {
+          var ab = await download(audioUrl, MAX_AUDIO_BYTES);
+          var ae = extOf(audioPath) || extOf(audioUrl);
+          var atype = AUDIO_TYPES[ae] || (ab.type && ab.type.indexOf("audio/") === 0 ? ab.type : "audio/mpeg");
+          if (!AUDIO_TYPES[ae]) ae = atype === "audio/wav" ? "wav" : atype === "audio/mp4" ? "m4a" : "mp3";
+          out.audio = new File([ab], base + "." + ae, { type: atype });
+        }
+      } catch (e) {
+        console.log("GLCTC1 share: song not attached:", e && e.message);
+        out.audioNote = e && e.message === "too-big" ? "big" : "fail";
+      }
+    }
+    return out;
+  }
+
+  async function shareLinkOnly(title, text, url) {
+    if (navigator.share) {
+      try { await navigator.share({ title: title, text: text, url: url }); }
+      catch (e) { if (!e || e.name !== "AbortError") console.log("Share cancelled:", e); }
+    } else {
+      var ok = false;
+      try { ok = typeof glctc1CopyText === "function" ? await glctc1CopyText(url) : false; } catch (e) {}
+      toast(ok ? "Link copied" : url, 5000);
+      if (!ok) { try { window.prompt("Copy this link:", url); } catch (e) {} }
+    }
+  }
+
+  var busy = false;
+
+  window.glctc1ShareTrackMedia = async function (track, shareUrl, opts) {
+    opts = opts || {};
+    track = track || {};
+    var title = opts.title || field(track, "title", "Track Title") || "GLCTC1 Track";
+    var artist = field(track, "artist", "Artist");
+    var line = opts.playlist ? "🎧 " + title : "🎧 " + (artist ? artist + " — " : "") + title;
+    var text = line + "\n" + shareUrl;
+
+    if (!navigator.share || !navigator.canShare) {            // desktop / old browser
+      return shareLinkOnly(title, line, shareUrl);
+    }
+    if (busy) return;
+    busy = true;
+    try {
+      var key = (opts.playlist ? "pl:" : "tr:") + shareUrl;
+      var prep = cache[key];
+      var fresh = false;
+      if (!prep) {
+        toast(opts.playlist ? "Preparing playlist share…" : "Preparing song + cover to share…", 20000);
+        prep = await prepare(track, opts);
+        cache[key] = prep; fresh = true;
+        var tt = document.getElementById("glctc1ShareToast"); if (tt) tt.style.display = "none";
+      }
+
+      var files = [prep.audio, prep.image].filter(Boolean);
+      var data = { title: title, text: text };
+      var withFiles = files.length && navigator.canShare({ files: files });
+
+      if (!withFiles && files.length > 1 && navigator.canShare({ files: [files[0]] })) { files = [files[0]]; withFiles = true; }
+
+      if (!withFiles) {
+        if (prep.audioNote === "big") toast("Song is too big to attach — sharing the link", 3500);
+        return shareLinkOnly(title, line, shareUrl);
+      }
+
+      data.files = files;                                      // link is inside text (some apps drop url when files are sent)
+      try {
+        await navigator.share(data);
+      } catch (e) {
+        if (e && e.name === "AbortError") return;              // person closed the share sheet
+        if (e && e.name === "NotAllowedError" && fresh) {      // preparing took too long for the phone
+          toast("Song is ready — tap SHARE again", 4000);
+          return;
+        }
+        console.log("GLCTC1 share with files failed, sharing link:", e);
+        return shareLinkOnly(title, line, shareUrl);
+      }
+    } finally {
+      busy = false;
+    }
+  };
+
+  /* ---- visitors arriving from a shared link: keep the song playing ----
+     Phones often block sound until the first touch. The page already tries to
+     auto-play; if the browser blocks it, a "tap to play" button appears. */
+  var sharedId = new URLSearchParams(location.search).get("track");
+  if (sharedId) {
+    var tries = 0;
+    var iv = setInterval(function () {
+      var a = document.getElementById("glctc1PlaylistAudio");
+      tries++;
+      if (a && a.getAttribute("src") && !a.paused) { clearInterval(iv); return; }
+      if (tries < 12 || !a || !a.getAttribute("src")) { if (tries > 40) clearInterval(iv); return; }
+      clearInterval(iv);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "▶ TAP TO PLAY SHARED TRACK";
+      btn.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;" +
+        "padding:14px 22px;border-radius:999px;border:1px solid #00e5ff;background:#0b1230;color:#9cf0ff;" +
+        "font:700 .85rem sans-serif;letter-spacing:.08em;box-shadow:0 0 22px rgba(0,229,255,.6)";
+      btn.addEventListener("click", function () {
+        a.play().catch(function () {});
+        btn.remove();
+      });
+      a.addEventListener("play", function () { btn.remove(); });
+      document.body.appendChild(btn);
+    }, 500);
+  }
+})();
+</script>
+
+</body>
+</html>
 
 <!-- v37: ROOMY MIXER BAY WITH MASTER VOLUME + CROSSFADER -->
 <style>
@@ -19387,9 +19047,7 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     var aw = a.closest('.mod-wrap') || a;
     var bw = b.closest('.mod-wrap') || b;
     var mw = mixer.closest('.mod-wrap') || mixer;
-    /* v47: move the MASTER VOLUME / CROSSFADER tabs with their controls
-       (moving only the inner controls left empty tabs behind). */
-    var nodes = [mw, master.closest('.mod-wrap') || master, cross.closest('.mod-wrap') || cross];
+    var nodes = [mw, master, cross];
     var markers = nodes.map(function (node, i) {
       var marker = document.createComment('GLCTC1 mixer bay original position ' + i);
       node.parentNode.insertBefore(marker, node);
@@ -19411,10 +19069,8 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
     }
     function update() {
       var ac = collapsed(aw), bc = collapsed(bw);
-      /* Dock into whichever deck is hidden. v47: when BOTH decks are hidden
-         the mixer goes back to its own full-width place (docking into Deck A
-         left a cramped box under the DECK A tab). */
-      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : null);
+      /* Dock into whichever deck is hidden. If both are hidden, use A's bay. */
+      var target = (ac && !bc) ? aw : ((!ac && bc) ? bw : ((ac && bc) ? aw : null));
       if (target === activeHost) return;
       if (activeHost) activeHost.classList.remove('mixer-bay-host');
       activeHost = null;
@@ -19440,263 +19096,4 @@ body .deck .transport-row button.cx-sync.locked{color:#02140c!important;backgrou
   else initMixerBay();
 })();
 </script>
-
-
-<!-- GLCTC1 FINAL LIVE PATCH v38
-     Mixer order: CHANNEL 1 + CHANNEL 2, MASTER VOLUME, CROSSFADER.
-     Retains the v37 mixer-bay behaviour: when Deck A or Deck B is hidden,
-     the full usable mixer docks into the hidden deck's space. -->
-<style id="glctc1-final-mixer-layout">
-  /* Keep the mixer, master output and crossfader as one spacious vertical stack. */
-  .glctc1-mixer-module {
-    overflow: visible !important;
-    min-width: 0 !important;
-  }
-  .glctc1-mixer-module .glctc1-channel-mixer {
-    margin-bottom: clamp(14px, 2vw, 22px) !important;
-  }
-  .mixer-bay-controls {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: clamp(14px, 2vw, 22px) !important;
-    min-width: 0 !important;
-  }
-  .mixer-bay-controls .glctc1-mixer-module,
-  .mixer-bay-controls .glctc1-master-volume-wrap,
-  .mixer-bay-controls .crossfader-wrap {
-    order: initial !important;
-    flex: 0 0 auto !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
-    margin: 0 !important;
-    box-sizing: border-box !important;
-  }
-  .mixer-bay-controls .glctc1-master-volume-wrap,
-  .mixer-bay-controls .crossfader-wrap {
-    padding: clamp(14px, 2vw, 22px) !important;
-    border-radius: 14px !important;
-    background: rgba(5, 12, 34, .78) !important;
-    border: 1px solid rgba(0, 220, 255, .24) !important;
-  }
-  .mixer-bay-controls .glctc1-master-volume {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 34px !important;
-    margin: 10px 0 4px !important;
-  }
-  .mixer-bay-controls .crossfader {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 34px !important;
-    margin: 10px 0 4px !important;
-  }
-  .mixer-bay-controls .crossfader-wrap {
-    margin-top: 0 !important;
-  }
-  @media (max-width: 760px) {
-    .mixer-bay-controls {
-      padding: 10px !important;
-      gap: 14px !important;
-    }
-    .mixer-bay-controls .glctc1-headphone-layout {
-      grid-template-columns: minmax(0, 1fr) !important;
-    }
-    .mixer-bay-controls .glctc1-channel-mixer {
-      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    }
-  }
-  @media (max-width: 420px) {
-    .mixer-bay-controls .glctc1-channel-mixer {
-      grid-template-columns: minmax(0, 1fr) !important;
-    }
-  }
-</style>
-
-<!-- =====================================================
-     GLCTC1 v47 — SIMPLE VIEW LAYOUT + SHARE-LINK AUTO PLAY
-     • Simple View: only the player + Master Library show,
-       with the player itself at the top of Playlist Master.
-     • Every ?track= / ?playlist= link plays automatically.
-       If the browser blocks sound until the visitor taps,
-       a full-screen TAP TO PLAY card appears instead of a
-       silent page.
-     ===================================================== -->
-<style id="glctc1-v47-simple-view">
-body.glctc1-simple-view .mod-advanced,
-body.glctc1-simple-view .glctc1-studio-only,
-body.glctc1-simple-view .mod-btn-showall,
-body.glctc1-simple-view .mod-btn-hideall,
-body.glctc1-simple-view .glctc1-playlist-bank-actions,
-body.glctc1-simple-view div:has(> #glctc1PlaylistLoadDeckA) {
-  display: none !important;
-}
-.mod-allbar .mod-allbtn.on {
-  border-color: #39ff14;
-  color: #8bff6b;
-  text-shadow: 0 0 8px #39ff14;
-  box-shadow: 0 0 12px #39ff1466, inset 0 0 10px #39ff1433;
-}
-body.glctc1-simple-view .mod-allbar .mod-allbtn { min-width: 0; }
-.mod-viewhint {
-  flex-basis: 100%;
-  text-align: center;
-  font: 600 11px system-ui, sans-serif;
-  letter-spacing: .08em;
-  color: #8a94bd;
-}
-body.glctc1-full-view .mod-viewhint { display: none; }
-
-/* Player first: header → player → share/actions → favourites → playlists */
-body.glctc1-simple-view #glctc1PlaylistMasterModule { display: flex; flex-direction: column; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > * { order: 10; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-master-header { order: 0; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-player { order: 1; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-action-centre { order: 2; margin-bottom: 14px; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > #glctc1FavouritePlaylist { order: 3; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-selected { order: 4; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-library { order: 5; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-create { order: 6; }
-body.glctc1-simple-view #glctc1PlaylistMasterModule > .glctc1-playlist-actions { order: 7; }
-
-/* TAP TO PLAY card (only when the browser blocks auto play) */
-#glctc1TapToPlay {
-  position: fixed; inset: 0; z-index: 99999;
-  display: none; align-items: center; justify-content: center;
-  padding: 24px; box-sizing: border-box;
-  background: rgba(2, 3, 14, .88);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-}
-#glctc1TapToPlay.open { display: flex; }
-#glctc1TapToPlay .ttp-card {
-  width: min(360px, 100%);
-  padding: 22px 20px 24px;
-  border-radius: 22px;
-  text-align: center;
-  color: #fff;
-  background: radial-gradient(circle at 50% 0%, rgba(168,85,247,.28), transparent 60%), #070a1c;
-  border: 1px solid rgba(25, 247, 255, .55);
-  box-shadow: 0 0 30px rgba(25,186,255,.35), 0 0 60px rgba(236,72,153,.2);
-  cursor: pointer;
-}
-#glctc1TapToPlay img {
-  display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
-  border-radius: 16px; margin: 0 0 16px; background: #0b1030;
-}
-#glctc1TapToPlay img[hidden] { display: none; }
-#glctc1TapToPlay .ttp-title { font: 800 18px 'Orbitron', system-ui, sans-serif; letter-spacing: .06em; overflow-wrap: anywhere; }
-#glctc1TapToPlay .ttp-artist { margin-top: 4px; font: 600 13px system-ui, sans-serif; color: #9fe9ff; letter-spacing: .08em; }
-#glctc1TapToPlay .ttp-btn {
-  display: inline-block; margin-top: 18px; padding: 14px 30px;
-  border: 0; border-radius: 999px; cursor: pointer;
-  font: 800 14px system-ui, sans-serif; letter-spacing: .16em; color: #fff;
-  background: linear-gradient(90deg, #ec4899, #a855f7, #06b6d4);
-  box-shadow: 0 0 18px rgba(236,72,153,.55), 0 0 34px rgba(6,182,212,.35);
-}
-
-/* No cover art: show a neon GLCTC1 disc instead of a broken image icon */
-.glctc1-playlist-artwork {
-  background: radial-gradient(circle at 50% 50%, #0a0620 0 14%, #1a1040 14.5% 30%, transparent 30.5%),
-              repeating-radial-gradient(circle at 50% 50%, #070a14 0 2px, #121830 2px 4px);
-}
-#glctc1PlaylistArtwork:not([src]), #glctc1PlaylistArtwork[src=""] { visibility: hidden; }
-body.glctc1-simple-view .mod-wrap:not(.mod-advanced) > .mod-toggle { display: none !important; }
-</style>
-
-<div id="glctc1TapToPlay" role="dialog" aria-modal="true" aria-labelledby="glctc1TapTitle">
-  <div class="ttp-card">
-    <img id="glctc1TapArt" alt="" hidden>
-    <div class="ttp-title" id="glctc1TapTitle">Shared track</div>
-    <div class="ttp-artist" id="glctc1TapArtist"></div>
-    <button class="ttp-btn" id="glctc1TapBtn" type="button">▶ TAP TO PLAY</button>
-  </div>
-</div>
-
-<script>
-(function () {
-  var img = document.getElementById("glctc1PlaylistArtwork");
-  if (img) img.addEventListener("error", function () { img.removeAttribute("src"); });
-})();
-</script>
-<script id="glctc1-v47-share-autoplay">
-(function () {
-  "use strict";
-  var qs = new URLSearchParams(location.search);
-  if (!qs.has("track") && !qs.has("playlist")) return;   // not a share link
-
-  var audio = document.getElementById("glctc1PlaylistAudio");
-  var box = document.getElementById("glctc1TapToPlay");
-  if (!audio || !box) return;
-
-  var done = false;          // stop helping once the track has played
-  var scrolled = false;
-
-  function txt(id) {
-    var el = document.getElementById(id);
-    return el ? el.textContent.trim() : "";
-  }
-
-  function showCard() {
-    if (done) return;
-    document.getElementById("glctc1TapTitle").textContent = txt("glctc1PlaylistTitle") || "Shared track";
-    document.getElementById("glctc1TapArtist").textContent = txt("glctc1PlaylistArtist");
-    var src = document.getElementById("glctc1PlaylistArtwork");
-    var art = document.getElementById("glctc1TapArt");
-    if (src && src.getAttribute("src")) { art.src = src.src; art.hidden = false; }
-    else art.hidden = true;
-    box.classList.add("open");
-    document.getElementById("glctc1TapBtn").focus({ preventScroll: true });
-  }
-
-  function hideCard() { box.classList.remove("open"); }
-
-  function showPlayer() {
-    if (scrolled) return;
-    scrolled = true;
-    var player = document.querySelector(".glctc1-playlist-player") ||
-                 document.getElementById("glctc1PlaylistMasterModule");
-    if (player) player.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  function tryPlay() {
-    if (done || !audio.currentSrc && !audio.src) return;
-    if (!audio.paused) return;
-    var p = audio.play();
-    if (p && p.catch) {
-      p.catch(function (err) {
-        if (err && err.name === "NotAllowedError") showCard();
-      });
-    }
-  }
-
-  // Tap anywhere on the card: play inside the tap, which every browser allows
-  box.addEventListener("click", function () {
-    hideCard();
-    var p = audio.play();
-    if (p && p.catch) p.catch(function (e) { console.log("GLCTC1 tap-to-play:", e); });
-  });
-
-  audio.addEventListener("playing", function () { done = true; hideCard(); showPlayer(); });
-
-  // The page loads the shared track into the player; try again as soon as it can play
-  ["loadedmetadata", "canplay"].forEach(function (ev) {
-    audio.addEventListener(ev, function () { showPlayer(); tryPlay(); });
-  });
-
-  // The existing loader already calls play(); if the browser refused, it stays
-  // paused with a source set — catch that case too.
-  var checks = 0;
-  var t = setInterval(function () {
-    checks++;
-    if (done || checks > 60) { clearInterval(t); return; }
-    if (audio.src && audio.paused && audio.readyState >= 2) tryPlay();
-  }, 500);
-})();
-</script>
-
-</body>
-</html>
 

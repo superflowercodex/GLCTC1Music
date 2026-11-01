@@ -4770,6 +4770,14 @@ if (masterLibraryEditorModule) {
   </div>
 
 
+  <div class="glctc1-playlist-tools" id="glctc1PlaylistTools">
+    <button id="glctc1CreateAlbumPlaylist" type="button" title="Make a playlist from an album in the Master Library">💿 CREATE ALBUM PLAYLIST</button>
+    <button id="glctc1PlaylistBackup" type="button" title="Save all playlists to a file">⬇ BACKUP</button>
+    <button id="glctc1PlaylistRestore" type="button" title="Load playlists from a backup file">⬆ RESTORE</button>
+    <input id="glctc1PlaylistRestoreFile" type="file" accept=".json,application/json" style="display:none">
+    <div id="glctc1PlSyncStatus" class="glctc1-pl-sync">☁ Checking sync…</div>
+  </div>
+
   <!-- ===================================================
        PLAYLIST LIBRARY
        =================================================== -->
@@ -19372,6 +19380,264 @@ html, body { overscroll-behavior-x: none; }
       keepPinned(btn, 0.5, 0.9, 0, 0.2);
     }, 500);
   }
+})();
+</script>
+
+
+<style id="glctc1-v57-style">
+.glctc1-playlist-tools{position:relative;z-index:1;display:grid;grid-template-columns:1fr auto auto;gap:8px;margin:0 0 12px}
+.glctc1-playlist-tools button{min-height:44px;padding:8px 12px;border-radius:12px;border:1px solid #ec4899;background:rgba(236,72,153,.12);color:#fff;font-weight:700;letter-spacing:.04em;cursor:pointer}
+.glctc1-playlist-tools .glctc1-pl-sync{grid-column:1 / -1;font-size:.72rem;opacity:.75;letter-spacing:.05em}
+@media (max-width:560px){.glctc1-playlist-tools{grid-template-columns:1fr 1fr}#glctc1CreateAlbumPlaylist{grid-column:1 / -1}}
+#glctc1AlbumPicker{position:fixed;inset:0;z-index:100000;display:none;background:rgba(3,6,20,.72)}
+#glctc1AlbumPicker *{box-sizing:border-box;text-transform:none !important;letter-spacing:normal !important;text-shadow:none !important;animation:none !important;filter:none !important}
+#glctc1AlbumPicker .ap-panel{display:flex;flex-direction:column;background:#0b1030;border:1px solid #ec4899;border-radius:18px;box-shadow:0 0 30px rgba(236,72,153,.45);color:#e8ecff;font-family:sans-serif;overflow:hidden}
+#glctc1AlbumPicker .ap-head{display:flex;align-items:center;gap:8px;padding:10px 8px 10px 16px;border-bottom:1px solid rgba(255,255,255,.12);font-weight:800;font-size:1rem;line-height:1.2}
+#glctc1AlbumPicker .ap-head span{flex:1 1 auto;min-width:0}
+#glctc1AlbumPicker button.ap-x{flex:0 0 44px !important;width:44px !important;min-width:44px !important;height:44px !important;min-height:44px !important;padding:0 !important;margin:0 !important;border:0 !important;border-radius:50% !important;background:rgba(255,255,255,.08) !important;box-shadow:none !important;color:#fff !important;font-size:1.2rem !important;line-height:44px;cursor:pointer;display:block}
+#glctc1AlbumPicker input.ap-search{display:block;width:calc(100% - 28px) !important;max-width:none !important;margin:10px 14px 4px !important;padding:10px 12px !important;border-radius:10px !important;border:1px solid rgba(255,255,255,.25) !important;background:#060a22 !important;box-shadow:none !important;color:#fff !important;font-size:1rem !important}
+#glctc1AlbumPicker .ap-list{overflow-y:auto;padding:6px 10px 12px;-webkit-overflow-scrolling:touch}
+#glctc1AlbumPicker button.ap-item{display:flex !important;align-items:center;gap:12px;width:100% !important;min-height:0 !important;height:auto !important;padding:8px !important;margin:6px 0 !important;border-radius:12px !important;border:1px solid rgba(255,255,255,.14) !important;background:rgba(255,255,255,.05) !important;box-shadow:none !important;color:#e8ecff !important;text-align:left;font-size:1rem !important;cursor:pointer}
+#glctc1AlbumPicker button.ap-item:active{background:rgba(236,72,153,.28) !important}
+#glctc1AlbumPicker .ap-art{flex:0 0 52px;width:52px;height:52px;border-radius:8px;background:#1a2050 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:1.4rem}
+#glctc1AlbumPicker .ap-name{font-weight:700;font-size:1rem;line-height:1.2;overflow-wrap:anywhere}
+#glctc1AlbumPicker .ap-sub{font-size:.8rem;opacity:.75;margin-top:2px}
+#glctc1AlbumPicker .ap-empty{padding:18px;text-align:center;opacity:.8}
+</style>
+
+<script id="glctc1-v57-album-sync">
+/* ===== v57: ALBUM PLAYLISTS + CLOUD SYNC + BACKUP / RESTORE ===== */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  function isUrl(v) { return /^(https?:|data:|blob:)/i.test(String(v || "")); }
+  function pinCentre(el, fx, fy, maxW, mh) { if (window.glctc1PinCentre) window.glctc1PinCentre(el, fx, fy, maxW, mh); }
+  function lib() { try { return typeof library !== "undefined" && Array.isArray(library) ? library : []; } catch (e) { return []; } }
+  function f(t, a, b) { return String((t && (t[a] != null && t[a] !== "" ? t[a] : t[b])) || "").trim(); }
+
+  var tEl;
+  function toast(msg, ms) {
+    if (!tEl) {
+      tEl = document.createElement("div");
+      tEl.style.cssText = "z-index:100001;padding:10px 16px;border-radius:12px;background:#101636;border:1px solid #ec4899;color:#e8ecff;font:600 .85rem sans-serif;text-align:center;box-shadow:0 0 18px rgba(236,72,153,.5);pointer-events:none;display:none;box-sizing:border-box";
+      document.body.appendChild(tEl);
+    }
+    tEl.textContent = msg; tEl.style.display = "block";
+    pinCentre(tEl, 0.5, 0.86, 360, 0.3);
+    clearTimeout(tEl._t); tEl._t = setTimeout(function () { tEl.style.display = "none"; }, ms || 3200);
+  }
+
+  function refreshUI() {
+    try { glctc1RenderPlaylistLibrary(); } catch (e) {}
+    try { glctc1UpdatePlaylistPlayer(); } catch (e) {}
+  }
+
+  /* ---------------- ALBUMS ---------------- */
+  function buildAlbums() {
+    var map = {};
+    lib().forEach(function (t) {
+      var name = f(t, "album", "Album");
+      if (!name) return;
+      var key = name.toLowerCase();
+      (map[key] = map[key] || { key: key, name: name, tracks: [] }).tracks.push(t);
+    });
+    return Object.keys(map).map(function (k) {
+      var a = map[k];
+      // album order: upload order (oldest first) - the library has no track-number field
+      a.tracks.sort(function (x, y) {
+        var xi = Number(x.id), yi = Number(y.id);
+        if (isFinite(xi) && isFinite(yi)) return xi - yi;
+        return String(x.id || "").localeCompare(String(y.id || ""));
+      });
+      var artists = {}; a.tracks.forEach(function (t) { var n = f(t, "artist", "Artist"); if (n) artists[n] = 1; });
+      var names = Object.keys(artists);
+      a.artist = names.length === 1 ? names[0] : (names.length ? "Various artists" : "");
+      a.cover = "";
+      for (var i = 0; i < a.tracks.length; i++) { var c = f(a.tracks[i], "cover_art", "Cover Art"); if (c) { a.cover = c; break; } }
+      return a;
+    }).sort(function (x, y) { return x.name.localeCompare(y.name, undefined, { sensitivity: "base" }); });
+  }
+
+  async function coverUrl(path) {
+    if (!path) return "";
+    if (isUrl(path)) return path;
+    try {
+      var r = await supabaseClient.storage.from("tracks").createSignedUrl(path, 3600);
+      if (r && r.data && r.data.signedUrl) return r.data.signedUrl;
+    } catch (e) {}
+    return "";
+  }
+
+  async function makeAlbumPlaylist(album) {
+    var tracks = album.tracks.map(function (t) { return Object.assign({}, t); });
+    var pl = glctc1Playlists.find(function (p) { return p.albumKey === album.key; });
+    var refreshed = !!pl;
+    if (pl) { pl.tracks = tracks; pl.name = pl.name || album.name; }
+    else {
+      pl = { id: "playlist_album_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8), name: album.name, albumKey: album.key, tracks: tracks };
+      glctc1Playlists.push(pl);
+    }
+    glctc1SelectedPlaylistId = pl.id;
+    glctc1PlaylistTrackIndex = 0;
+    glctc1SavePlaylists();
+    refreshUI();
+    closePicker();
+    toast("💿 " + album.name + " — " + tracks.length + " track" + (tracks.length === 1 ? "" : "s") + (refreshed ? " (updated)" : ""));
+    try { await glctc1PlayPlaylistIndex(0); } catch (e) { console.warn("album play", e); }
+  }
+
+  var picker, panel, listEl, searchEl, albumsCache = [];
+  function renderAlbumList() {
+    var q = (searchEl.value || "").trim().toLowerCase();
+    var items = albumsCache.filter(function (a) { return !q || (a.name + " " + a.artist).toLowerCase().indexOf(q) >= 0; });
+    listEl.innerHTML = "";
+    if (!items.length) {
+      var e = document.createElement("div"); e.className = "ap-empty";
+      e.textContent = albumsCache.length ? "No albums match." : "No albums yet. Add an Album name to your tracks in the Master Library editor and they will appear here.";
+      listEl.appendChild(e); return;
+    }
+    items.forEach(function (a) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "ap-item"; b.setAttribute("data-album", a.name);
+      var art = document.createElement("div"); art.className = "ap-art"; art.textContent = "💿";
+      var tx = document.createElement("div");
+      var n = document.createElement("div"); n.className = "ap-name"; n.textContent = a.name;
+      var sub = document.createElement("div"); sub.className = "ap-sub";
+      sub.textContent = (a.artist ? a.artist + " · " : "") + a.tracks.length + " track" + (a.tracks.length === 1 ? "" : "s");
+      tx.appendChild(n); tx.appendChild(sub); b.appendChild(art); b.appendChild(tx);
+      b.addEventListener("click", function () { makeAlbumPlaylist(a); });
+      listEl.appendChild(b);
+      if (a.cover) coverUrl(a.cover).then(function (u) { if (u) { art.textContent = ""; art.style.backgroundImage = 'url("' + u + '")'; } });
+    });
+  }
+  function ensurePicker() {
+    if (picker) return;
+    picker = document.createElement("div"); picker.id = "glctc1AlbumPicker";
+    picker.innerHTML = '<div class="ap-panel"><div class="ap-head"><span>💿 CHOOSE AN ALBUM</span><button type="button" class="ap-x" aria-label="Close">✕</button></div>' +
+      '<input class="ap-search" type="search" placeholder="Search albums" autocomplete="off"><div class="ap-list"></div></div>';
+    document.body.appendChild(picker);
+    panel = picker.querySelector(".ap-panel"); listEl = picker.querySelector(".ap-list"); searchEl = picker.querySelector(".ap-search");
+    picker.querySelector(".ap-x").addEventListener("click", closePicker);
+    picker.addEventListener("click", function (e) { if (e.target === picker) closePicker(); });
+    searchEl.addEventListener("input", renderAlbumList);
+    pinCentre(panel, 0.5, 0.5, 460, 0.86);
+  }
+  function openPicker() {
+    ensurePicker();
+    albumsCache = buildAlbums(); searchEl.value = "";
+    picker.style.display = "block";
+    pinCentre(panel, 0.5, 0.5, 460, 0.86);
+    panel.style.height = "auto";
+    renderAlbumList();
+    // list takes the remaining height inside the panel
+    listEl.style.maxHeight = Math.max(160, parseFloat(panel.style.maxHeight || "600") - 130) + "px";
+  }
+  function closePicker() { if (picker) picker.style.display = "none"; }
+
+  /* ---------------- BACKUP / RESTORE ---------------- */
+  function backup() {
+    var data = { app: "glctc1-playlists", version: 1, exported: new Date().toISOString(), playlists: glctc1Playlists };
+    var blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
+    var a = document.createElement("a"), url = URL.createObjectURL(blob);
+    a.href = url; a.download = "glctc1-playlists-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    toast("⬇ Backup saved (" + glctc1Playlists.length + " playlists)");
+  }
+  function restoreFile(file) {
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var d = JSON.parse(String(rd.result || ""));
+        var list = Array.isArray(d) ? d : d && d.playlists;
+        if (!Array.isArray(list)) throw new Error("not a playlist backup");
+        list = list.filter(function (p) { return p && p.id && Array.isArray(p.tracks); });
+        if (!list.length) throw new Error("no playlists in file");
+        list.forEach(function (p) {
+          var i = glctc1Playlists.findIndex(function (x) { return String(x.id) === String(p.id); });
+          if (i >= 0) glctc1Playlists[i] = p; else glctc1Playlists.push(p);
+        });
+        if (!glctc1SelectedPlaylistId) glctc1SelectedPlaylistId = glctc1Playlists[0].id;
+        glctc1SavePlaylists(); refreshUI();
+        toast("⬆ Restored " + list.length + " playlist" + (list.length === 1 ? "" : "s"));
+      } catch (e) { toast("That file is not a GLCTC1 playlist backup."); }
+    };
+    rd.readAsText(file);
+  }
+
+  /* ---------------- CLOUD SYNC (Supabase table user_playlists) ---------------- */
+  var TABLE = "user_playlists", user = null, ready = false, pushTimer = null, pushing = false;
+  var DIRTY = "glctc1_pl_dirty";
+  function setStatus(t) { var e = $("glctc1PlSyncStatus"); if (e) e.textContent = t; }
+  var origSave = window.glctc1SavePlaylists;
+  window.glctc1SavePlaylists = function () {
+    origSave.apply(this, arguments);
+    try { localStorage.setItem(DIRTY, "1"); } catch (e) {}
+    if (ready) { clearTimeout(pushTimer); pushTimer = setTimeout(push, 1200); setStatus("☁ Saving…"); }
+  };
+  async function push() {
+    if (!user || pushing) { if (pushing) pushTimer = setTimeout(push, 1500); return true; }
+    pushing = true;
+    try {
+      var r = await supabaseClient.from(TABLE).upsert({ user_id: user.id, playlists: glctc1Playlists, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+      if (r && r.error) throw r.error;
+      try { localStorage.setItem(DIRTY, "0"); } catch (e) {}
+      setStatus("☁ Synced to your account · " + glctc1Playlists.length + " playlist" + (glctc1Playlists.length === 1 ? "" : "s"));
+      return true;
+    } catch (e) { console.warn("playlist sync", e); setStatus("☁ Could not sync — saved on this device"); return false; }
+    finally { pushing = false; }
+  }
+  function merge(remote, local) {
+    var out = remote.slice();
+    local.forEach(function (p) {
+      var i = out.findIndex(function (x) { return String(x.id) === String(p.id); });
+      if (i < 0) out.push(p); else if ((p.tracks || []).length > (out[i].tracks || []).length) out[i] = p;
+    });
+    return out;
+  }
+  async function initSync() {
+    try {
+      var u = await supabaseClient.auth.getUser();
+      user = u && u.data && u.data.user ? u.data.user : null;
+    } catch (e) { user = null; }
+    if (!user) { setStatus("☁ Log in to sync playlists across devices (saved on this device)"); return; }
+    var r;
+    try { r = await supabaseClient.from(TABLE).select("playlists").eq("user_id", user.id).maybeSingle(); }
+    catch (e) { r = { error: e }; }
+    if (r.error) { console.warn("playlist sync", r.error); setStatus("☁ Cloud sync not set up yet (saved on this device)"); return; }
+    var remote = r.data && Array.isArray(r.data.playlists) ? r.data.playlists : null;
+    var syncedKey = "glctc1_pl_synced_" + user.id, synced = false, dirty = false;
+    try { synced = localStorage.getItem(syncedKey) === "1"; dirty = localStorage.getItem(DIRTY) === "1"; } catch (e) {}
+    var result, needPush = false;
+    if (!remote) { result = glctc1Playlists; needPush = glctc1Playlists.length > 0; }
+    else if (!synced) { result = merge(remote, glctc1Playlists); needPush = true; }
+    else if (dirty) { result = glctc1Playlists; needPush = true; }
+    else { result = remote; }
+    var changed = JSON.stringify(result) !== JSON.stringify(glctc1Playlists);
+    if (changed) {
+      glctc1Playlists = result;
+      if (!glctc1Playlists.some(function (p) { return p.id === glctc1SelectedPlaylistId; })) glctc1SelectedPlaylistId = glctc1Playlists.length ? glctc1Playlists[0].id : null;
+      origSave();
+      refreshUI();
+    }
+    ready = true;
+    var ok = true;
+    if (needPush) ok = await push(); else setStatus("☁ Synced to your account · " + glctc1Playlists.length + " playlist" + (glctc1Playlists.length === 1 ? "" : "s"));
+    if (ok) { try { localStorage.setItem(syncedKey, "1"); } catch (e) {} }
+  }
+
+  function wire() {
+    var a = $("glctc1CreateAlbumPlaylist"); if (a) a.addEventListener("click", openPicker);
+    var b = $("glctc1PlaylistBackup"); if (b) b.addEventListener("click", backup);
+    var r = $("glctc1PlaylistRestore"), fi = $("glctc1PlaylistRestoreFile");
+    if (r && fi) {
+      r.addEventListener("click", function () { fi.value = ""; fi.click(); });
+      fi.addEventListener("change", function () { if (fi.files && fi.files[0]) restoreFile(fi.files[0]); });
+    }
+    window.glctc1MakeAlbumPlaylist = makeAlbumPlaylist; window.glctc1BuildAlbums = buildAlbums;
+    initSync();
+    try { supabaseClient.auth.onAuthStateChange(function (ev) { if (ev === "SIGNED_IN" && !ready) setTimeout(initSync, 300); }); } catch (e) {}
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire); else wire();
 })();
 </script>
 

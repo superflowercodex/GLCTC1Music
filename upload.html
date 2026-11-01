@@ -15085,6 +15085,46 @@ if (sharedTrackId) {
 
 
 // ===================================================
+// 🎵 v53: NEVER A BLANK PLAYER
+// When nobody opened a shared track / playlist, the first track in the
+// Master Library (the one at the top of the table) is loaded into the
+// Playlist Master, ready to play: title, artist, cover and audio.
+// It does not start by itself (phones block that); press play.
+// ===================================================
+try {
+  const hasSharedLink =
+    sharedTrackId ||
+    new URLSearchParams(window.location.search).get("playlist") ||
+    (typeof glctc1SharedPlaylist !== "undefined" && glctc1SharedPlaylist);
+
+  if (!hasSharedLink && Array.isArray(library) && library.length) {
+
+    const firstTrack =
+      sortGLCTC1Library(library).find(t =>
+        t && (t.master_audio || t["Master Audio"])
+      );
+
+    if (firstTrack) {
+
+      selectedLibraryTrack = firstTrack;
+
+      if (typeof updateSelectedSlot === "function") {
+        updateSelectedSlot(firstTrack);
+      }
+
+      await playPlaylistMasterTrack(firstTrack, false);
+
+      console.log(
+        "🎵 GLCTC1 FIRST TRACK PRELOADED:",
+        firstTrack.artist, "-", firstTrack.title
+      );
+    }
+  }
+} catch (error) {
+  console.warn("GLCTC1 first track preload skipped:", error);
+}
+
+// ===================================================
 // 🎛️ EXISTING CONTROLS
 // ===================================================
 
@@ -17028,6 +17068,20 @@ if (sharedTrackId) {
 <style>
 
 
+/* ===== SIMPLE VIEW (v53) =====
+   Simple View hides the whole deck area completely - no tabs, no heading, no frame.
+   Only the Master Library Editor tab, Playlist Master and Master Library remain. */
+body.glctc1-simple-view .mod-wrap[data-mod="playspace"],
+body.glctc1-simple-view .mod-wrap[data-mod="deckA"],
+body.glctc1-simple-view .mod-wrap[data-mod="deckB"],
+body.glctc1-simple-view .mod-wrap[data-mod="mixer"],
+body.glctc1-simple-view .mod-wrap[data-mod="mastervolume"],
+body.glctc1-simple-view .mod-wrap[data-mod="crossfader"],
+body.glctc1-simple-view .mod-wrap[data-mod="banks"],
+body.glctc1-simple-view .glctc1-simple-hide {
+  display: none !important;
+}
+
 /* ===== NEON MODULE HIDE TABS ===== */
 
 .mod-wrap {
@@ -17230,6 +17284,7 @@ if (sharedTrackId) {
 
   var items = [];
   var barBtns = [];
+  var simpleMode = false;
 
 
   // Playlist Master now lives directly above the Master Library inside
@@ -17251,6 +17306,7 @@ if (sharedTrackId) {
     var parent = start.parentNode;
     var wrap = document.createElement("div");
     wrap.className = "mod-wrap" + (def.cls ? " " + def.cls : "");
+    wrap.setAttribute("data-mod", def.key);
     parent.insertBefore(wrap, start);
 
     // Move start … end (and anything between) into the wrapper
@@ -17428,19 +17484,28 @@ if (sharedTrackId) {
   function markBar() {
     if (!barBtns || !barBtns.length) return;
     var open = items.filter(function (i) { return !i.el.classList.contains("mod-collapsed"); });
-    var simple = items.every(function (i) {
-      return i.el.classList.contains("mod-collapsed") === !i.defOpen;
-    });
-    var state = open.length === items.length ? "all" : (open.length === 0 ? "none" : (simple ? "simple" : "custom"));
+    var state = simpleMode ? "simple" :
+      (open.length === items.length ? "all" : (open.length === 0 ? "none" : "custom"));
     barBtns.forEach(function (b) { b.el.classList.toggle("on", b.view === state); });
   }
 
+  // Simple View is a mode. It is remembered, and it is switched on/off by the three buttons.
+  function setSimple(on, save) {
+    simpleMode = !!on;
+    document.body.classList.toggle("glctc1-simple-view", simpleMode);
+    if (save) store.set("__simple", simpleMode);
+    markBar();
+    setTimeout(function () { window.dispatchEvent(new Event("resize")); }, 40);
+  }
+
   function setAll(collapsed) {
+    setSimple(false, true);
     items.forEach(function (i) { apply(i, collapsed, true); });
   }
 
   // SIMPLE VIEW = Playlist Master + Master Library only. Everything else is a closed tab.
   function simpleView() {
+    setSimple(true, true);
     items.forEach(function (i) { apply(i, !i.defOpen, true); });
   }
 
@@ -17486,6 +17551,37 @@ if (sharedTrackId) {
       bar.parentNode.insertBefore(shopBanner, bar);
     }
   }
+
+
+  // Tag the heading, sub-heading and frame around the decks so Simple View can hide them too
+  (function () {
+    var h = Array.prototype.filter.call(document.querySelectorAll("h1"), function (x) {
+      return /COSMIC\s*1200\s*DECKS/i.test(x.textContent);
+    })[0];
+    if (h) {
+      h.classList.add("glctc1-simple-hide");
+      var sub = h.nextElementSibling;
+      if (sub && sub.classList.contains("subtitle")) sub.classList.add("glctc1-simple-hide");
+    }
+    var card = document.querySelector(".glow-card");
+    var keep = $("glctc1PlaylistMasterModule");
+    if (card && !(keep && card.contains(keep)) && !card.querySelector("#masterLibraryModule")) {
+      card.classList.add("glctc1-simple-hide");
+    }
+  })();
+
+  // Starting mode: a saved choice wins. Otherwise Simple View is on when the page is
+  // laid out like Simple View already (this is every brand-new visitor).
+  (function () {
+    var saved = null;
+    try { saved = localStorage.getItem(KEY_PREFIX + "__simple"); } catch (e) {}
+    var layoutIsSimple = items.every(function (i) {
+      return i.el.classList.contains("mod-collapsed") === !i.defOpen;
+    });
+    if (saved === "1") { setSimple(true, false); if (!layoutIsSimple) simpleView(); }
+    else if (saved === "0") setSimple(false, false);
+    else setSimple(layoutIsSimple, false);
+  })();
 
 
   // Small helper for the browser console / other scripts

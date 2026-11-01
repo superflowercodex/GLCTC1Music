@@ -4870,6 +4870,9 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    const toTl=()=>{swStems.forEach((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0));swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
    if(r.stems.some(Boolean)){if(await mlLoadStems(r))toTl();return}
    const b=await mlLoadMaster(r);if(!b)return;swAfterSplit=()=>{swStemNames=STEM_NAMES.slice();toTl()};swSplit()}catch(e){toast(e.message)}}
+ window.GLCTC_ML={remixById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();
+   const r=rows.find(x=>sid&&String(x.id)===sid)||rows.find(x=>sc&&String(x.cat).trim().toLowerCase()===sc);
+   if(!r)throw Error('That track was not found in the Master Library');await mlRemix(r);return r}};
  const mlBtn=scB('☁ MASTER LIBRARY',()=>{if(mlBox.style.display==='none')mlOpen(false);else mlBox.style.display='none'},'Browse the GLCTC1 Play Space Master Library: load masters, stems, or remix a track');
  const swLab=t=>el('span',{class:'sw-lab',text:t});
  const swTools=el('div',{class:'sw-tools'},
@@ -6050,8 +6053,10 @@ const AUTO_LS='glctc1.autoSongOnLoad';
  try{if(box)box.checked=localStorage.getItem(AUTO_LS)!=='0'}catch(e){}
  if(box)box.addEventListener('change',()=>{try{localStorage.setItem(AUTO_LS,box.checked?'1':'0')}catch(e){}});
  let tries=0;
+ const REMIX_ARRIVAL=/[?&](remix|cat)=/.test(location.search); /* v63: opened from the Play Space REMIX button -> keep the remix, no random new song */
  function ready(){const h=H();return !!(h&&h.mods&&['bl','mine','lee','s101','go','vox','ws'].every(k=>h.mods[k])&&window.GLCTC_PATTERNS&&window.GALACTIC_ONE&&window.GALACTIC_VOX&&window.GLCTC_PAD64_PATTERNS&&window.GLCTC_80LA8_PATTERNS&&window.GLCTC_DIVINE09_PATTERNS&&window.GLCTC_30LEE_PATTERNS&&window.GLCTC_0010110_PATTERNS)}
  function run(){
+  if(REMIX_ARRIVAL)return;
   if(S||starting||window.glctcTimeline?.playing()||Object.values(H()?.mods||{}).some(m=>m.running?.()))return;
   const b=byId('gscAutoLoad');if(b&&!b.checked)return;
   if(!ready()){if(++tries<24)setTimeout(run,500);return}
@@ -6502,9 +6507,37 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
  if(document.readyState==='complete')document.body.append(root);else window.addEventListener('load',()=>document.body.append(root),{once:true});
 })();
 </script>
+
+<script>
+/* v63 REMIX ARRIVAL: daw.html?remix=<track id>&cat=<cat no> (sent by the Play Space "REMIX THIS TRACK" button)
+   opens the REMIX room and loads that song's stems onto the timeline at its BPM, ready to remix. */
+(()=>{'use strict';
+ const p=new URLSearchParams(location.search);
+ if(!p.has('remix')&&!p.has('cat'))return;
+ const id=p.get('remix'),cat=p.get('cat');
+ const bar=document.createElement('div');
+ bar.style.cssText='position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:99999;max-width:92vw;padding:10px 18px;border-radius:12px;background:#120a02;border:1px solid #ff8a2a;color:#ffd9b0;font:800 12px/1.3 system-ui,sans-serif;letter-spacing:.08em;text-align:center;box-shadow:0 0 18px rgba(255,138,42,.5)';
+ const say=(t,ms)=>{bar.textContent=t;if(!bar.isConnected)document.body.append(bar);clearTimeout(bar._t);if(ms)bar._t=setTimeout(()=>bar.remove(),ms)};
+ say('★ OPENING THE REMIX ROOM…');
+ const wait=(ok,ms)=>new Promise((res,rej)=>{const t0=Date.now();(function tick(){if(ok())return res();if(Date.now()-t0>ms)return rej(Error('The studio did not finish loading'));setTimeout(tick,150)})()});
+ async function go(){
+  try{
+   await wait(()=>window.GLCTC_STUDIO_MODE&&window.GLCTC_ML,30000);
+   await new Promise(r=>setTimeout(r,600));            // let the studio finish its own start-up room
+   window.GLCTC_STUDIO_MODE.set('remix');
+   say('★ LOADING YOUR SONG INTO THE REMIX ROOM…');
+   const r=await window.GLCTC_ML.remixById(id,cat);
+   say('★ '+((r.artist?r.artist+' — ':'')+(r.title||r.cat))+' · READY TO REMIX · PRESS ▶',9000);
+   try{history.replaceState(null,'',location.pathname)}catch(e){}   // a refresh will not reload it again
+  }catch(e){console.warn('remix arrival',e);say('COULD NOT OPEN THE REMIX · '+e.message+' · USE ☁ MASTER LIBRARY → ★ REMIX',12000)}
+ }
+ if(document.readyState==='complete')go();else window.addEventListener('load',go,{once:true});
+})();
+</script>
 </body>
 </html>
 
 
 <!-- GLCTC1 v55: SONG COMPOSER STOP now halts all registered modules and scheduled audio, resets shared module start step and master clock to beat zero, and returns the DAW timeline playhead/position to bar 1. -->
+
 

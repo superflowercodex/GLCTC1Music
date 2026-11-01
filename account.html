@@ -152,7 +152,7 @@ footer{padding:22px 0 30px;text-align:center;color:var(--muted);font-size:11px;l
 <div class="panel on" id="pProfile">
 <section class="card">
 <h2>ARTIST PROFILE</h2><p class="hint">This is how fans and bookers see you.</p>
-<div class="f"><label for="artistName">Artist name</label><input id="artistName" type="text" maxlength="100" placeholder="Enter your artist name" autocomplete="off"></div>
+<div class="f"><label for="artistName">Artist name</label><input id="artistName" type="text" maxlength="100" placeholder="Enter your artist name" autocomplete="off" aria-describedby="nameMsg"><p class="msg" id="nameMsg" aria-live="polite" style="margin-top:6px;font-size:12px"></p></div>
 <div class="f"><label for="bio">Bio <span class="cnt" id="bioC">0/500</span></label><textarea id="bio" maxlength="500" placeholder="Tell people who you are, what you make, where you are from…"></textarea></div>
 </section>
 </div>
@@ -242,24 +242,50 @@ async function load(){
  const admin=me.id===ADMIN_USER_ID;$("permission").textContent=admin?"Administrator":"Standard User";$("perm").textContent=admin?"ADMIN":"STANDARD";$("perm").className="chip "+(admin?"g":"c");
  const{data:p,error:pe}=await sb.from("profiles").select("*").eq("id",me.id).maybeSingle();
  if(pe){gate("PROFILE COULD NOT LOAD",pe.message,false);return}
- if(p){$("artistName").value=p.artist_name||"";$("bio").value=p.bio||"";$("donationEnabled").checked=p.donation_enabled===true;
+ /* name chosen at sign-up (kept on the account) fills the field if the profile doesn't have one yet */
+ const signupName=((me.user_metadata&&me.user_metadata.username)||"").trim();
+ if(!(p&&p.artist_name)&&signupName){$("artistName").value=signupName;say($("nameMsg"),"From your sign-up — press Save to keep it.")}
+ if(p){if(p.artist_name)$("artistName").value=p.artist_name;$("bio").value=p.bio||"";$("donationEnabled").checked=p.donation_enabled===true;
   $("donationMessage").value=p.donation_message||"";$("paypalUrl").value=p.paypal_url||"";$("xrpAddress").value=p.xrp_address||"";$("xlmAddress").value=p.xlm_address||"";$("cryptoUrl").value=p.crypto_url||"";avatarUrl=p.avatar_url||"";setAvatar(avatarUrl);$("bio").dispatchEvent(new Event("input"))}
  show();chips();loadMine();
 }
 
+/* Artist name must be unique (database rule: profiles_artist_name_unique).
+   Live check uses the username_available() function from artist-names.sql. */
+const cleanName=v=>v.trim().replace(/\s+/g," ");
+let nameTimer=null,nameSeq=0;
+async function checkName(){
+ const n=cleanName($("artistName").value),m=$("nameMsg"),my=++nameSeq;
+ if(!n){say(m,"");return false}
+ if(n.length<2){say(m,"At least 2 characters.",1);return false}
+ if(!sb||PREVIEW){say(m,"");return null}
+ try{
+  const{data,error}=await sb.rpc("username_available",{name:n});
+  if(my!==nameSeq)return null;
+  if(error){say(m,"");return null}            /* can't check: the database rule still protects on save */
+  say(m,data?"✓ Available":"✗ "+n+" is already taken",!data);return !!data;
+ }catch(e){return null}
+}
+$("artistName").addEventListener("input",()=>{clearTimeout(nameTimer);say($("nameMsg"),"");nameTimer=setTimeout(checkName,450)});
+
 /* Save profile and support fields in one database operation. */
 async function save(){
  const s=$("saveStatus");if(!me){say(s,"You are not signed in.",1);return}
- const name=$("artistName").value.trim();if(!name){say(s,"Please enter your artist name.",1);return}
+ const name=cleanName($("artistName").value);if(!name){say(s,"Please enter your artist name.",1);return}
  if(PREVIEW){say(s,"Preview mode — nothing saved.");return}
+ clearTimeout(nameTimer);
+ if(await checkName()===false){say(s,name.length<2?"Artist name needs at least 2 characters.":"That artist name is taken. Choose another.",1);$("pProfile").scrollIntoView({block:"start"});$("artistName").focus();return}
+ $("artistName").value=name;
  const userId=me.id;
  const fields={id:userId,artist_name:name,bio:$("bio").value.trim(),donation_enabled:$("donationEnabled").checked,donation_message:$("donationMessage").value.trim(),paypal_url:$("paypalUrl").value.trim(),xrp_address:$("xrpAddress").value.trim(),xlm_address:$("xlmAddress").value.trim(),crypto_url:$("cryptoUrl").value.trim()};
  $("saveProfileBtn").disabled=true;say(s,"Saving…");
  try{
   const{data,error}=await sb.from("profiles").upsert(fields,{onConflict:"id"}).select("id").single();
   if(error)throw error;if(!data||data.id!==userId)throw new Error("Profile save was not confirmed.");
-  say(s,"✓ Artist profile and support details saved.");
- }catch(e){say(s,"Save failed: "+e.message,1)}
+  say(s,"✓ Artist profile and support details saved.");say($("nameMsg"),"");chips();
+ }catch(e){
+  if(e.code==="23505"||/duplicate key|artist_name_unique/i.test(e.message||"")){say(s,"That artist name was just taken. Choose another.",1);say($("nameMsg"),"✗ "+name+" is already taken",1)}
+  else say(s,"Save failed: "+e.message,1)}
  finally{$("saveProfileBtn").disabled=false}
 }
 $("saveProfileBtn").onclick=save;
@@ -340,3 +366,4 @@ load().catch(e=>{$("app").classList.add("hidden");$("gate").classList.remove("hi
 </script>
 </body>
 </html>
+

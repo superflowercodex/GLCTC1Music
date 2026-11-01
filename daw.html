@@ -3996,7 +3996,52 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  window.WSB=(id,fb)=>{try{if(fb&&audioCtx&&fb.context!==audioCtx)return fb;return window.GLCTC_WSBUS(id)||fb}catch(e){return fb}};
  const anySolo=()=>MODS.some(m=>!m.track&&ms(m.id).solo);
  const audible=m=>{const s=ms(m.id);return !s.mute&&(!anySolo()||s.solo)};
- function applyMix(){if(!audioCtx)return;const t=audioCtx.currentTime;MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==audioCtx)return;const s=ms(m.id);b.vol.gain.setTargetAtTime(s.vol*(MIXTRIM[m.id]||1)*MIXBOOST,t,.015);b.gate.gain.setTargetAtTime(audible(m)?1:0,t,.012);b.pan.pan.setTargetAtTime(s.pan,t,.015)})}
+ function applyMix(){if(!audioCtx)return;const t=audioCtx.currentTime;MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==audioCtx)return;const s=ms(m.id);b.vol.gain.setTargetAtTime(s.vol*(MIXTRIM[m.id]||1)*amGain(m.id),t,.015);b.gate.gain.setTargetAtTime(audible(m)?1:0,t,.012);b.pan.pan.setTargetAtTime(s.pan,t,.015)})}
+
+ /* ---------- v68 AUTO MIX: measures every sound while the song plays and trims it to a balanced level ---------- */
+ const AM={on:true,active:false,tdb:{},master:0,hist:{},an:{},mAn:null,mHist:[],mPk:0,buf:new Float32Array(2048),last:0,lastM:0,note:'',lpBase:null,lpSet:null,lpTap:null,genre:'',mt:-14.5};
+ const AM_TARGET={bl:-20,mine:-20,lee:-24,s101:-25,go:-25,vox:-23,ws:-28,lp:-27};   /* loud-passage level of each sound (dBFS), peak-aware */
+ const AM_START={bl:-1,mine:0,lee:-5,s101:1,go:1,vox:0,ws:3};                    /* first guess, so nothing blasts before it has been measured */
+ const AM_LS='glctc1.autoMix',AM_MASTER_BY={ambient:-18,lofi:-16};
+ try{AM.on=localStorage.getItem(AM_LS)!=='0'}catch(e){}
+ function amGain(id){return AM.active&&AM.on?Math.pow(10,(AM.tdb[id]||0)/20):MIXBOOST}
+ const amPct=(a,q)=>{const b=a.slice().sort((x,y)=>x-y);return b[Math.floor(q*(b.length-1))]};
+ const amDb=(a,n)=>{let sm=0;for(let i=0;i<n;i++)sm+=a[i]*a[i];return 10*Math.log10(sm/n+1e-12)};
+ const amLoop=()=>{try{return typeof project!=='undefined'&&project.tracks?project.tracks.find(t=>t.looper)||null:null}catch(e){return null}};
+ function amNote(t){AM.note=t;const e=document.getElementById('gscMixInfo');if(e)e.textContent=t}
+ function amRestoreLoop(){const lt=amLoop();if(lt&&AM.lpBase!=null){lt.volume=AM.lpBase;try{window.lpLive&&window.lpLive()}catch(e){}}AM.lpBase=null;AM.lpSet=null}
+ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-14.5;amRestoreLoop();AM.tdb={};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=AM_START[m.id]||0});AM.master=4;AM.hist={};AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
+  if(AM.on){const lt=amLoop();if(lt){AM.lpBase=lt.volume;AM.lpSet=Math.min(1,lt.volume*.4);lt.volume=AM.lpSet;try{window.lpLive&&window.lpLive()}catch(e){}}}
+  try{applyMix()}catch(e){}amNote(AM.on?'AUTO MIX · LISTENING…':'AUTO MIX OFF')}
+ function amTick(){
+  if(!AM.on||!AM.active||!audioCtx||audioCtx.state!=='running')return;
+  const c=audioCtx,N=2048,tgt=id=>(AM_TARGET[id]||-24)+AM.master;
+  const grab=(a)=>{a.getFloatTimeDomainData(AM.buf);let pk=0;for(let i=0;i<N;i++){const v=Math.abs(AM.buf[i]);if(v>pk)pk=v}const d0=amDb(AM.buf,N);return {d0,d:Math.max(d0,20*Math.log10(pk+1e-9)-14),pk}};
+  MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==c)return;let a=AM.an[m.id];if(!a||a.context!==c){a=c.createAnalyser();a.fftSize=N;b.tap.connect(a);AM.an[m.id]=a;return}
+   const g=grab(a);if(g.d0>-60){const v=Math.max(.05,ms(m.id).vol),h=AM.hist[m.id]||(AM.hist[m.id]=[]);h.push(g.d-20*Math.log10(v));if(h.length>200)h.shift()}});
+  const lt=amLoop(),lb=lt&&c._buses?c._buses[lt.id]:null;
+  if(lt&&lb){let a=AM.an.lp;if(!a||a.context!==c||AM.lpTap!==lb.tap){a=c.createAnalyser();a.fftSize=N;lb.tap.connect(a);AM.an.lp=a;AM.lpTap=lb.tap}
+   else{const g=grab(a);if(g.d0>-60){const h=AM.hist.lp||(AM.hist.lp=[]);h.push(g.d-20*Math.log10(Math.max(.03,lt.volume)));if(h.length>200)h.shift()}}}
+  if(!AM.mAn||AM.mAn.context!==c){if(masterGain){AM.mAn=c.createAnalyser();AM.mAn.fftSize=N;masterGain.connect(AM.mAn)}}
+  else{const g=grab(AM.mAn);if(g.d0>-60){AM.mHist.push(g.d0);if(AM.mHist.length>200)AM.mHist.shift()}if(g.pk>AM.mPk)AM.mPk=g.pk}
+  const now=performance.now();if(now-AM.last<2000)return;AM.last=now;
+  let changed=false,n=0;
+  MODS.forEach(m=>{if(m.track)return;const h=AM.hist[m.id];if(!h||h.length<30)return;n++;
+   const p90=amPct(h,.9),err=tgt(m.id)-p90;if(Math.abs(err)<1.3)return;
+   const step=Math.max(-3,Math.min(2,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-24,Math.min(6,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
+  /* the Looper demo loop is a timeline track: trim it through its track volume (your own fader move is respected) */
+  if(lt&&AM.hist.lp&&AM.hist.lp.length>=30&&AM.lpSet!=null){n++;
+   if(Math.abs(lt.volume-AM.lpSet)>.03*AM.lpSet+.005){const f=AM.lpSet/Math.max(.001,AM.lpBase||AM.lpSet);AM.lpBase=lt.volume/f;AM.lpSet=lt.volume}
+   const p90=amPct(AM.hist.lp,.9),err=tgt('lp')-p90;
+   if(Math.abs(err)>=1.3){const step=Math.max(-3,Math.min(2,err*.8)),nv=Math.max(.02,Math.min(1,AM.lpSet*Math.pow(10,step/20)));if(Math.abs(nv-AM.lpSet)>.002){const dl=20*Math.log10(nv/AM.lpSet);AM.lpSet=nv;lt.volume=nv;try{window.lpLive&&window.lpLive()}catch(e){}for(let i=0;i<AM.hist.lp.length;i++)AM.hist.lp[i]+=0;changed=true}}}
+  /* overall level: shifts every target together, so the balance between sounds never changes */
+  if(now-AM.lastM>=6000&&AM.mHist.length>=30){const p90=amPct(AM.mHist,.9);let step=Math.max(-3,Math.min(2,(AM.mt-p90)*.5));if(AM.mPk>1.6&&p90>-16)step=Math.min(step,-1.5);
+   if(Math.abs(AM.mt-p90)>=1.5||step<=-1.5){const nm=Math.max(-12,Math.min(8,AM.master+step));if(nm!==AM.master){AM.master=nm;AM.mHist=[];AM.mPk=0;AM.lastM=now;changed=true}}else AM.mPk=0}
+  if(changed){try{applyMix()}catch(e){}}
+  if(n)amNote('AUTO MIX · '+(changed?'BALANCING…':'BALANCED')+' · '+MODS.filter(m=>!m.track&&AM.hist[m.id]&&AM.hist[m.id].length>=30).map(m=>m.name+' '+((AM.tdb[m.id]||0)>0?'+':'')+(AM.tdb[m.id]||0).toFixed(0)).join(' · '))}
+ setInterval(amTick,100);
+ window.GLCTC_MIX.autoSong=amStart;
+ window.GLCTC_MIX.autoMix={get on(){return AM.on},set on(v){AM.on=!!v;try{localStorage.setItem(AM_LS,AM.on?'1':'0')}catch(e){}if(AM.on)amStart(AM.genre);else{AM.active=false;amRestoreLoop();try{applyMix()}catch(e){}amNote('AUTO MIX OFF')}},rebalance:()=>amStart(AM.genre),state:()=>({on:AM.on,active:AM.active,trims:Object.assign({},AM.tdb),master:AM.master,loop:AM.lpSet,note:AM.note})};
  let fin=null;
  function ensureBuses(){
   const c=ensureAudio();MODS.forEach(m=>{if(!m.track)bus(m.id)});
@@ -5533,7 +5578,7 @@ panel.innerHTML=`<style>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px"><input id="gscLoop" type="checkbox">LOOP SONG</label></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Off = every module plays straight 16ths, perfectly locked. On = the drums, bass and Galactic One swing together in the genre&#39;s groove."><input id="gscSwing" type="checkbox">SWING GROOVE</label></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Builds rise through a high-pass filter, the last beat drops out, and the drop hits at full weight"><input id="gscEpic" type="checkbox" checked>EPIC BUILDS &amp; DROPS</label></div>
- <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label></div>
+ <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Listens to every module while the song plays and sets a balanced level for each (drums up front, 30LEE, synths and pads sitting underneath). Your faders still work on top."><input id="gscAutoMix" type="checkbox" checked>⚖ AUTO MIX LEVELS</label><div id="gscMixInfo" style="font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere"></div></div>
 </div>
 <div class="gsc-wrap"><table id="gscGrid"></table></div>
 <div class="gsc-actions" aria-label="Song controls">
@@ -6087,6 +6132,7 @@ function prepareSong(genreKey,txt,forceFill){
  MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});
  st.presets=Object.assign({},st.presets,g.pre);
  try{if(window.GLCTC_MIX)window.GLCTC_MIX.boost={ambient:2.2}[genreKey]||1}catch(e){}
+ try{if(window.GLCTC_MIX&&window.GLCTC_MIX.autoSong)window.GLCTC_MIX.autoSong(genreKey)}catch(e){}
  let pack=null;
  try{if(forceFill||(byId('gscAutoFill')&&byId('gscAutoFill').checked))pack=fillPatterns(genreKey,txt)}catch(e){console.warn('pattern fill',e)}
  save();renderGrid();
@@ -6623,6 +6669,15 @@ window.GLCTC_SONG={play:startSong,generate,stop:()=>stopSong('SONG STOPPED'),sta
  function onStep(n){cur=n;t0=performance.now();if(!running){running=true;requestAnimationFrame(frame)}}
  new MutationObserver(ms=>{for(const m of ms){const t=m.target;if(m.type==='attributes'&&t.classList&&t.classList.contains('playing')&&t.dataset&&t.dataset.step!=null){onStep(+t.dataset.step);return}}}).observe(root,{subtree:true,attributes:true,attributeFilter:['class']});
  ['pointerdown','wheel','touchstart'].forEach(ev=>wrap.addEventListener(ev,()=>{pausedUntil=performance.now()+4000},{passive:true}));
+})();
+</script>
+
+<script>
+/* v68 AUTO MIX checkbox */
+(()=>{'use strict';
+ function go(){const b=document.getElementById('gscAutoMix');if(!b||!window.GLCTC_MIX||!GLCTC_MIX.autoMix){return setTimeout(go,300)}
+  b.checked=GLCTC_MIX.autoMix.on;b.addEventListener('change',()=>{GLCTC_MIX.autoMix.on=b.checked})}
+ if(document.readyState==='complete')go();else window.addEventListener('load',go,{once:true});
 })();
 </script>
 </body>

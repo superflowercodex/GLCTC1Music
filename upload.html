@@ -18882,21 +18882,50 @@ html, body { overscroll-behavior-x: none; }
 </script>
 
 
-<!-- GLCTC1 v51 - SHARE = SONG + COVER IMAGE
-     The Share Track buttons now send the actual audio file with the cover
-     image attached through the phone's Share menu (WhatsApp, Messages, Drive...),
-     and the link to this page is written in the message.
-     • The link still opens the page and plays that song when a visitor arrives.
-     • Share Playlist sends the playlist link with the cover image.
-     • If the phone / app can't take files, or the file is too big, it shares
-       the link instead. If the phone makes you wait too long while the song
-       is prepared, the button says "tap again" and the second tap shares at once. -->
+<!-- GLCTC1 v55 - SHARE PANEL
+     Tapping any SHARE button opens a small panel that shows the cover and gives:
+       🎵 Song + cover image   (the audio file and the cover picture, link in the message)
+       🖼 Cover + link         (the cover picture with the link under it - best for WhatsApp chats)
+       🔗 Share link           (phone share menu with the link - this one has "Copy" in it)
+       📋 Copy link
+     The song and cover are prepared the moment the panel opens, so by the time a
+     button is tapped the phone lets the share go straight through.
+     A link opened by a visitor still opens the page and plays that song. -->
+<style>
+#glctc1ShareSheet{position:fixed;inset:0;z-index:100000;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(2,4,14,.72);-webkit-tap-highlight-color:transparent}
+#glctc1ShareSheet .gs-panel{width:100%;max-width:520px;box-sizing:border-box;padding:16px 16px 22px;border-radius:20px 20px 0 0;
+  background:linear-gradient(170deg,#0b1535,#0a0a24);border:1px solid #19f7ff;border-bottom:0;
+  box-shadow:0 -6px 30px rgba(25,247,255,.28);color:#e8ecff;font-family:system-ui,Segoe UI,Roboto,sans-serif;
+  max-height:92vh;overflow:auto}
+#glctc1ShareSheet .gs-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+#glctc1ShareSheet .gs-art{flex:0 0 68px;width:68px;height:68px;border-radius:12px;overflow:hidden;position:relative;
+  background:radial-gradient(circle at 50% 40%,#3b1a6b,#06091c);border:1px solid #19f7ff66;
+  display:flex;align-items:center;justify-content:center;font-size:30px;color:#19f7ff88}
+#glctc1ShareSheet .gs-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#glctc1ShareSheet .gs-meta{flex:1;min-width:0}
+#glctc1ShareSheet .gs-t{font-weight:800;font-size:1.02rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#glctc1ShareSheet .gs-a{font-size:.82rem;color:#7fe9ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#glctc1ShareSheet .gs-x{flex:0 0 40px;height:40px;border-radius:50%;border:1px solid #ffffff33;background:#111a3a;color:#fff;font-size:1.1rem;padding:0;cursor:pointer}
+#glctc1ShareSheet .gs-status{font-size:.76rem;line-height:1.4;color:#b9c3ee;margin:2px 2px 12px;min-height:1.1em}
+#glctc1ShareSheet .gs-status b{color:#6dffb0;font-weight:700}
+#glctc1ShareSheet .gs-status i{color:#ffb86b;font-style:normal;font-weight:700}
+#glctc1ShareSheet .gs-btn{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;width:100%;
+  min-height:54px;margin:0 0 9px;padding:8px 16px;border-radius:14px;border:1px solid #2a3770;text-align:left;cursor:pointer;
+  background:linear-gradient(180deg,#18214a,#101636);color:#fff;text-transform:none;letter-spacing:0;box-sizing:border-box}
+#glctc1ShareSheet .gs-btn .gs-l{font-weight:800;font-size:.95rem}
+#glctc1ShareSheet .gs-btn .gs-s{font-size:.72rem;color:#9aa7da;font-weight:500}
+#glctc1ShareSheet .gs-btn.gs-main{border-color:#19f7ff;background:linear-gradient(180deg,#0f3a52,#0a2238);box-shadow:0 0 14px rgba(25,247,255,.35)}
+#glctc1ShareSheet .gs-btn[disabled]{opacity:.45;cursor:default;box-shadow:none}
+#glctc1ShareSheet .gs-btn:active:not([disabled]){transform:scale(.985)}
+</style>
 <script>
 (function () {
   "use strict";
 
-  var MAX_AUDIO_BYTES = 60 * 1024 * 1024;     // bigger songs are shared as a link
-  var cache = {};                              // prepared files, so a 2nd tap is instant
+  var MAX_AUDIO_BYTES = 60 * 1024 * 1024;     // bigger songs can't be attached
+  var cache = {};                              // prepared files by key (max 2 kept)
+  var pending = {};                            // preparations in progress
 
   var AUDIO_TYPES = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", mp4: "audio/mp4",
                       aac: "audio/aac", ogg: "audio/ogg", oga: "audio/ogg", flac: "audio/flac", webm: "audio/webm" };
@@ -18909,23 +18938,23 @@ html, body { overscroll-behavior-x: none; }
     return m ? m[1].toLowerCase() : "";
   }
   function safeName(v) { return String(v).replace(/[\\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "GLCTC1"; }
+  function mb(n) { return (n / 1048576).toFixed(1) + " MB"; }
 
   function toast(msg, ms) {
     var t = document.getElementById("glctc1ShareToast");
     if (!t) {
       t = document.createElement("div");
       t.id = "glctc1ShareToast";
-      t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:99999;" +
+      t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:100001;" +
         "max-width:90vw;padding:10px 16px;border-radius:12px;background:#101636;border:1px solid #ec4899;" +
         "color:#e8ecff;font:600 .8rem sans-serif;text-align:center;box-shadow:0 0 18px rgba(236,72,153,.5);" +
         "pointer-events:none;display:none";
       document.body.appendChild(t);
     }
     t.textContent = msg; t.style.display = "block";
-    clearTimeout(t._t); t._t = setTimeout(function () { t.style.display = "none"; }, ms || 3500);
+    clearTimeout(t._t); t._t = setTimeout(function () { t.style.display = "none"; }, ms || 3000);
   }
 
-  // storage path -> playable URL
   async function resolve(path) {
     if (!path) return "";
     if (isUrl(path)) return path;
@@ -18936,23 +18965,27 @@ html, body { overscroll-behavior-x: none; }
     return "";
   }
 
-  async function download(url, maxBytes) {
-    var res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    var len = Number(res.headers.get("content-length")) || 0;
-    if (maxBytes && len > maxBytes) throw new Error("too-big");
-    var blob = await res.blob();
-    if (maxBytes && blob.size > maxBytes) throw new Error("too-big");
-    return blob;
+  async function download(url, maxBytes, timeoutMs) {
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, timeoutMs || 90000) : null;
+    try {
+      var res = await fetch(url, ctl ? { signal: ctl.signal } : undefined);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var len = Number(res.headers.get("content-length")) || 0;
+      if (maxBytes && len > maxBytes) throw new Error("too-big");
+      var blob = await res.blob();
+      if (maxBytes && blob.size > maxBytes) throw new Error("too-big");
+      return blob;
+    } finally { if (timer) clearTimeout(timer); }
   }
 
+  // Fetch the cover and (for tracks) the song as real files
   async function prepare(track, opts) {
-    var out = { audio: null, image: null };
+    var out = { audio: null, image: null, audioNote: "", imageNote: "" };
     var title = opts.title || field(track, "title", "Track Title") || "Track";
     var artist = opts.playlist ? "" : field(track, "artist", "Artist");
     var base = safeName((artist ? artist + " - " : "") + title);
 
-    // cover image (small, always attempted)
     try {
       var coverPath = field(track, "cover_art", "Cover Art");
       var coverUrl = await resolve(coverPath);
@@ -18960,21 +18993,23 @@ html, body { overscroll-behavior-x: none; }
         var img = document.getElementById("glctc1PlaylistArtwork");
         if (img && img.complete && img.naturalWidth > 0 && isUrl(img.currentSrc || "")) coverUrl = img.currentSrc;
       }
-      if (coverUrl) {
-        var ib = await download(coverUrl, 15 * 1024 * 1024);
-        var ie = extOf(coverUrl) || extOf(coverPath) || (ib.type.indexOf("image/") === 0 ? ib.type.slice(6).replace("jpeg", "jpg") : "jpg");
+      if (!coverUrl) { out.imageNote = "none"; }
+      else {
+        var ib = await download(coverUrl, 15 * 1024 * 1024, 30000);
+        var ie = extOf(coverUrl) || extOf(coverPath);
         var itype = ib.type && ib.type.indexOf("image/") === 0 ? ib.type : (IMAGE_TYPES[ie] || "image/jpeg");
-        out.image = new File([ib], base + " (cover)." + (IMAGE_TYPES[ie] ? ie : "jpg"), { type: itype });
+        if (!IMAGE_TYPES[ie]) ie = itype === "image/png" ? "png" : itype === "image/webp" ? "webp" : "jpg";
+        out.image = new File([ib], base + " (cover)." + ie, { type: itype });
       }
-    } catch (e) { console.log("GLCTC1 share: cover not attached:", e && e.message); }
+    } catch (e) { console.log("GLCTC1 share: cover not attached:", e && e.message); out.imageNote = "fail"; }
 
-    // the song itself
     if (!opts.playlist) {
       try {
         var audioPath = field(track, "master_audio", "Master Audio") || field(track, "sample", "audio") || field(track, "audio_url", "Audio URL");
         var audioUrl = await resolve(audioPath);
-        if (audioUrl) {
-          var ab = await download(audioUrl, MAX_AUDIO_BYTES);
+        if (!audioUrl) { out.audioNote = "none"; }
+        else {
+          var ab = await download(audioUrl, MAX_AUDIO_BYTES, 120000);
           var ae = extOf(audioPath) || extOf(audioUrl);
           var atype = AUDIO_TYPES[ae] || (ab.type && ab.type.indexOf("audio/") === 0 ? ab.type : "audio/mpeg");
           if (!AUDIO_TYPES[ae]) ae = atype === "audio/wav" ? "wav" : atype === "audio/mp4" ? "m4a" : "mp3";
@@ -18988,75 +19023,175 @@ html, body { overscroll-behavior-x: none; }
     return out;
   }
 
-  async function shareLinkOnly(title, text, url) {
-    if (navigator.share) {
-      try { await navigator.share({ title: title, text: text, url: url }); }
-      catch (e) { if (!e || e.name !== "AbortError") console.log("Share cancelled:", e); }
-    } else {
-      var ok = false;
-      try { ok = typeof glctc1CopyText === "function" ? await glctc1CopyText(url) : false; } catch (e) {}
-      toast(ok ? "Link copied" : url, 5000);
-      if (!ok) { try { window.prompt("Copy this link:", url); } catch (e) {} }
-    }
+  function getPrep(key, track, opts) {
+    if (cache[key]) return Promise.resolve(cache[key]);
+    if (pending[key]) return pending[key];
+    pending[key] = prepare(track, opts).then(function (p) {
+      if (p.audio || p.image) {
+        var keys = Object.keys(cache);
+        if (keys.length >= 2) delete cache[keys[0]];
+        cache[key] = p;
+      }
+      delete pending[key];
+      return p;
+    }, function (e) { delete pending[key]; throw e; });
+    return pending[key];
   }
 
-  var busy = false;
+  async function copyLink(url) {
+    var ok = false;
+    try { if (typeof glctc1CopyText === "function") ok = await glctc1CopyText(url); } catch (e) {}
+    if (!ok) {
+      try { await navigator.clipboard.writeText(url); ok = true; } catch (e) {}
+    }
+    if (!ok) { try { window.prompt("Copy this link:", url); ok = true; } catch (e) {} }
+    return ok;
+  }
 
-  window.glctc1ShareTrackMedia = async function (track, shareUrl, opts) {
-    opts = opts || {};
-    track = track || {};
+  var sheet = null, escHandler = null;
+  function closeSheet() {
+    if (!sheet) return;
+    if (sheet._url) { try { URL.revokeObjectURL(sheet._url); } catch (e) {} }
+    if (sheet.parentNode) sheet.parentNode.removeChild(sheet);
+    sheet = null;
+    if (escHandler) { document.removeEventListener("keydown", escHandler); escHandler = null; }
+  }
+
+  function openSheet(track, shareUrl, opts) {
+    closeSheet();
     var title = opts.title || field(track, "title", "Track Title") || "GLCTC1 Track";
-    var artist = field(track, "artist", "Artist");
+    var artist = opts.playlist ? "Playlist" : field(track, "artist", "Artist");
     var line = opts.playlist ? "🎧 " + title : "🎧 " + (artist ? artist + " — " : "") + title;
     var text = line + "\n" + shareUrl;
+    var canNative = !!(navigator.share && navigator.canShare);
+    var key = (opts.playlist ? "pl:" : "tr:") + shareUrl;
 
-    if (!navigator.share || !navigator.canShare) {            // desktop / old browser
-      return shareLinkOnly(title, line, shareUrl);
+    sheet = document.createElement("div");
+    sheet.id = "glctc1ShareSheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", "Share");
+
+    var panel = document.createElement("div"); panel.className = "gs-panel";
+
+    var head = document.createElement("div"); head.className = "gs-head";
+    var art = document.createElement("div"); art.className = "gs-art"; art.textContent = "♫";
+    var meta = document.createElement("div"); meta.className = "gs-meta";
+    var t1 = document.createElement("div"); t1.className = "gs-t"; t1.textContent = title;
+    var t2 = document.createElement("div"); t2.className = "gs-a"; t2.textContent = artist;
+    meta.appendChild(t1); meta.appendChild(t2);
+    var x = document.createElement("button"); x.type = "button"; x.className = "gs-x"; x.textContent = "✕"; x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", closeSheet);
+    head.appendChild(art); head.appendChild(meta); head.appendChild(x);
+
+    var status = document.createElement("div"); status.className = "gs-status";
+
+    function mk(label, sub, main) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "gs-btn" + (main ? " gs-main" : "");
+      var l = document.createElement("span"); l.className = "gs-l"; l.textContent = label;
+      var s2 = document.createElement("span"); s2.className = "gs-s"; s2.textContent = sub || "";
+      b.appendChild(l); b.appendChild(s2); b._s = s2;
+      return b;
     }
-    if (busy) return;
-    busy = true;
-    try {
-      var key = (opts.playlist ? "pl:" : "tr:") + shareUrl;
-      var prep = cache[key];
-      var fresh = false;
-      if (!prep) {
-        toast(opts.playlist ? "Preparing playlist share…" : "Preparing song + cover to share…", 20000);
-        prep = await prepare(track, opts);
-        if (prep.audio || prep.image) {            // only remember a successful preparation
-          var keys = Object.keys(cache);
-          if (keys.length >= 2) delete cache[keys[0]];
-          cache[key] = prep;
-        }
-        fresh = true;
-        var tt = document.getElementById("glctc1ShareToast"); if (tt) tt.style.display = "none";
-      }
+    var bSong  = opts.playlist ? null : mk("🎵 Song + cover image", "Preparing…", true);
+    var bCover = mk("🖼 Cover image + link", "Preparing…", !!opts.playlist);
+    var bLink  = mk("🔗 Share link", "Opens your share menu — it has Copy in it");
+    var bCopy  = mk("📋 Copy link", shareUrl.replace(/^https?:\/\//, ""));
 
-      var files = [prep.audio, prep.image].filter(Boolean);
-      var data = { title: title, text: text };
-      var withFiles = files.length && navigator.canShare({ files: files });
+    panel.appendChild(head); panel.appendChild(status);
+    [bSong, bCover, bLink, bCopy].forEach(function (b) { if (b) panel.appendChild(b); });
+    sheet.appendChild(panel);
+    document.body.appendChild(sheet);
 
-      if (!withFiles && files.length > 1 && navigator.canShare({ files: [files[0]] })) { files = [files[0]]; withFiles = true; }
+    sheet.addEventListener("click", function (e) { if (e.target === sheet) closeSheet(); });
+    escHandler = function (e) { if (e.key === "Escape") closeSheet(); };
+    document.addEventListener("keydown", escHandler);
 
-      if (!withFiles) {
-        if (prep.audioNote === "big") toast("Song is too big to attach — sharing the link", 3500);
-        return shareLinkOnly(title, line, shareUrl);
-      }
+    var prep = null;
 
-      data.files = files;                                      // link is inside text (some apps drop url when files are sent)
-      try {
-        await navigator.share(data);
-      } catch (e) {
-        if (e && e.name === "AbortError") return;              // person closed the share sheet
-        if (e && e.name === "NotAllowedError" && fresh) {      // preparing took too long for the phone
-          toast("Song is ready — tap SHARE again", 4000);
-          return;
-        }
-        console.log("GLCTC1 share with files failed, sharing link:", e);
-        return shareLinkOnly(title, line, shareUrl);
-      }
-    } finally {
-      busy = false;
+    // --- always available ---
+    bCopy.addEventListener("click", async function () {
+      var ok = await copyLink(shareUrl);
+      toast(ok ? "Link copied" : "Couldn't copy the link", 2500);
+      if (ok) closeSheet();
+    });
+
+    function shareLinkOnly() {
+      if (!canNative) { bCopy.click(); return; }
+      navigator.share({ title: title, text: line, url: shareUrl })
+        .then(closeSheet)
+        .catch(function (e) { if (!e || e.name !== "AbortError") status.textContent = "Couldn't open the share menu — use Copy link."; });
     }
+    bLink.addEventListener("click", shareLinkOnly);
+
+    function sendFiles(files, btn) {
+      if (!prep || !files.length) return;
+      var data = { title: title, text: text, files: files };
+      var ok = false;
+      try { ok = navigator.canShare(data); } catch (e) {}
+      if (!ok) {
+        status.innerHTML = "<i>This phone can't send those files from the browser.</i> Use Share link instead.";
+        btn.disabled = true; return;
+      }
+      navigator.share(data).then(closeSheet).catch(function (e) {
+        if (e && e.name === "AbortError") return;
+        status.innerHTML = "<i>The share was blocked (" + (e && e.name || "error") + ").</i> Try again, or use Share link.";
+      });
+    }
+    if (bSong)  bSong.addEventListener("click", function () { if (prep) sendFiles([prep.audio, prep.image].filter(Boolean), bSong); });
+    bCover.addEventListener("click", function () { if (prep && prep.image) sendFiles([prep.image], bCover); });
+
+    // --- no native sharing (desktop): copy only ---
+    if (!canNative) {
+      [bSong, bCover, bLink].forEach(function (b) { if (b) b.style.display = "none"; });
+      status.textContent = "Sharing files isn't available in this browser — copy the link.";
+      return;
+    }
+
+    if (bSong) bSong.disabled = true;
+    bCover.disabled = true;
+    status.textContent = opts.playlist ? "Getting the cover ready…" : "Getting the song and cover ready… (a few seconds)";
+
+    getPrep(key, track, opts).then(function (p) {
+      if (!sheet) return;
+      prep = p;
+
+      if (p.image) {
+        sheet._url = URL.createObjectURL(p.image);
+        var im = document.createElement("img"); im.alt = ""; im.src = sheet._url;
+        art.textContent = ""; art.appendChild(im);
+      }
+
+      var bits = [];
+      if (!opts.playlist) {
+        if (p.audio) bits.push("<b>✓ Song ready</b> (" + mb(p.audio.size) + ")");
+        else bits.push("<i>✗ Song " + (p.audioNote === "big" ? "is too big to attach" : "couldn't be loaded") + "</i>");
+      }
+      if (p.image) bits.push("<b>✓ Cover image ready</b>");
+      else bits.push("<i>✗ Cover " + (p.imageNote === "none" ? "— this track has no cover" : "couldn't be loaded") + "</i>");
+      status.innerHTML = bits.join(" &nbsp;·&nbsp; ");
+
+      if (bSong) {
+        var files = [p.audio, p.image].filter(Boolean);
+        var can = false; try { can = !!(p.audio && navigator.canShare({ files: files })); } catch (e) {}
+        bSong.disabled = !can;
+        bSong._s.textContent = !p.audio ? "Song unavailable — use Share link"
+          : can ? (p.image ? "Sends the audio file and the cover picture, link in the message" : "Sends the audio file, link in the message")
+                : "This phone can't send that file — use Share link";
+      }
+      var canCover = false; try { canCover = !!(p.image && navigator.canShare({ files: [p.image] })); } catch (e) {}
+      bCover.disabled = !canCover;
+      bCover._s.textContent = !p.image ? "No cover picture available" : "Sends the picture with the link under it — taps open the song";
+    }).catch(function (e) {
+      if (!sheet) return;
+      console.log("GLCTC1 share prepare failed:", e);
+      status.innerHTML = "<i>Couldn't prepare the files.</i> Share link and Copy link still work.";
+      if (bSong) bSong._s.textContent = "Unavailable"; bCover._s.textContent = "Unavailable";
+    });
+  }
+
+  // called by the Share Track / Share Playlist buttons
+  window.glctc1ShareTrackMedia = function (track, shareUrl, opts) {
+    openSheet(track || {}, shareUrl, opts || {});
   };
 
   /* ---- visitors arriving from a shared link: keep the song playing ----

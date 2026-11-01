@@ -6150,8 +6150,20 @@ function prepareSong(genreKey,txt,forceFill){
 const GENRE_WORDS=[['psytrance',/psy|goa|forest/],['trance',/trance|uplifting|euphoric anthem/],['dubstep',/dubstep|wobble|riddim|brostep/],['garage',/garage|2-step|two step|ukg|speed garage/],['breaks',/breakbeat|big beat|breaks\b|nu skool/],['synthwave',/synthwave|outrun|retrowave|80s|eighties|neon/],['trap',/\btrap\b|drill|808 glide/],['lofi',/lo-?fi|chillhop|study beats|cassette/],['dnb',/dnb|drum ?(and|&|n) ?bass|jungle|liquid/],['hiphop',/hip ?hop|boom ?bap|rap\b/],['house',/house|disco|tribal groove/],['ambient',/ambient|drone|meditat|cinematic pad/],['pop',/\bpop\b|radio|catchy/],['techno',/techno|warehouse|industrial/]];
 function detectGenre(txt){for(const [g,re] of GENRE_WORDS)if(re.test(txt))return g;return null}
 function detectLength(txt){if(/epic|festival|anthem|journey|massive/.test(txt))return 'epic';if(/club|extended|dj tool|long/.test(txt))return 'club';if(/verse|chorus|radio|song form/.test(txt))return 'radio';if(/short|quick|sketch/.test(txt))return '16';return null}
+const REGEN_KEY='glctc1.regen';
 async function generate(){
  if(starting||S)return;
+ /* v10: GENERATE SONG = a fresh page load that builds the song the same way NEW SONG ON LOAD does. Same clean audio engine, same default sounds, same mix - nothing left over from before. */
+ try{
+  const t0=(byId('gscPrompt').value||''),tl=t0.toLowerCase(),g0=detectGenre(tl),l0=detectLength(tl);
+  let genre=byId('gscGenre').value,len=byId('gscLen').value;
+  if(g0&&GENRE[g0])genre=g0;if(l0&&TPL[l0])len=l0;
+  sessionStorage.setItem(REGEN_KEY,JSON.stringify({genre,len,prompt:t0,t:Date.now()}));
+  status('GENERATING A FRESH SONG…');
+  try{save()}catch(e){}
+  setTimeout(()=>{location.replace(location.pathname)},120);
+  return;
+ }catch(e){console.warn('fresh-page generate unavailable, using in-page generate',e)}
  {const t0=(byId('gscPrompt').value||'').toLowerCase(),g0=detectGenre(t0),l0=detectLength(t0);if(g0&&GENRE[g0]){const sel=byId('gscGenre');if(sel)sel.value=g0}if(l0&&TPL[l0]){const ls=byId('gscLen');if(ls)ls.value=l0}}
  const genreKey=byId('gscGenre').value,txt=(byId('gscPrompt').value||'').toLowerCase();
  try{
@@ -6175,14 +6187,19 @@ const AUTO_LS='glctc1.autoSongOnLoad';
  const REMIX_ARRIVAL=/[?&](remix|cat)=/.test(location.search); /* v63: opened from the Play Space REMIX button -> keep the remix, no random new song */
  function ready(){const h=H();return !!(h&&h.mods&&['bl','mine','lee','s101','go','vox','ws'].every(k=>h.mods[k])&&window.GLCTC_PATTERNS&&window.GALACTIC_ONE&&window.GALACTIC_VOX&&window.GLCTC_PAD64_PATTERNS&&window.GLCTC_80LA8_PATTERNS&&window.GLCTC_DIVINE09_PATTERNS&&window.GLCTC_30LEE_PATTERNS&&window.GLCTC_0010110_PATTERNS)}
  function run(){
-  if(REMIX_ARRIVAL)return;
+  let REGEN=null;try{REGEN=JSON.parse(sessionStorage.getItem(REGEN_KEY)||'null');if(REGEN&&Date.now()-REGEN.t>60000)REGEN=null}catch(e){}
+  if(REMIX_ARRIVAL&&!REGEN)return;
   if(S||starting||window.glctcTimeline?.playing()||Object.values(H()?.mods||{}).some(m=>m.running?.()))return;
-  const b=byId('gscAutoLoad');if(b&&!b.checked)return;
+  const b=byId('gscAutoLoad');if(b&&!b.checked&&!REGEN)return;
   if(!ready()){if(++tries<24)setTimeout(run,500);return}
   try{
-   const keys=Object.keys(GENRE),g=keys[Math.floor(Math.random()*keys.length)];
+   const keys=Object.keys(GENRE);let g=keys[Math.floor(Math.random()*keys.length)],rtxt='';
+   if(REGEN){try{sessionStorage.removeItem(REGEN_KEY)}catch(e){}
+    if(GENRE[REGEN.genre])g=REGEN.genre;rtxt=String(REGEN.prompt||'').toLowerCase();
+    const pe=byId('gscPrompt');if(pe)pe.value=REGEN.prompt||'';const le=byId('gscLen');if(le&&TPL[REGEN.len])le.value=REGEN.len;
+   }
    const sel=byId('gscGenre');if(sel)sel.value=g;
-   const pack=prepareSong(g,'',true);
+   const pack=prepareSong(g,rtxt,true);
    try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
    window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=String(pack&&pack.name||'C MINOR').toUpperCase();

@@ -12,7 +12,7 @@
   content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
 >
 <title>
-GLCTC1 — VIDEO SPACE V21
+GLCTC1 — VIDEO SPACE V22
 </title>
 <link
   href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap"
@@ -142,7 +142,7 @@ details.advanced{margin-top:16px;border:1px solid #00ffff30;border-radius:14px;p
 <section class="hero">
 <div class="hero-brand">GLCTC1</div>
 <h1>VIDEO SPACE</h1>
-<div class="hero-subtitle" style="opacity:.55;margin-top:-4px;">BUILD V21</div>
+<div class="hero-subtitle" style="opacity:.55;margin-top:-4px;">BUILD V22</div>
 <div class="hero-subtitle">PICK A CHARACTER — LOAD A SONG — WATCH THEM PERFORM</div>
 <div class="hero-copy">
 <strong>1. PICK.&nbsp; 2. LOAD.&nbsp; 3. PLAY.</strong><br><br>
@@ -2941,14 +2941,77 @@ try{ await audio(); if(S.ac.state === "suspended"){ await S.ac.resume(); }
 sourceAudio.pause(); sourceAudio.currentTime = 0; S.est = 0; S.move.bar = -1; S.paused = false; await sourceAudio.play(); S.playing = true; playButton.textContent = "❚❚ PLAYING"; status.classList.add("active");
 startRecording(); }
 catch(error){ console.error(error); status.textContent = "THE VIDEO RENDER COULD NOT START."; }
-}; function startRecording(){ if(!canvas.captureStream || !window.MediaRecorder){ status.textContent = "THIS BROWSER CANNOT RECORD VIDEO — TRY CHROME, EDGE OR SAFARI."; return; }
+}; function fmp4ToMp4(input){ const d = new Uint8Array(input); const dv = new DataView(d.buffer,d.byteOffset,d.byteLength); const u32 = o => dv.getUint32(o);
+const type = o => String.fromCharCode(d[o + 4],d[o + 5],d[o + 6],d[o + 7]); function* boxes(s,e){ let i = s; while(i + 8 <= e){ let sz = u32(i), hdr = 8; if(sz === 1){ sz = Number(dv.getBigUint64(i + 8)); hdr = 16; }
+else if(sz === 0){ sz = e - i; }
+if(sz < 8 || i + sz > e){ break; }
+yield { t:type(i), s:i, e:i + sz, b:i + hdr }; i += sz; }
+}
+const kids = bx => [...boxes(bx.b,bx.e)]; const find = (bx,t) => kids(bx).find(k => k.t === t); const top = [...boxes(0,d.length)]; const ftyp = top.find(b => b.t === "ftyp"), moov = top.find(b => b.t === "moov");
+if(!ftyp || !moov){ throw Error("not an MP4"); }
+const moofs = top.filter(b => b.t === "moof"); if(!moofs.length){ return null; }                     /* already a normal MP4 */
+const raw = bx => d.subarray(bx.s,bx.e); const mvhd = find(moov,"mvhd"); const mvex = find(moov,"mvex"); const trex = {}; if(mvex){ kids(mvex).filter(k => k.t === "trex").forEach(k => { const o = k.b + 4;
+trex[u32(o)] = { desc:u32(o + 4), dur:u32(o + 8), size:u32(o + 12), flags:u32(o + 16) }; }); }
+const tracks = {}; kids(moov).filter(k => k.t === "trak").forEach(trak => { const tkhd = find(trak,"tkhd"), mdia = find(trak,"mdia"); const mdhd = find(mdia,"mdhd"), hdlr = find(mdia,"hdlr"), minf = find(mdia,"minf");
+const stbl = find(minf,"stbl"), stsd = find(stbl,"stsd"); const v = d[tkhd.b]; const id = u32(tkhd.b + (v === 1 ? 20 : 12)); const mv = d[mdhd.b]; const ts = u32(mdhd.b + (mv === 1 ? 20 : 12));
+tracks[id] = { id, trak, tkhd, mdhd, hdlr, minf, stsd, ts, handler:type(hdlr.b + 4), samples:[], minfOther:kids(minf).filter(k => k.t !== "stbl") }; }); moofs.forEach(moof => {
+kids(moof).filter(k => k.t === "traf").forEach(traf => { const tfhd = find(traf,"tfhd"); const ff = u32(tfhd.b) & 0xffffff; let o = tfhd.b + 4; const id = u32(o); o += 4;
+const T = tracks[id], X = trex[id] || { dur:0, size:0, flags:0 }; if(!T){ return; }
+let base = moof.s; if(ff & 0x1){ base = Number(dv.getBigUint64(o)); o += 8; }
+if(ff & 0x2){ o += 4; }
+let dDur = X.dur, dSize = X.size, dFlags = X.flags; if(ff & 0x8){ dDur = u32(o); o += 4; }
+if(ff & 0x10){ dSize = u32(o); o += 4; }
+if(ff & 0x20){ dFlags = u32(o); o += 4; }
+let next = base; const tfdt = find(traf,"tfdt"); if(tfdt){ const bt = d[tfdt.b] === 1 ? Number(dv.getBigUint64(tfdt.b + 4)) : u32(tfdt.b + 4); if(T.samples.length){ const last = T.samples[T.samples.length - 1];
+const gap = bt - T.tAcc; if(gap !== 0){ last.dur = Math.max(0,last.dur + gap); }
+}
+else{ T.start = bt; }
+T.tAcc = bt; }
+kids(traf).filter(k => k.t === "trun").forEach(trun => { const ver = d[trun.b], tf = u32(trun.b) & 0xffffff; let p = trun.b + 4; const n = u32(p); p += 4; let pos = next;
+if(tf & 0x1){ pos = base + dv.getInt32(p); p += 4; }
+let first = null; if(tf & 0x4){ first = u32(p); p += 4; }
+for(let i = 0; i < n; i++){ let dur = dDur, size = dSize, flags = (i === 0 && first !== null) ? first : dFlags, cto = 0; if(tf & 0x100){ dur = u32(p); p += 4; }
+if(tf & 0x200){ size = u32(p); p += 4; }
+if(tf & 0x400){ flags = u32(p); p += 4; }
+if(tf & 0x800){ cto = ver === 1 ? dv.getInt32(p) : u32(p); p += 4; }
+T.samples.push({ off:pos, size, dur, cto, sync:!(flags & 0x10000) }); T.tAcc = (T.tAcc || 0) + dur; pos += size; }
+next = pos; }); }); }); const list = Object.values(tracks).filter(T => T.samples.length); if(!list.length){ throw Error("no samples found"); }
+const be32 = v => [(v >>> 24) & 255,(v >>> 16) & 255,(v >>> 8) & 255,v & 255]; const str = s => [...s].map(c => c.charCodeAt(0)); const box = (t,...parts) => { let len = 8; parts.forEach(p => len += p.length);
+const out = new Uint8Array(len); out.set(be32(len),0); out.set(str(t),4); let o = 8; parts.forEach(p => { out.set(p,o); o += p.length; }); return out; };
+const full = (t,ver,flags,body) => box(t,new Uint8Array([ver,(flags >> 16) & 255,(flags >> 8) & 255,flags & 255]),body);
+const arr = a => { const out = new Uint8Array(a.length*4); a.forEach((v,i) => out.set(be32(v >>> 0),i*4)); return out; }; const withDur = (bx,durOffV0,durOffV1,dur) => { const c = raw(bx).slice();
+const cv = new DataView(c.buffer); const hdr = bx.b - bx.s; if(c[hdr] === 1){ cv.setBigUint64(hdr + durOffV1,BigInt(Math.round(dur))); }
+else{ cv.setUint32(hdr + durOffV0,Math.min(0xffffffff,Math.round(dur))); }
+return c; }; const movieTs = (() => { const v = d[mvhd.b]; return u32(mvhd.b + (v === 1 ? 20 : 12)); })(); const chunks = []; list.forEach(T => { let t = 0, cur = null; const span = T.ts*.5; T.chunkOf = [];
+T.samples.forEach((s,i) => { if(!cur || t - cur.t0 >= span){ cur = { T, t0:t, first:i, n:0, size:0, time:t/T.ts }; chunks.push(cur); }
+cur.n++; cur.size += s.size; t += s.dur; }); T.total = t; }); chunks.sort((a,b) => a.time - b.time); const ftypRaw = raw(ftyp); let mdatSize = 8; chunks.forEach(c => mdatSize += c.size);
+if(mdatSize > 0xffffffff){ throw Error("video too large to finish"); }
+function buildMoov(mdatStart){ let o = mdatStart + 8; chunks.forEach(c => { c.off = o; o += c.size; }); const traks = list.map(T => { const S = T.samples;
+const stts = []; S.forEach(s => { const l = stts[stts.length - 1]; if(l && l[1] === s.dur){ l[0]++; } else{ stts.push([1,s.dur]); } }); const hasCto = S.some(s => s.cto !== 0), negCto = S.some(s => s.cto < 0);
+const ctts = []; if(hasCto){ S.forEach(s => { const l = ctts[ctts.length - 1]; if(l && l[1] === s.cto){ l[0]++; } else{ ctts.push([1,s.cto]); } }); }
+const sync = []; S.forEach((s,i) => { if(s.sync){ sync.push(i + 1); } }); const my = chunks.filter(c => c.T === T);
+const stsc = []; my.forEach((c,i) => { const l = stsc[stsc.length - 1]; if(!l || l[1] !== c.n){ stsc.push([i + 1,c.n,1]); } }); const stbl = box("stbl", raw(T.stsd), full("stts",0,0,arr([stts.length,...stts.flat()])),
+...(hasCto ? [full("ctts",negCto ? 1 : 0,0,arr([ctts.length,...ctts.flat()]))] : []), ...(sync.length < S.length ? [full("stss",0,0,arr([sync.length,...sync]))] : []), full("stsc",0,0,arr([stsc.length,...stsc.flat()])),
+full("stsz",0,0,arr([0,S.length,...S.map(s => s.size)])), full("stco",0,0,arr([my.length,...my.map(c => c.off)]))
+); const minf = box("minf",...T.minfOther.map(raw),stbl); const mdia = box("mdia",withDur(T.mdhd,16,24,T.total),raw(T.hdlr),minf); const tkDur = T.total/T.ts*movieTs; return box("trak",withDur(T.tkhd,20,28,tkDur),mdia);
+}); const movieDur = Math.max(...list.map(T => T.total/T.ts))*movieTs; return box("moov",withDur(mvhd,16,24,movieDur),...traks); }
+const probe = buildMoov(0); const moovOut = buildMoov(ftypRaw.length + probe.length); const out = new Uint8Array(ftypRaw.length + moovOut.length + mdatSize); let o = 0; out.set(ftypRaw,o); o += ftypRaw.length;
+out.set(moovOut,o); o += moovOut.length; out.set(be32(mdatSize),o); out.set(str("mdat"),o + 4); o += 8; chunks.forEach(c => { for(let i = c.first; i < c.first + c.n; i++){ const s = c.T.samples[i];
+out.set(d.subarray(s.off,s.off + s.size),o); o += s.size; }
+}); return { bytes:out, seconds:Math.max(...list.map(T => T.total/T.ts)) }; }
+function startRecording(){ if(!canvas.captureStream || !window.MediaRecorder){ status.textContent = "THIS BROWSER CANNOT RECORD VIDEO — TRY CHROME, EDGE OR SAFARI."; return; }
 S.chunks = []; resultPanel.hidden = true; const videoStream = canvas.captureStream(30); const tracks = [...videoStream.getVideoTracks()]; if(S.dest){ S.dest.stream.getAudioTracks().forEach(t => tracks.push(t)); }
 S.recStream = new MediaStream(tracks); const mime = pickMime(); const opts = { videoBitsPerSecond:8000000, audioBitsPerSecond:192000 }; if(mime){ opts.mimeType = mime; }
 try{ S.rec = new MediaRecorder(S.recStream,opts); }
 catch(error){ console.error(error); S.rec = new MediaRecorder(S.recStream); }
-S.rec.ondataavailable = ev => { if(ev.data && ev.data.size){ S.chunks.push(ev.data); } }; S.rec.onstop = () => { clearInterval(recTimer); const type = (S.rec && S.rec.mimeType) || mime || "video/webm";
-const isMp4 = /mp4/i.test(type); const blob = new Blob(S.chunks,{ type:isMp4 ? "video/mp4" : "video/webm" }); const ext = isMp4 ? "mp4" : "webm";
-const name = "GLCTC1-" + CHARS[S.char].name + "-" + Date.now() + "." + ext; take = { blob, name, ext, isMp4 }; if(resultVideo.dataset.url){ URL.revokeObjectURL(resultVideo.dataset.url); }
+S.rec.ondataavailable = ev => { if(ev.data && ev.data.size){ S.chunks.push(ev.data); } }; S.rec.onstop = async () => { clearInterval(recTimer); const type = (S.rec && S.rec.mimeType) || mime || "video/webm";
+const isMp4 = /mp4/i.test(type); let blob = new Blob(S.chunks,{ type:isMp4 ? "video/mp4" : "video/webm" }); if(isMp4){ status.textContent = "FINISHING THE MP4…"; try{ const fixed = fmp4ToMp4(await blob.arrayBuffer());
+if(fixed){ blob = new Blob([fixed.bytes],{ type:"video/mp4" }); }
+}
+catch(err){ console.warn("MP4 finish skipped:",err); }
+}
+const ext = isMp4 ? "mp4" : "webm"; const name = "GLCTC1-" + CHARS[S.char].name + "-" + Date.now() + "." + ext; take = { blob, name, ext, isMp4 };
+if(resultVideo.dataset.url){ URL.revokeObjectURL(resultVideo.dataset.url); }
 const url = URL.createObjectURL(blob); resultVideo.dataset.url = url; resultVideo.src = url; resultInfo.textContent = ext.toUpperCase() + " — " + (blob.size/1048576).toFixed(1) + " MB — " + CHARS[S.char].name;
 resultCaption.value = "Made with GLCTC1 Video Space — " + CHARS[S.char].name + " dancing to " + Math.round(S.song ? S.song.bpm : S.bpm) + " BPM #GLCTC1"; setMsg(isMp4
 ? "YOUR MP4 IS READY."

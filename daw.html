@@ -6157,8 +6157,12 @@ async function generate(){
  try{
   const t0=(byId('gscPrompt').value||''),tl=t0.toLowerCase(),g0=detectGenre(tl),l0=detectLength(tl);
   let genre=byId('gscGenre').value,len=byId('gscLen').value;
-  if(g0&&GENRE[g0])genre=g0;if(l0&&TPL[l0])len=l0;
-  sessionStorage.setItem(REGEN_KEY,JSON.stringify({genre,len,prompt:t0,t:Date.now()}));
+  const cur=(window.GLCTC_NEW_SONG&&window.GLCTC_NEW_SONG.genre)||genre;
+  /* v11: exactly like a page load - a brand-new random genre, key and tempo every time. Only an explicit request keeps the genre: you picked a different genre in the list, or you named one in the prompt. */
+  let want=null;
+  if(g0&&GENRE[g0])want=g0;else if(genre!==cur)want=genre;
+  if(l0&&TPL[l0])len=l0;
+  sessionStorage.setItem(REGEN_KEY,JSON.stringify({genre:want,avoid:cur,len,prompt:want?t0:'',t:Date.now()}));
   status('GENERATING A FRESH SONG…');
   try{save()}catch(e){}
   setTimeout(()=>{location.replace(location.pathname)},120);
@@ -6187,15 +6191,15 @@ const AUTO_LS='glctc1.autoSongOnLoad';
  const REMIX_ARRIVAL=/[?&](remix|cat)=/.test(location.search); /* v63: opened from the Play Space REMIX button -> keep the remix, no random new song */
  function ready(){const h=H();return !!(h&&h.mods&&['bl','mine','lee','s101','go','vox','ws'].every(k=>h.mods[k])&&window.GLCTC_PATTERNS&&window.GALACTIC_ONE&&window.GALACTIC_VOX&&window.GLCTC_PAD64_PATTERNS&&window.GLCTC_80LA8_PATTERNS&&window.GLCTC_DIVINE09_PATTERNS&&window.GLCTC_30LEE_PATTERNS&&window.GLCTC_0010110_PATTERNS)}
  function run(){
-  let REGEN=null;try{REGEN=JSON.parse(sessionStorage.getItem(REGEN_KEY)||'null');if(REGEN&&Date.now()-REGEN.t>60000)REGEN=null}catch(e){}
+  let REGEN=window.__glctcRegen;if(REGEN===undefined){REGEN=null;try{REGEN=JSON.parse(sessionStorage.getItem(REGEN_KEY)||'null');sessionStorage.removeItem(REGEN_KEY);if(REGEN&&Date.now()-REGEN.t>60000)REGEN=null}catch(e){}window.__glctcRegen=REGEN}
   if(REMIX_ARRIVAL&&!REGEN)return;
   if(S||starting||window.glctcTimeline?.playing()||Object.values(H()?.mods||{}).some(m=>m.running?.()))return;
   const b=byId('gscAutoLoad');if(b&&!b.checked&&!REGEN)return;
   if(!ready()){if(++tries<24)setTimeout(run,500);return}
   try{
-   const keys=Object.keys(GENRE);let g=keys[Math.floor(Math.random()*keys.length)],rtxt='';
-   if(REGEN){try{sessionStorage.removeItem(REGEN_KEY)}catch(e){}
-    if(GENRE[REGEN.genre])g=REGEN.genre;rtxt=String(REGEN.prompt||'').toLowerCase();
+   const keys=Object.keys(GENRE);let pool=keys.filter(k=>!REGEN||k!==REGEN.avoid);let g=pool[Math.floor(Math.random()*pool.length)],rtxt='';
+   if(REGEN){
+    if(REGEN.genre&&GENRE[REGEN.genre])g=REGEN.genre;rtxt=String(REGEN.prompt||'').toLowerCase();
     const pe=byId('gscPrompt');if(pe)pe.value=REGEN.prompt||'';const le=byId('gscLen');if(le&&TPL[REGEN.len])le.value=REGEN.len;
    }
    const sel=byId('gscGenre');if(sel)sel.value=g;

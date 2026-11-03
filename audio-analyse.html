@@ -1213,7 +1213,7 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 
     <!-- ===== GLCTC1 MASTER LIBRARY — COMPLETE CHECK (admin) ===== -->
     <div class="lb-head">MASTER LIBRARY — COMPLETE CHECK</div>
-    <div class="status">One check for every track: tempo (knows half-time from double-time — reggae, dub, hip hop vs drum &amp; bass / jungle), key, sacred frequency · chakra · planet, and genre. Nothing is saved until you press SAVE. Genres in the same family as the artist's own choice are kept.</div>
+    <div class="status">One check for every track: tempo (knows half-time from double-time — reggae, dub, hip hop vs drum &amp; bass / jungle), key, sacred frequency · chakra · planet, and genre. Clear fixes come ticked; anything less certain is left unticked so you can 🎧 listen first. Nothing is saved until you press SAVE.</div>
     <div class="lb-bar" id="ccFields" style="flex-wrap:wrap;gap:6px 14px"></div>
     <div class="lb-bar">
       <button id="ccScan" type="button" class="lb-btn lb-main">⚡ RUN COMPLETE CHECK — ALL TRACKS</button>
@@ -2431,11 +2431,15 @@ function glctc1Groove(samples, sr, bpmIn) {
   }
   if (T0 >= 112 && T0 <= 150 && kickEvery >= 0.7) {
     bpm = T0;
-    if (T0 >= 135 || (T0 >= 128 && share.mid < 0.22 && share.high > 0.10)) { genre = "TECHNO"; why = "kick on every beat, fast, little melody"; }
+    /* DJ tempo standard first, then the groove decides within the range */
+    if (T0 >= 129) { genre = "TECHNO"; why = `kick on every beat at ${Math.round(T0)} BPM (techno range 129–150)`; }
     else if (midPerBeatT0 >= 2.6 && T0 <= 128) { genre = "SPIRITUAL TRIBAL HOUSE"; why = "kick on every beat, lots of mid percussion"; }
-    else if (T0 <= 123 && share.high < 0.06) { genre = "DEEP HOUSE"; why = "kick on every beat, warm and dark"; }
-    else if (T0 >= 125 && share.low > 0.62 && share.mid < 0.25) { genre = "TECH HOUSE"; why = "kick on every beat, bass-led"; }
-    else { genre = "HOUSE"; why = "kick on every beat"; }
+    else if (T0 >= 124) {
+      if (midPerBeatT0 >= 1.5) { genre = "HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM with chords/claps (house)`; }
+      else { genre = "TECH HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM, bass-led, few chords (tech house range 124–128)`; }
+    }
+    else if (share.high < 0.03) { genre = "DEEP HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM, warm and dark (deep house range 115–124)`; }
+    else { genre = "HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM (house range 115–128)`; }
     conf = Math.round(60 + 35 * Math.min(1, (kickEvery - 0.6) / 0.35));
   } else if (S >= 55 && S <= 100 && !(T0 >= 135 && T0 < 150 && !((offbeat >= 1.5 || attacksPerSec < 2.5) && hiPerSlowBeat < 3.3))) {
     if (hiPerSlowBeat >= 3.6 && S * 2 >= 150) {
@@ -2455,10 +2459,12 @@ function glctc1Groove(samples, sr, bpmIn) {
     } else {
       bpm = S; genre = "DOWNTEMPO / CHILL"; why = "slow groove"; conf = 65;
     }
-  } else if (T0 > 100 && T0 <= 112) {
-    bpm = T0; genre = "HIP HOP"; why = "mid-tempo backbeat"; conf = 60;
+  } else if (T0 > 100 && T0 <= 115) {
+    bpm = T0; genre = "HIP HOP"; why = `backbeat at ${Math.round(T0)} BPM (hip hop range)`; conf = 60;
+  } else if (T0 >= 150 && T0 <= 185) {
+    bpm = T0; genre = "DRUM & BASS / JUNGLE"; why = `${Math.round(T0)} BPM (drum & bass / jungle range 150–185)`; conf = 75;
   } else {
-    bpm = T0; genre = "BREAKBEAT / BREAKS"; why = "broken kick pattern"; conf = 65;
+    bpm = T0; genre = "BREAKBEAT / BREAKS"; why = `broken kick pattern at ${Math.round(T0)} BPM (breaks range)`; conf = 65;
   }
   return { name: genre, genre, bpm: round(bpm), bpmReliable: true, confidence: conf, why, features: f };
 }
@@ -5247,7 +5253,8 @@ function setStatus(
     if (blank(a)) return blank(b);
     const na = Number(a), nb = Number(b);
     if (!blank(b) && isFinite(na) && isFinite(nb)) return Math.abs(na - nb) < 0.05;
-    return String(a).trim().toLowerCase().replace(/\s+/g, " ") === String(b).trim().toLowerCase().replace(/\s+/g, " ");
+    const norm = v => String(v).toLowerCase().replace(/\bchakra\b/g, "").replace(/\s*\/\s*/g, "/").replace(/[^a-z0-9#/&]+/g, " ").trim();
+    return norm(a) === norm(b);
   };
 
   let ctx = null;
@@ -5285,31 +5292,33 @@ function setStatus(
       else if (savedScore && best && savedScore.frequency !== best.frequency && savedScore.score >= best.score * 0.7) notes.push(`Frequency kept — ${saved} Hz is also strongly present`);
       else {
         const why = `clear ${f.frequency} Hz tone (${f.confidence}%)`;
-        add("freq", "FREQUENCY (Hz)", f.frequency, true, why);
-        add("chakra", "CHAKRA", f.chakra, true, why);
-        add("planet", "PLANET", f.planet, true, why);
+        const sure = f.confidence >= 90;
+        add("freq", "FREQUENCY (Hz)", f.frequency, sure, why + (sure ? "" : " — listen first"));
+        add("chakra", "CHAKRA", f.chakra, sure, why + (sure ? "" : " — listen first"));
+        add("planet", "PLANET", f.planet, sure, why + (sure ? "" : " — listen first"));
       }
     }
     if (groups.includes("genre") && g.name) {
       const gcol = colFor("genre", r.raw), saved = gcol ? r.raw[gcol] : "";
       const fs = family(saved), fn = family(g.name);
       if (!blank(saved) && fs >= 0 && fs === fn) { /* same family — keep the artist's own wording */ }
-      else add("genre", "GENRE", g.name, (g.confidence || 0) >= 65, g.why || "");
+      else { const sure = (g.confidence || 0) >= 75; add("genre", "GENRE", g.name, sure, (g.why || "") + (sure ? "" : " — less certain, listen first")); }
     }
     return { ch, notes };
   }
 
   function render() {
     const body = $("ccBody");
-    const list = CC.rows.filter(x => x.ch.length || x.notes.length || x.error);
+    const list = CC.rows.filter(x => x.ch.length || x.error || x.notes.some(n => n.startsWith("✔")));
+    const quiet = CC.rows.length - list.length;
     if (!list.length) body.innerHTML = `<tr><td colspan="3" class="lb-empty">${CC.rows.length ? "Everything already matches. ✦" : "Run the complete check to see proposed changes."}</td></tr>`;
     else body.innerHTML = list.map(x => {
       const i = CC.rows.indexOf(x);
       const lines = x.ch.map((c, j) => `<label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin:2px 0"><input type="checkbox" data-i="${i}" data-j="${j}" ${c.on ? "checked" : ""}><span><b>${esc(c.label)}</b>: ${esc(blank(c.oldV) ? "—" : c.oldV)} → <b style="color:#42ff9a">${esc(c.newV)}</b>${c.why ? `<br><small style="color:#9a98a3">${esc(c.why)}</small>` : ""}</span></label>`).join("")
-        + x.notes.map(n => `<div style="color:#ffb347;font-size:12px">${esc(n)}</div>`).join("")
+        + x.notes.filter(n => !/^Frequency kept — no clear/.test(n)).map(n => `<div style="color:#ffb347;font-size:12px">${esc(n)}</div>`).join("")
         + (x.error ? `<div style="color:#ff5470">${esc(x.error)}</div>` : "");
       return `<tr><td><button type="button" class="lb-btn" data-listen="${i}" title="Listen and tap the tempo" style="padding:6px 9px">🎧</button></td><td>${esc(x.r.title)}<br><small style="color:#9a98a3">${esc(x.r.artist || "")}</small></td><td>${lines}</td></tr>`;
-    }).join("");
+    }).join("") + (quiet > 0 ? `<tr><td colspan="3" class="lb-empty">${quiet} other track${quiet === 1 ? "" : "s"} checked — nothing to change (saved values kept).</td></tr>` : "");
     const nTicked = CC.rows.reduce((t, x) => t + x.ch.filter(c => c.on).length, 0);
     const nTracks = CC.rows.filter(x => x.ch.some(c => c.on)).length;
     $("ccSave").disabled = CC.busy || !nTicked;

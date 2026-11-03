@@ -19980,6 +19980,8 @@ html, body { overscroll-behavior-x: none; }
 #gsp .gsp-tbl .library-table{min-width:1100px}
 .mod-wrap.gsp-gone{display:none!important}
 @media(max-width:420px){#gsp .li .rb{width:32px;height:32px}#gsp .li .r{display:none}}
+#gspToast{position:fixed;left:50%;bottom:96px;z-index:9800;transform:translate(-50%,20px);opacity:0;pointer-events:none;max-width:calc(100% - 32px);padding:10px 16px;border-radius:12px;border:1px solid #38d9ff;background:linear-gradient(180deg,#0e1431,#080c20);color:#e8ecff;font:700 13px system-ui,sans-serif;box-shadow:0 0 18px rgba(56,217,255,.35);transition:opacity .2s,transform .2s;text-align:center}
+#gspToast.on{opacity:1;transform:translate(-50%,0)}
 #gsp-hold{display:none!important}
 @media(max-width:720px){#gsp .now{grid-template-columns:1fr;gap:10px;padding:12px;text-align:center}#gsp .art{max-width:270px;margin:6% auto 2%;width:78%}#gsp .pills,#gsp .row{justify-content:center}#gsp .src{justify-content:center}}
 /* mini player — a slim deck strip */
@@ -20017,7 +20019,7 @@ html.gsp-mini-on body{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px)
 'use strict';
 var $=function(i){return document.getElementById(i)};
 function mk(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(t==="button")e.classList.add("g");if(x!=null)e.textContent=x;return e}
-function toast(m,ms){if(window.glctc1Toast)window.glctc1Toast(m,ms||2600);else console.log(m)}
+var toastEl=null,toastT=0;function toast(m,ms){if(window.glctc1Toast){window.glctc1Toast(m,ms||2600);return}if(!toastEl){toastEl=document.createElement("div");toastEl.id="gspToast";document.body.appendChild(toastEl)}toastEl.textContent=m;toastEl.classList.add("on");clearTimeout(toastT);toastT=setTimeout(function(){toastEl.classList.remove("on")},ms||2600)}
 var CHAKRAS=[
  {k:"ROOT",n:"Root",s:"Muladhara",hz:396,c:"#ff2d2d",re:/root|muladhara|base/},
  {k:"SACRAL",n:"Sacral",s:"Svadhisthana",hz:417,c:"#ff8a1f",re:/sacral|svadhisthana|swadhisthana/},
@@ -20115,7 +20117,7 @@ function sync(){
  var bpm=t?f(t,"bpm","BPM"):"",ky=t?f(t,"key","Key"):"";if(bpm)pills.append(mk("span","pill",bpm+" BPM"));if(ky)pills.append(mk("span","pill",ky));
  var gn=t?f(t,"genre","Genre"):"";if(gn)pills.append(mk("span","pill",gn.toUpperCase()));pills.append(plays);
  bFav.disabled=bRmx.disabled=bMore.disabled=bDA.disabled=bDB.disabled=bShr.disabled=!t;
- mirrorCounter();mini();media();markLib();
+ ownArt(t);mirrorCounter();mini();media();markLib();
  if(panes.next.classList.contains("on"))renderNext();
 }
 function markLib(){var t=CUR;var A=t?artistOf(t).toLowerCase():"",T=t?titleOf(t).toLowerCase():"";document.querySelectorAll("#libraryTable tbody tr.library-row").forEach(function(r){var c=r.cells;var on=!!t&&c&&c.length>6&&c[5].textContent.trim().toLowerCase()===A&&c[6].textContent.trim().toLowerCase()===T;r.classList.toggle("gsp-cur",on)})}
@@ -20129,7 +20131,12 @@ bFav.onclick=function(){var p=counterP();if(p&&p.favButton)p.favButton.click();s
 bRmx.onclick=function(){var p=counterP();if(p&&p.remixButton&&!p.remixButton.disabled&&p.track){p.remixButton.click()}else remix(CUR)};
 /* artwork mirrors the engine's cover (it already turns storage paths into links) */
 var oldArt=$("glctc1PlaylistArtwork");
-function mirrorArt(){var s=oldArt&&oldArt.getAttribute("src")&&oldArt.style.display!=="none"?oldArt.src:"";artUrl=s;img.style.backgroundImage=s?"url("+JSON.stringify(s)+")":"";img.textContent=s?"":"♫";mini();media()}
+function useArt(u){artUrl=u||"";img.style.backgroundImage=artUrl?"url("+JSON.stringify(artUrl)+")":"";img.textContent=artUrl?"":"♫";mini();media()}
+var artFor="";function ownArt(t){var c=t?f(t,"cover_art","Cover Art"):"";artFor=c;if(!c){mirrorArt();return}
+ if(/^(https?:|data:|blob:)/i.test(c)){useArt(c);return}
+ if(typeof covers!=="undefined"&&covers[c]){useArt(covers[c]);return}
+ try{supabaseClient.storage.from("tracks").createSignedUrl(c,86400).then(function(o){var u=o&&o.data&&o.data.signedUrl;if(u&&typeof covers!=="undefined")covers[c]=u;if(artFor===c)useArt(u||"")}).catch(function(){if(artFor===c)mirrorArt()})}catch(e){mirrorArt()}}
+function mirrorArt(){if(CUR&&f(CUR,"cover_art","Cover Art")&&artUrl)return;var s=oldArt&&oldArt.getAttribute("src")&&oldArt.style.display!=="none"?oldArt.src:"";artUrl=s;img.style.backgroundImage=s?"url("+JSON.stringify(s)+")":"";img.textContent=s?"":"♫";mini();media()}
 if(oldArt){new MutationObserver(mirrorArt).observe(oldArt,{attributes:true,attributeFilter:["src","style"]});mirrorArt()}
 ["glctc1PlaylistTitle","glctc1PlaylistArtist","glctc1PlaylistTrackPosition"].forEach(function(id){var n=$(id);if(n)new MutationObserver(function(){setTimeout(sync,0)}).observe(n,{childList:true,characterData:true,subtree:true})});
 audio.addEventListener("loadstart",function(){setTimeout(sync,0)});
@@ -20310,7 +20317,7 @@ function copy(t){return Object.assign({},t)}
 /* actions that work on ANY track */
 function loadDeck(L,t){t=t||CUR;if(!t)return;try{if(typeof window.loadToDeck!=="function")throw 0;window.loadToDeck(L,copy(t));toast("🎚 "+titleOf(t)+" → Deck "+L)}catch(e){toast("Couldn't load Deck "+L+" — try again.")}}
 function shareTrack(t){t=t||CUR;if(!t)return;var id=t.id||f(t,"id_cat_no","ID Cat No");if(!id){toast("This track can't be shared yet.");return}
- var url=location.origin+location.pathname+"?track="+encodeURIComponent(id);
+ var url=location.origin+location.pathname.replace(/[^\/]*$/,"upload.html")+"?track="+encodeURIComponent(id);
  if(typeof window.glctc1ShareTrackMedia==="function"){window.glctc1ShareTrackMedia(t,url)}else if(navigator.share){navigator.share({title:titleOf(t),text:titleOf(t)+" — "+artistOf(t),url:url}).catch(function(){})}else{try{navigator.clipboard.writeText(url);toast("🔗 Link copied.")}catch(e){}}}
 function remix(t){t=t||CUR;if(!t)return;if(same(t,CUR)){var p=counterP();if(p&&p.remixButton){p.remixButton.click();return}}
  var q=new URLSearchParams();if(t.id!=null&&t.id!=="")q.set("remix",String(t.id));var cat=f(t,"id_cat_no","ID Cat No");if(cat)q.set("cat",cat);if(![...q.keys()].length){toast("This track can't be remixed yet.");return}
@@ -20422,6 +20429,8 @@ body #bankTracks .bank-track-item > span:last-child{display:flex;gap:6px;flex:no
 body #bankTracks .bankLoadA{border-color:#38d9ff!important;color:#9cf0ff!important}
 body #bankTracks .bankLoadB{border-color:#f06bff!important;color:#ffb3fb!important}
 
+/* Live: Load songs / USB panel */
+body #glctc1LocalLoader{border-radius:20px!important;background:linear-gradient(180deg,#0e1431,#080c20)!important;border:1px solid color-mix(in srgb,#38d9ff 35%,#1d2850)!important;box-shadow:0 0 0 1px #000,0 12px 40px rgba(0,0,0,.55),0 0 28px rgba(56,217,255,.1)!important}
 /* Playlist Master card */
 body #glctc1PlaylistMasterModule{padding:12px!important}
 body #glctc1PlaylistMasterModule .glctc1-playlist-master-header{border-bottom:1px solid #1d2850!important;margin:0 0 10px!important;padding:0 4px 10px!important}
@@ -20444,6 +20453,8 @@ body .master-library-module .library-row.gsp-cur{background:rgba(56,217,255,.12)
  function marks(){try{g.querySelectorAll(".bank-btn").forEach(function(b){var L=b.dataset.bank;b.classList.toggle("has",!!(banks[L]&&banks[L].length))})}catch(e){}}
  g.addEventListener("click",function(e){var b=e.target.closest(".bank-btn");if(!b)return;g.querySelectorAll(".bank-btn").forEach(function(x){x.classList.toggle("on",x===b)});setTimeout(marks,50)});
  marks();setInterval(marks,3000);})();
+/* the old "Banks A–Z" label above the pads is replaced by the module tab */
+(function(){var g=document.getElementById("banksGrid"),t=g&&g.previousElementSibling;if(t&&t.classList.contains("section-title"))t.style.display="none"})();
 </script>
 <!-- ===== END GLCTC1 DECK SKIN ===== -->
 

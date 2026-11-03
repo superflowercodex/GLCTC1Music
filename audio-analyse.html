@@ -1211,6 +1211,17 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
     </div>
     </div>
 
+<style id="glctc1-cc-css">
+#ccBody .cc-grid{border-collapse:collapse;font-size:12px;width:100%}
+#ccBody .cc-grid td,#ccBody .cc-grid th{border:0;vertical-align:top}
+@media(max-width:760px){
+  .lb-table:has(#ccBody) thead{display:none}
+  #ccBody>tr{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:10px 6px;border-bottom:1px solid #26283a}
+  #ccBody>tr>td{display:block;border:0!important;padding:0!important}
+  #ccBody>tr>td:nth-child(3){grid-column:1 / -1}
+  #ccBody .cc-grid{font-size:13px}
+}
+</style>
     <!-- ===== GLCTC1 MASTER LIBRARY — COMPLETE CHECK (admin) ===== -->
     <div class="lb-head">MASTER LIBRARY — COMPLETE CHECK</div>
     <div class="status">One check for every track: tempo (knows half-time from double-time — reggae, dub, hip hop vs drum &amp; bass / jungle), key, sacred frequency · chakra · planet, and genre. Clear fixes come ticked; anything less certain is left unticked so you can 🎧 listen first. Nothing is saved until you press SAVE.</div>
@@ -1225,9 +1236,13 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
       <button id="ccTickAll" type="button" class="lb-btn">✔ TICK ALL</button>
       <button id="ccTickNone" type="button" class="lb-btn">☐ UNTICK ALL</button>
     </div>
+    <div class="lb-bar">
+      <button id="ccShowAll" type="button" class="lb-btn lb-main">☰ ALL TRACKS</button>
+      <button id="ccShowCh" type="button" class="lb-btn">⚠ ONLY TRACKS WITH CHANGES</button>
+    </div>
     <div class="lb-tablewrap">
       <table class="lb-table">
-        <thead><tr><th>🎧</th><th>TRACK</th><th>SUGGESTED CHANGES (SAVED → NEW) · TICK TO SAVE</th></tr></thead>
+        <thead><tr><th>🎧</th><th>TRACK</th><th>SAVED · SCAN · TICK “CHANGE” TO SAVE</th></tr></thead>
         <tbody id="ccBody"><tr><td colspan="3" class="lb-empty">Run the complete check to see suggested changes.</td></tr></tbody>
       </table>
     </div>
@@ -2326,6 +2341,10 @@ function glctc1BandSection(samples, sr, start, len) {
     E.low += l; E.mid += m; E.high += h;
     env.low[f] = Math.sqrt(l / hop); env.mid[f] = Math.sqrt(m / hop); env.high[f] = Math.sqrt(h / hop); env.all[f] = Math.sqrt(a / hop);
   }
+  /* deep bass notes ripple at 5 ms resolution — smooth the low band over ~30 ms so an 808 isn't mistaken for kicks */
+  const sm = new Float32Array(frames); let acc = 0;
+  for (let f = 0; f < frames; f++) { acc += env.low[f] * env.low[f]; if (f >= 6) acc -= env.low[f - 6] * env.low[f - 6]; sm[f] = Math.sqrt(Math.max(0, acc) / Math.min(f + 1, 6)); }
+  env.low = sm;
   return { env, E, R, frames };
 }
 
@@ -2377,7 +2396,7 @@ function glctc1Groove(samples, sr, bpmIn) {
   const dur = samples.length / sr;
   const secLen = Math.min(dur, 24);
   const starts = dur > 60 ? [0.2, 0.5, 0.8] : [0.5];
-  const F = { E: { low: 0, mid: 0, high: 0 }, attacks: 0, secs: 0, hiPeaks: 0, midPeaks: 0, lowPeaks: 0, offHalfOn: 0, offHalfOff: 0, offFullOn: 0, offFullOff: 0, kickT0: [] };
+  const F = { E: { low: 0, mid: 0, high: 0 }, attacks: 0, secs: 0, hiPeaks: 0, midPeaks: 0, lowPeaks: 0, offHalfOn: 0, offHalfOff: 0, offFullOn: 0, offFullOff: 0, kickT0: [], symHalf: [], symFull: [] };
   for (const c of starts) {
     const start = Math.max(0, Math.floor((dur - secLen) * c * sr)), len = Math.floor(secLen * sr);
     const sec = glctc1BandSection(samples, sr, start, len);
@@ -2389,7 +2408,7 @@ function glctc1Groove(samples, sr, bpmIn) {
     let att = 0;
     if (hmax > amax * 0.01) for (let i = 3; i < al.raw.length; i++) {
       if (al.raw[i] - al.raw[i - 3] > 0.5 && hi.raw[i] - hi.raw[i - 3] > 1.0 && sec.env.high[i] > hmax * 0.08) { att++; i += 20; }
-      else if (lo.raw[i] - lo.raw[i - 3] > 1.2 && sec.env.low[i] > 0.25 * Math.max(1e-9, sec.env.low.reduce((m, v) => v > m ? v : m, 0))) { att++; i += 20; }
+      else if (i >= 6 && lo.raw[i] - lo.raw[i - 6] > 1.0 && sec.env.low[i] > 0.25 * Math.max(1e-9, sec.env.low.reduce((m, v) => v > m ? v : m, 0))) { att++; i += 20; }
     }
     F.attacks += att; F.secs += secLen;
     F.hiPeaks += hi.peaks.length; F.midPeaks += mi.peaks.length; F.lowPeaks += lo.peaks.length;
@@ -2400,6 +2419,8 @@ function glctc1Groove(samples, sr, bpmIn) {
         let k0 = 0; for (let k = 1; k < 16; k++) if (sm(k) > sm(k0)) k0 = k;
         return [mf[k0] + mf[(k0 + 1) % 16], mf[(k0 + 8) % 16] + mf[(k0 + 9) % 16]];
       };
+      const symAt = Tb => { const f2 = glctc1Fold(mi.O, sec.R, Tb / 2, 8); let mn = 0, tot = 0; for (let k = 0; k < 8; k++) { mn += Math.min(f2[k], f2[(k + 4) % 8]); tot += f2[k]; } return tot > 0 ? mn / tot : 1; };
+      F.symHalf.push(symAt(T0 / 2)); F.symFull.push(symAt(T0));
       const h = offAt(T0 / 2), w = offAt(T0);
       F.offHalfOn += h[0]; F.offHalfOff += h[1]; F.offFullOn += w[0]; F.offFullOff += w[1];
     }
@@ -2413,7 +2434,8 @@ function glctc1Groove(samples, sr, bpmIn) {
   const share = { low: F.E.low / Et, mid: F.E.mid / Et, high: F.E.high / Et };
   const attacksPerSec = F.attacks / (F.secs || 1);
   const midPerBeatT0 = T0 > 0 ? (F.midPeaks / F.secs) * 60 / T0 : 0;
-  const kickEvery = F.kickT0.length ? F.kickT0.reduce((a, b) => a + b, 0) / F.kickT0.length : 0;
+  const ks = F.kickT0.slice().sort((a, b) => b - a);
+  const kickEvery = ks.length ? (ks.length >= 3 ? (ks[0] + ks[1]) / 2 : ks[0]) : 0;   /* best sections (intros/breakdowns drop the kick) */
   const hiPerBeatAt = t => t > 0 ? (F.hiPeaks / F.secs) * 60 / t : 0;
   /* the slow reading of the tempo: 135–200 → 67–100, and sparse non-four-on-the-floor 110–135 grooves → 55–67 */
   const sparseSlow = T0 >= 110 && T0 < 135 && kickEvery < 0.7 && attacksPerSec < 2.5 && hiPerBeatAt(T0 / 2) < 3.3;
@@ -2421,15 +2443,18 @@ function glctc1Groove(samples, sr, bpmIn) {
   const S = halve ? T0 / 2 : T0;
   const hiPerSlowBeat = hiPerBeatAt(S);
   const offbeat = halve ? F.offHalfOff / (F.offHalfOn || 1e-9) : F.offFullOff / (F.offFullOn || 1e-9);
-  const f = { share, attacksPerSec, hiPerSlowBeat, offbeat, kickEvery, midPerBeatT0, slow: S };
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 1;
+  const snareSym = halve ? avg(F.symHalf) : avg(F.symFull);   /* at the slow reading */
+  const f = { share, attacksPerSec, hiPerSlowBeat, offbeat, kickEvery, midPerBeatT0, slow: S, snareSym };
 
   let genre, bpm = T0, conf = 70, why;
   const round = v => Math.round(v * 10) / 10;
-  if (!T0 || attacksPerSec < 0.35) {
+  if (!T0 || attacksPerSec < 0.2) {
     genre = "AMBIENT / MEDITATION"; conf = 80; why = "very few drum hits";
     return { name: genre, genre, bpm: T0 ? round(T0) : "—", bpmReliable: false, confidence: conf, why, features: f };
   }
-  if (T0 >= 112 && T0 <= 150 && kickEvery >= 0.7) {
+  const hatsPerT0Beat = hiPerBeatAt(T0);
+  if (T0 >= 112 && T0 <= 150 && kickEvery >= 0.88) {
     bpm = T0;
     /* DJ tempo standard first, then the groove decides within the range */
     if (T0 >= 129) { genre = "TECHNO"; why = `kick on every beat at ${Math.round(T0)} BPM (techno range 129–150)`; }
@@ -2440,12 +2465,18 @@ function glctc1Groove(samples, sr, bpmIn) {
     }
     else if (share.high < 0.03) { genre = "DEEP HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM, warm and dark (deep house range 115–124)`; }
     else { genre = "HOUSE"; why = `kick on every beat at ${Math.round(T0)} BPM (house range 115–128)`; }
-    conf = Math.round(60 + 35 * Math.min(1, (kickEvery - 0.6) / 0.35));
+    conf = Math.round(60 + 35 * Math.min(1, (kickEvery - 0.8) / 0.2));
+  } else if (T0 >= 130 && T0 <= 155 && hatsPerT0Beat >= 3 && midPerBeatT0 <= 1.25) {
+    bpm = T0; genre = "HIP HOP"; why = `trap-style: rapid hi-hats over a half-time snare at ${Math.round(T0)} BPM`; conf = 70;
   } else if (S >= 55 && S <= 100 && !(T0 >= 135 && T0 < 150 && !((offbeat >= 1.5 || attacksPerSec < 2.5) && hiPerSlowBeat < 3.3))) {
-    if (hiPerSlowBeat >= 3.6 && S * 2 >= 150) {
+    if (hiPerSlowBeat >= 4.0 && snareSym >= 0.62 && S * 2 >= 150) {
       bpm = S * 2 <= 190 ? S * 2 : T0; genre = "DRUM & BASS / JUNGLE";
-      why = `busy hi-hats/breaks (${hiPerSlowBeat.toFixed(1)} per slow beat) → double-time`;
-      conf = Math.round(Math.min(95, 60 + (hiPerSlowBeat - 3.6) * 12));
+      why = `snare hits every slow beat + busy hats → it's ${Math.round(S * 2)} BPM double-time (drum & bass / jungle range)`;
+      conf = Math.round(Math.min(95, 62 + (snareSym - 0.62) * 120 + (hiPerSlowBeat - 3) * 4));
+    } else if (snareSym < 0.6 && S >= 78 && attacksPerSec >= 2.5) {
+      bpm = S; genre = "HIP HOP";
+      why = `kick/snare alternate (backbeat) at ${Math.round(S)} BPM → hip hop, even with busy hats`;
+      conf = Math.round(Math.min(92, 78 + (0.6 - snareSym) * 150));
     } else if (offbeat >= 1.3) {
       bpm = S;
       if (S <= 73) { genre = "DUB"; why = "off-beat skank + heavy bass → half-time feel is the real tempo"; }
@@ -2454,7 +2485,7 @@ function glctc1Groove(samples, sr, bpmIn) {
     } else if (S < 78 && attacksPerSec < 2.5 && offbeat >= 1.0) {
       bpm = S; genre = "DUB"; why = "slow, sparse and bass-heavy with off-beat accents → half-time feel is the real tempo"; conf = 62;
     } else if (S >= 78) {
-      bpm = S; genre = "HIP HOP"; why = "steady backbeat, relaxed hats → slow tempo";
+      bpm = S; genre = "HIP HOP"; why = `backbeat at ${Math.round(S)} BPM (hip hop range 80–115)`;
       conf = Math.round(Math.min(90, 60 + (3.6 - hiPerSlowBeat) * 10));
     } else {
       bpm = S; genre = "DOWNTEMPO / CHILL"; why = "slow groove"; conf = 65;
@@ -5304,21 +5335,43 @@ function setStatus(
       if (!blank(saved) && fs >= 0 && fs === fn) { /* same family — keep the artist's own wording */ }
       else { const sure = (g.confidence || 0) >= 75; add("genre", "GENRE", g.name, sure, (g.why || "") + (sure ? "" : " — less certain, listen first")); }
     }
-    return { ch, notes };
+    const fz = a.frequency || {};
+    const scan = { bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
+                   genre: g.name, gwhy: g.why, gconf: g.confidence, bpmOk: g.bpmReliable };
+    return { ch, notes, scan };
   }
 
+  const SHOW = { mode: "all" };
+  const FIELDS_UI = [
+    { k: "bpm", label: "BPM", saved: x => x.r.raw[colFor("bpm", x.r.raw)], scan: x => x.scan && (x.scan.bpmOk ? x.scan.bpm : "no steady beat") },
+    { k: "key", label: "KEY", saved: x => x.r.raw[colFor("key", x.r.raw)], scan: x => x.scan && x.scan.key },
+    { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" + (x.scan.fclear ? "" : " (no clear tone)") : "") },
+    { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => x.scan && x.scan.chakra },
+    { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => x.scan && x.scan.planet },
+    { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre }
+  ];
   function render() {
     const body = $("ccBody");
-    const list = CC.rows.filter(x => x.ch.length || x.error || x.notes.some(n => n.startsWith("✔")));
-    const quiet = CC.rows.length - list.length;
-    if (!list.length) body.innerHTML = `<tr><td colspan="3" class="lb-empty">${CC.rows.length ? "Everything already matches. ✦" : "Run the complete check to see proposed changes."}</td></tr>`;
+    const withCh = CC.rows.filter(x => x.ch.length || x.error);
+    const list = SHOW.mode === "all" ? CC.rows : withCh;
+    $("ccShowAll").classList.toggle("lb-main", SHOW.mode === "all"); $("ccShowCh").classList.toggle("lb-main", SHOW.mode !== "all");
+    $("ccShowCh").textContent = `⚠ ONLY TRACKS WITH CHANGES (${withCh.length})`; $("ccShowAll").textContent = `☰ ALL TRACKS (${CC.rows.length})`;
+    if (!list.length) body.innerHTML = `<tr><td colspan="3" class="lb-empty">${CC.rows.length ? "Everything already matches. ✦" : "Run the complete check to see every track's saved and scanned details."}</td></tr>`;
     else body.innerHTML = list.map(x => {
       const i = CC.rows.indexOf(x);
-      const lines = x.ch.map((c, j) => `<label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin:2px 0"><input type="checkbox" data-i="${i}" data-j="${j}" ${c.on ? "checked" : ""}><span><b>${esc(c.label)}</b>: ${esc(blank(c.oldV) ? "—" : c.oldV)} → <b style="color:#42ff9a">${esc(c.newV)}</b>${c.why ? `<br><small style="color:#9a98a3">${esc(c.why)}</small>` : ""}</span></label>`).join("")
-        + x.notes.filter(n => !/^Frequency kept — no clear/.test(n)).map(n => `<div style="color:#ffb347;font-size:12px">${esc(n)}</div>`).join("")
-        + (x.error ? `<div style="color:#ff5470">${esc(x.error)}</div>` : "");
-      return `<tr><td><button type="button" class="lb-btn" data-listen="${i}" title="Listen and tap the tempo" style="padding:6px 9px">🎧</button></td><td>${esc(x.r.title)}<br><small style="color:#9a98a3">${esc(x.r.artist || "")}</small></td><td>${lines}</td></tr>`;
-    }).join("") + (quiet > 0 ? `<tr><td colspan="3" class="lb-empty">${quiet} other track${quiet === 1 ? "" : "s"} checked — nothing to change (saved values kept).</td></tr>` : "");
+      const grid = FIELDS_UI.map(F => {
+        const j = x.ch.findIndex(c => c.k === F.k), c = j >= 0 ? x.ch[j] : null;
+        const sv = F.saved(x), sc = x.scan ? F.scan(x) : "";
+        const act = c ? `<label style="cursor:pointer;white-space:nowrap"><input type="checkbox" data-i="${i}" data-j="${j}" ${c.on ? "checked" : ""}> change</label>`
+                      : (x.scan ? `<span style="color:#42ff9a">✓</span>` : "");
+        const col = c ? "#ffd27a" : "#cfcbd8";
+        return `<tr style="border:0"><td style="padding:2px 8px 2px 0;color:#9a98a3;white-space:nowrap">${F.label}</td><td style="padding:2px 8px;color:#cfcbd8">${esc(blank(sv) ? "—" : sv)}</td><td style="padding:2px 8px;color:${col}">${c ? "→ <b>" + esc(c.newV) + "</b>" : esc(blank(sc) ? "" : sc)}</td><td style="padding:2px 0 2px 8px">${act}</td></tr>`;
+      }).join("");
+      const why = x.scan ? `<div style="margin-top:4px;font-size:12px;color:#9a98a3">🔎 ${esc(x.scan.genre || "")}${x.scan.gwhy ? " — " + esc(x.scan.gwhy) : ""}</div>` : "";
+      const notes = x.notes.filter(n => !/^Frequency kept — no clear/.test(n)).map(n => `<div style="color:#ffb347;font-size:12px">${esc(n)}</div>`).join("");
+      return `<tr><td><button type="button" class="lb-btn" data-listen="${i}" title="Listen and tap the tempo" style="padding:6px 9px">🎧</button></td><td>${esc(x.r.title)}<br><small style="color:#9a98a3">${esc(x.r.artist || "")}</small></td>
+        <td><table class="cc-grid"><tr><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px 0"></th><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px">SAVED</th><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px">SCAN</th><th></th></tr>${grid}</table>${why}${notes}${x.error ? `<div style="color:#ff5470">${esc(x.error)}</div>` : ""}</td></tr>`;
+    }).join("");
     const nTicked = CC.rows.reduce((t, x) => t + x.ch.filter(c => c.on).length, 0);
     const nTracks = CC.rows.filter(x => x.ch.some(c => c.on)).length;
     $("ccSave").disabled = CC.busy || !nTicked;
@@ -5343,6 +5396,8 @@ function setStatus(
     if (!same(x.r.raw[col], bpm)) x.ch.unshift({ k: "bpm", label: "BPM", col, oldV: x.r.raw[col], newV: bpm, on: true, why: "tapped by ear" });
     render(); status(`${x.r.title}: BPM set to ${bpm} from your taps — press SAVE to store it.`, "success");
   });
+  $("ccShowAll").addEventListener("click", () => { SHOW.mode = "all"; render(); });
+  $("ccShowCh").addEventListener("click", () => { SHOW.mode = "changes"; render(); });
   $("ccTickAll").addEventListener("click", () => { CC.rows.forEach(x => x.ch.forEach(c => c.on = true)); render(); });
   $("ccTickNone").addEventListener("click", () => { CC.rows.forEach(x => x.ch.forEach(c => c.on = false)); render(); });
   $("ccStop").addEventListener("click", () => { CC.stop = true; status("Stopping after this track…", "active"); });
@@ -5368,7 +5423,7 @@ function setStatus(
           const buf = await decodeFull(await fetchMasterAudioBytes(String(r.path)));
           await new Promise(z => setTimeout(z, 0));
           const p = propose(r, analyseBuffer(buf), groups);
-          x.ch = p.ch; x.notes = p.notes; if (p.ch.length) changed++;
+          x.ch = p.ch; x.notes = p.notes; x.scan = p.scan; if (p.ch.length) changed++;
         } catch (e) { x.error = "Could not analyse: " + String(e && e.message ? e.message : e).slice(0, 160); failed++; }
         CC.rows.push(x);
         if (n % 3 === 0) render();

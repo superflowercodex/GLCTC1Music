@@ -794,7 +794,20 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 .panel.mixer.qmx-retired{display:none!important}
 #wsPanel #qmxDesk{min-width:0;max-width:100%}
 #wsPanel #qmxDesk .cn-mixwrap{max-width:100%}
-#wsPanel #qmxDesk .cn-mixwrap>.cn-master{position:sticky;right:0;z-index:3;align-self:flex-start;box-shadow:-10px 0 18px #000c,inset 0 1px 0 #ffffff14}
+#wsPanel #qmxDesk .cn-mixwrap.qmx-wrap{display:flex;flex-direction:column;gap:12px;overflow:visible;padding:0 0 4px}
+#wsPanel #qmxDesk .qmx-seq,#wsPanel #qmxDesk .qmx-mods{overflow-x:auto;padding-bottom:6px;scrollbar-color:#555 #111}
+#wsPanel #qmxDesk .qmx-seq .cn-strips,#wsPanel #qmxDesk .qmx-mods .cn-strips{width:max-content}
+#wsPanel #qmxDesk .qmx-bottom{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+#wsPanel #qmxDesk .qmx-mods{flex:1 1 420px;min-width:0}
+#wsPanel #qmxDesk .qmx-mblock{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;max-width:100%}
+#wsPanel #qmxDesk .qmx-mrow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
+#wsPanel #qmxDesk .qmx-mrow>.cn-master{flex:0 0 150px}
+#wsPanel #qmxDesk .qmx-mon{display:flex!important;flex-direction:column;gap:8px;margin:0;width:250px}
+#wsPanel #qmxDesk .qmx-mon .mfxbox{margin:0}
+#wsPanel .qmx-kgrid{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 2px}
+#wsPanel .qmx-kgrid .qmx-kc{flex:0 0 74px;padding:4px 2px!important;border:1px solid #000;border-radius:7px;background:linear-gradient(#1d1e23,#121317)}
+#wsPanel .qmx-rgrid .qmx-kgrid .qmx-kc{flex-basis:70px}
+#wsPanel #qmxDesk .qmx-mon .qmx-kgrid .qmx-kc{flex:1 1 0;min-width:62px}
 #wsPanel .cn-ch{flex:0 0 94px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 8px;border-radius:8px;background:linear-gradient(#25262b,#17181c);border:1px solid #000;box-shadow:inset 0 1px 0 #ffffff14;position:relative;min-width:0}
 #wsPanel .cn-ch:before{content:'';position:absolute;top:0;left:0;right:0;height:5px;border-radius:8px 8px 0 0;background:var(--sc,#888);box-shadow:0 0 10px var(--sc,#888)}
 #wsPanel .cn-ch.dim{opacity:.5}
@@ -1906,6 +1919,11 @@ function fill(sel,main,val){sel.innerHTML='';[['none','Not routed'],...(main?[['
    module strips (Master Console → mixer), using the same faders, knobs, meters and buttons. Every control still
    drives the same track settings as before (volume, pan, →MST, HP, mute, solo, track FX sends, insert FX). */
 let rackId=null;
+/* v65: turn every "label + horizontal slider" pair inside a box into a knob cell (GLCTC_KNOBS draws the knob) */
+function kcWrap(root){if(!root)return;root.querySelectorAll('input[type=range]').forEach(r=>{if(r.parentElement&&r.parentElement.classList.contains('qmx-kc'))return;const lab=r.previousElementSibling&&r.previousElementSibling.tagName==='LABEL'?r.previousElementSibling:null;const kc=document.createElement('div');kc.className='qmx-kc';r.parentNode.insertBefore(kc,lab||r);if(lab)kc.append(lab);kc.append(r)});
+ root.querySelectorAll('.qmx-kc').forEach(kc=>{if(kc.parentElement.classList.contains('qmx-kgrid'))return;const g=document.createElement('div');g.className='qmx-kgrid';kc.parentNode.insertBefore(g,kc);let n=g.nextElementSibling;while(n&&n.classList.contains('qmx-kc')){const nx=n.nextElementSibling;g.append(n);n=nx}});
+ try{window.GLCTC_KNOBS&&GLCTC_KNOBS.scan()}catch(e){}}
+window.glctcKcWrap=kcWrap;
 function eqOf(t){PLUG.ensureAll(t);return t.plugs.find(e=>e.type==='eq')}
 function setEq(t,k,v){const e=eqOf(t);if(!e)return;e.p=e.p||{};e.p[k]=v;const want=!(Math.abs(e.p.lo||0)>.01||Math.abs(e.p.mid||0)>.01||Math.abs(e.p.hi||0)>.01);if(e.off!==want){e.off=want;PLUG.rebuildAll()}else PLUG.liveSet(e);markDirty()}
 function rackUi(){const box=$('qmxRack');if(!box)return;box.innerHTML='';const t=rackId&&project&&project.tracks.find(x=>x.id===rackId);if(!t){box.classList.remove('on');return}
@@ -1914,7 +1932,7 @@ function rackUi(){const box=$('qmxRack');if(!box)return;box.innerHTML='';const t
  box.append(h('div',{className:'qmx-rhead'},h('b',{textContent:'FX RACK · '+t.name}),h('span',{textContent:'TRACK FX + INSERT FX · TAP ON/OFF · DRAG TO SET'}),close));
  const grid=h('div',{className:'qmx-rgrid'});const fb=h('div',{className:'fxbox'},h('b',{textContent:'TRACK FX'}));fxStrip(fb,t);grid.append(fb);
  PLUG.ensureAll(t);(t.plugs||[]).forEach((e,i)=>{const d=PLUG.FX[e.type],bx=h('div',{className:'fxbox pl-fx'}),top=h('div',{className:'controls-row'}),by=h('button',{className:'tiny'+(e.off?'':' active'),textContent:e.off?'OFF':'ON'}),rm=h('button',{className:'tiny danger',textContent:'×'});top.append(h('b',{textContent:d?d.n:(e.name||'Plugin')}),by,...(e.type==='wam'?[rm]:[]));by.onclick=()=>{e.off=!e.off;PLUG.rebuildAll();markDirty();rackUi();mixUi()};rm.onclick=()=>{t.plugs.splice(i,1);PLUG.rebuildAll();markDirty();rackUi();mixUi()};bx.append(top);(d?d.p:[]).forEach(([k,n,lo,hi,st,df])=>{const r=h('input',{type:'range',min:lo,max:hi,step:st,value:(e.p||{})[k]??df,title:n});r.oninput=()=>{(e.p=e.p||{})[k]=+r.value;PLUG.liveSet(e);markDirty();if(e.type==='eq')mixUi()};bx.append(h('label',{textContent:n}),r)});grid.append(bx)});
- box.append(grid)}
+ box.append(grid);kcWrap(grid)}
 function mixUi(){const el=$('mixStrips');if(!el||!project)return;
 const M=mx();try{$('hpVol').value=M.hpVol;$('boothVol').value=M.boothVol;fill($('hpDev'),1,M.hpDev);fill($('boothDev'),0,M.boothDev);$('hpMix').classList.toggle('active',!!M.hpMix)}catch(e){}
 const CN=window.GLCTC_CN;if(!CN){clearTimeout(mixUi._t);mixUi._t=setTimeout(mixUi,300);return}
@@ -5144,13 +5162,15 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   const sh=cnMixer.querySelector('.cn-sechead');if(sh){sh.querySelector('b').textContent='GLCTC1 QU · MASTER DESK';sh.querySelector('span').textContent='ONE ANALOGUE DESK · SEQUENCER TRACKS + MODULES → ONE MASTER · REC · MASTER FX · HEADPHONES · BOOTH'}
   const wrap=cnMixer.querySelector('.cn-mixwrap'),ms=$('mixStrips');
   const lyr=(t,sub,body)=>el('div',{class:'qmx-lyr'},el('div',{class:'qmx-ltitle'},el('b',{text:t}),el('span',{text:sub})),body);
-  if(wrap&&ms){ms.className='cn-strips qmx-tracks';wrap.insertBefore(el('div',{class:'qmx-layers'},lyr('SEQUENCER TRACKS','TIMELINE CHANNELS · EQ HI/MID/LO · PAN · DELAY + REVERB SENDS · FX RACK',ms),lyr('MODULES','INSTRUMENT CHANNELS · ARM TO PLAY FROM THE MASTER KEYBOARD',cnStrips)),cnMaster)}
+  const mon0=el('div',{class:'qmx-mon'});const old0=document.querySelector('.panel.mixer');if(old0){old0.querySelectorAll('.mfxbox').forEach(b=>mon0.append(b));old0.classList.add('qmx-retired')}
+  if(wrap&&ms){ms.className='cn-strips qmx-tracks';const seq=lyr('SEQUENCER TRACKS','TIMELINE CHANNELS · EQ HI/MID/LO · PAN · DELAY + REVERB SENDS · FX RACK',ms);seq.classList.add('qmx-seq');const mods=lyr('MODULES','INSTRUMENT CHANNELS · ARM TO PLAY FROM THE MASTER KEYBOARD',cnStrips);mods.classList.add('qmx-mods');
+   const mblock=el('div',{class:'qmx-mblock'},el('div',{class:'qmx-ltitle'},el('b',{text:'MASTER SECTION'}),el('span',{text:'MASTER · FX · HEADPHONES · BOOTH'})),el('div',{class:'qmx-mrow'},cnMaster,mon0));
+   wrap.classList.add('qmx-wrap');wrap.replaceChildren(seq,el('div',{class:'qmx-bottom'},mods,mblock));try{window.glctcKcWrap&&glctcKcWrap(mon0)}catch(e){}}
   const rec=el('button',{class:'tiny qmx-rec',type:'button',text:'● REC',title:'Record the master output (and any sources chosen in RECORD ANYTHING)',onclick:()=>{try{UI.recBtn.click()}catch(e){}}});
   const fxb=cnMaster.querySelector('.cn-fxb');if(fxb)fxb.append(rec);else cnMaster.append(rec);
   setInterval(()=>{try{rec.classList.toggle('on',!!(REC.on||REC.counting));rec.textContent=REC.on?'■ STOP REC':REC.counting?'… COUNT-IN':'● REC'}catch(e){}},300);
-  const rack=el('div',{class:'qmx-rack',id:'qmxRack'}),mon=el('div',{class:'qmx-mon'});
-  const old=document.querySelector('.panel.mixer');if(old){old.querySelectorAll('.mfxbox').forEach(b=>mon.append(b));old.classList.add('qmx-retired')}
-  if(wrap){wrap.insertAdjacentElement('afterend',rack);rack.insertAdjacentElement('afterend',mon)}
+  const rack=el('div',{class:'qmx-rack',id:'qmxRack'});
+  if(wrap)wrap.insertAdjacentElement('afterend',rack);
  })();
  /* ---------- LIVE PERFORMANCE STRIP · module arms + transport + chain ---------- */
  const liveArms=el('div',{class:'cn-livearms'});
@@ -7301,7 +7321,7 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 
 </script>
 
-<!-- ===== GLCTC1 HARDWARE KNOBS v1 — 80LA8 · DIVINE09 · 30LEE · 0010110 ==========================================
+<!-- ===== GLCTC1 HARDWARE KNOBS v1 — 80LA8 · DIVINE09 · 30LEE · 0010110 · MASTER DESK ==========================================
      The sound-shaping sliders on the three drum/acid modules become real hardware-style knobs, like Galactic One:
      80LA8 = cream 808-style knobs, DIVINE09 = silver 909-style knobs, 30LEE = black 303-style knobs with chrome caps, 0010110 = SH-101-style vertical faders.
      Each knob drives the module's own (now hidden) slider, so every sound, preset, recording and save works as before.
@@ -7310,8 +7330,8 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 .kz-cell{display:flex!important;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:8px 4px 7px!important;min-width:0;text-align:center}
 .kz-cell>input[type=range]{display:none!important}
 .kz-cell>label{display:block!important;margin:0!important;padding:0!important;font-size:0!important;line-height:1!important;color:transparent!important;background:none!important;border:0!important}
-.kz-cell>label>*:not(output){display:none!important}
-.kz-cell>label>output{display:inline!important}
+.kz-cell>label>*:not(output):not(.kz-val){display:none!important}
+.kz-cell>label>output,.kz-cell>label>.kz-val{display:inline!important;font:600 10px ui-monospace,Menlo,Consolas,monospace!important;color:var(--kz-val,#ff8a4a)!important}
 .kz-ring{--a0:0deg;--a1:0deg;width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from -135deg,var(--kz-track,#24262d) 0 var(--a0),var(--kz-arc,#19baff) var(--a0) var(--a1),var(--kz-track,#24262d) var(--a1) 270deg,transparent 270deg);filter:drop-shadow(0 0 4px color-mix(in srgb,var(--kz-arc,#19baff) 35%,transparent))}
 .kz-k{--a:-135deg;position:relative;width:46px;height:46px;border-radius:50%;touch-action:none;cursor:ns-resize;outline:none;-webkit-tap-highlight-color:transparent;
  background:radial-gradient(circle at 36% 28%,#6a6b75,#2e2f36 55%,#141519);box-shadow:inset 0 1px 0 #ffffff40,0 4px 7px #000c,0 0 0 2px #0b0b0d}
@@ -7346,10 +7366,28 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 .s101-controls.kz-on>.kz-cell{flex:0 0 78px;background:linear-gradient(#1a2129,#10151b)!important}
 .s101-controls.kz-on>:not(.kz-cell){flex:1 1 160px}
 .kz-101 .kz-n{font-size:8.5px}
+/* MASTER DESK · dark console knobs with red arc (match the desk) */
+.kz-desk{--kz-arc:#ff4457;--kz-track:#34353c;--kz-name:#a3a5b4;--kz-val:#ff8a4a}
+.kz-desk .kz-ring{width:48px;height:48px}.kz-desk .kz-k{width:38px;height:38px}.kz-desk .kz-k i{top:3px;height:12px;transform-origin:50% 16px}
+.kz-desk .kz-n{font-size:8px;letter-spacing:.08em}
+/* 80LA8 · big knobs stacked 4 + 4, the switches row underneath */
+#blFx.kz-on{display:grid!important;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-content:start}
+#blFx.kz-on>.control.kz-cell{grid-column:span 3;flex:none;padding:16px 6px 12px!important;gap:6px}
+#blFx.kz-on>.control:not(.kz-cell){grid-column:span 4;flex:none}
+#blFx .kz-ring{width:104px;height:104px}
+#blFx .kz-k{width:84px;height:84px}
+#blFx .kz-k i{top:7px;width:6px;left:calc(50% - 3px);height:24px;transform-origin:50% 35px;border-radius:3px}
+#blFx .kz-n{font-size:11px;letter-spacing:.12em}
+#blFx .kz-cell>label>output{font-size:12px!important}
+@media(max-width:820px){#blFx .kz-ring{width:76px;height:76px}#blFx .kz-k{width:60px;height:60px}#blFx .kz-k i{top:5px;height:17px;transform-origin:50% 25px}}
+@media(max-width:520px){#blFx.kz-on>.control.kz-cell{grid-column:span 6}#blFx.kz-on>.control:not(.kz-cell){grid-column:1/-1}}
+/* DIVINE09 · big drum pads under the four extra sample slots */
+.d09-padsec{margin:12px 10px 6px!important;padding:0!important;max-width:calc(100% - 20px)}
+.d09-padsec .mine909-subtitle{margin:0 0 8px}
+.divine09 .d09-padsec .mine909-pads{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(92px,1fr))!important;gap:10px!important}
+.divine09 .d09-padsec .mine909-pad{aspect-ratio:1/1;min-height:0;border-radius:12px;border:1px solid #24516b;background:radial-gradient(120% 120% at 30% 20%,#1d3a50,#0b1822 60%,#060d13);color:#bceeff;font-size:11px;font-weight:900;letter-spacing:.08em;box-shadow:inset 0 2px 0 #ffffff14,inset 0 -6px 12px #0008,0 4px 10px #000a;touch-action:manipulation}
+.divine09 .d09-padsec .mine909-pad:active,.divine09 .d09-padsec .mine909-pad.hit{background:radial-gradient(circle,#9cf0ff,#19baff 55%,#0b6f99);color:#00131b;box-shadow:0 0 22px #19baff,inset 0 2px 0 #fff6}
 /* layouts: knob rows instead of slider stacks */
-#blFx.kz-on{display:flex!important;flex-wrap:wrap;gap:8px;align-content:flex-start}
-#blFx.kz-on>.control.kz-cell{flex:0 0 96px}
-#blFx.kz-on>.control:not(.kz-cell){flex:1 1 210px}
 .d09-voice-card.kz-on,.d09-sample-card.kz-on{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 2px;align-content:start}
 .d09-voice-card.kz-on>:not(.kz-cell),.d09-sample-card.kz-on>:not(.kz-cell){grid-column:1/-1}
 .d09-voice-card .kz-cell,.d09-sample-card .kz-cell{margin-top:4px!important;padding:6px 0 5px!important}
@@ -7362,7 +7400,7 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 .lee303-controls.kz-on{display:flex!important;flex-wrap:wrap;gap:8px}
 .lee303-controls.kz-on>.kz-cell{flex:0 0 100px}
 .lee303-controls.kz-on>:not(.kz-cell){flex:1 1 200px}
-@media(max-width:520px){#blFx.kz-on>.control.kz-cell,.mine909-mix.kz-on>.kz-cell,.lee303-controls.kz-on>.kz-cell{flex-basis:84px}}
+@media(max-width:520px){.mine909-mix.kz-on>.kz-cell,.lee303-controls.kz-on>.kz-cell{flex-basis:84px}}
 </style>
 <script id="glctc1-knobs-js">
 (()=>{'use strict';
@@ -7370,14 +7408,15 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
   {panel:'beatLabPanel',theme:'kz-808',cells:'.bl-fx > .control'},
   {panel:'mine909Panel',theme:'kz-909',cells:'.d09-control, .mine909-mix > div'},
   {panel:'lee303Panel',theme:'kz-303',cells:'.lee303-control'},
-  {panel:'s101Panel',theme:'kz-101',cells:'.s101-control',fader:true}
+  {panel:'s101Panel',theme:'kz-101',cells:'.s101-control',fader:true},
+  {panel:'wsPanel',theme:'kz-desk',cells:'.qmx-kc'}
  ];
  const KN=new Set();
  const num=(x,d)=>{x=parseFloat(x);return isFinite(x)?x:d};
- function nameOf(box,label){const sp=label&&label.querySelector('span');let t=sp?sp.textContent:(label?[...label.childNodes].filter(n=>n.nodeType===3||(n.nodeType===1&&n.tagName!=='OUTPUT')).map(n=>n.textContent).join(' '):'');t=t.replace(/\s+/g,' ').trim().replace(/\s*·\s*DARK.*$/i,'').replace(/\s*\/\s*drive$/i,' / Drive');if(!t){const r=box.querySelector('input[type=range]');t=(r&&(r.getAttribute('aria-label')||r.title))||''}return t}
+ function nameOf(box,label){const sp=label&&label.querySelector('span:not(.kz-val)');let t=sp?sp.textContent:(label?[...label.childNodes].filter(n=>n.nodeType===3||(n.nodeType===1&&n.tagName!=='OUTPUT'&&!n.classList.contains('kz-val'))).map(n=>n.textContent).join(' '):'');t=t.replace(/\s+/g,' ').trim().replace(/\s*·\s*DARK.*$/i,'').replace(/\s*\/\s*drive$/i,' / Drive');if(!t){const r=box.querySelector('input[type=range]');t=(r&&(r.getAttribute('aria-label')||r.title))||''}return t}
  function make(box,theme){const st0={};
   const r=box.querySelector(':scope > input[type=range]');if(!r||r.__kz)return false;
-  const label=box.querySelector(':scope > label');let out=label&&label.querySelector('output');const ownOut=!out;
+  const label=box.querySelector(':scope > label');let out=label&&(label.querySelector('output')||label.querySelector('span[id]'));if(out)out.classList.add('kz-val');const ownOut=!out;
   const nm=document.createElement('span');nm.className='kz-n';nm.textContent=nameOf(box,label);
   if(!out){out=document.createElement('output')}
   const fad=!!(box.__kzFader);
@@ -7389,7 +7428,7 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
   const st={r,k,ring,out,min,max,step,def,last:null,drag:false,ownOut,fad,cap:st0.cap,trk:st0.trk};r.__kz=st;KN.add(st);
   const snap=x=>{x=Math.max(min,Math.min(max,x));if(step){x=Math.round((x-min)/step)*step+min;x=Math.max(min,Math.min(max,+x.toFixed(6)))}return x};
   const f0=(min<0&&max>0)?(0-min)/(max-min):0;
-  function paint(){const v=num(r.value,min),f=(v-min)/((max-min)||1);if(fad){st.cap.style.bottom='calc('+(f*100).toFixed(2)+'% - 9px)';k.setAttribute('aria-valuenow',String(v));st.last=r.value;if(st.ownOut)out.textContent=String(Math.round(v*100)/100);return}ring.style.setProperty('--a0',(Math.min(f,f0)*270).toFixed(1)+'deg');ring.style.setProperty('--a1',(Math.max(f,f0)*270).toFixed(1)+'deg');k.style.setProperty('--a',(-135+f*270).toFixed(1)+'deg');k.setAttribute('aria-valuenow',String(v));k.setAttribute('aria-valuetext',out.textContent||String(v));st.last=r.value;if(st.ownOut)out.textContent=String(Math.round(v*100)/100)}
+  function paint(){const v=num(r.value,min),f=(v-min)/((max-min)||1);if(fad){st.cap.style.bottom='calc('+(f*100).toFixed(2)+'% - 9px)';k.setAttribute('aria-valuenow',String(v));st.last=r.value;if(st.ownOut)out.textContent=(min>=0&&max<=1)?Math.round(v*100)+'%':String(Math.round(v*100)/100);return}ring.style.setProperty('--a0',(Math.min(f,f0)*270).toFixed(1)+'deg');ring.style.setProperty('--a1',(Math.max(f,f0)*270).toFixed(1)+'deg');k.style.setProperty('--a',(-135+f*270).toFixed(1)+'deg');k.setAttribute('aria-valuenow',String(v));k.setAttribute('aria-valuetext',out.textContent||String(v));st.last=r.value;if(st.ownOut)out.textContent=(min>=0&&max<=1)?Math.round(v*100)+'%':String(Math.round(v*100)/100)}
   function set(x,fire){const v=snap(x);if(String(v)===r.value&&!fire)return;r.value=String(v);r.dispatchEvent(new Event('input',{bubbles:true}));paint()}
   st.paint=paint;
   k.chainGet=()=>num(r.value,min);k.chainSet=x=>set(x);k.chainMin=min;k.chainMax=max;
@@ -7410,10 +7449,11 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
  function scan(){ZONES.forEach(z=>{const P=document.getElementById(z.panel);if(!P)return;P.querySelectorAll(z.cells).forEach(box=>{if(z.fader)box.__kzFader=true;if(make(box,z.theme)){const par=box.parentElement;if(par)par.classList.add('kz-on')}})})}
  /* keep knobs in step when presets, patterns, undo or other code change the slider values */
  setInterval(()=>{KN.forEach(st=>{if(!st.r.isConnected){KN.delete(st);return}if(!st.drag&&st.r.value!==st.last)st.paint()})},200);
- let t=0;const mo=new MutationObserver(()=>{clearTimeout(t);t=setTimeout(scan,80)});
- function start(){scan();ZONES.forEach(z=>{const P=document.getElementById(z.panel);if(P)mo.observe(P,{childList:true,subtree:true})})}
+ let t=0;const mo=new MutationObserver(()=>{if(!t)t=setTimeout(()=>{t=0;scan()},90)});
+ function movePads(){const P=document.getElementById('mine909Panel');if(!P)return;const pw=P.querySelector('.mine909-padwrap');const sec=[...P.querySelectorAll('.bl-section')].find(x=>/FOUR EXTRA SAMPLE CHANNELS/i.test(x.textContent));if(!pw||!sec||pw.closest('.d09-padsec'))return;const hint=[...sec.children].reverse().find(c=>c.tagName==='P'||/saved in this browser/i.test(c.textContent));pw.classList.add('d09-padsec');const t=pw.querySelector('.mine909-subtitle');if(t)t.textContent='DRUM PADS · TAP TO PLAY · SAMPLE 1–4 PLAY YOUR LOADED SAMPLES';if(hint&&hint.parentElement===sec)sec.insertBefore(pw,hint);else sec.append(pw)}
+ function start(){movePads();scan();ZONES.forEach(z=>{const P=document.getElementById(z.panel);if(P)mo.observe(P,{childList:true,subtree:true})})}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
- window.addEventListener('load',()=>setTimeout(scan,300),{once:true});
+ window.addEventListener('load',()=>setTimeout(()=>{movePads();scan()},300),{once:true});
  window.GLCTC_KNOBS={scan,count:()=>KN.size};
 })();
 </script>
@@ -7442,6 +7482,5 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 
 
 <!-- GLCTC1 v55: SONG COMPOSER STOP now halts all registered modules and scheduled audio, resets shared module start step and master clock to beat zero, and returns the DAW timeline playhead/position to bar 1. -->
-
 
 

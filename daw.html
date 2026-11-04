@@ -2063,7 +2063,19 @@ async function rec(s){if(s.mr){s.mr.stop();return}try{const st=await navigator.m
 function draw(s){const cv=$('lpWave'),x=cv.getContext('2d'),w=cv.width,hh=cv.height,b=s&&(s.proc||s.buf);x.clearRect(0,0,w,hh);if(!b){x.fillStyle='#888';x.fillText('Tap REC or load a sample',12,20);return}const d=b.getChannelData(0),st=Math.max(1,Math.floor(d.length/w));x.strokeStyle='#19baff';x.beginPath();for(let i=0;i<w;i++){let mn=1,mxv=-1;for(let j=0;j<st;j+=Math.max(1,st>>5)){const v=d[i*st+j]||0;if(v<mn)mn=v;if(v>mxv)mxv=v}x.moveTo(i,hh/2+mn*hh/2);x.lineTo(i,hh/2+mxv*hh/2)}x.stroke();const L=s.L;x.fillStyle='#000b';x.fillRect(0,0,L.start*w,hh);x.fillRect(L.end*w,0,w,hh)}
 function ui(){const s=cur(),L=s&&s.L;[['lpRec','● REC','■ STOP REC',s&&s.mr],['lpPlay','▶ PAD','■ PAD',s&&s.v]].forEach(([id,a,b,on])=>{$(id).textContent=on?b:a;$(id).classList.toggle('active',!!on)});$('lpLoop').classList.toggle('active',!!(L&&L.loop));$('lpRev').classList.toggle('active',!!(L&&L.rev));if(L){$('lpMode').value=L.mode;$('lpBars').value=L.bars;$('lpWarp').checked=L.warp;document.querySelectorAll('#lpSliders input').forEach(i=>i.value=L[i.dataset.k])}$('lpInfo').textContent=!s?'Create a looper track (or press LOOPER on any channel) to begin.':s.proc?'Loop: '+s.proc.duration.toFixed(2)+' s · output goes through this track’s mixer channel, FX and sends.':'Tap REC to record from your microphone, or load a sample. Samples live in this session – use Bounce to keep them in the timeline.';draw(s);padsUi();padSync()}
 
-window.lpLoadDemo=(force)=>{try{const t=project.tracks.find(x=>x.looper);if(!t)return;ensure(t);const s=padState(t,0);if(s.buf&&!force)return;const c=ensureAudio(),sr=c.sampleRate,bpm=Math.max(30,Math.min(300,GLCTC_CLOCK.bpm)),bars=2,len=Math.round(bars*4*60/bpm*sr),b=c.createBuffer(1,len,sr),d=b.getChannelData(0),sx=sr*60/bpm/4;let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647*2-1};for(let i=0;i<bars*16;i++){const st=Math.round(i*sx),acc=i%4===2?.34:i%2===1?.16:.07,n=Math.min(Math.round(sr*.045),len-st);let prev=0;for(let k=0;k<n;k++){const x=rnd(),hp=x-prev;prev=x;d[st+k]+=hp*acc*Math.exp(-k/(sr*.011))}}s.buf=b;const L=t.looper.pads[0];L.bars=bars;L.warp=true;L.mode='loop';L.loop=true;t.looper.sel=0;proc(s);ui();draw(s)}catch(e){console.warn('Looper demo',e)}};
+/* v71 GENRE LOOP: the Looper's starter loop is written for the song's genre (shaker / tambourine / vinyl crackle) and carries the same swing as the drum modules, so it never flams against them */
+const LP_GROOVE={techno:{sh:[.07,.16,.34,.16]},trance:{sh:[.05,.12,.3,.12]},psytrance:{sh:[.05,.12,.28,.12]},house:{sh:[.1,.18,.3,.18]},garage:{sh:[.08,.2,.28,.22]},
+ dnb:{sh:[.12,.18,.3,.2]},breaks:{sh:[.1,.2,.32,.2]},hiphop:{sh:[.08,0,.12,0],tb:[0,0,0,0,.32,0,0,0,0,0,0,0,.32,0,0,0],cr:.6},lofi:{sh:[.07,0,.1,0],tb:[0,0,0,0,.18,0,0,0,0,0,0,0,.18,0,0,0],cr:.8},
+ dubstep:{sh:[0,0,.22,0,0,0,.14,0]},synthwave:{sh:[.14,0,.2,0]},pop:{sh:[.1,0,.26,0],tb:[0,0,0,0,.2,0,0,0,0,0,0,0,.2,0,0,0]},trap:{sh:[0,0,.12,0,0,0,0,0]},ambient:{sh:[0,0,.06,0,0,0,0,0],cr:.5}};
+window.lpLoadDemo=(force,genre)=>{try{const t=project.tracks.find(x=>x.looper);if(!t)return;ensure(t);const s=padState(t,0);if(s.buf&&!force)return;
+ genre=genre||(window.GLCTC_NEW_SONG&&window.GLCTC_NEW_SONG.genre)||'techno';const GR=LP_GROOVE[genre]||LP_GROOVE.techno;
+ let sw=0;try{const e=document.getElementById('gscSwing');if((!e||e.checked)&&window.GLCTC_PATTERNS)sw=window.GLCTC_PATTERNS.swingFor(genre)||0}catch(_){}
+ const c=ensureAudio(),sr=c.sampleRate,bpm=Math.max(30,Math.min(300,GLCTC_CLOCK.bpm)),bars=2,len=Math.round(bars*4*60/bpm*sr),b=c.createBuffer(1,len,sr),d=b.getChannelData(0),sx=sr*60/bpm/4;let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647*2-1};
+ const hit=(st,acc,dec,ms,bright)=>{const n=Math.min(Math.round(sr*ms),len-st);let p1=0,p2=0;for(let k=0;k<n;k++){const x=rnd(),h1=x-p1;p1=x;const h2=bright?h1-p2:h1;p2=h1;d[st+k]+=h2*acc*(bright?.7:1)*Math.exp(-k/(sr*dec))}};
+ for(let i=0;i<bars*16;i++){const st=Math.round((i+(i%2===1?sw:0))*sx);if(st>=len)continue;const a=GR.sh[i%GR.sh.length]||0,tb=GR.tb?GR.tb[i%16]:0;
+  if(a)hit(st,a*.6*(.92+.16*Math.abs(rnd())),.011,.045,false);if(tb)hit(st,tb*.6,.034,.14,true)}
+ if(GR.cr){const nC=Math.round(len/sr*14*GR.cr);for(let j=0;j<nC;j++){const at=Math.floor((rnd()*.5+.5)*(len-4)),amp=(.04+.14*Math.pow(Math.abs(rnd()),3))*(rnd()<0?-1:1);d[at]+=amp;d[at+1]-=amp*.6;d[at+2]+=amp*.2}}
+ s.buf=b;const L=t.looper.pads[0];L.bars=bars;L.warp=true;L.mode='loop';L.loop=true;t.looper.sel=0;proc(s);ui();draw(s)}catch(e){console.warn('Looper demo',e)}};
 function refresh(){const sel=$('lpTrack'),v=sel.value;sel.innerHTML='';project.tracks.filter(t=>t.looper).forEach(t=>sel.append(new Option(t.name,t.id)));if([...sel.options].some(o=>o.value===v))sel.value=v;ui()}
 window.lpUse=id=>{const t=getTrack(id);if(!t)return;ensure(t);markDirty();renderAll();$('lpTrack').value=id;ui();$('looperPanel').__noJump?.({behavior:'smooth'})};
 const _ra4=renderAll;renderAll=function(){const r=_ra4.apply(this,arguments);refresh();window.lpLive();return r};
@@ -4195,8 +4207,9 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
 
  /* ---------- v68 AUTO MIX: measures every sound while the song plays and trims it to a balanced level ---------- */
  const AM={on:true,active:false,tdb:{},master:0,hist:{},an:{},mAn:null,mHist:[],mPk:0,buf:new Float32Array(2048),last:0,lastM:0,note:'',lpBase:null,lpSet:null,lpTap:null,genre:'',mt:-14.5};
- const AM_TARGET={bl:-20,mine:-20,lee:-24,s101:-25,go:-25,vox:-23,ws:-28,lp:-27};   /* loud-passage level of each sound (dBFS), peak-aware */
+ const AM_TARGET={bl:-20,mine:-26,lee:-24,s101:-26,go:-25,vox:-23,ws:-29,lp:-33};   /* v71: DIVINE09 only plays hats / ride / crash now, so it sits under the kick and snare instead of matching them; the Looper is a texture layer */   /* loud-passage level of each sound (dBFS), peak-aware */
  const AM_START={bl:-5,mine:6,lee:-8,s101:-8,go:-4,vox:-3,ws:2};   /* v70: measured average of where the auto mix settles, so every sound already sits right the first time it enters (a build is not learned from) */                    /* first guess, so nothing blasts before it has been measured */
+ const AM_MAXUP={mine:10,ws:10};   /* v71: hats and PAD-64 hits are never pushed up more than +10 dB chasing a level they should not reach */
  const AM_LS='glctc1.autoMix',AM_MASTER_BY={ambient:-18,lofi:-16};
  /* v12 GENRE CHARACTER (dB on top of AM_TARGET): bass-led styles push the 30LEE forward, drum-led styles the kit, melodic styles the leads/pads */
  const AM_GENRE={techno:{bl:1.5,lee:1},house:{mine:1,s101:1},dnb:{lee:2.5,mine:1},hiphop:{bl:2,lee:3,s101:-1,mine:-3},ambient:{go:4,s101:1,ws:2,vox:-1},
@@ -4229,7 +4242,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   let changed=false,n=0;
   MODS.forEach(m=>{if(m.track)return;const h=AM.hist[m.id];if(!h||h.length<30)return;n++;
    const p90=amPct(h,.9),err=tgt(m.id)-p90;if(Math.abs(err)<1.3)return;
-   const step=Math.max(-3,Math.min(2,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-24,Math.min(18,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
+   const step=Math.max(-3,Math.min(2,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-24,Math.min(AM_MAXUP[m.id]||18,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
   /* the Looper demo loop is a timeline track: trim it through its track volume (your own fader move is respected) */
   if(lt&&AM.hist.lp&&AM.hist.lp.length>=30&&AM.lpSet!=null){n++;
    if(Math.abs(lt.volume-AM.lpSet)>.03*AM.lpSet+.005){const f=AM.lpSet/Math.max(.001,AM.lpBase||AM.lpSet);AM.lpBase=lt.volume/f;AM.lpSet=lt.volume}
@@ -5776,8 +5789,10 @@ const GENRE={
  psytrance:{patch:'F|PSY ZAP LEAD',skip:['vox'],pre:{lp:'Psytrance · Spiral',bl:'Psytrance · Forest Punch',mine:'Psytrance · Electro Rattle',lee:'Psytrance · Gallop',s101:'Psytrance · Acid Zap',go:'F|PSY ZAP LEAD',vox:'PSY SHAMAN',ws:'Psytrance · Zap Rain'}},
  breaks:{patch:'F|BREAKBEAT HOOVER',skip:[],pre:{lp:'Breaks · Crunchy Break',bl:'Breaks · Big Beat',mine:'Breaks · Big Beat Kit',lee:'Breaks · Funk Bass',s101:'Breaks · Rave Hoover',go:'F|BREAKBEAT HOOVER',vox:'BREAKS MC',ws:'Breaks · Big Beat Hits'}}
 };
+const CHILL_BUILD={hiphop:{bl:2,lee:0,s101:0,go:3,ws:2},lofi:{bl:2,lee:0,s101:0,go:3,ws:2,lp:0},ambient:{s101:0,go:3,ws:2}};
 /* AUTO-ARRANGE: one rule per module by section kind. -1 = silent, 0.. = pattern A, B, C ... */
-function autoCells(secs){
+function autoCells(secs,genre){
+ genre=genre||(window.GLCTC_NEW_SONG&&window.GLCTC_NEW_SONG.genre)||'';
  /* v12 BANGING ARRANGER: every section uses the pattern the AI writer made for that job.
     Drums/bass/PAD-64: 0 main groove · 1 alt groove (2nd drop) · 2 breakdown · 3 build fill (snare roll, rising bass, riser).
     Galactic One: 0 main · 2 sparse · 3 rise · 5 drop-2 lead · 7 pad.  -1 = silent. */
@@ -5791,6 +5806,8 @@ function autoCells(secs){
  secs.forEach(s=>{
   const K=s.kind;
   if(K==='drop'){const a=drop++%2;put({lp:0,bl:a,mine:a,lee:a,s101:0,go:a?(V.lead2):0,vox:0,ws:a});return}
+  /* v71: hip hop / lo-fi do not do EDM snare-roll builds - the beat strips back (kick + snare only, no hats) and drops in again; ambient just swells */
+  if(K==='build'&&CHILL_BUILD[genre]){put(CHILL_BUILD[genre]);return}
   if(K==='build'){put({lp:0,bl:3,mine:3,lee:3,s101:0,go:3,ws:3});return}
   if(K==='break'){put(V.brk);return}
   if(K==='verse'){put({bl:0,mine:0,lee:0,go:2,vox:0});return}
@@ -6050,7 +6067,7 @@ try{window.GLCTC_SONG_MODE=localStorage.getItem('glctc1.songMode')||'minor'}catc
 function wsRetune(){try{const a=window.GLCTC_PAD64_PATTERNS;if(!wsKeyTunes||!a||!a.get||!a.set)return;const d=a.get();d.tunes=Object.assign({},wsKeyTunes);a.set(d)}catch(e){console.warn('pad-64 key lock',e)}}
 function applyPresets(force){
  MODS.forEach(m=>{
-  const v=st.presets[m.k];if(!v||!used(m))return;
+  const v=st.presets[m.k];if(!v||(!used(m)&&m.k==='vox'))return;   /* v71: modules left out of the song still get the genre sound, so ticking one back in sounds right */
   const el=byId(m.preset);if(!el)return;
   if(!Array.from(el.options).some(o=>o.value===v))return;
   if(force||el.value!==v){el.value=v;fire(el)}
@@ -6329,7 +6346,7 @@ const PAT=(()=>{
    stab:'x.....x...x.....',goK:[3,5,2,6,3,4],voxR:'x.......',pops:.2}
  };
 /* who owns what, so no two modules double the same sound: 80LA8 = kick/snare/clap/toms/rim, DIVINE09 = hats/perc/cowbell/crash, 30LEE = bass, 0010110 = stab, GALACTIC ONE = lead/arp, VOX = hook, PAD-64 = pad + FX */
- const OWN={bl:'KSCTUR',mine:'HOGBZ'};
+ const OWN={bl:'KSCTUR',mine:'HOBZ'};   /* v71: congas (G) are played by PAD-64's real CONGA pad only - DIVINE09 used to double them on its HIGH TOM */
  const ROLE={bl:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,G:7,R:8,B:9,Z:10},ws:{K:0,S:1,C:2,H:3,O:4,T:5,R:6,G:7}};
  /* one bar of drum velocities per role; bar 2 gets a fill at the end so loops breathe */
  /* ===== v15 SONG WRITER: one shared chord vamp for every module, hook-style leads, and a per-song "flavour" so no two songs are alike ===== */
@@ -6420,7 +6437,8 @@ const PAT=(()=>{
  function wsPats(g,r,key){const Gg=G[g];
   /* PAD-64 layer: percussion accents (open hat, rim, conga, tom, crash) taken from the genre grid, plus atmosphere (pad, zap, riser, impact).
      Kick, snare, clap, closed hat, bass and stab stay with the other modules so nothing doubles. Works for minor AND major keys. */
-  const roles={O:4,R:6,G:7,T:5,U:5};
+  /* v71: PAD-64 owns the congas only. Open hat (DIVINE09), rim and toms (80LA8) are no longer copied here, so nothing is played twice and the drums stay tight. */
+  const roles={G:7};
   return[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));const at=(lane,steps,v)=>steps.forEach(i=>{if(i>=0&&i<64)L[lane][i]=v||1});
    const d=(Gg.D&&(Gg.D[k]||Gg.D[0]))||{};
    for(const role in roles){let str=d[role];if(!str)continue;if(F.rot&&k!==2&&(role==='R'||role==='G'))str=rotS(str,F.rot);
@@ -6530,7 +6548,7 @@ function resetAllForNewSong(){
 function prepareSong(genreKey,txt,forceFill){
  try{freshKnobs()}catch(e){console.warn('knob reset',e)}
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
- st.len=TPL[len]?len:'32';st.secs=mkSecs(st.len);st.cells=autoCells(st.secs);
+ st.len=TPL[len]?len:'32';st.secs=mkSecs(st.len);st.cells=autoCells(st.secs,genreKey);
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
  const skip=new Set(g.skip);
  if(/acid|303/.test(txt))skip.delete('lee');
@@ -6575,7 +6593,7 @@ async function generate(){
   prepareSong(genreKey,txt,false);
   /* v9: same finishing steps as NEW SONG ON LOAD - reload every module's genre sound from scratch (even if the preset name is already selected, so earlier tweaks or a previous song cannot leak in) and load the Looper loop */
   try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
-  try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
+  try{window.lpLoadDemo&&window.lpLoadDemo(true,genreKey)}catch(e){}
   try{applySwing(genreKey)}catch(e){}
   try{window.GLCTC_NEW_SONG={genre:genreKey,key:(byId('gscKey')||{}).textContent,bpm:st.bpm,seed:null}}catch(e){}
   status('SONG GENERATED · '+st.bpm+' BPM · '+(byId('gscKey')?.textContent||'KEY')+' · PRESS PLAY WHEN READY');
@@ -6608,7 +6626,7 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    resetAllForNewSong();
    const pack=prepareSong(g,rtxt,true);
    try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
-   try{window.lpLoadDemo&&window.lpLoadDemo(false)}catch(e){}
+   try{window.lpLoadDemo&&window.lpLoadDemo(true,g)}catch(e){}
    try{applySwing(g)}catch(e){}
    window.GLCTC_NEW_SONG={genre:g,key:pack&&pack.name,bpm:st.bpm,seed:pack&&pack.seed};const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=String(pack&&pack.name||'C MINOR').toUpperCase();
    status('NEW SONG · '+g.toUpperCase()+' · '+(pack?pack.name:'')+' · '+st.bpm+' BPM · every module is in key and in time · press PLAY');

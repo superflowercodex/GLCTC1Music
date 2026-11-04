@@ -119,7 +119,7 @@ details.advanced{margin-top:16px;border:1px solid #00ffff30;border-radius:14px;p
 .av-modal.on{display:flex}.av-sheet{width:min(520px,100%);max-height:96vh;overflow:auto;background:#0b0820;border:1px solid #ff2bd6;border-radius:16px;padding:14px;box-shadow:0 0 30px #ff2bd655}
 .av-title{font:900 14px Orbitron,Arial,sans-serif;letter-spacing:.16em;color:#fff}.av-msg{margin:6px 0;font:700 10px Orbitron,Arial,sans-serif;letter-spacing:.1em;color:var(--cyan)}
 .av-stage{display:flex;justify-content:center}.av-can{max-width:100%;max-height:58vh;border-radius:10px;touch-action:none;background:#120c28}
-.av-lab{margin-top:10px;font:700 10px Orbitron,Arial,sans-serif;letter-spacing:.14em;color:var(--cyan)}.chip.mv-sig{border-color:#ffd61e;color:#ffd61e}.av-tip{margin:8px 0;font-size:11px;color:#bbb;line-height:1.5}.av-name{width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid #00ffff55;background:#04040e;color:#fff;font:700 12px Orbitron,Arial,sans-serif;letter-spacing:.1em}
+.av-lab{margin-top:10px;font:700 10px Orbitron,Arial,sans-serif;letter-spacing:.14em;color:var(--cyan)}.chip.mv-sig{border-color:#ffd61e;color:#ffd61e}.char-search{margin:10px 0}.cs-in{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid #00ffff66;background:#04040e;color:#fff;font:700 12px Orbitron,Arial,sans-serif;letter-spacing:.08em}.cs-in:focus{outline:none;border-color:var(--pink);box-shadow:0 0 14px #ff2bd655}.cs-note{margin:6px 2px;font-size:10px;letter-spacing:.06em;color:#9aa;min-height:12px}.cs-head{margin:6px 0;font-size:11px;letter-spacing:.2em;color:var(--pink)}.cs-found:empty{display:none}.av-by{display:block;font-size:9px;letter-spacing:.08em;color:#9fe;margin-top:2px}.av-tip{margin:8px 0;font-size:11px;color:#bbb;line-height:1.5}.av-name{width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid #00ffff55;background:#04040e;color:#fff;font:700 12px Orbitron,Arial,sans-serif;letter-spacing:.1em}
 </style>
 </head>
 <body>
@@ -3302,6 +3302,9 @@ function cutoutFallback(c){ const w = c.width, h = c.height, g = c.getContext("2
  ed.forEach((i,k) => { if(!seen[i]){ seen[i] = 1; q.push([i,k]); } });
  while(q.length){ const [i,k] = q.pop(); mask[i] = 0; const x = i%w, y = (i/w)|0; const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1];
   for(const j of nb){ if(j < 0 || seen[j]){ continue; } if(dist(j,ref[k]) < 70 && dist(j,[d[i*4],d[i*4+1],d[i*4+2]]) < 34){ seen[j] = 1; q.push([j,k]); } } }
+ { const med = ch => { const v = ref.map(r => r[ch]).sort((a,b) => a - b); return v[v.length >> 1]; }; const er = [med(0),med(1),med(2)]; const near = new Uint8Array(w*h); for(let i = 0; i < w*h; i++){ if(mask[i] > .5 && dist(i,er) < 36){ near[i] = 1; } }
+  const vis = new Uint8Array(w*h), minA = w*h*.0015; for(let s0 = 0; s0 < w*h; s0++){ if(!near[s0] || vis[s0]){ continue; } const comp = [s0], st2 = [s0]; vis[s0] = 1; let adj = false; while(st2.length){ const i = st2.pop(); const x = i%w, y = (i/w)|0; for(const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]){ if(j < 0){ continue; } if(mask[j] < .5){ adj = true; } if(near[j] && !vis[j]){ vis[j] = 1; st2.push(j); comp.push(j); } } }
+   if(comp.length > minA || (adj && comp.length > 6)){ comp.forEach(i => { mask[i] = 0; }); } } }
  return mask; }
 function maskBBox(mask,w,h){ let x0 = w, y0 = h, x1 = 0, y1 = 0; for(let y = 0; y < h; y++){ for(let x = 0; x < w; x++){ if(mask[y*w + x] > .5){ if(x < x0){ x0 = x; } if(x > x1){ x1 = x; } if(y < y0){ y0 = y; } if(y > y1){ y1 = y; } } } } return x1 > x0 ? { x0, y0, x1, y1 } : null; }
 function rowSpan(mask,w,y,cx){ y = Math.round(y); let l = Math.round(cx), r = Math.round(cx); while(l > 0 && mask[y*w + l - 1] > .5){ l--; } while(r < w - 1 && mask[y*w + r + 1] > .5){ r++; } return [l,r]; }
@@ -3319,40 +3322,74 @@ function jointsFromMP(lm,mask,w,h){ const P = i => [lm[i].x*w,lm[i].y*h]; const 
  return { top:[nose[0],ty], head:[nose[0],(ty + chin)/2], chin:[nose[0],chin], shL:pick(12,11), shR:pick2(12,11), elL:pick(14,13), elR:pick2(14,13), wrL:pick(16,15), wrR:pick2(16,15), hiL:pick(24,23), hiR:pick2(24,23), knL:pick(26,25), knR:pick2(26,25), anL:pick(28,27), anR:pick2(28,27) }; }
 const dst = (a,b) => Math.hypot(b[0] - a[0],b[1] - a[1]);
 const mid = (a,b) => [(a[0] + b[0])/2,(a[1] + b[1])/2];
+/* every pixel of the cut-out belongs to one body part; anything else in the photo (a staff, an ankh, a halo, a bag…) is a PROP
+   and rides on the body part it touches — the hand first, then the head — so nothing is ever cut off */
+const AVPARTS = [["thighL","hiL","knL"],["shinL","knL","anL"],["thighR","hiR","knR"],["shinR","knR","anR"],["upL","shL","elL"],["foreL","elL","wrL"],["upR","shR","elR"],["foreR","elR","wrR"]];
+function segDist(px,py,A,B){ const vx = B[0] - A[0], vy = B[1] - A[1], L = vx*vx + vy*vy || 1; let t = ((px - A[0])*vx + (py - A[1])*vy)/L; t = t < 0 ? 0 : t > 1 ? 1 : t; const dx = px - A[0] - vx*t, dy = py - A[1] - vy*t; return Math.sqrt(dx*dx + dy*dy); }
+function inPoly(px,py,P){ let c = false; for(let i = 0, j = P.length - 1; i < P.length; j = i++){ if(((P[i][1] > py) !== (P[j][1] > py)) && (px < (P[j][0] - P[i][0])*(py - P[i][1])/(P[j][1] - P[i][1]) + P[i][0])){ c = !c; } } return c; }
+function polyDist(px,py,P){ if(inPoly(px,py,P)){ return 0; } let m = 1e9; for(let i = 0, j = P.length - 1; i < P.length; j = i++){ m = Math.min(m,segDist(px,py,P[j],P[i])); } return m; }
+function buildLayers(img,J){ const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height; const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d"); g.drawImage(img,0,0); const src = g.getImageData(0,0,w,h).data;
+ const up = (dst(J.shL,J.elL) + dst(J.shR,J.elR))/2, thigh = (dst(J.hiL,J.knL) + dst(J.hiR,J.knR))/2, shw = dst(J.shL,J.shR), headH = Math.max(10,J.chin[1] - J.top[1]);
+ const torsoP = [[J.shL[0],J.shL[1] - headH*.1],[J.shR[0],J.shR[1] - headH*.1],[J.hiR[0],J.hiR[1] + thigh*.12],[J.hiL[0],J.hiL[1] + thigh*.12]];
+ const hc = J.head, hrx = Math.max(shw*.36,headH*.6), hry = headH*.62;
+ const names = AVPARTS.map(p => p[0]).concat(["torso","head","propL","propR"]); const T = 8, HD = 9, PL = 10, PR = 11;
+ const zone = AVPARTS.map(p => /^(up|fore)/.test(p[0]) ? up*.5 : thigh*.42); zone[T] = shw*.3; zone[HD] = headH*.35;
+ const shinL = (dst(J.knL,J.anL) + dst(J.knR,J.anR))/2; const lab = new Int8Array(w*h).fill(-1), nd = new Float32Array(w*h);
+ for(let y = 0; y < h; y++){ for(let x = 0; x < w; x++){ const o = y*w + x; if(src[o*4+3] < 20){ continue; } let best = -1, bv = 1;
+   for(let k = 0; k < AVPARTS.length; k++){ let d = segDist(x,y,J[AVPARTS[k][1]],J[AVPARTS[k][2]])/zone[k]; if(k === 1 || k === 3){ const E = J[AVPARTS[k][2]], dx = x - E[0], dy = (y - E[1])*1.4; if(y > E[1] - shinL*.15){ d = Math.min(d,Math.sqrt(dx*dx + dy*dy)/(shinL*.72)); } } if(d < bv){ bv = d; best = k; } }
+   const dt = polyDist(x,y,torsoP)/zone[T]; if(dt < bv || dt === 0 && bv > .35){ bv = dt; best = T; }
+   const ex = (x - hc[0])/hrx, ey = (y - hc[1])/hry, eh = Math.max(0,Math.sqrt(ex*ex + ey*ey) - 1)*hry/zone[HD]; if(eh < bv || (eh === 0 && y < J.chin[1])){ bv = eh; best = HD; }
+   lab[o] = best; nd[o] = bv; if(best < 0){ lab[o] = -2; } } }
+ /* props: connected pieces outside the body, attached to the hand they touch (else head, else what they touch, else nearest) */
+ const seen = new Uint8Array(w*h), wr = [J.wrL,J.wrR], foreIdx = [5,7], handR = up*.7;
+ for(let s0 = 0; s0 < w*h; s0++){ if(lab[s0] !== -2 || seen[s0]){ continue; } const comp = [], touch = {}; const st = [s0]; seen[s0] = 1; let sx = 0, sy = 0, nearHand = [1e9,1e9];
+  while(st.length){ const o = st.pop(); comp.push(o); const x = o%w, y = (o/w)|0; sx += x; sy += y; for(let q = 0; q < 2; q++){ const d = dst([x,y],wr[q]); if(d < nearHand[q]){ nearHand[q] = d; } }
+   for(const n of [x > 0 ? o - 1 : -1, x < w - 1 ? o + 1 : -1, y > 0 ? o - w : -1, y < h - 1 ? o + w : -1]){ if(n < 0){ continue; } const L = lab[n]; if(L === -2 && !seen[n]){ seen[n] = 1; st.push(n); } else if(L >= 0){ touch[L] = (touch[L] || 0) + 1; } } }
+  let to; const hq = nearHand[0] < nearHand[1] ? 0 : 1;
+  if(nearHand[hq] < handR){ to = hq ? PR : PL; } else if(touch[HD]){ to = HD; } else{ const ks = Object.keys(touch); if(ks.length){ to = +ks.sort((a,b) => touch[b] - touch[a])[0]; } else{ const cx = sx/comp.length, cy = sy/comp.length; to = cy < J.chin[1] + headH*.3 ? HD : (dst([cx,cy],J.wrL) < dst([cx,cy],J.wrR) ? PL : PR); } }
+  for(const o of comp){ lab[o] = to; } }
+ /* a held object that passes close to the body (a staff by the leg) takes back its own pixels: grow each hand prop into body pixels of the same colour, away from the bone */
+ { const q = []; for(let o = 0; o < w*h; o++){ if(lab[o] === PL || lab[o] === PR){ q.push(o); } } const cd = (a,b) => Math.abs(src[a*4] - src[b*4]) + Math.abs(src[a*4+1] - src[b*4+1]) + Math.abs(src[a*4+2] - src[b*4+2]);
+  for(let qi = 0; qi < q.length; qi++){ const o = q[qi], x = o%w, y = (o/w)|0; for(const n of [x > 0 ? o - 1 : -1, x < w - 1 ? o + 1 : -1, y > 0 ? o - w : -1, y < h - 1 ? o + w : -1]){ if(n < 0){ continue; } const L = lab[n]; if(L >= 0 && L < HD && L !== T && nd[n] > .3 && cd(n,o) < 46){ lab[n] = lab[o]; q.push(n); } } } }
+ /* joints: a little overlap so nothing opens up when a limb bends */
+ const JO = [["knL",0,1,thigh*.3],["knR",2,3,thigh*.3],["elL",4,5,up*.28],["elR",6,7,up*.28],["hiL",0,T,thigh*.38],["hiR",2,T,thigh*.38],["shL",4,T,up*.32],["shR",6,T,up*.32]];
+ const layers = names.map(() => ({ x0:w, y0:h, x1:-1, y1:-1 })); const extra = names.map(() => []);
+ for(let o = 0; o < w*h; o++){ const L = lab[o]; if(L < 0){ continue; } const x = o%w, y = (o/w)|0; const b = layers[L]; if(x < b.x0){ b.x0 = x; } if(x > b.x1){ b.x1 = x; } if(y < b.y0){ b.y0 = y; } if(y > b.y1){ b.y1 = y; }
+  for(const [jn,a,bb,r] of JO){ if(L !== a && L !== bb){ continue; } const p = J[jn]; const dx = x - p[0], dy = y - p[1]; if(dx*dx + dy*dy < r*r){ const other = L === a ? bb : a; extra[other].push(o); const e = layers[other]; if(x < e.x0){ e.x0 = x; } if(x > e.x1){ e.x1 = x; } if(y < e.y0){ e.y0 = y; } if(y > e.y1){ e.y1 = y; } } } }
+ const out = {}; names.forEach((n,L) => { const b = layers[L]; if(b.x1 < b.x0){ return; } const lw = b.x1 - b.x0 + 1, lh = b.y1 - b.y0 + 1; const lc = document.createElement("canvas"); lc.width = lw; lc.height = lh; const lg = lc.getContext("2d"); const id = lg.createImageData(lw,lh), d = id.data;
+  const put = o => { const x = o%w - b.x0, y = ((o/w)|0) - b.y0, q = (y*lw + x)*4; d[q] = src[o*4]; d[q+1] = src[o*4+1]; d[q+2] = src[o*4+2]; d[q+3] = src[o*4+3]; };
+  for(let o = 0; o < w*h; o++){ if(lab[o] === L){ put(o); } } extra[L].forEach(put); lg.putImageData(id,0,0); out[n] = { c:lc, x:b.x0, y:b.y0 }; });
+ return out; }
 function buildPhotoChar(img,J,name,meta){ const thigh = (dst(J.hiL,J.knL) + dst(J.hiR,J.knR))/2, shin = (dst(J.knL,J.anL) + dst(J.knR,J.anR))/2, up = (dst(J.shL,J.elL) + dst(J.shR,J.elR))/2, fore = (dst(J.elL,J.wrL) + dst(J.elR,J.wrR))/2;
  const sm2 = mid(J.shL,J.shR), hm = mid(J.hiL,J.hiR), torso = dst(hm,sm2), headH = Math.max(10,J.chin[1] - J.top[1]); const full = (thigh + shin) + torso + Math.max(0,sm2[1] - J.chin[1]) + headH; const k = 520/Math.max(50,full);
- const ch = { name:(name || "MY AVATAR").toUpperCase().slice(0,16), photo:{ img, J, k }, my:.5, avatar:meta || null,
+ const ch = { name:(name || "MY AVATAR").toUpperCase().slice(0,16), photo:{ img, J, k, L:buildLayers(img,J) }, my:.5, avatar:meta || null,
   p:{ leg:(thigh + shin)/2*k, arm:(up + fore)/2*k, torso:torso*k, headR:headH/2*k, neck:Math.max(2,(sm2[1] - J.chin[1]))*k, hipW:dst(J.hiL,J.hiR)/2*k, shW:dst(J.shL,J.shR)/2*k, limbW:24 },
   limb:{ col:"#888", hand:"#888", foot:"#888", joint:null }, torsoCol:"#888", torsoW:60, head(){} };
- /* limb thickness measured from the cut-out */
- ch.photo.w = { arm:Math.max(10,up*.32), leg:Math.max(14,thigh*.36) }; return ch; }
-function seg(g,img,A,B,A2,B2,wid,extA,extB){ const L1 = dst(A,B) || 1, L2 = Math.hypot(B2.x - A2.x,B2.y - A2.y) || 1, s = L2/L1; const th = Math.atan2(B2.y - A2.y,B2.x - A2.x) - Math.atan2(B[1] - A[1],B[0] - A[0]);
- g.save(); g.translate(A2.x,A2.y); g.rotate(th); g.scale(s,s); g.translate(-A[0],-A[1]); const ux = (B[0] - A[0])/L1, uy = (B[1] - A[1])/L1, nx = -uy, ny = ux, a0 = [A[0] - ux*extA,A[1] - uy*extA], b0 = [B[0] + ux*extB,B[1] + uy*extB];
- g.beginPath(); g.moveTo(a0[0] + nx*wid,a0[1] + ny*wid); g.lineTo(b0[0] + nx*wid,b0[1] + ny*wid); g.arc(b0[0],b0[1],wid,Math.atan2(ny,nx),Math.atan2(-ny,-nx)); g.lineTo(a0[0] - nx*wid,a0[1] - ny*wid); g.arc(a0[0],a0[1],wid,Math.atan2(-ny,-nx),Math.atan2(ny,nx)); g.closePath(); g.clip(); g.drawImage(img,0,0); g.restore(); }
+ return ch; }
+function held(g,Ly,E,Wr,E2,W2,k){ if(!Ly){ return; } const a1 = Math.atan2(Wr[1] - E[1],Wr[0] - E[0]), a2 = Math.atan2(W2.y - E2.y,W2.x - E2.x); let d = a2 - a1; while(d > Math.PI){ d -= Math.PI*2; } while(d < -Math.PI){ d += Math.PI*2; }
+ g.save(); g.translate(W2.x,W2.y); g.rotate(d*.18); g.scale(k,k); g.translate(-Wr[0],-Wr[1]); layerAt(g,Ly); g.restore(); }
+function layerAt(g,Ly){ if(Ly){ g.drawImage(Ly.c,Ly.x,Ly.y); } }
+function seg(g,Ly,A,B,A2,B2){ if(!Ly){ return; } const L1 = dst(A,B) || 1, L2 = Math.hypot(B2.x - A2.x,B2.y - A2.y) || 1, s = L2/L1; const th = Math.atan2(B2.y - A2.y,B2.x - A2.x) - Math.atan2(B[1] - A[1],B[0] - A[0]);
+ g.save(); g.translate(A2.x,A2.y); g.rotate(th); g.scale(s,s); g.translate(-A[0],-A[1]); layerAt(g,Ly); g.restore(); }
 function affine3(g,p,q){ /* map photo triangle p → screen triangle q */ const [a,b,c] = p, [A,B,C] = q; const den = (b[0] - a[0])*(c[1] - a[1]) - (c[0] - a[0])*(b[1] - a[1]) || 1;
  const m11 = ((B.x - A.x)*(c[1] - a[1]) - (C.x - A.x)*(b[1] - a[1]))/den, m12 = ((C.x - A.x)*(b[0] - a[0]) - (B.x - A.x)*(c[0] - a[0]))/den, m21 = ((B.y - A.y)*(c[1] - a[1]) - (C.y - A.y)*(b[1] - a[1]))/den, m22 = ((C.y - A.y)*(b[0] - a[0]) - (B.y - A.y)*(c[0] - a[0]))/den;
  g.transform(m11,m21,m12,m22,A.x - m11*a[0] - m12*a[1],A.y - m21*a[0] - m22*a[1]); }
-function photoDraw(g,ch,G,st){ const ph = ch.photo, J = ph.J, img = ph.img, wA = ph.w.arm, wL = ph.w.leg;
+function photoDraw(g,ch,G,st){ const ph = ch.photo, J = ph.J, L = ph.L;
  g.save(); if(S.gal && S.gal.on){ g.shadowColor = CHK[Math.floor(performance.now()/333)%7].c; g.shadowBlur = 26; }
- seg(g,img,J.hiL,J.knL,G.hipL,G.kneeL,wL,wL*.4,wL*.5); seg(g,img,J.hiR,J.knR,G.hipR,G.kneeR,wL,wL*.4,wL*.5);
- seg(g,img,J.knL,J.anL,G.kneeL,G.footL,wL*.85,wL*.3,dst(J.knL,J.anL)*.42); seg(g,img,J.knR,J.anR,G.kneeR,G.footR,wL*.85,wL*.3,dst(J.knR,J.anR)*.42);
- { const sm2 = mid(J.shL,J.shR), hm = mid(J.hiL,J.hiR); g.save(); affine3(g,[J.shL,J.shR,hm],[G.shL,G.shR,G.hip]); const ox = (J.shR[0] - J.shL[0])*.06, hx = (J.hiR[0] - J.hiL[0])*.25, dn = dst(hm,sm2)*.16;
-  g.beginPath(); g.moveTo(J.shL[0] - ox,sm2[1] - (J.shL[1] - sm2[1]) - dst(hm,sm2)*.05); g.lineTo(J.chin[0] - dst(J.shL,J.shR)*.16,J.chin[1]); g.lineTo(J.chin[0] + dst(J.shL,J.shR)*.16,J.chin[1]); g.lineTo(J.shR[0] + ox,J.shR[1] - dst(hm,sm2)*.05);
-  g.lineTo(J.hiR[0] + hx,J.hiR[1] + dn); g.lineTo(J.hiL[0] - hx,J.hiL[1] + dn); g.closePath(); g.clip(); g.drawImage(img,0,0); g.restore(); }
- { const R = ch.p.headR, c = Math.cos(G.tilt), s = Math.sin(G.tilt), top = { x:G.head.x + s*R, y:G.head.y - c*R }, bob = 1 + (st.mouth || 0)*.04; const hc = J.head;
-  g.save(); const L1 = Math.max(4,hc[1] - J.top[1]), sc = R/L1; g.translate(G.head.x,G.head.y); g.rotate(G.tilt); g.scale(sc,sc*bob); g.translate(-hc[0],-hc[1]);
-  const hw = Math.max(dst(J.shL,J.shR)*.42,L1*.95); g.beginPath(); g.ellipse(hc[0],hc[1] - L1*.05,hw,L1*1.18,0,0,Math.PI*2); g.clip(); g.drawImage(img,0,0); g.restore(); }
- seg(g,img,J.shL,J.elL,G.shL,G.elbowL,wA,wA*.6,wA*.4); seg(g,img,J.elL,J.wrL,G.elbowL,G.handL,wA*.9,wA*.3,dst(J.elL,J.wrL)*.5);
- seg(g,img,J.shR,J.elR,G.shR,G.elbowR,wA,wA*.6,wA*.4); seg(g,img,J.elR,J.wrR,G.elbowR,G.handR,wA*.9,wA*.3,dst(J.elR,J.wrR)*.5);
+ seg(g,L.thighL,J.hiL,J.knL,G.hipL,G.kneeL); seg(g,L.thighR,J.hiR,J.knR,G.hipR,G.kneeR); seg(g,L.shinL,J.knL,J.anL,G.kneeL,G.footL); seg(g,L.shinR,J.knR,J.anR,G.kneeR,G.footR);
+ { const hm = mid(J.hiL,J.hiR); g.save(); affine3(g,[J.shL,J.shR,hm],[G.shL,G.shR,G.hip]); layerAt(g,L.torso); g.restore(); }
+ { const R = ch.p.headR, bob = 1 + (st.mouth || 0)*.04, hc = J.head, L1 = Math.max(4,hc[1] - J.top[1]), sc = R/L1; g.save(); g.translate(G.head.x,G.head.y); g.rotate(G.tilt); g.scale(sc,sc*bob); g.translate(-hc[0],-hc[1]); layerAt(g,L.head); g.restore(); }
+ seg(g,L.upL,J.shL,J.elL,G.shL,G.elbowL); seg(g,L.foreL,J.elL,J.wrL,G.elbowL,G.handL); seg(g,L.upR,J.shR,J.elR,G.shR,G.elbowR); seg(g,L.foreR,J.elR,J.wrR,G.elbowR,G.handR);
+ held(g,L.propL,J.elL,J.wrL,G.elbowL,G.handL,ph.k); held(g,L.propR,J.elR,J.wrR,G.elbowR,G.handR,ph.k);
  g.restore(); }
 function addAvatarCard(ch){ CHARS.push(ch); const i = CHARS.length - 1; const b = document.createElement("button"); b.type = "button"; b.className = "char-card av-card"; const c = document.createElement("canvas"); c.width = 170; c.height = 240;
  const label = document.createElement("span"); label.textContent = "👤 " + ch.name + (ch.sig ? " · " + (MOVE_NAMES[ch.sig] || "").split(" ")[0] : ""); b.append(c,label); b.onclick = () => { if(S.party){ partyToggle(i); } else{ selectChar(i); } };
- const x = document.createElement("i"); x.className = "av-del"; x.textContent = "✕"; x.title = "Delete this avatar"; x.onclick = e => { e.stopPropagation(); avDelete(ch,b); }; b.appendChild(x);
+ if(ch.guest){ const a = document.createElement("small"); a.className = "av-by"; a.textContent = "BY " + (ch.artist || "AN ARTIST"); b.appendChild(a); } else{ const x = document.createElement("i"); x.className = "av-del"; x.textContent = "✕"; x.title = "Delete this avatar"; x.onclick = e => { e.stopPropagation(); avDelete(ch,b); }; b.appendChild(x); }
  charGrid.appendChild(b); cards.push({ b, c, ch }); drawThumb(c,ch,false); return i; }
 async function avDelete(ch,b){ if(!confirm("Delete the avatar " + ch.name + "?")){ return; } try{ const sb = getSupabase(); if(sb && ch.avatar){ if(ch.avatar.id){ await sb.from("video_characters").delete().eq("id",ch.avatar.id); } if(ch.avatar.path){ await sb.storage.from(AV.bucket).remove([ch.avatar.path]); } } }catch(e){ console.warn("avatar delete",e); }
  b.style.display = "none"; ch.hidden = true; if(CHARS[S.char] === ch){ selectChar(0); } status.textContent = "AVATAR DELETED."; }
 /* editor modal */
-const avBox = document.createElement("div"); avBox.className = "av-modal"; avBox.innerHTML = '<div class="av-sheet"><div class="av-title">👤 YOUR AVATAR</div><div class="av-msg">LOADING…</div><div class="av-stage"><canvas class="av-can"></canvas></div><div class="av-tip">Drag the dots onto your joints if any are off. Best photo: full body, standing, facing the camera, arms a little away from your sides.</div><input class="av-name" maxlength="16" placeholder="NAME YOUR CHARACTER" value="MY AVATAR"><div class="av-lab">SIGNATURE SPECIAL MOVE</div><div class="chip-row av-moves"><button type="button" class="chip selected" data-m="fly">🕊 FLY</button><button type="button" class="chip" data-m="jump">⤒ BIG JUMP</button><button type="button" class="chip" data-m="spin">🌀 TORNADO SPIN</button><button type="button" class="chip" data-m="galactic">✦ FULL GALACTIC</button></div><div class="chip-row"><button type="button" class="chip av-ok selected">✓ CREATE CHARACTER</button><button type="button" class="chip av-cancel">CANCEL</button></div></div>';
+const avBox = document.createElement("div"); avBox.className = "av-modal"; avBox.innerHTML = '<div class="av-sheet"><div class="av-title">👤 YOUR AVATAR</div><div class="av-msg">LOADING…</div><div class="av-stage"><canvas class="av-can"></canvas></div><div class="av-tip">Drag the dots onto your joints if any are off. Best photo: full body, standing, facing the camera, arms a little away from your sides.</div><input class="av-name" maxlength="16" placeholder="NAME YOUR CHARACTER" value="MY AVATAR"><div class="chip-row"><button type="button" class="chip av-share selected">🌐 SHARE WITH OTHER ARTISTS</button></div><div class="av-lab">SIGNATURE SPECIAL MOVE</div><div class="chip-row av-moves"><button type="button" class="chip selected" data-m="fly">🕊 FLY</button><button type="button" class="chip" data-m="jump">⤒ BIG JUMP</button><button type="button" class="chip" data-m="spin">🌀 TORNADO SPIN</button><button type="button" class="chip" data-m="galactic">✦ FULL GALACTIC</button></div><div class="chip-row"><button type="button" class="chip av-ok selected">✓ CREATE CHARACTER</button><button type="button" class="chip av-cancel">CANCEL</button></div></div>';
 document.body.appendChild(avBox);
 const avCan = avBox.querySelector(".av-can"), avMsg = avBox.querySelector(".av-msg"); let avCur = null;
 const JNAMES = ["top","head","chin","shL","shR","elL","elR","wrL","wrR","hiL","hiR","knL","knR","anL","anR"];
@@ -3364,7 +3401,7 @@ function avPaint(){ if(!avCur){ return; } const { cut, J } = avCur, g = avCan.ge
  avCan.addEventListener("pointerdown",e => { if(!avCur){ return; } const p = pos(e); let best = null, bd = 1e9; JNAMES.forEach(n => { const d = dst(p,avCur.J[n]); if(d < bd){ bd = d; best = n; } }); if(bd < avCan.width*.08){ drag = best; avCan.setPointerCapture(e.pointerId); e.preventDefault(); } });
  avCan.addEventListener("pointermove",e => { if(!drag){ return; } const p = pos(e); avCur.J[drag] = [clamp(p[0],0,avCan.width),clamp(p[1],0,avCan.height)]; if(drag === "top" || drag === "chin"){ avCur.J.head = mid(avCur.J.top,avCur.J.chin); } avPaint(); });
  avCan.addEventListener("pointerup",() => { drag = null; }); }
-let avSig = "fly"; avBox.querySelectorAll(".av-moves .chip").forEach(b => b.onclick = () => { avSig = b.dataset.m; avBox.querySelectorAll(".av-moves .chip").forEach(x => x.classList.toggle("selected",x === b)); });
+let avSig = "fly", avShare = true; avBox.querySelector(".av-share").onclick = e => { avShare = !avShare; e.currentTarget.classList.toggle("selected",avShare); e.currentTarget.textContent = avShare ? "🌐 SHARE WITH OTHER ARTISTS" : "🔒 ONLY ME"; }; avBox.querySelectorAll(".av-moves .chip").forEach(b => b.onclick = () => { avSig = b.dataset.m; avBox.querySelectorAll(".av-moves .chip").forEach(x => x.classList.toggle("selected",x === b)); });
 avBox.querySelector(".av-cancel").onclick = () => { avBox.classList.remove("on"); avCur = null; };
 avBox.querySelector(".av-ok").onclick = async () => { if(!avCur){ return; } const name = avBox.querySelector(".av-name").value.trim() || "MY AVATAR"; const ok = avBox.querySelector(".av-ok"); ok.disabled = true;
  try{ const img = await loadImg(avCur.cut.toDataURL("image/png")); const ch = buildPhotoChar(img,avCur.J,name,null); ch.sig = avSig; const i = addAvatarCard(ch); selectChar(i); avBox.classList.remove("on");
@@ -3374,7 +3411,8 @@ async function avUser(){ const sb = getSupabase(); if(!sb){ return null; } try{ 
 async function avSave(ch,cur){ const u = await avUser(); if(!u){ return "SIGN IN TO SAVE IT TO YOUR ACCOUNT."; } try{ const id = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8); const path = u.user.id + "/avatars/" + id + ".png";
   const blob = await new Promise(r => cur.cut.toBlob(r,"image/png")); const st = u.sb.storage.from(AV.bucket);
   const up = await st.upload(path,blob,{ contentType:"image/png", upsert:true }); if(up.error){ throw up.error; }
-  const { data, error } = await u.sb.from("video_characters").insert({ user_id:u.user.id, name:ch.name, image_path:path, joints:cur.J, special_move:ch.sig || "fly", width:cur.cut.width, height:cur.cut.height }).select("id").single();
+  let artist = ""; try{ const { data:pr } = await u.sb.from("profiles").select("artist_name").eq("id",u.user.id).maybeSingle(); artist = (pr && pr.artist_name) || ""; }catch(e){}
+  const { data, error } = await u.sb.from("video_characters").insert({ user_id:u.user.id, name:ch.name, image_path:path, joints:cur.J, special_move:ch.sig || "fly", width:cur.cut.width, height:cur.cut.height, artist_name:artist, is_public:avShare }).select("id").single();
   if(error){ await st.remove([path]); throw error; }
   ch.avatar = { id:data.id, path }; return true; }catch(e){ console.warn("avatar save",e); return "IT COULD NOT BE SAVED (" + (e.message || "storage") + ")."; } }
 async function avLoadSaved(){ const u = await avUser(); if(!u){ return; } try{ const { data, error } = await u.sb.from("video_characters").select("id,name,image_path,joints,special_move").eq("user_id",u.user.id).order("created_at",{ ascending:true }); if(error || !data){ if(error){ console.warn("avatars",error.message); } return; }
@@ -3395,12 +3433,34 @@ async function avFromFile(file){ avBox.classList.add("on"); avCur = null; avMsg.
   const g = c.getContext("2d"), id = g.getImageData(0,0,w,h); for(let i = 0; i < w*h; i++){ const a = mask[i]; id.data[i*4+3] = a > .6 ? 255 : a < .3 ? 0 : Math.round((a - .3)/.3*255); } g.putImageData(id,0,0);
   const b = maskBBox(mask,w,h) || { x0:0, y0:0, x1:w - 1, y1:h - 1 }; const pad = 12, x0 = Math.max(0,b.x0 - pad), y0 = Math.max(0,b.y0 - pad), x1 = Math.min(w,b.x1 + pad), y1 = Math.min(h,b.y1 + pad);
   const cut = document.createElement("canvas"); cut.width = x1 - x0; cut.height = y1 - y0; cut.getContext("2d").drawImage(c,-x0,-y0); JNAMES.forEach(n => { J[n] = [J[n][0] - x0,J[n][1] - y0]; });
-  avCur = { cut, J }; avMsg.textContent = how; avPaint(); }
+  avCur = { cut, J, off:[x0,y0], sc }; avMsg.textContent = how; avPaint(); }
  catch(e){ console.warn("avatar",e); avMsg.textContent = "WE COULDN'T FIND A PERSON IN THAT PHOTO — TRY A FULL-BODY PHOTO ON A PLAIN BACKGROUND."; } }
 { const row = document.createElement("div"); row.className = "chip-row av-row"; row.innerHTML = '<label class="chip av-up">👤 UPLOAD AVATAR — FULL BODY PHOTO<input type="file" accept="image/*" hidden></label><span class="av-hint">Turns a photo of you into a dancing character. Saved to your GLCTC1 account.</span>';
  const inp = row.querySelector("input"); inp.onchange = () => { const f = inp.files && inp.files[0]; inp.value = ""; if(f){ avFromFile(f); } }; charGrid.after(row); }
 setTimeout(avLoadSaved,1200);
-window.GLCTC_VIDEO = { beatSec, sp:() => S.sp, probe:(kind,ph) => { const sv = S.sp, am = S.autoMoves; S.autoMoves = false; S.sp = { kind, t0:performance.now()/1000 - ph*2, dur:2 }; const t = v23Moves(Object.assign({},REST),16,0); S.sp = sv; S.autoMoves = am; return { hop:t.hop, aLu:t.aLu, bx:S.bxSpin }; }, chk:CHK, ckApply, keyFromBuffer, startMove, endGalactic, buildPhotoChar, addAvatarCard, avFromFile, defaultJoints, cutoutFallback, state:() => ({ stage:STAGES[S.stage].id, ck:S.ck.cur, why:S.ck.why, auto:S.ck.auto, sp:S.sp && S.sp.kind, gal:S.gal.on, hop:S.pose.hop, look:S.look, chars:CHARS.length }) };
+/* ---------- CHARACTER SEARCH: your characters + every artist's shared characters ---------- */
+{ const box = document.createElement("div"); box.className = "char-search";
+ box.innerHTML = '<input type="search" class="cs-in" placeholder="🔍 SEARCH CHARACTERS OR ARTISTS…" autocomplete="off"><div class="cs-note"></div><div class="cs-head" style="display:none">ARTISTS\' CHARACTERS</div><div class="char-grid cs-found"></div>';
+ charGrid.before(box); const inp = box.querySelector(".cs-in"), note = box.querySelector(".cs-note"), head = box.querySelector(".cs-head"), found = box.querySelector(".cs-found"); let tmr = 0, req = 0; const added = new Set();
+ const norm = t => String(t || "").toLowerCase();
+ function filterLocal(q){ let n = 0; cards.forEach(o => { if(o.ch.hidden){ return; } const hit = !q || norm(o.ch.name).includes(q) || norm(o.ch.artist).includes(q); o.b.style.display = hit ? "" : "none"; if(hit){ n++; } }); return n; }
+ async function searchRemote(q){ const my = ++req; const sb = getSupabase(); if(!sb){ note.textContent = "ARTISTS' CHARACTERS NEED A CONNECTION."; return; }
+  let me = null; try{ const { data } = await sb.auth.getUser(); me = data && data.user ? data.user.id : null; }catch(e){}
+  let qq = sb.from("video_characters").select("id,user_id,name,artist_name,image_path,joints,special_move").eq("is_public",true).order("created_at",{ ascending:false }).limit(24);
+  if(q){ const safe = q.replace(/[%,()]/g," ").trim(); qq = qq.or("name.ilike.%" + safe + "%,artist_name.ilike.%" + safe + "%"); }
+  const { data, error } = await qq; if(my !== req){ return; } found.innerHTML = "";
+  if(error){ console.warn("character search",error); note.textContent = "ARTISTS' CHARACTERS ARE NOT SET UP YET (RUN THE SQL UPDATE)."; head.style.display = "none"; return; }
+  const rows = (data || []).filter(r => r.user_id !== me && !added.has(r.id)); head.style.display = rows.length ? "" : "none";
+  if(!rows.length){ note.textContent = q ? "NO ARTIST CHARACTERS MATCH \"" + q.toUpperCase() + "\"." : ""; return; }
+  note.textContent = rows.length + " ARTIST CHARACTER" + (rows.length > 1 ? "S" : "") + (q ? " FOUND" : " · NEWEST FIRST") + " — TAP ONE TO DANCE WITH IT";
+  const st = sb.storage.from(AV.bucket);
+  for(const r of rows){ const b = document.createElement("button"); b.type = "button"; b.className = "char-card av-card cs-card"; const c = document.createElement("canvas"); c.width = 170; c.height = 240; const lab = document.createElement("span"); lab.textContent = "👤 " + r.name; const by = document.createElement("small"); by.className = "av-by"; by.textContent = "BY " + (r.artist_name || "AN ARTIST"); b.append(c,lab,by); found.appendChild(b);
+   let ch = null; b.disabled = true;
+   (async () => { try{ const pb = await st.download(r.image_path); if(!pb.data){ throw Error("no image"); } const img = await loadImg(URL.createObjectURL(pb.data)); ch = buildPhotoChar(img,r.joints,r.name,{ id:r.id, path:r.image_path }); ch.sig = r.special_move || "fly"; ch.guest = true; ch.artist = r.artist_name || ""; drawThumb(c,ch,false); b.disabled = false; }catch(e){ console.warn("artist character",r.name,e); lab.textContent = "✕ " + r.name + " (UNAVAILABLE)"; } })();
+   b.onclick = () => { if(!ch){ return; } added.add(r.id); const i = addAvatarCard(ch); selectChar(i); b.remove(); if(!found.children.length){ head.style.display = "none"; } status.textContent = ch.name + " BY " + (ch.artist || "AN ARTIST") + " JOINED YOUR CHARACTERS — LOAD A SONG AND PRESS PLAY."; filterLocal(norm(inp.value.trim())); }; } }
+ inp.addEventListener("input",() => { const q = norm(inp.value.trim()); const n = filterLocal(q); note.textContent = q ? n + " OF YOUR CHARACTERS MATCH · SEARCHING ARTISTS…" : ""; clearTimeout(tmr); tmr = setTimeout(() => searchRemote(q).catch(e => console.warn(e)),350); });
+ let browsed = false; inp.addEventListener("focus",() => { if(!browsed && !inp.value.trim()){ browsed = true; searchRemote("").catch(e => console.warn(e)); } }); }
+window.GLCTC_VIDEO = { avSetJ:J0 => { if(!avCur){ return false; } const k = avCur.sc; JNAMES.forEach(n => { if(J0[n]){ avCur.J[n] = [J0[n][0]*k - avCur.off[0],J0[n][1]*k - avCur.off[1]]; } }); avPaint(); return true; }, beatSec, sp:() => S.sp, probe:(kind,ph) => { const sv = S.sp, am = S.autoMoves; S.autoMoves = false; S.sp = { kind, t0:performance.now()/1000 - ph*2, dur:2 }; const t = v23Moves(Object.assign({},REST),16,0); S.sp = sv; S.autoMoves = am; return { hop:t.hop, aLu:t.aLu, bx:S.bxSpin }; }, chk:CHK, ckApply, keyFromBuffer, startMove, endGalactic, buildPhotoChar, addAvatarCard, avFromFile, defaultJoints, cutoutFallback, state:() => ({ stage:STAGES[S.stage].id, ck:S.ck.cur, why:S.ck.why, auto:S.ck.auto, sp:S.sp && S.sp.kind, gal:S.gal.on, hop:S.pose.hop, look:S.look, chars:CHARS.length }) };
 
 })();
 </script>

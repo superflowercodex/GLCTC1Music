@@ -1969,7 +1969,7 @@ function kcWrap(root){if(!root)return;root.querySelectorAll('input[type=range]')
 window.glctcKcWrap=kcWrap;
 let padT=0;function padLater(){clearTimeout(padT);const go=()=>{if(window.__qmxPadDown){padT=setTimeout(go,200)}else renderAll()};padT=setTimeout(go,250)}
 window.glctcTrackPads=function(){const box=$('qmxTrackPads');if(!box||!project||!window.glctcPad)return;box.innerHTML='';
- project.tracks.filter(t=>t.type!=='auto').forEach(t=>{const st=()=>project.tracks.find(x=>x.id===t.id)||t;
+ project.tracks.filter(t=>t.type!=='auto'&&!t.looper).forEach(t=>{const st=()=>project.tracks.find(x=>x.id===t.id)||t;
   box.append(h('div',{className:'qmx-padcol'},glctcPad('mute',t.name,t.color,()=>!!st().mute,()=>{const x=st();x.mute=!x.mute;rebase();markDirty();padLater()}),glctcPad('solo',t.name,t.color,()=>!!st().solo,()=>{const x=st();x.solo=!x.solo;rebase();markDirty();padLater()})))})};
 /* v65 layer controls for the SEQUENCER TRACKS mixer */
 window.glctcTrackMix={
@@ -1996,7 +1996,7 @@ const CN=window.GLCTC_CN;if(!CN){clearTimeout(mixUi._t);mixUi._t=setTimeout(mixU
 el.innerHTML='';for(const k in strips)delete strips[k];
 const dbf=v=>(v>0?'+':'')+(Math.round(v*2)/2)+'dB',pct=v=>Math.round(v*100)+'',panf=v=>Math.abs(v)<.03?'C':(v<0?'L':'R')+Math.round(Math.abs(v)*100);
 const K=(lab,min,max,st,val,fn,fmt,def)=>{const k=CN.knob(lab,min,max,st,val,fn,fmt,def);const w=k.el;w.classList.add('qmx-k');w.title=lab;return w};
-project.tracks.filter(t=>t.type!=='auto').forEach(t=>{const f=tfx(t),eq=eqOf(t),ep=(eq&&eq.p)||{};
+project.tracks.filter(t=>t.type!=='auto'&&!t.looper).forEach(t=>{const f=tfx(t),eq=eqOf(t),ep=(eq&&eq.p)||{};
  const bar=h('i'),meter=h('div',{className:'cn-led'},bar),lamp=h('button',{className:'qmx-clip',textContent:'CLIP',title:'Tap to reset',type:'button'}),txt=h('small',{className:'qmx-db',textContent:'-∞'});lamp.onclick=()=>lamp.classList.remove('on');
  const fader=CN.fader(t.name+' level',0,1,.01,t.volume??.8,v=>{t.volume=v;window.lpLive&&window.lpLive();markDirty()},.8,.8);
  const hi=K('HI',-15,15,.5,ep.hi||0,v=>setEq(t,'hi',v),dbf,0),mid=K('MID',-15,15,.5,ep.mid||0,v=>setEq(t,'mid',v),dbf,0),lo=K('LO',-15,15,.5,ep.lo||0,v=>setEq(t,'lo',v),dbf,0);
@@ -5315,7 +5315,10 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
    const modPower=on=>{let off=false;try{off=localStorage.getItem(MSTATE)==='1'}catch(e){}if(on===undefined)on=off;if(!on===off)return;
     MODS.forEach(m=>{if(m.track){const t=lpTrack();if(!t)return;if(!on){t._pm=!!t.mute;t.mute=true}else{t.mute=!!t._pm;delete t._pm}}else{const st=ms(m.id);if(!on){st._pm=!!st.mute;st.mute=true}else{st.mute=!!st._pm;delete st._pm}}});
     try{localStorage.setItem(MSTATE,on?'0':'1')}catch(e){}ensureBuses();try{applyMix();save();rebase();renderAll();markDirty()}catch(e){}try{refresh()}catch(e){}paintLayers();toast(on?'Modules ON':'Modules OFF · every module channel is silent until you switch them back on')};
-   const modReset=()=>{ensureBuses();MODS.forEach(m=>{if(m.track){const t=lpTrack();if(t){t.volume=1;t.pan=0;t.solo=false;if(!('_pm' in t))t.mute=false}}else{const st=ms(m.id);st.vol=1;st.pan=0;st.solo=false;if(!st._pm)st.mute=false}const sp=strips[m.id];if(sp){try{sp.vol.value=1;sp.pan.value=0}catch(e){}}});
+   /* v78: RESET 0 dB makes every module channel normal and audible - the LOOPER channel resets every looper track (whatever the Looper drop-down shows), clears any saved 'muted by power-off' flag, and the module power goes back ON */
+    const modReset=()=>{ensureBuses();try{localStorage.setItem(MSTATE,'0')}catch(e){}
+     try{project.tracks.filter(t=>t.looper).forEach(t=>{t.volume=1;t.pan=0;t.solo=false;t.mute=false;t.send=true;delete t._pm;const L=t.looper&&t.looper.pads;if(Array.isArray(L))L.forEach(pd=>{if(pd&&'vol' in pd)pd.vol=1})})}catch(e){}
+     MODS.forEach(m=>{if(!m.track){const st=ms(m.id);st.vol=1;st.pan=0;st.solo=false;st.mute=false;delete st._pm}const sp=strips[m.id];if(sp){try{sp.vol.value=1;sp.pan.value=0}catch(e){}}});try{paintLayers()}catch(e){}
     try{applyMix();save();window.lpLive&&window.lpLive();markDirty()}catch(e){}try{refresh()}catch(e){}toast('Module mixer reset · faders at 0 dB, pans centred, solos off')};
    const modsOn=()=>{try{return localStorage.getItem(MSTATE)!=='1'}catch(e){return true}};
    const lbtn=(txt,title,fn,cls)=>el('button',{type:'button',class:'qmx-lb'+(cls?' '+cls:''),text:txt,title,onclick:fn});
@@ -5889,10 +5892,12 @@ window.GLCTC_FX={select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshA
    The Looper track keeps its pads (it is the LOOPER module) but loses its clips; all track mixer settings, sends and FX go back to normal. */
 window.GLCTC_CLEAR_TRACKS=function(){
  try{if(typeof stopPlayback==='function')stopPlayback(true)}catch(e){}
- const fresh=defaultProject().tracks,oldLp=project.tracks.find(t=>t.looper);
- project.tracks=fresh.map(t=>{if(t.looper&&oldLp){Object.assign(oldLp,{name:t.name,clips:[],volume:t.volume,pan:0,mute:false,solo:false,send:true,cue:false,busSends:{},fxChain:[],plugs:undefined});delete oldLp._pm;return oldLp}return t});
+ /* v78: EVERY sequencer track goes. Only the Looper's own track stays (the LOOPER module plays through it - it is channel 1 of the MODULES mixer, not a sequencer track) */
+ const fresh=defaultProject().tracks.find(t=>t.looper),oldLp=project.tracks.find(t=>t.looper);
+ let lp=fresh;if(oldLp){Object.assign(oldLp,{name:fresh.name,clips:[],volume:1,pan:0,mute:false,solo:false,send:true,cue:false,busSends:{},fxChain:[],plugs:undefined});delete oldLp._pm;lp=oldLp}
+ project.tracks=[lp];
  try{if(audioCtx&&audioCtx._buses){const keep=new Set(project.tracks.map(t=>t.id));Object.keys(audioCtx._buses).forEach(id=>{if(!keep.has(id)){const b=audioCtx._buses[id];try{b.tap.disconnect()}catch(e){}delete audioCtx._buses[id]}})}}catch(e){}
- selectedClipId=null;selectedTrackId=project.tracks[0]&&project.tracks[0].id;
+ selectedClipId=null;selectedTrackId=null;
  try{if(typeof PLUG!=='undefined'&&PLUG.rebuildAll)PLUG.rebuildAll()}catch(e){}
  try{if(typeof fxAll==='function')fxAll()}catch(e){}
  try{renderAll();markDirty()}catch(e){}
@@ -7073,6 +7078,17 @@ const TRANSPORT={
  }
 };
 window.GLCTC_TRANSPORT=TRANSPORT;
+/* v78 CLEAR COMPOSER (RESET ALL): an empty song - every cell '—' (nothing plays), no prompt, no presets, default levels, loop off */
+window.GLCTC_COMPOSER_CLEAR=function(){
+ try{if(S||starting)stopSong('COMPOSER CLEARED')}catch(e){}
+ st.cells={};MODS.forEach(m=>{st.cells[m.k]=st.secs.map(()=>-1);st.on[m.k]=true});
+ st.presets={};st.level={};st.loop=false;
+ try{const p=byId('gscPrompt');if(p)p.value=''}catch(e){}
+ try{const k=byId('gscKey');if(k)k.textContent='—'}catch(e){}
+ try{const f=byId('gscFillInfo');if(f)f.textContent=''}catch(e){}
+ save();renderGrid();try{refreshTimeline()}catch(e){}
+ status('COMPOSER CLEARED · every section is empty · press ✦ GENERATE SONG or pick patterns yourself');
+};
 byId('gscPlay').addEventListener('click',()=>TRANSPORT.play());
 byId('gscStop').addEventListener('click',()=>TRANSPORT.stop());
 /* capture-phase routing so the older handlers on these buttons never run a different kind of play */
@@ -7862,10 +7878,11 @@ function resetEverything(){
  CUR.genre=null;if(CUR.mode!=='off')CUR.mode='auto';save();apply();
  /* 6. v75: sequencer tracks cleared (standard track set, no clips), buses and every channel FX back to normal */
  try{window.GLCTC_CLEAR_TRACKS&&GLCTC_CLEAR_TRACKS()}catch(e){console.warn('clear tracks',e)}
+ try{window.GLCTC_COMPOSER_CLEAR&&GLCTC_COMPOSER_CLEAR()}catch(e){console.warn('clear composer',e)}
  try{const B=window.GLCTC_BUSES;if(B){const S2=B.state();S2.sends={};S2.sel={};for(let i=0;i<8;i++)B.set(i,{vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0}});B.sync()}}catch(e){}
  try{const F=window.GLCTC_FX;if(F){['lp','bl','mine','lee','s101','go','vox','ws'].forEach(id=>F.clear('mod:'+id));for(let i=0;i<8;i++)F.clear('bus:'+i)}}catch(e){}
  try{window.GLCTC_NEW_SONG=null;const f=$('gscFillInfo');if(f)f.textContent='ALL MODULES RESET · NO PATTERNS · write your own, or press ✦ GENERATE SONG';const k=$('gscKey');if(k)k.textContent='C MINOR'}catch(e){}
- toast2('↺ RESET ALL · every module at factory settings with empty patterns · sequencer tracks cleared · mixer, buses and FX back to normal');
+ toast2('↺ RESET ALL · every module at factory settings with empty patterns · all sequencer tracks removed · composer empty · mixer, buses and FX back to normal');
 }
 window.GLCTC_RESET_ALL=resetEverything;
 function addTile(){
@@ -7881,8 +7898,8 @@ function addTile(){
 .gm-grid .gm-reset .gr-s{font-size:10px;letter-spacing:.1em;color:#ffb3bd;max-width:280px;line-height:1.45;text-align:left}`;
  document.head.append(css);
  const b=document.createElement('button');b.type='button';b.className='gm-card gm-reset';b.title='Reset every module, pattern, mixer and master setting to its normal factory state';
- b.innerHTML='<span class="gr-ico">↺</span><span class="gr-t">RESET ALL</span><span class="gr-s">EVERY MODULE TO FACTORY · NO PATTERNS · SEQUENCER TRACKS CLEARED · MIXER, BUSES &amp; MASTER TO NORMAL</span>';
- b.onclick=()=>{if(confirm('RESET ALL?\n\nEvery module goes back to factory settings with EMPTY patterns.\nThe sequencer tracks are CLEARED (standard tracks, no clips).\nThe mixer, buses, channel FX and master go back to normal and 130 BPM.\n\nSave your project first if you want to keep it.'))resetEverything()};
+ b.innerHTML='<span class="gr-ico">↺</span><span class="gr-t">RESET ALL</span><span class="gr-s">EVERY MODULE TO FACTORY · NO PATTERNS · SEQUENCER TRACKS REMOVED · COMPOSER EMPTY · MIXER, BUSES &amp; MASTER TO NORMAL</span>';
+ b.onclick=()=>{if(confirm('RESET ALL?\n\nEvery module goes back to factory settings with EMPTY patterns.\nALL sequencer tracks are REMOVED and the SONG COMPOSER is emptied.\nThe mixer, buses, channel FX and master go back to normal and 130 BPM.\n\nSave your project first if you want to keep it.'))resetEverything()};
  grid.append(b);
  /* fill the free space after the last room (3 slots beside RECORD on the 4-column phone layout); full row if there is little room */
  const fit=()=>{try{const cols=getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length||4,n=grid.querySelectorAll('.gm-card:not(.gm-reset)').length,free=cols-(n%cols||cols);b.style.gridColumn='span '+(free>=3?free:cols)}catch(e){}};

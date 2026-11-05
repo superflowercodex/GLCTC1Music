@@ -4361,7 +4361,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  body.append(rackC.c);
  /* ---------- MASTER KEYBOARD CONTROLLER · ANALOG PERFORMANCE CONSOLE ---------- */
  const mkC=card('MASTER KEYBOARD CONTROLLER','GALACTIC ONE · hands-on performance · live sound control · master of every module');
- const mkSelected=new Set(MODS.map(m=>m.id));
+ const mkSelected=new Set(MODS.map(m=>m.id));let mkLayer=false;   /* v76: true once you arm several modules on purpose (layering) */
  const mkStatus=el('div',{class:'k37-l1',text:'SYSTEM READY · PICK A TARGET AND PLAY'});
  const mkTarg=el('div',{class:'k37-l2'}),mkInfo=el('div',{class:'k37-l3'});
  const mkNoteNames=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
@@ -4373,7 +4373,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  function mkRefreshLcd(){const names=MODS.filter(x=>mkSelected.has(x.id)).map(x=>x.name);mkTarg.textContent='TARGET ▸ '+(names.length?names.join(' + '):'NONE SELECTED');const s=(mkOct+1)*12,e=Math.min(127,s+mkKeyCount-1);mkInfo.textContent='KEYS '+mkNn(s)+'–'+mkNn(e)+' · OCT '+mkOct+' · TRANS '+(mkTranspose>0?'+':'')+mkTranspose+' · VEL '+(mkTouchVel?'TOUCH':mkVelocity)+' · BEND ±'+mkBendRange+(mkSustain?' · HOLD':'')}
  /* ---------- module targets ---------- */
  const mkPick=el('div',{class:'k37-chips'}),mkChecks={};
- MODS.forEach(m=>{const kind=m.track?'LOOPER':m.id==='ws'?'PAD VOICES':(['bl','mine'].includes(m.id)?'DRUM VOICE':'INSTRUMENT');const b=el('button',{class:'k37-chip'+(mkSelected.has(m.id)?' on':''),type:'button','aria-pressed':String(mkSelected.has(m.id)),title:m.name+' · '+kind},el('i',{class:'k37-led'}),el('span',{text:m.name}),el('small',{text:kind}));b.onclick=()=>{const on=!mkSelected.has(m.id);on?mkSelected.add(m.id):mkSelected.delete(m.id);b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on));mkStatus.textContent=mkSelected.size?'LIVE TARGETS UPDATED':'NO MODULE SELECTED · CHOOSE A TARGET';mkRefreshLcd()};mkChecks[m.id]=b;mkPick.append(b)});
+ MODS.forEach(m=>{const kind=m.track?'LOOPER':m.id==='ws'?'PAD VOICES':(['bl','mine'].includes(m.id)?'DRUM VOICE':'INSTRUMENT');const b=el('button',{class:'k37-chip'+(mkSelected.has(m.id)?' on':''),type:'button','aria-pressed':String(mkSelected.has(m.id)),title:m.name+' · '+kind},el('i',{class:'k37-led'}),el('span',{text:m.name}),el('small',{text:kind}));b.onclick=()=>{const on=!mkSelected.has(m.id);on?mkSelected.add(m.id):mkSelected.delete(m.id);mkLayer=mkSelected.size>1;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on));mkStatus.textContent=mkSelected.size?'LIVE TARGETS UPDATED':'NO MODULE SELECTED · CHOOSE A TARGET';mkRefreshLcd()};mkChecks[m.id]=b;mkPick.append(b)});
  function setExistingControl(id,v){const x=$(id);if(!x)return false;x.value=String(v);x.dispatchEvent(new Event('input',{bubbles:true}));x.dispatchEvent(new Event('change',{bubbles:true}));return true}
  function updateModuleMacro(pattern,value){let changed=0;const chosen=[...mkSelected].map(id=>MODS.find(m=>m.id===id)).filter(Boolean);chosen.forEach(m=>{const panel=$(m.panel);if(!panel)return;const ranges=[...panel.querySelectorAll('input[type="range"]')];const target=ranges.find(r=>{const t=((r.getAttribute('aria-label')||'')+' '+(r.title||'')+' '+(r.closest('label')?.textContent||'')).toLowerCase();return pattern.test(t)});if(target){const lo=Number(target.min||0),hi=Number(target.max||1);target.value=String(lo+(hi-lo)*value);target.dispatchEvent(new Event('input',{bubbles:true}));target.dispatchEvent(new Event('change',{bubbles:true}));changed++}});return changed}
  const fHz=x=>Math.round(180*Math.pow(100,x)),hzToFrac=h=>clampMK(Math.log(Math.max(180,Math.min(18000,h))/180)/Math.log(100),0,1);
@@ -5427,6 +5427,33 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  body.innerHTML='';
  body.append(el('div',{class:'cn'},cnBarEl,padC.c,cnScreen,cnMixer,cnKeyboard,det('SCENES · SNAPSHOT THE WHOLE CONSOLE',scC.c),det('SEQUENCE TRACKS · TIMELINE',trkC.c)));
  cnSyncArm();
+ /* ---------- v76 TOUCH TO ARM: touch any module (its panel, its mixer strip or its MUTE / SOLO pads) and it becomes the
+    module the MASTER KEYBOARD plays. If you have armed several modules on purpose to layer them, touching one of those keeps
+    the layer. The ARM / KEYS buttons and the target chips work exactly as before. ---------- */
+ {
+  padC.c.dataset.glctcMod='ws';const sqPane=cnScreen.querySelector('.cn-sq');if(sqPane)sqPane.dataset.glctcMod='ws';
+  const PANEL_IDS=MODS.filter(m=>m.id!=='ws').map(m=>[m.panel,m.id]);
+  const modOf=t=>{
+   if(!t||!t.closest)return null;
+   if(t.closest('.cn-keysec,.k37-chips,.cn-arm,.cn-livebar,#glctc1SongComposer'))return null;   /* the keyboard and the arm controls themselves */
+   const mk=t.closest('[data-glctc-mod]');if(mk)return mk.dataset.glctcMod;
+   const strip=t.closest('.cn-ch');if(strip&&strip.parentElement&&strip.parentElement.matches('#qmxDesk .qmx-mods > .cn-strips')){const i=[...strip.parentElement.children].indexOf(strip);return MODS[i]?MODS[i].id:null}
+   const pc=t.closest('#qmxModPads .qmx-padcol');if(pc){const i=[...pc.parentElement.children].indexOf(pc);return MODS[i]?MODS[i].id:null}
+   for(const [pid,id] of PANEL_IDS){if(t.closest('#'+pid))return id}
+   return null};
+  const autoArm=id=>{
+   if(!id||!mkChecks[id])return;
+   if(mkSelected.size===1&&mkSelected.has(id))return;
+   if(mkLayer&&mkSelected.has(id))return;
+   mkSelected.clear();mkSelected.add(id);mkLayer=false;
+   MODS.forEach(m=>{const b=mkChecks[m.id];if(b){const on=m.id===id;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on))}});
+   try{cnSyncArm()}catch(e){}try{mkRefreshLcd()}catch(e){}
+   const nm=(MODS.find(m=>m.id===id)||{}).name||id;mkStatus.textContent='ARMED ▸ '+nm+' · PLAY IT FROM THE MASTER KEYBOARD';
+  };
+  document.addEventListener('pointerdown',e=>{try{autoArm(modOf(e.target))}catch(err){}},true);
+  document.addEventListener('focusin',e=>{try{if(e.target&&e.target.matches&&e.target.matches('input,select,textarea,[role=slider]'))autoArm(modOf(e.target))}catch(err){}},true);
+  window.GLCTC_AUTOARM={arm:autoArm,armed:()=>[...mkSelected],layered:()=>mkLayer};
+ }
  /* ---------- wiring into the host app ---------- */
  const _ra=renderAll;renderAll=function(){const r=_ra.apply(this,arguments);try{renderTracks();renderChips()}catch(e){console.error(e)}return r};
  setInterval(()=>{try{refresh();if(aud&&!playing)endAudition()}catch(e){}},250);
@@ -5633,7 +5660,8 @@ window.GLCTC_BUSES={sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
 (()=>{'use strict';
 const LSFX='glctc1.fx.v1',MAXFX=8;
 let FS={mods:{},buses:{},master:[]};
-try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{};FS.master=Array.isArray(x.master)?x.master:[]}}catch(e){}
+try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{}}}catch(e){}
+/* v75: the master has its own MASTER FX in the master section - it is not part of the channel FX */FS.master=[];
 let fsT=0;const fsave=()=>{clearTimeout(fsT);fsT=setTimeout(()=>{try{localStorage.setItem(LSFX,JSON.stringify(FS))}catch(e){}},250)};
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const AC2=()=>{try{return audioCtx}catch(e){return null}};
@@ -5779,7 +5807,6 @@ const MODIDS=['bl','mine','lee','s101','go','vox','ws'];
 function attachLive(){const c=AC2();if(!c||!c._mg)return;
  MODIDS.forEach(id=>{let b=null;try{b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(id)}catch(e){}if(!b||b.c!==c||!b.hp||!b.vol)return;if(b._fx&&b._fx.c===c)return;
   const ix=c.createGain(),ox=c.createGain();try{b.hp.disconnect()}catch(e){}b.hp.connect(ix);ox.connect(b.vol);b._fx=attach(c,'mod:'+id,ix,ox)});
- if(c._mIns&&!c._mIns._fx){c._mIns._fx=attach(c,'master',c._mIns[0],c._mIns[1])}
  /* tracks that already exist (new ones are caught by the trackBus hook) */
  if(c._buses)for(const id in c._buses){const b=c._buses[id];if(b&&b.flt&&!b._fx&&b.track)hookTrack(c,b.track,b)}
 }
@@ -5792,8 +5819,8 @@ let lastBpm=0;setInterval(()=>{try{attachLive();const b=bpm();if(Math.abs(b-last
 
 /* ---------- UI: CHANNEL FX panel (under the MASTER SECTION) ---------- */
 const E=(t,a,...k)=>{const e=document.createElement(t);if(a)for(const x in a){if(x==='class')e.className=a[x];else if(x==='text')e.textContent=a[x];else if(x.startsWith('on'))e[x]=a[x];else e.setAttribute(x,a[x])}k.forEach(n=>n!=null&&e.append(n));return e};
-let sel='master',panel=null,body=null,picker=null,titleEl=null;
-function channels(){const out=[{key:'master',name:'MASTER',col:'#ffd36a',grp:'MASTER'}];
+let sel='mod:bl',panel=null,body=null,picker=null,titleEl=null,addBox=null;
+function channels(){const out=[];
  const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state();const BC=['#ff5d73','#ffb347','#ffe066','#6dff8b','#4fd8ff','#7a8cff','#c77dff','#ff7ad9'];
  for(let i=0;i<8;i++)out.push({key:'bus:'+i,name:BS?BS.buses[i].name:'BUS '+(i+1),col:BC[i],grp:'BUSES'});
  [['lp','LOOPER','#19baff'],['bl','80LA8','#ffd36a'],['mine','DIVINE09','#4fd8ff'],['lee','30LEE','#ff6eae'],['s101','0010110','#75e4ff'],['go','GALACTIC ONE','#40eaff'],['vox','GALACTIC VOX','#ff7ad9'],['ws','PAD-64','#ffb347']].forEach(([id,n,c])=>out.push({key:'mod:'+id,name:n,col:c,grp:'MODULES'}));
@@ -5811,9 +5838,9 @@ function render(){
  /* bus tone section (the bus's built-in FX) */
  if(sel.startsWith('bus:')&&window.GLCTC_BUSES&&GLCTC_BUSES.toneUi){const tb=E('div',{class:'qfx-slot qfx-tone'});GLCTC_BUSES.toneUi(tb,+sel.slice(4));body.append(tb)}
  if(sel.startsWith('trk:')&&window.glctcOpenRack){body.append(E('button',{type:'button',class:'cn-b qfx-rack',text:'TRACK SENDS + PLUG-INS RACK ↗',onclick:()=>glctcOpenRack(sel.slice(4))}))}
- if(!ch.length)body.append(E('div',{class:'qfx-empty',text:'No FX on '+info.name+' yet. Pick one below to add it to this channel.'}));
+ if(!ch.length)body.append(E('div',{class:'qfx-empty',text:'No FX on '+info.name+' yet · choose one from ＋ ADD FX'}));
  ch.forEach((f,i)=>{if(!f||!FX[f.type])return;const d=FX[f.type],p={...defP(f.type),...f.p};f.p=p;
-  const slot=E('div',{class:'qfx-slot'+(f.on===false?' off':'')});
+  const slot=E('div',{class:'qfx-slot'+(f.on===false?' off':'')});slot.dataset.cat=d.cat;
   const ts=fxSelect(f.type,v=>{ch[i]=newFx(v);persist(sel);rebuild(sel);render()});
   const onB=E('button',{type:'button',class:'cn-b'+(f.on!==false?' on':''),text:f.on!==false?'ON':'OFF',title:'Switch this FX on / off'});onB.onclick=()=>{f.on=f.on===false;persist(sel);rebuild(sel);render()};
   const up=E('button',{type:'button',class:'cn-b',text:'▲',title:'Move up'}),dn=E('button',{type:'button',class:'cn-b',text:'▼',title:'Move down'}),rm=E('button',{type:'button',class:'cn-b qfx-x',text:'✕',title:'Remove'});
@@ -5824,8 +5851,7 @@ function render(){
    if(opts){const s=E('select',{class:'qfx-opt','aria-label':l});opts.forEach((t,j)=>{const o=E('option',{value:String(j)});o.textContent=t;s.append(o)});s.value=String(p[k]|0);s.onchange=()=>{p[k]=+s.value;persist(sel);liveSet(sel,i)};kg.append(E('label',{class:'qfx-optw'},E('span',{text:l}),s));return}
    if(!CN||!CN.knob)return;const kn=CN.knob(l,min,max,step,p[k],v=>{p[k]=v;persist(sel);liveSet(sel,i)},fmt||(v=>String(v)),def);kn.el.classList.add('qmx-k');kg.append(kn.el)});
   slot.append(kg);body.append(slot)});
- if(ch.length<MAXFX){const add=fxSelect('',v=>{chainOf(sel,true).push(newFx(v));persist(sel);rebuild(sel);render()},'＋ ADD FX…');add.classList.add('qfx-add');body.append(add)}
- else body.append(E('div',{class:'qfx-empty',text:'8 FX is the most one channel can hold.'}));
+ addBox.innerHTML='';if(ch.length<MAXFX){const add=fxSelect('',v=>{chainOf(sel,true).push(newFx(v));persist(sel);rebuild(sel);render()},'＋ ADD FX');add.classList.add('qfx-add');addBox.append(add)}else addBox.append(E('span',{class:'qfx-empty',text:'8 FX MAX'}));
  markStrips();
 }
 function select(key,scroll){sel=key;if(!panel)build();render();if(scroll&&panel)setTimeout(()=>{try{panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
@@ -5833,17 +5859,18 @@ function markStrips(){
  /* FX buttons on strips show a dot when that channel has FX, and the selected channel is outlined */
  document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=activeCount(k);b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',k===sel);const ch=b.closest('.cn-ch');if(ch)ch.classList.toggle('qfx-sel',k===sel)})}
 function build(){
- const mb=document.querySelector('#qmxDesk .qmx-mblock');if(!mb||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
+ const desk=document.getElementById('qmxDesk'),wrap=desk&&desk.querySelector('.qmx-wrap');if(!wrap||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
  panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);
- body=E('div',{class:'qfx-body'});
- panel.append(E('div',{class:'qmx-ltitle'},E('b',{text:'CHANNEL FX'}),E('span',{text:'TAP FX ON ANY CHANNEL · OR PICK IT HERE · UP TO 8 FX PER CHANNEL'})),E('div',{class:'qfx-top'},E('i',{class:'qfx-led'}),titleEl,picker),body);
- mb.append(panel);hookStrips();render();return true}
+ addBox=E('span',{class:'qfx-addw'});body=E('div',{class:'qfx-body'});
+ panel.append(E('div',{class:'qfx-bar'},E('b',{class:'qfx-h',text:'CHANNEL FX'}),E('i',{class:'qfx-led'}),titleEl,addBox,E('label',{class:'qfx-pickw'},E('span',{text:'CHANNEL'}),picker)),body);
+ /* under the whole desk (after the track FX rack), so it never squeezes the channel rows or the master section */
+ const rack=document.getElementById('qmxRack');(rack||wrap).insertAdjacentElement('afterend',panel);hookStrips();render();return true}
 /* FX buttons: tracks (FX), modules (new FX button), buses (FX), master (FX ▸) */
 function hookStrips(){
  const mods=document.querySelector('#qmxDesk .qmx-mods .cn-strips');const ids=['lp','bl','mine','lee','s101','go','vox','ws'];
  if(mods)[...mods.children].forEach((row,i)=>{const id=ids[i];if(!id||row.querySelector('[data-fxkey]'))return;const b=E('button',{type:'button',class:'cn-b','data-fxkey':'mod:'+id,text:'FX',title:'Open this module\'s FX in CHANNEL FX'});b.onclick=()=>select('mod:'+id,true);row.append(E('div',{class:'cn-bb one'},b))});
  document.querySelectorAll('#qmxBuses .qmx-bus').forEach((ch,i)=>{const b=ch.querySelector('.cn-bb.one .cn-b');if(b&&!b.dataset.fxkey){b.dataset.fxkey='bus:'+i;b.onclick=e=>{e.stopImmediatePropagation();select('bus:'+i,true)}}});
- const ms=document.querySelector('#qmxDesk .cn-master .cn-fxb');if(ms&&!ms.querySelector('[data-fxkey]')){const b=E('button',{type:'button',class:'tiny','data-fxkey':'master','data-fxlabel':'INSERT FX',text:'INSERT FX',title:'Open the MASTER insert FX in CHANNEL FX'});b.onclick=()=>select('master',true);ms.append(b)}
+ document.querySelectorAll('#qmxDesk [data-fxkey="master"]').forEach(b=>b.remove());
  markStrips()}
 setInterval(()=>{try{if(!panel)build();else{hookStrips();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
 window.GLCTC_FX={select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
@@ -5851,6 +5878,20 @@ window.GLCTC_FX={select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshA
  set(key,i,p){const f=chainOf(key)[i];if(!f)return;Object.assign(f.p,p);persist(key);liveSet(key,i)},
  clear(key){const ch=chainOf(key);ch.splice(0);persist(key);rebuild(key);if(sel===key)render()},slots:()=>SLOTS};
 })();
+
+/* v75 CLEAR SEQUENCER TRACKS (used by RESET ALL): the timeline goes back to the standard track set with no clips.
+   The Looper track keeps its pads (it is the LOOPER module) but loses its clips; all track mixer settings, sends and FX go back to normal. */
+window.GLCTC_CLEAR_TRACKS=function(){
+ try{if(typeof stopPlayback==='function')stopPlayback(true)}catch(e){}
+ const fresh=defaultProject().tracks,oldLp=project.tracks.find(t=>t.looper);
+ project.tracks=fresh.map(t=>{if(t.looper&&oldLp){Object.assign(oldLp,{name:t.name,clips:[],volume:t.volume,pan:0,mute:false,solo:false,send:true,cue:false,busSends:{},fxChain:[],plugs:undefined});delete oldLp._pm;return oldLp}return t});
+ try{if(audioCtx&&audioCtx._buses){const keep=new Set(project.tracks.map(t=>t.id));Object.keys(audioCtx._buses).forEach(id=>{if(!keep.has(id)){const b=audioCtx._buses[id];try{b.tap.disconnect()}catch(e){}delete audioCtx._buses[id]}})}}catch(e){}
+ selectedClipId=null;selectedTrackId=project.tracks[0]&&project.tracks[0].id;
+ try{if(typeof PLUG!=='undefined'&&PLUG.rebuildAll)PLUG.rebuildAll()}catch(e){}
+ try{if(typeof fxAll==='function')fxAll()}catch(e){}
+ try{renderAll();markDirty()}catch(e){}
+ try{const sel=document.getElementById('lpTrack');if(sel&&oldLp)sel.value=oldLp.id}catch(e){}
+ return project.tracks.length};
 
 init();
 })();
@@ -7813,8 +7854,12 @@ function resetEverything(){
  ['masterVol','filterCutoff','delayMix','reverbMix'].forEach(id=>{const e=$(id);if(!e)return;e.value=e.defaultValue;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}))});
  /* 5. clean master: no genre character until the next song is generated */
  CUR.genre=null;if(CUR.mode!=='off')CUR.mode='auto';save();apply();
+ /* 6. v75: sequencer tracks cleared (standard track set, no clips), buses and every channel FX back to normal */
+ try{window.GLCTC_CLEAR_TRACKS&&GLCTC_CLEAR_TRACKS()}catch(e){console.warn('clear tracks',e)}
+ try{const B=window.GLCTC_BUSES;if(B){const S2=B.state();S2.sends={};S2.sel={};for(let i=0;i<8;i++)B.set(i,{vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0}});B.sync()}}catch(e){}
+ try{const F=window.GLCTC_FX;if(F){['lp','bl','mine','lee','s101','go','vox','ws'].forEach(id=>F.clear('mod:'+id));for(let i=0;i<8;i++)F.clear('bus:'+i)}}catch(e){}
  try{window.GLCTC_NEW_SONG=null;const f=$('gscFillInfo');if(f)f.textContent='ALL MODULES RESET · NO PATTERNS · write your own, or press ✦ GENERATE SONG';const k=$('gscKey');if(k)k.textContent='C MINOR'}catch(e){}
- toast2('↺ RESET ALL · every module is at factory settings with empty patterns · keys and pads are ready to play');
+ toast2('↺ RESET ALL · every module at factory settings with empty patterns · sequencer tracks cleared · mixer, buses and FX back to normal');
 }
 window.GLCTC_RESET_ALL=resetEverything;
 function addTile(){
@@ -7830,8 +7875,8 @@ function addTile(){
 .gm-grid .gm-reset .gr-s{font-size:10px;letter-spacing:.1em;color:#ffb3bd;max-width:280px;line-height:1.45;text-align:left}`;
  document.head.append(css);
  const b=document.createElement('button');b.type='button';b.className='gm-card gm-reset';b.title='Reset every module, pattern, mixer and master setting to its normal factory state';
- b.innerHTML='<span class="gr-ico">↺</span><span class="gr-t">RESET ALL</span><span class="gr-s">EVERY MODULE TO FACTORY · NO PATTERNS · MIXER &amp; MASTER TO NORMAL · STILL PLAYABLE</span>';
- b.onclick=()=>{if(confirm('RESET ALL?\n\nEvery module goes back to factory settings with EMPTY patterns, the mixer and master go back to normal and 130 BPM.\nYour timeline / project is not touched.'))resetEverything()};
+ b.innerHTML='<span class="gr-ico">↺</span><span class="gr-t">RESET ALL</span><span class="gr-s">EVERY MODULE TO FACTORY · NO PATTERNS · SEQUENCER TRACKS CLEARED · MIXER, BUSES &amp; MASTER TO NORMAL</span>';
+ b.onclick=()=>{if(confirm('RESET ALL?\n\nEvery module goes back to factory settings with EMPTY patterns.\nThe sequencer tracks are CLEARED (standard tracks, no clips).\nThe mixer, buses, channel FX and master go back to normal and 130 BPM.\n\nSave your project first if you want to keep it.'))resetEverything()};
  grid.append(b);
  /* fill the free space after the last room (3 slots beside RECORD on the 4-column phone layout); full row if there is little room */
  const fit=()=>{try{const cols=getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length||4,n=grid.querySelectorAll('.gm-card:not(.gm-reset)').length,free=cols-(n%cols||cols);b.style.gridColumn='span '+(free>=3?free:cols)}catch(e){}};
@@ -8017,29 +8062,44 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 </style>
 
 <style id="glctc1-channelfx-css">
-#wsPanel #qmxDesk .qfx-panel{margin-top:12px;padding:12px;border:1px solid var(--sc,#ffd36a);border-radius:12px;background:linear-gradient(#1a1b20,#121317);box-shadow:0 0 0 1px #000,inset 0 1px 0 #ffffff10;min-width:0}
-#wsPanel #qmxDesk .qfx-panel .qmx-ltitle b{color:#ffd36a}
-#wsPanel #qmxDesk .qfx-top{display:flex;align-items:center;gap:8px;margin:8px 0 10px;flex-wrap:wrap}
-#wsPanel #qmxDesk .qfx-led{width:10px;height:10px;border-radius:50%;background:var(--sc,#ffd36a);box-shadow:0 0 8px var(--sc,#ffd36a)}
-#wsPanel #qmxDesk .qfx-title{font-size:15px;letter-spacing:.08em;color:#fff;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#wsPanel #qmxDesk .qfx-pick,#wsPanel #qmxDesk .qfx-type,#wsPanel #qmxDesk .qfx-opt{background:#08090c;color:#f2ecff;border:1px solid #3a3346;border-radius:6px;padding:6px 8px;font-size:11px;font-weight:800;letter-spacing:.04em;max-width:100%}
-#wsPanel #qmxDesk .qfx-pick{flex:0 1 200px}
-#wsPanel #qmxDesk .qfx-body{display:flex;flex-direction:column;gap:8px}
-#wsPanel #qmxDesk .qfx-slot{border:1px solid #2e2f37;border-left:3px solid var(--sc,#ffd36a);border-radius:8px;padding:8px;background:#101115}
-#wsPanel #qmxDesk .qfx-slot.off{opacity:.5}
+/* v75 DESK TIDY: channel rows scroll sideways with a visible scrollbar; nothing sits on top of the channels */
+#wsPanel #qmxDesk .qmx-seq,#wsPanel #qmxDesk .qmx-mods{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#6d6e7a #0d0e12;padding-bottom:10px;border-radius:10px}
+#wsPanel #qmxDesk .qmx-seq::-webkit-scrollbar,#wsPanel #qmxDesk .qmx-mods::-webkit-scrollbar{height:10px}
+#wsPanel #qmxDesk .qmx-seq::-webkit-scrollbar-track,#wsPanel #qmxDesk .qmx-mods::-webkit-scrollbar-track{background:#0d0e12;border-radius:6px}
+#wsPanel #qmxDesk .qmx-seq::-webkit-scrollbar-thumb,#wsPanel #qmxDesk .qmx-mods::-webkit-scrollbar-thumb{background:#5b5c68;border-radius:6px;border:2px solid #0d0e12}
+#wsPanel #qmxDesk .qmx-seq .cn-strips,#wsPanel #qmxDesk .qmx-mods .cn-strips,#wsPanel #qmxDesk .qmx-pads,#wsPanel #qmxDesk .qmx-busrow{padding-right:6px}
+#wsPanel #qmxDesk .qmx-bottom{align-items:flex-start;gap:14px}
+#wsPanel #qmxDesk .qmx-mods{flex:1 1 420px;min-width:0}
+#wsPanel #qmxDesk .qmx-mblock{flex:0 0 auto}
+/* CHANNEL FX: its own full-width row under the desk */
+#wsPanel #qmxDesk .qfx-panel{margin:14px 0 6px;padding:12px 14px 14px;border:1px solid #2c2d34;border-top:3px solid var(--sc,#ffd36a);border-radius:12px;background:linear-gradient(#1a1b20,#121317);box-shadow:inset 0 1px 0 #ffffff0d}
+#wsPanel #qmxDesk .qfx-bar{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;margin-bottom:12px}
+#wsPanel #qmxDesk .qfx-h{font-size:12px;font-weight:900;letter-spacing:.14em;color:#ffd36a}
+#wsPanel #qmxDesk .qfx-led{width:10px;height:10px;border-radius:50%;background:var(--sc,#ffd36a);box-shadow:0 0 8px var(--sc,#ffd36a);flex:none}
+#wsPanel #qmxDesk .qfx-title{font-size:16px;letter-spacing:.08em;color:#fff;flex:0 1 auto;min-width:0;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#wsPanel #qmxDesk .qfx-pickw{margin-left:auto}
+#wsPanel #qmxDesk .qfx-pickw{display:flex;align-items:center;gap:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#8f8c9c}
+#wsPanel #qmxDesk .qfx-pick,#wsPanel #qmxDesk .qfx-type,#wsPanel #qmxDesk .qfx-opt{background:#08090c;color:#f2ecff;border:1px solid #3a3346;border-radius:7px;padding:7px 9px;font-size:11px;font-weight:800;letter-spacing:.04em;max-width:100%;min-height:34px}
+#wsPanel #qmxDesk .qfx-pick{min-width:170px}
+#wsPanel #qmxDesk .qfx-add{min-width:150px;border:1px dashed #a77d2c;color:#ffd27a;background:#19150e;cursor:pointer}
+#wsPanel #qmxDesk .qfx-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;align-items:start}
+#wsPanel #qmxDesk .qfx-slot{border:1px solid #2e2f37;border-left:3px solid var(--sc,#ffd36a);border-radius:10px;padding:10px;background:#101115;min-width:0}
+#wsPanel #qmxDesk .qfx-slot.off{opacity:.45}
 #wsPanel #qmxDesk .qfx-tone{border-left-color:#c77dff}
-#wsPanel #qmxDesk .qfx-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
-#wsPanel #qmxDesk .qfx-head b{color:var(--sc,#ffd36a);font-size:12px;min-width:16px}
-#wsPanel #qmxDesk .qfx-head .qfx-type{flex:1 1 140px}
-#wsPanel #qmxDesk .qfx-head .cn-b{min-width:34px;min-height:30px;padding:4px 8px}
+#wsPanel #qmxDesk .qfx-head{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+#wsPanel #qmxDesk .qfx-head b{color:var(--sc,#ffd36a);font-size:12px;min-width:14px}
+#wsPanel #qmxDesk .qfx-head{flex-wrap:wrap}
+#wsPanel #qmxDesk .qfx-head .qfx-type{flex:1 1 calc(100% - 26px);min-width:0;order:1}
+#wsPanel #qmxDesk .qfx-head b{order:0}
+#wsPanel #qmxDesk .qfx-head .cn-b{order:2}
+#wsPanel #qmxDesk .qfx-head .cn-b:first-of-type{margin-left:20px}
+#wsPanel #qmxDesk .qfx-head .cn-b{flex:none;min-width:32px;min-height:32px;padding:4px 7px}
 #wsPanel #qmxDesk .qfx-head .qfx-tname{flex:1 1 auto;font-size:11px;font-weight:800;letter-spacing:.06em;color:#ddd}
-#wsPanel #qmxDesk .qfx-knobs{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
+#wsPanel #qmxDesk .qfx-knobs{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;justify-content:flex-start}
 #wsPanel #qmxDesk .qfx-optw{display:flex;flex-direction:column;gap:3px;font-size:9px;font-weight:800;letter-spacing:.08em;color:#9a97a8}
-#wsPanel #qmxDesk .qfx-add{width:100%;padding:10px;border-style:dashed;border-color:#6b5a2d;color:#ffd27a;text-align:center}
-#wsPanel #qmxDesk .qfx-empty{font-size:11px;color:#9a97a8;letter-spacing:.04em;padding:6px 2px}
-#wsPanel #qmxDesk .qfx-rack{width:100%;font-size:10px}
+#wsPanel #qmxDesk .qfx-empty{font-size:11px;color:#8f8c9c;letter-spacing:.05em;padding:4px 2px}
+#wsPanel #qmxDesk .qfx-rack{grid-column:1/-1;justify-self:start;font-size:10px;padding:6px 12px}
 #wsPanel #qmxDesk .cn-ch.qfx-sel{outline:2px solid var(--sc,#ffd36a);outline-offset:-2px}
-#wsPanel #qmxDesk .qmx-mblock{min-width:0}
 </style>
 </body>
 </html>

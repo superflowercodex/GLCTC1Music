@@ -5660,8 +5660,7 @@ window.GLCTC_BUSES={sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
 (()=>{'use strict';
 const LSFX='glctc1.fx.v1',MAXFX=8;
 let FS={mods:{},buses:{},master:[]};
-try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{}}}catch(e){}
-/* v75: the master has its own MASTER FX in the master section - it is not part of the channel FX */FS.master=[];
+try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{};FS.master=Array.isArray(x.master)?x.master:[]}}catch(e){}
 let fsT=0;const fsave=()=>{clearTimeout(fsT);fsT=setTimeout(()=>{try{localStorage.setItem(LSFX,JSON.stringify(FS))}catch(e){}},250)};
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const AC2=()=>{try{return audioCtx}catch(e){return null}};
@@ -5807,6 +5806,7 @@ const MODIDS=['bl','mine','lee','s101','go','vox','ws'];
 function attachLive(){const c=AC2();if(!c||!c._mg)return;
  MODIDS.forEach(id=>{let b=null;try{b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(id)}catch(e){}if(!b||b.c!==c||!b.hp||!b.vol)return;if(b._fx&&b._fx.c===c)return;
   const ix=c.createGain(),ox=c.createGain();try{b.hp.disconnect()}catch(e){}b.hp.connect(ix);ox.connect(b.vol);b._fx=attach(c,'mod:'+id,ix,ox)});
+ if(c._mIns&&!c._mIns._fx){c._mIns._fx=attach(c,'master',c._mIns[0],c._mIns[1])}
  /* tracks that already exist (new ones are caught by the trackBus hook) */
  if(c._buses)for(const id in c._buses){const b=c._buses[id];if(b&&b.flt&&!b._fx&&b.track)hookTrack(c,b.track,b)}
 }
@@ -5820,7 +5820,7 @@ let lastBpm=0;setInterval(()=>{try{attachLive();const b=bpm();if(Math.abs(b-last
 /* ---------- UI: CHANNEL FX panel (under the MASTER SECTION) ---------- */
 const E=(t,a,...k)=>{const e=document.createElement(t);if(a)for(const x in a){if(x==='class')e.className=a[x];else if(x==='text')e.textContent=a[x];else if(x.startsWith('on'))e[x]=a[x];else e.setAttribute(x,a[x])}k.forEach(n=>n!=null&&e.append(n));return e};
 let sel='mod:bl',panel=null,body=null,picker=null,titleEl=null,addBox=null;
-function channels(){const out=[];
+function channels(){const out=[{key:'master',name:'MASTER',col:'#ffd36a',grp:'MASTER'}];
  const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state();const BC=['#ff5d73','#ffb347','#ffe066','#6dff8b','#4fd8ff','#7a8cff','#c77dff','#ff7ad9'];
  for(let i=0;i<8;i++)out.push({key:'bus:'+i,name:BS?BS.buses[i].name:'BUS '+(i+1),col:BC[i],grp:'BUSES'});
  [['lp','LOOPER','#19baff'],['bl','80LA8','#ffd36a'],['mine','DIVINE09','#4fd8ff'],['lee','30LEE','#ff6eae'],['s101','0010110','#75e4ff'],['go','GALACTIC ONE','#40eaff'],['vox','GALACTIC VOX','#ff7ad9'],['ws','PAD-64','#ffb347']].forEach(([id,n,c])=>out.push({key:'mod:'+id,name:n,col:c,grp:'MODULES'}));
@@ -5857,20 +5857,26 @@ function render(){
 function select(key,scroll){sel=key;if(!panel)build();render();if(scroll&&panel)setTimeout(()=>{try{panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
 function markStrips(){
  /* FX buttons on strips show a dot when that channel has FX, and the selected channel is outlined */
- document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=activeCount(k);b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',k===sel);const ch=b.closest('.cn-ch');if(ch)ch.classList.toggle('qfx-sel',k===sel)})}
+ /* v77: an FX button only lights while that channel really has FX switched on - choosing a channel never latches it */
+ document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=activeCount(k);b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',n>0);const ch=b.closest('.cn-ch');if(ch)ch.classList.remove('qfx-sel')})}
 function build(){
  const desk=document.getElementById('qmxDesk'),wrap=desk&&desk.querySelector('.qmx-wrap');if(!wrap||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
  panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);
  addBox=E('span',{class:'qfx-addw'});body=E('div',{class:'qfx-body'});
  panel.append(E('div',{class:'qfx-bar'},E('b',{class:'qfx-h',text:'CHANNEL FX'}),E('i',{class:'qfx-led'}),titleEl,addBox,E('label',{class:'qfx-pickw'},E('span',{text:'CHANNEL'}),picker)),body);
- /* under the whole desk (after the track FX rack), so it never squeezes the channel rows or the master section */
- const rack=document.getElementById('qmxRack');(rack||wrap).insertAdjacentElement('afterend',panel);hookStrips();render();return true}
+ /* v77: in the master column, in the free space under MASTER / HEADPHONES / BOOTH, beside the bus tracks. It takes the column's width and never makes it wider */
+ const mb=desk.querySelector('.qmx-mblock');if(!mb)return false;mb.append(panel);hidePanelMasterFx();hookStrips();render();return true}
+/* v77: the old MASTER FX box is gone - master FX are done in CHANNEL FX (select MASTER) like every other channel */
+function hidePanelMasterFx(){const box=document.getElementById('mfxOn');const mb=box&&box.closest('.mfxbox');if(mb)mb.style.display='none';
+ document.querySelectorAll('#qmxDesk .cn-master .cn-fxb > *').forEach(b=>{const t=(b.textContent||'').trim().toUpperCase();if(/^(FX|FILTER|DELAY|REVERB)$/.test(t)&&!b.dataset.fxkey)b.style.display='none'})}
+setTimeout(()=>{try{const m=mfx();if(m&&m.on){m.on=false;mfxUi();setMaster()}}catch(e){}},3000);
 /* FX buttons: tracks (FX), modules (new FX button), buses (FX), master (FX ▸) */
 function hookStrips(){
  const mods=document.querySelector('#qmxDesk .qmx-mods .cn-strips');const ids=['lp','bl','mine','lee','s101','go','vox','ws'];
  if(mods)[...mods.children].forEach((row,i)=>{const id=ids[i];if(!id||row.querySelector('[data-fxkey]'))return;const b=E('button',{type:'button',class:'cn-b','data-fxkey':'mod:'+id,text:'FX',title:'Open this module\'s FX in CHANNEL FX'});b.onclick=()=>select('mod:'+id,true);row.append(E('div',{class:'cn-bb one'},b))});
  document.querySelectorAll('#qmxBuses .qmx-bus').forEach((ch,i)=>{const b=ch.querySelector('.cn-bb.one .cn-b');if(b&&!b.dataset.fxkey){b.dataset.fxkey='bus:'+i;b.onclick=e=>{e.stopImmediatePropagation();select('bus:'+i,true)}}});
- document.querySelectorAll('#qmxDesk [data-fxkey="master"]').forEach(b=>b.remove());
+ const ms=document.querySelector('#qmxDesk .cn-master .cn-fxb');if(ms&&!ms.querySelector('[data-fxkey="master"]')){const b=E('button',{type:'button',class:'tiny','data-fxkey':'master',text:'FX',title:'Master FX: open MASTER in CHANNEL FX'});b.onclick=()=>select('master',true);ms.prepend(b)}
+ hidePanelMasterFx();
  markStrips()}
 setInterval(()=>{try{if(!panel)build();else{hookStrips();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
 window.GLCTC_FX={select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
@@ -8072,17 +8078,19 @@ if(document.readyState==='complete')addTile();else window.addEventListener('load
 #wsPanel #qmxDesk .qmx-mods{flex:1 1 420px;min-width:0}
 #wsPanel #qmxDesk .qmx-mblock{flex:0 0 auto}
 /* CHANNEL FX: its own full-width row under the desk */
-#wsPanel #qmxDesk .qfx-panel{margin:14px 0 6px;padding:12px 14px 14px;border:1px solid #2c2d34;border-top:3px solid var(--sc,#ffd36a);border-radius:12px;background:linear-gradient(#1a1b20,#121317);box-shadow:inset 0 1px 0 #ffffff0d}
+#wsPanel #qmxDesk .qfx-panel{width:0;min-width:100%;box-sizing:border-box;margin:4px 0 6px;padding:12px 14px 14px;border:1px solid #2c2d34;border-top:3px solid var(--sc,#ffd36a);border-radius:12px;background:linear-gradient(#1a1b20,#121317);box-shadow:inset 0 1px 0 #ffffff0d}
 #wsPanel #qmxDesk .qfx-bar{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;margin-bottom:12px}
 #wsPanel #qmxDesk .qfx-h{font-size:12px;font-weight:900;letter-spacing:.14em;color:#ffd36a}
 #wsPanel #qmxDesk .qfx-led{width:10px;height:10px;border-radius:50%;background:var(--sc,#ffd36a);box-shadow:0 0 8px var(--sc,#ffd36a);flex:none}
 #wsPanel #qmxDesk .qfx-title{font-size:16px;letter-spacing:.08em;color:#fff;flex:0 1 auto;min-width:0;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#wsPanel #qmxDesk .qfx-pickw{margin-left:auto}
+#wsPanel #qmxDesk .qfx-pickw{flex:1 1 100%}
+#wsPanel #qmxDesk .qfx-pickw .qfx-pick{flex:1 1 auto}
+#wsPanel #qmxDesk .qfx-title{flex:1 1 auto}
 #wsPanel #qmxDesk .qfx-pickw{display:flex;align-items:center;gap:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#8f8c9c}
 #wsPanel #qmxDesk .qfx-pick,#wsPanel #qmxDesk .qfx-type,#wsPanel #qmxDesk .qfx-opt{background:#08090c;color:#f2ecff;border:1px solid #3a3346;border-radius:7px;padding:7px 9px;font-size:11px;font-weight:800;letter-spacing:.04em;max-width:100%;min-height:34px}
 #wsPanel #qmxDesk .qfx-pick{min-width:170px}
 #wsPanel #qmxDesk .qfx-add{min-width:150px;border:1px dashed #a77d2c;color:#ffd27a;background:#19150e;cursor:pointer}
-#wsPanel #qmxDesk .qfx-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;align-items:start}
+#wsPanel #qmxDesk .qfx-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:start}
 #wsPanel #qmxDesk .qfx-slot{border:1px solid #2e2f37;border-left:3px solid var(--sc,#ffd36a);border-radius:10px;padding:10px;background:#101115;min-width:0}
 #wsPanel #qmxDesk .qfx-slot.off{opacity:.45}
 #wsPanel #qmxDesk .qfx-tone{border-left-color:#c77dff}

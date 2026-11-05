@@ -4232,7 +4232,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  const AM={on:true,active:false,tdb:{},master:0,hist:{},an:{},mAn:null,mHist:[],mPk:0,buf:new Float32Array(2048),last:0,lastM:0,note:'',lpBase:null,lpSet:null,lpTap:null,genre:'',mt:-14.5};
  const AM_TARGET={bl:-18,mine:-26,lee:-23,s101:-28,go:-27,vox:-24,ws:-30,lp:-33};   /* v71: DIVINE09 only plays hats / ride / crash now, so it sits under the kick and snare instead of matching them; the Looper is a texture layer */   /* loud-passage level of each sound (dBFS), peak-aware */
  const AM_START={bl:-5,mine:0,lee:-8,s101:-8,go:-6,vox:-4,ws:0};   /* v73: no channel starts above 0 dB - a hot preset can never blast before it is measured */   /* v70: measured average of where the auto mix settles, so every sound already sits right the first time it enters (a build is not learned from) */                    /* first guess, so nothing blasts before it has been measured */
- const AM_MAXUP={mine:10,ws:10,bl:10,lee:10,s101:10,go:10,vox:10};   /* v71: hats and PAD-64 hits are never pushed up more than +10 dB chasing a level they should not reach */
+ const AM_MAXUP={mine:2,ws:0,bl:3,lee:2,s101:0,go:0,vox:0};   /* v71: hats and PAD-64 hits are never pushed up more than +10 dB chasing a level they should not reach */
  const AM_LS='glctc1.autoMix',AM_MASTER_BY={ambient:-22,lofi:-20,hiphop:-19},AM_LEARN='glctc1.autoMix.learned';
  const amLearned=()=>{try{return JSON.parse(localStorage.getItem(AM_LEARN)||'{}')||{}}catch(e){return {}}};
  /* v12 GENRE CHARACTER (dB on top of AM_TARGET): bass-led styles push the 30LEE forward, drum-led styles the kit, melodic styles the leads/pads */
@@ -4250,18 +4250,17 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  function amLoopTrim(v){AM.lpSet=v;const g=amLoopNode();if(g){try{g.setTargetAtTime(v==null?1:v,audioCtx.currentTime,.05)}catch(e){g.value=v==null?1:v}}}
  function amRestoreLoop(){AM.lpBase=null;amLoopTrim(null);AM.lpSet=null}
  function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=AM_START[m.id]||0});AM.master=0;AM.locked=false;AM.stable=0;
-  /* v73: a genre the auto mix has already balanced starts from those locked levels */
-  {const L=amLearned()[AM.genre];if(L&&L.tdb){Object.keys(L.tdb).forEach(k=>{if(k in AM.tdb)AM.tdb[k]=Math.max(-30,Math.min(10,+L.tdb[k]||0))});AM.master=Math.max(-12,Math.min(2,+L.master||0))}}AM.hist={};AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
+  AM.hist={};AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
   if(AM.on){const lt=amLoop();if(lt)amLoopTrim(.4)}
   try{applyMix()}catch(e){}amNote(AM.on?'AUTO MIX · LISTENING…':'AUTO MIX OFF')}
  function amTick(){
-  if(!AM.on||!AM.active||AM.locked||!audioCtx||audioCtx.state!=='running')return;
+  if(!AM.on||!AM.active||!audioCtx||audioCtx.state!=='running')return;
   if(AM.lpSet!=null){const g=amLoopNode();if(g&&g.value>.9999&&AM.lpSet<.999)amLoopTrim(AM.lpSet)}
   const c=audioCtx,N=2048,tgt=id=>(AM_TARGET[id]||-24)+AM.master+(((AM_GENRE[AM.genre]||{})[id])||0);
   let sk=null;try{const G=window.GLCTC_SONG;if(G&&G.running()&&G.sectionKind)sk=G.sectionKind()}catch(e){}
   const learnMod=!sk||!/^(build|break)$/.test(sk),learnMaster=!sk||/^(drop|verse)$/.test(sk);
   const grab=(a)=>{a.getFloatTimeDomainData(AM.buf);let pk=0;for(let i=0;i<N;i++){const v=Math.abs(AM.buf[i]);if(v>pk)pk=v}const d0=amDb(AM.buf,N);return {d0,d:Math.max(d0,20*Math.log10(pk+1e-9)-14),pk}};
-  MODS.forEach(m=>{if(m.track)return;const b=BUS[m.id];if(!b||b.c!==c)return;let a=AM.an[m.id];if(!a||a.context!==c){a=c.createAnalyser();a.fftSize=N;b.tap.connect(a);AM.an[m.id]=a;return}
+  MODS.forEach(m=>{if(m.track||!running(m.id)||!audible(m))return;const b=BUS[m.id];if(!b||b.c!==c||b.in.gain.value<.95)return;let a=AM.an[m.id];if(!a||a.context!==c){a=c.createAnalyser();a.fftSize=N;b.tap.connect(a);AM.an[m.id]=a;return}
    const g=grab(a);if(g.d0>-60){const v=Math.max(.05,ms(m.id).vol),x=g.d-20*Math.log10(v);/* v73: builds / breaks only teach the auto mix when a sound is TOO LOUD, so a hot sound is caught in any section */if(learnMod||x>tgt(m.id)+3){const h=AM.hist[m.id]||(AM.hist[m.id]=[]);h.push(x);if(h.length>200)h.shift()}}});
   const lt=amLoop(),lb=lt&&c._buses?c._buses[lt.id]:null;
   if(lt&&lb){let a=AM.an.lp;if(!a||a.context!==c||AM.lpTap!==lb.tap){a=c.createAnalyser();a.fftSize=N;lb.tap.connect(a);AM.an.lp=a;AM.lpTap=lb.tap}
@@ -4272,7 +4271,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   let changed=false,n=0;
   MODS.forEach(m=>{if(m.track)return;const h=AM.hist[m.id];if(!h||h.length<12)return;n++;
    const p90=amPct(h,.9),err=tgt(m.id)-p90;if(Math.abs(err)<1.3)return;
-   const step=Math.max(-6,Math.min(1.5,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-30,Math.min(AM_MAXUP[m.id]||10,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
+   const step=Math.max(-6,Math.min(1.5,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-30,Math.min(AM_MAXUP[m.id]??0,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
   /* the Looper demo loop is a timeline track: trim it through its track volume (your own fader move is respected) */
   if(lt&&AM.hist.lp&&AM.hist.lp.length>=30&&AM.lpSet!=null){n++;
    {const g=amLoopNode();if(g&&Math.abs(g.value-AM.lpSet)>.05&&g.value>.9999)amLoopTrim(AM.lpSet)}
@@ -4282,10 +4281,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
   if(now-AM.lastM>=6000&&AM.mHist.length>=30){const p90=amPct(AM.mHist,.9);let step=Math.max(-3,Math.min(2,(AM.mt-p90)*.5));if(AM.mPk>1.3)step=Math.min(step,-1.5);
    if(Math.abs(AM.mt-p90)>=1.5||step<=-1.5){const nm=Math.max(-12,Math.min(2,AM.master+step));if(nm!==AM.master){AM.master=nm;AM.mHist=[];AM.mPk=0;AM.lastM=now;changed=true}}else AM.mPk=0}
   if(changed){try{applyMix()}catch(e){}}
-  /* v73 LOCK: once every sound has sat on its level for three checks in a row the mix is locked for the rest of the song and remembered for this genre */
-  AM.stable=(!changed&&n>=3&&AM.mHist.length>=30)?(AM.stable||0)+1:0;
-  if(AM.stable>=6){AM.locked=true;try{const L=amLearned();L[AM.genre||'any']={tdb:Object.assign({},AM.tdb),master:AM.master,t:Date.now()};localStorage.setItem(AM_LEARN,JSON.stringify(L))}catch(e){}
-   amNote('AUTO MIX · LOCKED ✓ · '+MODS.filter(m=>!m.track&&AM.tdb[m.id]!=null).map(m=>m.name+' '+((AM.tdb[m.id]||0)>0?'+':'')+(AM.tdb[m.id]||0).toFixed(0)).join(' · '));return}
+
   if(n)amNote('AUTO MIX · '+(changed?'BALANCING…':'BALANCED')+' · '+MODS.filter(m=>!m.track&&AM.hist[m.id]&&AM.hist[m.id].length>=30).map(m=>m.name+' '+((AM.tdb[m.id]||0)>0?'+':'')+(AM.tdb[m.id]||0).toFixed(0)).join(' · '))}
  setInterval(amTick,100);window.__glctcAM=AM;
  window.GLCTC_MIX.autoSong=amStart;
@@ -6299,22 +6295,18 @@ function autoCells(secs,genre){
     Drums/bass/PAD-64: 0 main groove · 1 alt groove (2nd drop) · 2 breakdown · 3 build fill (snare roll, rising bass, riser).
     Galactic One: 0 main · 2 sparse · 3 rise · 5 drop-2 lead · 7 pad.  -1 = silent. */
  let drop=0;const c={};MODS.forEach(m=>c[m.k]=[]);
- const R=a=>a[Math.floor(Math.random()*a.length)];
- /* v15: each new song picks its own intro, breakdown, second-drop lead and outro */
- const V={intro:R([{bl:0,mine:0,go:7,ws:2},{mine:0,go:7,ws:2,s101:0},{bl:0,mine:2,lee:2,ws:2},{go:6,mine:2,ws:2}]),
-  brk:R([{mine:2,lee:2,s101:0,go:7,vox:0,ws:2},{go:2,vox:0,ws:2},{lee:2,go:7,ws:2,mine:2},{s101:0,go:4,vox:0,ws:2}]),
-  lead2:R([5,5,4,1]),out:R([{bl:0,mine:2,go:7,ws:2},{bl:0,mine:0,lee:0},{go:7,ws:2,mine:2}])};
  const put=o=>MODS.forEach(m=>c[m.k].push(o[m.k]===undefined?-1:o[m.k]));
+ const soft=['hiphop','lofi'].includes(genre),ambient=genre==='ambient';
  secs.forEach(s=>{
-  const K=s.kind;
-  if(K==='drop'){const a=drop++%2;put({lp:0,bl:a,mine:a,lee:a,s101:0,go:a?(V.lead2):0,vox:0,ws:a});return}
-  /* v71: hip hop / lo-fi do not do EDM snare-roll builds - the beat strips back (kick + snare only, no hats) and drops in again; ambient just swells */
-  if(K==='build'&&CHILL_BUILD[genre]){put(CHILL_BUILD[genre]);return}
-  if(K==='build'){put({lp:0,bl:3,mine:3,lee:3,s101:0,go:3,ws:3});return}
-  if(K==='break'){put(V.brk);return}
-  if(K==='verse'){put({bl:0,mine:0,lee:0,go:2,vox:0});return}
-  if(K==='outro'){put(V.out);return}
-  put(V.intro); /* intro: varies per song */
+  if(ambient){put(s.kind==='drop'?{go:7,s101:0,ws:2}:{go:7,ws:2});return}
+  switch(s.kind){
+   case 'drop': {const a=drop++%2;put({bl:a,mine:a,lee:a,go:a?5:0,ws:a,vox:0});break}
+   case 'build': put(soft?{bl:0,mine:2,lee:0,go:2}:{bl:3,mine:3,lee:0,go:2});break;
+   case 'verse': put({bl:0,mine:0,lee:0,s101:0});break;
+   case 'break': put({go:7,s101:0,ws:2});break;
+   case 'outro': put({bl:0,mine:2,lee:2});break;
+   default: put({bl:0,mine:2,go:2});
+  }
  });
  return c;
 }
@@ -6798,6 +6790,18 @@ const PAT=(()=>{
    D:[{K:'X......X..X.....',S:BB,H:EI},{K:'X......X..X.....',S:BB,H:EI,O:'..............x.'},{K:'X...............',H:'x...x...x...x...'},{K:'X......X..X.....',S:BB,H:EI}],
    bass:['X......X..X.....','X......X..X.....','X...............','X......X..X.....'],stab:'x.......x.......',voxR:'x...............'}
  };
+ /* Keep the backbeat through every build; variation comes from arrangement,
+    not an unrelated four-on-the-floor roll. Open hats replace closed hats. */
+ for(const g of Object.keys(G)){
+  const main=G[g].D[0];
+  G[g].D[1]={...main,...(G[g].D[1].G?{G:G[g].D[1].G}:{})};
+  G[g].D[3]={...main};
+  for(const d of G[g].D){
+   if(d.H&&d.O)d.H=[...d.H].map((c,i)=>vel(d.O[i])?'.':c).join('');
+   if(d.S&&d.C)delete d.C;
+  }
+ }
+ G.trance.bass[0]=OFF;G.trance.bass[1]=OFF;
  /* bass glide only where the genre is built on it (808 / wobble / acid) */
  const GLIDE={trap:.45,dubstep:.25,techno:.12,psytrance:0};
  const OCTB={synthwave:1,pop:1};   /* octave-pumping 8th bass */
@@ -6833,7 +6837,8 @@ const PAT=(()=>{
     const c=rh[i];if(c==='.')return{on:false,note:base,accent:false,slide:false,velocity:.78};
     const n=OCTB[g]&&i%4===2?base+12:base;
     const slide=last!==null&&n!==last&&r()<(GLIDE[g]||0);last=n;return{on:true,note:cl(n,24,60),accent:c==='X'||i%4===0,slide,velocity:c==='X'?.95:.82}})})}
- const goStep=(on,n,v,g,a,s)=>({on:on?1:0,n:on?cl(n,-12,19):0,v:v??.8,g:g??.7,p:1,r:1,c:0,a:a?1:0,s:s?1:0});
+ const fitNote=n=>{while(n>19)n-=12;while(n< -12)n+=12;return n};
+ const goStep=(on,n,v,g,a,s)=>({on:on?1:0,n:on?fitNote(n):0,v:v??.8,g:g??.7,p:1,r:1,c:0,a:a?1:0,s:s?1:0});
  /* LEAD: a short riff on the genre stab rhythm - chord root, fifth on the last hit of each bar. Trance / psy / synthwave keep a plain 8th-note arp. */
  function riff(sc,rh,o){o=o||{};const off=o.oct||0,steps=Array.from({length:32},()=>goStep(0));rh=rh.padEnd(16,'.');
   for(let i=0;i<32;i++){const c=rh[i%16];if(c==='.')continue;let lastHit=true;for(let j=(i%16)+1;j<16;j++)if(rh[j]!=='.'){lastHit=false;break}
@@ -6868,11 +6873,8 @@ const PAT=(()=>{
    const d=(Gg.D&&(Gg.D[k]||Gg.D[0]))||{};
    for(const role in roles){let str=d[role];if(!str)continue;if(F.rot&&k!==2&&(role==='R'||role==='G'))str=rotS(str,F.rot);
     for(let b=0;b<4;b++)for(let s=0;s<16;s++){const ch=str[s];if(!ch||ch==='.')continue;if(b%2===1&&ch!=='X'&&r()<.22)continue;if(!L[roles[role]][b*16+s])L[roles[role]][b*16+s]=ch==='X'?2:1}}
-   if(d.Z&&d.Z[0]&&d.Z[0]!=='.')at(15,[0],1);
-   if(k===0)at(15,[0],2);
-   if(k===2)at(11,[0]);else at(11,[0,32]);
-   if(k===1){at(15,[0],2);if(Gg.pops>=.3)at(13,[30])}
-   if(k===3){at(14,[48]);at(15,[0],2);at(5,[56,58,60,61,62,63])}
+   if(g==='ambient'&&k===2)at(11,[0]);
+
    return L})}
  const wsTunes=key=>{const wrap=n=>((n%12)+18)%12-6;return{8:wrap(key-9),9:wrap(key-9),10:wrap(key-9),11:wrap(key),12:wrap(key-9)}};
  function flavour(genre,r){
@@ -6971,7 +6973,7 @@ function prepareSong(genreKey,txt,forceFill){
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
  st.len=TPL[len]?len:'32';st.secs=mkSecs(st.len);st.cells=autoCells(st.secs,genreKey);
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
- const skip=new Set(g.skip);
+ const skip=new Set([...g.skip,'lp','vox']);
  if(/acid|303/.test(txt))skip.delete('lee');
  if(/vocal|vox|choir|sing|voice/.test(txt))skip.delete('vox');
  if(/no drums|without drums|drumless/.test(txt)){['bl','mine','ws','lp'].forEach(k=>skip.add(k))}
@@ -6992,26 +6994,13 @@ function detectLength(txt){if(/epic|festival|anthem|journey|massive/.test(txt))r
 const REGEN_KEY='glctc1.regen';
 async function generate(){
  if(starting||S)return;
- /* v10: GENERATE SONG = a fresh page load that builds the song the same way NEW SONG ON LOAD does. Same clean audio engine, same default sounds, same mix - nothing left over from before. */
- try{
-  const t0=(byId('gscPrompt').value||''),tl=t0.toLowerCase(),g0=detectGenre(tl),l0=detectLength(tl);
-  let genre=byId('gscGenre').value,len=byId('gscLen').value;
-  const cur=(window.GLCTC_NEW_SONG&&window.GLCTC_NEW_SONG.genre)||genre;
-  /* v11: exactly like a page load - a brand-new random genre, key and tempo every time. Only an explicit request keeps the genre: you picked a different genre in the list, or you named one in the prompt. */
-  let want=null;
-  if(g0&&GENRE[g0])want=g0;else if(genre!==cur)want=genre;
-  if(l0&&TPL[l0])len=l0;
-  sessionStorage.setItem(REGEN_KEY,JSON.stringify({genre:want,avoid:cur,len,prompt:want?t0:'',t:Date.now()}));
-  status('GENERATING A FRESH SONG…');
-  try{save()}catch(e){}
-  setTimeout(()=>{location.replace(location.pathname)},120);
-  return;
- }catch(e){console.warn('fresh-page generate unavailable, using in-page generate',e)}
+ /* Generate in place; the genre selector is authoritative unless the prompt names a genre. */
  {const t0=(byId('gscPrompt').value||'').toLowerCase(),g0=detectGenre(t0),l0=detectLength(t0);if(g0&&GENRE[g0]){const sel=byId('gscGenre');if(sel)sel.value=g0}if(l0&&TPL[l0]){const ls=byId('gscLen');if(ls)ls.value=l0}}
  const genreKey=byId('gscGenre').value,txt=(byId('gscPrompt').value||'').toLowerCase();
  try{
-  resetAllForNewSong();
+  if(byId('gscAutoFill')?.checked)resetAllForNewSong();
   prepareSong(genreKey,txt,false);
+  try{window.glctcTimeline?.stop(true)}catch(e){}
   /* v9: same finishing steps as NEW SONG ON LOAD - reload every module's genre sound from scratch (even if the preset name is already selected, so earlier tweaks or a previous song cannot leak in) and load the Looper loop */
   try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
   try{window.lpLoadDemo&&window.lpLoadDemo(true,genreKey)}catch(e){}

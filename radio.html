@@ -939,6 +939,14 @@ body{background:radial-gradient(ellipse at 70% -15%,#17253b 0,transparent 40%),r
 .tv-progress{height:2px;background:#ffffff20;margin-top:14px;overflow:hidden}#tvProgress{height:100%;width:0;background:linear-gradient(90deg,#b044ff,#40f8e6);transition:width .2s linear}
 @media(max-width:540px){.tv-head-note{display:none}.tv-song{gap:10px}.tv-tag{margin-bottom:6px}.tv-progress{margin-top:9px}.tv-number{padding-right:10px}}
 
+
+.tv-fullscreen{position:absolute;top:4%;left:4%;z-index:5;min-height:44px;padding:8px 12px;border:1px solid #ffffff70;border-radius:6px;background:#070914b8;color:white;font:700 11px Arial,sans-serif;letter-spacing:.08em;cursor:pointer}
+.tv-fullscreen:hover{background:#22243de8;border-color:#43f6e5}.tv-fullscreen:focus-visible{outline:2px solid #43f6e5;outline-offset:3px}
+#musicTVScreen:fullscreen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;background:#000}
+#musicTVScreen:-webkit-full-screen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;background:#000}
+#musicTVScreen.tv-theatre{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:2147483647;aspect-ratio:auto;background:#000}
+#musicTVScreen:fullscreen #musicTVFrame,#musicTVScreen.tv-theatre #musicTVFrame{width:min(100vw,125vh);height:min(100vh,80vw);inset:auto;left:50%;top:50%;transform:translate(-50%,-50%)}
+#musicTVScreen:-webkit-full-screen #musicTVFrame{width:min(100vw,125vh);height:min(100vh,80vw);inset:auto;left:50%;top:50%;transform:translate(-50%,-50%)}
 </style>
 </head>
 
@@ -1050,7 +1058,8 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 
 <section class="panel visual" aria-label="GLCTC1 Music TV">
   <div class="head tv-head"><span class="tv-size-guide" aria-hidden="true">🌀 FREQUENCY VISUALISER</span><span class="tv-size-guide" aria-hidden="true">MUSIC YOU HEAR • FREQUENCY YOU SEE</span><div class="tv-head-label"><span>GLCTC1 MUSIC TV</span><span class="tv-head-note">RADIO SPACE • AUTO VIDEO</span></div></div>
-  <div class="tv-screen">
+  <div class="tv-screen" id="musicTVScreen">
+    <button type="button" id="tvFullscreenBtn" class="tv-fullscreen" aria-label="Enter Music TV fullscreen" aria-pressed="false" title="Fullscreen">⛶ FULLSCREEN</button>
     <canvas id="cymaticCanvas" class="visualCanvas" aria-hidden="true"></canvas>
     <iframe id="musicTVFrame" title="GLCTC1 automatic music video" tabindex="-1" aria-hidden="true"></iframe>
     <div class="tv-bug"><b>GLCTC1<span>MUSIC TV</span></b><i id="tvState">STANDBY</i></div>
@@ -1781,6 +1790,8 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
       </div>
 
 
+      <button type="button" class="btn" id="cueOutputBtn">🎧 CONNECT HEADPHONES</button>
+      <audio id="cueMonitor" hidden></audio>
       <div
         id="cueOutputNotice"
         style="
@@ -2260,6 +2271,11 @@ function applyAdminOverride(){
     }
   );
 
+  if($('volumeSlider')) $('volumeSlider').disabled = !isAdmin || $('duckToggle').checked;
+  document.querySelectorAll('#libraryBody button, #libraryTableBody button, .library tbody button').forEach(b => b.disabled = !isAdmin);
+  if($('cueOutputBtn')) $('cueOutputBtn').disabled = !isAdmin || !cueSupported();
+  if(!isAdmin && cueMonitor) cueMonitor.pause();
+
 }
 
 
@@ -2267,34 +2283,8 @@ function applyAdminOverride(){
    GLCTC1 ADMIN LIBRARY PLAY OVERRIDE
 ===================================================== */
 
-async function playLibraryTrack(
-  track
-){
-
-  if(!isAdmin){
-
-    console.log(
-      "GLCTC1 ADMIN OVERRIDE — LIBRARY PLAY BLOCKED"
-    );
-
-    return;
-
-  }
-
-  currentTrack =
-    track;
-
-  currentIndex =
-    library.indexOf(
-      track
-    );
-
-  updateTrackUI();
-
-  await playTrack(
-    track
-  );
-
+async function playLibraryTrack(track){
+  return runDJCommand(() => saveSupabaseRadioStation(track,0));
 }
 
 
@@ -3117,12 +3107,9 @@ function radioStationPosition(
   }
 
 
-  const elapsed =
-    (
-      Date.now() -
-      started
-    ) / 1000;
-
+  const pausedAt = new Date(station.updated_at).getTime();
+  const clock = station.playing === false && Number.isFinite(pausedAt) ? pausedAt : Date.now();
+  const elapsed = (clock - started) / 1000;
 
   return Math.max(
     0,
@@ -3189,17 +3176,12 @@ async function saveSupabaseRadioStation(
       audio.duration <= 0
     ){
 
-      await new Promise(
-        resolve => {
-
-          audio.addEventListener(
-            "loadedmetadata",
-            resolve,
-            { once:true }
-          );
-
-        }
-      );
+      await new Promise((resolve,reject) => {
+        const done=()=>{cleanup();resolve();}, fail=()=>{cleanup();reject(new Error('Track metadata unavailable'));};
+        const timer=setTimeout(fail,15000);
+        function cleanup(){clearTimeout(timer);audio.removeEventListener('loadedmetadata',done);audio.removeEventListener('error',fail);}
+        audio.addEventListener('loadedmetadata',done,{once:true});audio.addEventListener('error',fail,{once:true});
+      });
 
     }
 
@@ -3238,7 +3220,7 @@ async function saveSupabaseRadioStation(
       new Date(
         Date.now() -
         (
-          Number(position || 0) *
+          Number(audio.currentTime || position || 0) *
           1000
         )
       ).toISOString();
@@ -3352,7 +3334,7 @@ async function saveSupabaseRadioStation(
 
 async function syncRadioToStation(){
 
-  if(radioStationSyncBusy)
+  if(radioStationSyncBusy || djCommandBusy || radioStationAdvanceBusy)
     return false;
 
 
@@ -3362,8 +3344,10 @@ async function syncRadioToStation(){
 
   try{
 
+    const revision = djCommandRevision;
     const station =
       await loadSupabaseRadioStation();
+    if(djCommandBusy || radioStationAdvanceBusy || revision !== djCommandRevision) return false;
 
 
     /*
@@ -3437,6 +3421,7 @@ async function syncRadioToStation(){
     */
 
     if(
+      station.playing !== false &&
       duration > 0 &&
       elapsed >= duration
     ){
@@ -3696,8 +3681,8 @@ async function advanceSupabaseRadioStation(){
       );
 
 
-    const nextTrack =
-      choices[randomIndex];
+    const current = list.findIndex(track => radioTrackKey(track) === radioStationTrackKey);
+    const nextTrack = shuffleEnabled ? choices[randomIndex] : list[(current + 1) % list.length];
 
 
     console.log(
@@ -5124,11 +5109,6 @@ $("duckToggle").onchange =
 
 function applyRadioDucking(){
 
-  if(
-    !audioCtx
-  )
-    return;
-
 
   if(
     duckLockedTrackVolume === null
@@ -5162,10 +5142,6 @@ function applyRadioDucking(){
       1 -
       duckAmount
     );
-
-
-  const now =
-    audioCtx.currentTime;
 
 
   /*
@@ -7642,6 +7618,69 @@ $("refreshLibrary").onclick =
   () =>
     loadLibrary();
 
+/* DJ controls: station writes, local monitor routing and capability-aware cue. */
+let djCommandBusy=false,djCommandRevision=0;
+async function runDJCommand(action){
+ if(!isAdmin||djCommandBusy||radioStationAdvanceBusy)return false;
+ djCommandBusy=true;djCommandRevision++;
+ try{const ok=await action();if(!ok){radioStationTrackKey=null;$('radioStatus').textContent='STATION UPDATE FAILED — RETRY';}return ok;}
+ catch(e){console.error('DJ command failed',e);$('radioStatus').textContent='STATION UPDATE FAILED — RETRY';return false;}
+ finally{djCommandBusy=false;}
+}
+async function setDJPlaying(playing){
+ if(!currentTrack){const list=playableLibrary();return list.length?saveSupabaseRadioStation(list[shuffleEnabled?Math.floor(Math.random()*list.length):0],0):false;}
+ const position=audio.currentTime||0;
+ if(playing){await ensureAudioEngine();await audio.play();}else{audio.pause();disarmRadioWake();}
+ const now=Date.now(),state={id:1,track_key:radioTrackKey(currentTrack),started_at:new Date(now-position*1000).toISOString(),duration:Number(audio.duration)||radioStationDuration||0,playing,updated_at:new Date(now).toISOString()};
+ const {error}=await supabaseClient.from('glctc1_radio_station').upsert(state,{onConflict:'id'});
+ if(error){await syncAfterDJFailure();return false;}
+ radioStationState=state;radioStationPlaying=playing;radioStationStartedAt=Date.parse(state.started_at);radioStationTrackKey=state.track_key;
+ $('playBtn').textContent=playing?'⏸ PAUSE':'▶ PLAY';$('radioStatus').textContent=playing?'● RADIO PLAYING':'RADIO PAUSED';return true;
+}
+async function syncAfterDJFailure(){const saved=await loadSupabaseRadioStation();if(saved){if(saved.playing)await audio.play().catch(()=>{});else audio.pause();}}
+$('playBtn').onclick=()=>runDJCommand(()=>setDJPlaying(audio.paused));
+$('nextBtn').onclick=()=>runDJCommand(()=>advanceSupabaseRadioStation());
+$('prevBtn').onclick=()=>runDJCommand(()=>{const list=playableLibrary();if(!list.length)return false;const i=list.findIndex(t=>radioTrackKey(t)===radioStationTrackKey);return saveSupabaseRadioStation(list[(Math.max(0,i)-1+list.length)%list.length],0);});
+// Explicit guards supplement disabled UI controls (database policies still govern server writes).
+for(const [id,event] of [['shuffleBtn','onclick'],['volumeSlider','oninput'],['loadVideoBtn','onclick'],['clearVideoBtn','onclick'],['stopWebcamBtn','onclick'],['refreshLibrary','onclick']]){
+ const element=$(id),handler=element[event];element[event]=function(e){if(!isAdmin)return;return handler.call(this,e);};
+}
+const originalLoadVideoURL=loadVideoURL;
+loadVideoURL=function(url){if(!isAdmin)return;return originalLoadVideoURL(url);};
+const cueMonitor=$('cueMonitor');let cueBus=null,cueRadio=null,cueLive=null,cueMaster=null,cueOutput=null,cueRadioSource=null,cueLiveSource=null;
+function cueSupported(){return !!(navigator.mediaDevices?.selectAudioOutput&&cueMonitor?.setSinkId);}
+function updateCueRouting(){
+ if(!cueBus)return;
+ const active=isAdmin&&($('radioCueToggle').checked||$('liveCueToggle').checked),mix=Number($('cueMix').value),level=Number($('cueLevel').value),now=audioCtx.currentTime;
+ if(radioSource!==cueRadioSource){if(cueRadioSource)try{cueRadioSource.disconnect(cueRadio);}catch(e){}cueRadioSource=radioSource;if(radioSource)radioSource.connect(cueRadio);}
+ if(liveAudioSource!==cueLiveSource){if(cueLiveSource)try{cueLiveSource.disconnect(cueLive);}catch(e){}cueLiveSource=liveAudioSource;if(liveAudioSource)liveAudioSource.connect(cueLive);}
+ cueRadio.gain.setTargetAtTime(active&&$('radioCueToggle').checked?1:0,now,.03);
+ cueLive.gain.setTargetAtTime(active&&$('liveCueToggle').checked?1:0,now,.03);
+ cueBus.gain.setTargetAtTime(active?1-mix:0,now,.03);cueMaster.gain.setTargetAtTime(active?mix:0,now,.03);cueOutput.gain.setTargetAtTime(active?level:0,now,.03);
+}
+const originalCueState=updateCueState;
+updateCueState=function(){originalCueState();updateCueRouting();};
+for(const id of ['radioCueToggle','liveCueToggle'])$(id).onchange=()=>{if(isAdmin)updateCueState();};
+for(const id of ['cueMix','cueLevel']){const handler=$(id).oninput;$(id).oninput=e=>{if(isAdmin)handler(e);};}
+$('cueOutputBtn').onclick=async()=>{
+ if(!isAdmin||!cueSupported())return;
+ try{
+  const device=await navigator.mediaDevices.selectAudioOutput();
+  if(!isAdmin)return;
+  if(!await ensureAudioEngine())throw Error('Audio engine unavailable');
+  if(!cueBus){
+   cueBus=audioCtx.createGain();cueRadio=audioCtx.createGain();cueLive=audioCtx.createGain();cueMaster=audioCtx.createGain();cueOutput=audioCtx.createGain();
+   const stream=audioCtx.createMediaStreamDestination();cueOutput.gain.value=0;
+   cueRadio.connect(cueBus);cueLive.connect(cueBus);cueBus.connect(cueOutput);masterGain.connect(cueMaster);cueMaster.connect(cueOutput);cueOutput.connect(stream);cueMonitor.srcObject=stream.stream;
+  }
+  await cueMonitor.setSinkId(device.deviceId);updateCueRouting();await cueMonitor.play();
+  $('cueOutputNotice').textContent='CUE OUTPUT: '+(device.label||'SELECTED DEVICE')+' · MIX: CUE ← → MASTER';
+ }catch(e){$('cueOutputNotice').textContent=e.name==='NotAllowedError'?'HEADPHONE SELECTION CANCELLED':'HEADPHONE OUTPUT UNAVAILABLE — '+e.message;}
+};
+if(!cueSupported()){$('cueOutputNotice').textContent='Separate headphone output is not supported by this browser. Use a browser with an audio-output picker.';$('cueOutputBtn').disabled=true;}
+// Keep cue taps connected when the live performer changes; no station writes here.
+setInterval(()=>{if(cueBus)updateCueRouting();},250);
+
 /* =====================================================
    AUTH
 ===================================================== */
@@ -7649,7 +7688,7 @@ $("refreshLibrary").onclick =
 supabaseClient.auth
   .onAuthStateChange(
     () =>
-      getSession()
+      setTimeout(() => getSession(),0)
   );
 
 /* =====================================================
@@ -7770,6 +7809,29 @@ window.GLCTC_MUSIC_TV_FEED=()=>({userId:currentUser?.id||null,track:currentTrack
 })();
 </script>
 
+<script>
+(()=>{
+ const screen=document.getElementById('musicTVScreen'),button=document.getElementById('tvFullscreenBtn');
+ let placeholder=null,oldOverflow='',previousFocus=null;
+ const nativeElement=()=>document.fullscreenElement||document.webkitFullscreenElement;
+ const expanded=()=>nativeElement()===screen||screen.classList.contains('tv-theatre');
+ function update(){const on=expanded();button.textContent=on?'✕ EXIT FULLSCREEN':'⛶ FULLSCREEN';button.setAttribute('aria-pressed',String(on));button.setAttribute('aria-label',on?'Exit Music TV fullscreen':'Enter Music TV fullscreen');button.title=on?'Exit fullscreen':'Fullscreen';}
+ function theatre(on){
+  if(on&&!placeholder){previousFocus=document.activeElement;placeholder=document.createElement('div');placeholder.style.height=screen.getBoundingClientRect().height+'px';screen.before(placeholder);document.body.appendChild(screen);oldOverflow=document.body.style.overflow;document.body.style.overflow='hidden';screen.classList.add('tv-theatre');button.focus();}
+  else if(!on&&placeholder){placeholder.replaceWith(screen);placeholder=null;screen.classList.remove('tv-theatre');document.body.style.overflow=oldOverflow;previousFocus?.focus();}
+  update();
+ }
+ button.onclick=async()=>{
+  if(screen.classList.contains('tv-theatre')){theatre(false);return;}
+  if(nativeElement()===screen){try{await (document.exitFullscreen||document.webkitExitFullscreen).call(document);}catch(e){}update();return;}
+  try{const request=screen.requestFullscreen||screen.webkitRequestFullscreen;if(!request)throw Error('Use theatre mode');await request.call(screen);update();}catch(e){theatre(true);}
+ };
+ document.addEventListener('fullscreenchange',update);document.addEventListener('webkitfullscreenchange',update);
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&screen.classList.contains('tv-theatre')){e.preventDefault();theatre(false);}});
+ update();
+})();
+
+</script>
 </body>
 </html>
 

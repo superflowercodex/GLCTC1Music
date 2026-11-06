@@ -1168,6 +1168,12 @@ const beatSeconds=()=>60/(schedulingBpm||GLCTC_CLOCK.bpm);
 Object.assign(GLCTC_CLOCK,{
  jobs:new Map(),sources:new Map(),owner:null,pulseTimer:0,
  bpmAt(t){if(!this.anchored())return this.bpm;let g=this.segs[0];for(const x of this.segs){if(x.t0>t)break;g=x}return g.bpm},
+ // Never replay an overdue run of notes after a busy UI frame/background stall.
+ // Keep the absolute song counter; all modules resume on the same clock grid.
+ catchUpStep(step,beatSize,now){
+  if(this.timeOfBeat(step*beatSize)>=now-.03)return step;
+  return Math.max(step,Math.ceil(this.beatAt(now+.005)/beatSize-1e-7));
+ },
  prepare(id,beat){return window.GLCTC_SONG?.prepareStep?.(id,beat)||{on:true,beat,section:null}},
  within(id,fn){const prev=this.owner;this.owner=id;try{return fn()}finally{this.owner=prev}},
  every(id,fn){this.jobs.set(id,fn);if(!this.pulseTimer)this.pulseTimer=setInterval(()=>this.pulse(),10);return {clockJob:id}},
@@ -1246,6 +1252,9 @@ function timelineSchedule(){
  if(!playing||!audioCtx)return;const c=audioCtx;
  playheadBeats=Math.max(0,timelineBeatAt(c.currentTime));
  const composer=window.GLCTC_SONG?.running(),song=window.GLCTC_SONG?.position?.(),L=timelineLoop();
+ if(timelineTimeAt(scheduledUntil)<c.currentTime-.03){
+  stopTimelineAt(c.currentTime);startedClips.clear();timelineTempoPending=timelineTempoPending.filter(at=>at>c.currentTime);scheduledUntil=Math.max(scheduledUntil,timelineUnwrappedAt(c.currentTime+.005));
+ }
  let to=timelineUnwrappedAt(c.currentTime+.22);
  if(!L)to=Math.min(to,song?song.total:totalBeats());
  while(timelineTempoPending.length&&timelineTempoPending[0]<=c.currentTime+.22){
@@ -2280,7 +2289,7 @@ let blUiQueue=[],blLit=-1;
 function patternStep(i,when){const pat=currentPattern(),step=i%16;for(let vi=0;vi<names.length;vi++){const s=pat.steps[vi][step];if(s.on)trigger(vi,s.velocity,when)}setTimeout(()=>blLight(step),Math.max(0,((when||0)-(audioCtx?audioCtx.currentTime:0))*1000));}
 function blLight(step){if(!playingBL||!__glctcVisible($b('beatLabPanel')))return;const root=$b('blSteps');if(blLit>=0)root.querySelectorAll('[data-step="'+blLit+'"]').forEach(b=>b.classList.remove('playing'));root.querySelectorAll('[data-step="'+step+'"]').forEach(b=>b.classList.add('playing'));blLit=step}
 function stepDuration(){return 60/(GLCTC_CLOCK.bpm)/4}
-function schedule(){if(!playingBL)return;const ctx=ensureAudio(),now=ctx.currentTime,K=GLCTC_CLOCK;if(K.timeOfBeat(nextStep/4)<now-GLCTC_CLOCK.AHEAD)nextStep=Math.max(nextStep,Math.ceil(K.beatAt(now-.03)*4));let g=0;while(K.timeOfBeat(nextStep/4)<now+GLCTC_CLOCK.AHEAD&&g++<64){const songStep=K.prepare('bl',nextStep/4),step=Math.round(songStep.beat*4)%16,t0=K.timeOfBeat(nextStep/4),sd=K.timeOfBeat((nextStep+1)/4)-t0;let when=t0;if(step%2===1)when+=sd*(state.swing||0);if(songStep.on&&when>=now-.03)patternStep(step,when);nextStep++;} }
+function schedule(){if(!playingBL)return;const ctx=ensureAudio(),now=ctx.currentTime,K=GLCTC_CLOCK;nextStep=K.catchUpStep(nextStep,.25,now);let g=0;while(K.timeOfBeat(nextStep/4)<now+GLCTC_CLOCK.AHEAD&&g++<64){const songStep=K.prepare('bl',nextStep/4),step=Math.round(songStep.beat*4)%16,t0=K.timeOfBeat(nextStep/4),sd=K.timeOfBeat((nextStep+1)/4)-t0;let when=t0;if(step%2===1)when+=sd*(state.swing||0);if(songStep.on&&when>=now-.03)patternStep(step,when);nextStep++;} }
 function start(){if(playingBL)stop();const ctx=ensureAudio();ctx.resume();playingBL=true;{const o0=window.__glctcStartStep||0;GLCTC_CLOCK.ensureAnchor(o0);originStep=0;nextStep=o0;lastStep=-1}try{noiseBuffer(ctx);for(let i=0;i<names.length;i++)updateBus(ctx,i)}catch(e){console.warn('80LA8 pre-warm',e)}blTimer=GLCTC_CLOCK.every('bl',schedule);$b('blPlay').textContent='Ⅱ PLAYING';$b('blPlay').classList.add('active');}
 function stop(){blUiQueue.length=0;blLit=-1;playingBL=false;GLCTC_CLOCK.cancel(blTimer);clearTimeout(blTransportTimer);blTransportTimer=0;blTimer=0;$b('blPlay').textContent='▶ PLAY PATTERN';$b('blPlay').classList.remove('active');$b('blSteps').querySelectorAll('.bl-step').forEach(b=>b.classList.remove('playing'))}
 function renderCurrentStep(){renderSteps()}
@@ -2479,7 +2488,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
  function renderVoiceProfiles(){const root=$('d09VoiceProfiles');if(!root)return;root.innerHTML='';names.forEach((n,i)=>{const card=document.createElement('div');card.className='d09-voice-card';const title=document.createElement('strong');title.textContent=n;const sel=document.createElement('select');profiles.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p==='kit'?'FOLLOW KIT':p.toUpperCase();sel.append(o)});sel.value=S.profiles[i]||'kit';sel.onchange=()=>{S.profiles[i]=sel.value;save()};card.append(title,sel);const ch=S.channels[i];[['LEVEL','level',0,1,.01],['PAN','pan',-1,1,.01],['TONE · DARK ◀ ▶ BRIGHT','tone',-1,1,.01],['DELAY SEND','delay',0,1,.01],['REVERB SEND','reverb',0,1,.01]].forEach(([label,key,min,max,step])=>{const wrap=document.createElement('div');wrap.className='d09-control';const l=document.createElement('label');l.innerHTML=`<span>${label}</span><output>${Math.round((ch[key]??0)*100)}%</output>`;const input=document.createElement('input');input.type='range';input.min=min;input.max=max;input.step=step;input.value=ch[key]??0;input.oninput=()=>{ch[key]=+input.value;l.querySelector('output').textContent=key==='pan'?Math.round(ch[key]*100):Math.round(ch[key]*100)+'%';save()};wrap.append(l,input);card.append(wrap)});root.append(card)})}
  function renderSamples(){const root=$('d09Samples');if(!root)return;root.innerHTML='';for(let i=0;i<4;i++){const card=document.createElement('div');card.className='d09-sample-card';const title=document.createElement('strong');title.textContent=sampleNamesLoaded[i];const input=document.createElement('input');input.type='file';input.accept='audio/*,.wav,.mp3,.ogg,.m4a,.aiff';input.setAttribute('aria-label','Load sample '+(i+1));input.onchange=async()=>{const file=input.files?.[0];if(!file)return;try{const c=ctx();const bytes=await file.arrayBuffer();const buf=await c.decodeAudioData(bytes.slice(0));sampleBuffers[i]=buf;sampleNamesLoaded[i]=file.name;title.textContent=file.name;const persisted=await persistSample(i,file.name,bytes);save();$('mine909Status').textContent='LOADED SAMPLE '+(i+1)+(persisted?' · SAVED ON THIS DEVICE':' · SESSION ONLY · STORAGE UNAVAILABLE')}catch(e){$('mine909Status').textContent='COULD NOT DECODE SAMPLE'}};const actions=document.createElement('div');actions.className='d09-sample-actions';const preview=document.createElement('button');preview.textContent='▶ PREVIEW';preview.onclick=()=>{if(sampleBuffers[i])voice(i+11,.9);else $('mine909Status').textContent='LOAD A SAMPLE FIRST'};const clear=document.createElement('button');clear.textContent='CLEAR';clear.onclick=()=>{sampleBuffers[i]=null;sampleNamesLoaded[i]='No sample loaded';removePersistedSample(i);save();renderSamples()};actions.append(preview,clear);card.append(title,input,actions);root.append(card)}}
  function interval(){return 60/(GLCTC_CLOCK.bpm)/4}
- function tick(){if(!running)return;const c=ctx(),now=c.currentTime,K=GLCTC_CLOCK,loop=S.bars*16;if(K.timeOfBeat(step/4)<now-GLCTC_CLOCK.AHEAD)step=Math.max(step,Math.ceil(K.beatAt(now-.03)*4));let g=0;while(K.timeOfBeat(step/4)<now+GLCTC_CLOCK.AHEAD&&g++<64){const songStep=K.prepare('mine',step/4),ix=Math.round(songStep.beat*4)%loop,local=ix%16,t0=K.timeOfBeat(step/4),sd=K.timeOfBeat((step+1)/4)-t0,when=t0+(local%2===1?S.swing*sd:0);if(songStep.on&&when>=now-.03)current().forEach((row,v)=>{const st=row[ix];if(st?.on)voice(v,st.velocity*(st.accent?1.12:1),when)});setTimeout(()=>{if(!running||!__glctcVisible($('mine909Panel')))return;const el=$('mine909Steps');if(!el)return;el.querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'));el.querySelectorAll(`[data-step="${ix}"]`).forEach(b=>b.classList.add('playing'))},Math.max(0,(t0-now)*1000));step++}}
+ function tick(){if(!running)return;const c=ctx(),now=c.currentTime,K=GLCTC_CLOCK,loop=S.bars*16;step=K.catchUpStep(step,.25,now);let g=0;while(K.timeOfBeat(step/4)<now+GLCTC_CLOCK.AHEAD&&g++<64){const songStep=K.prepare('mine',step/4),ix=Math.round(songStep.beat*4)%loop,local=ix%16,t0=K.timeOfBeat(step/4),sd=K.timeOfBeat((step+1)/4)-t0,when=t0+(local%2===1?S.swing*sd:0);if(songStep.on&&when>=now-.03)current().forEach((row,v)=>{const st=row[ix];if(st?.on)voice(v,st.velocity*(st.accent?1.12:1),when)});setTimeout(()=>{if(!running||!__glctcVisible($('mine909Panel')))return;const el=$('mine909Steps');if(!el)return;el.querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'));el.querySelectorAll(`[data-step="${ix}"]`).forEach(b=>b.classList.add('playing'))},Math.max(0,(t0-now)*1000));step++}}
  function start(){if(running)stop();ctx().resume();getBus(ctx());updateFx();running=true;step=window.__glctcStartStep||0;GLCTC_CLOCK.ensureAnchor(step);timer=GLCTC_CLOCK.every('mine',tick);$('mine909Play').textContent='Ⅱ PLAYING';$('mine909Play').classList.add('active');$('mine909Status').textContent='DIVINE09 RHYTHM RUNNING'}
  function stop(){running=false;GLCTC_CLOCK.cancel(timer);timer=0;$('mine909Play').textContent='▶ PLAY PATTERN';$('mine909Play').classList.remove('active');$('mine909Status').textContent='DIVINE09 ENGINE READY';$('mine909Steps').querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'))}
  function copyBar(){const from=S.editBar*16,to=((S.editBar+1)%S.bars)*16;current().forEach(row=>{for(let i=0;i<16;i++)row[to+i]={...row[from+i]}});S.editBar=(S.editBar+1)%S.bars;save();render()}
@@ -2543,7 +2552,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
  function tick(){
   if(!running)return;
   const ctx=ensureAudio(),now=ctx.currentTime,K=GLCTC_CLOCK;
-  if(K.timeOfBeat(next/4)<now-GLCTC_CLOCK.AHEAD)next=Math.max(next,Math.ceil(K.beatAt(now-.03)*4));
+  next=K.catchUpStep(next,.25,now);
   let g=0;
   while(K.timeOfBeat(next/4)<now+GLCTC_CLOCK.AHEAD&&g++<64){
    const songStep=K.prepare('lee',next/4),ix=Math.round(songStep.beat*4)%(S.length||16),st=current()[ix],t0=K.timeOfBeat(next/4),sd=K.timeOfBeat((next+1)/4)-t0;
@@ -2659,7 +2668,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
  function s101Scale(){return ({minor:[0,2,3,5,7,8,10],major:[0,2,4,5,7,9,11],phrygian:[0,1,3,5,7,8,10],pentatonic:[0,3,5,7,10],chromatic:[0,1,2,3,4,5,6,7,8,9,10,11]})[$s('s101PatternScale').value]||[0,2,3,5,7,8,10]}
  function s101PatternNote(st){const root=+$s('s101PatternRoot').value,scale=s101Scale(),idx=st.note||0;return root+Math.floor(idx/scale.length)*12+scale[idx%scale.length]}
  function renderS101Pattern(){const root=$s('s101PatternGrid');if(!root)return;root.innerHTML='';const len=+$s('s101PatternLength').value||16;s101Pattern.forEach((st,i)=>{const b=document.createElement('button');b.id=`s101PatternStep${i}`;b.className='s101-pattern-step'+(st.on?' on':'')+(st.accent?' accent':'');b.dataset.step=i;b.style.display=i<len?'flex':'none';b.innerHTML=`<span>${i+1}</span><small>${noteNames[(s101PatternNote(st)%12)]}</small>`;b.title='Click toggle · Shift-click accent · double-click cycle note';b.onclick=e=>{if(e.shiftKey){st.accent=!st.accent;st.velocity=st.accent?1:.78}else st.on=!st.on;renderS101Pattern()};b.ondblclick=e=>{e.preventDefault();st.note=(st.note+1)%s101Scale().length;renderS101Pattern()};root.append(b)});}
- function s101PatternTick(){if(!s101PatternRunning)return;const c=ctx(),now=c.currentTime,K=GLCTC_CLOCK,len=+$s('s101PatternLength').value||16;if(K.timeOfBeat(s101PatternStep/4)<now-GLCTC_CLOCK.AHEAD)s101PatternStep=Math.max(s101PatternStep,Math.ceil(K.beatAt(now-.03)*4));let gg=0;while(K.timeOfBeat(s101PatternStep/4)<now+GLCTC_CLOCK.AHEAD&&gg++<64){const songStep=K.prepare('s101',s101PatternStep/4),ix=Math.round(songStep.beat*4)%len,st=s101Pattern[ix],when0=K.timeOfBeat(s101PatternStep/4),sd=K.timeOfBeat((s101PatternStep+1)/4)-when0,when=when0+(ix%2===1?sd*((window.GLCTC_GROOVE&&+window.GLCTC_GROOVE.swing)||0):0),late=when<now-.03,delay=Math.max(0,(when-now)*1000);if(songStep.on&&st&&st.on&&!late){const g=noteOn(s101PatternNote(st),st.velocity*(st.accent?1.12:1),'s101pattern',true,Math.max(now,when));s101PatternVoice=g;(window.__s101PatG=window.__s101PatG||[]).push(g);if(window.__s101PatG.length>10)window.__s101PatG.shift();const gate=sd*(+$s('s101PatternGate').value||.72);releaseGroup(g,Math.max(now,when)+Math.max(.025,gate));pressed.delete('s101pattern')}setTimeout(()=>{if(!s101PatternRunning||!__glctcVisible($s('s101Panel')))return;$s('s101PatternGrid').querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'));const el=$s('s101PatternGrid').querySelector(`[data-step="${ix}"]`);if(el)el.classList.add('playing')},delay);s101PatternStep++}}
+ function s101PatternTick(){if(!s101PatternRunning)return;const c=ctx(),now=c.currentTime,K=GLCTC_CLOCK,len=+$s('s101PatternLength').value||16;s101PatternStep=K.catchUpStep(s101PatternStep,.25,now);let gg=0;while(K.timeOfBeat(s101PatternStep/4)<now+GLCTC_CLOCK.AHEAD&&gg++<64){const songStep=K.prepare('s101',s101PatternStep/4),ix=Math.round(songStep.beat*4)%len,st=s101Pattern[ix],when0=K.timeOfBeat(s101PatternStep/4),sd=K.timeOfBeat((s101PatternStep+1)/4)-when0,when=when0+(ix%2===1?sd*((window.GLCTC_GROOVE&&+window.GLCTC_GROOVE.swing)||0):0),late=when<now-.03,delay=Math.max(0,(when-now)*1000);if(songStep.on&&st&&st.on&&!late){const g=noteOn(s101PatternNote(st),st.velocity*(st.accent?1.12:1),'s101pattern',true,Math.max(now,when));s101PatternVoice=g;(window.__s101PatG=window.__s101PatG||[]).push(g);if(window.__s101PatG.length>10)window.__s101PatG.shift();const gate=sd*(+$s('s101PatternGate').value||.72);releaseGroup(g,Math.max(now,when)+Math.max(.025,gate));pressed.delete('s101pattern')}setTimeout(()=>{if(!s101PatternRunning||!__glctcVisible($s('s101Panel')))return;$s('s101PatternGrid').querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'));const el=$s('s101PatternGrid').querySelector(`[data-step="${ix}"]`);if(el)el.classList.add('playing')},delay);s101PatternStep++}}
  function s101PatternStart(){if(s101PatternRunning)s101PatternStop();ctx().resume();getBus();stopArp();s101PatternRunning=true;s101PatternStep=window.__glctcStartStep||0;GLCTC_CLOCK.ensureAnchor(s101PatternStep);GLCTC_CLOCK.cancel(s101PatternTimer);s101PatternTimer=GLCTC_CLOCK.every('s101',s101PatternTick);$s('s101TransportPlay').textContent='Ⅱ PLAYING';$s('s101TransportPlay').classList.add('s101-active');$s('s101Status').textContent='0010110 PATTERN RUNNING'}
  function s101PatternStop(){s101PatternRunning=false;GLCTC_CLOCK.cancel(s101PatternTimer);s101PatternTimer=0;(window.__s101PatG||[]).splice(0).forEach(g=>{try{releaseGroup(g)}catch(e){}});if(s101PatternVoice){releaseGroup(s101PatternVoice);s101PatternVoice=null}pressed.delete('s101pattern');$s('s101TransportPlay').textContent='▶ PLAY PATTERN';$s('s101TransportPlay').classList.remove('s101-active');$s('s101PatternGrid').querySelectorAll('.playing').forEach(b=>b.classList.remove('playing'));$s('s101Status').textContent='TRANSPORT STOPPED'}
  $s('s101PatternLength').onchange=renderS101Pattern;$s('s101PatternRoot').onchange=renderS101Pattern;$s('s101PatternScale').onchange=renderS101Pattern;$s('s101PatternGate').oninput=e=>$s('s101PatternGateVal').textContent=Math.round(+e.target.value*100)+'%';$s('s101PatternRandom').onclick=()=>{const sc=s101Scale();s101Pattern.forEach((st,i)=>{st.on=Math.random()>.42;st.note=Math.floor(Math.random()*sc.length);st.accent=st.on&&Math.random()>.78;st.velocity=st.accent?1:.65+Math.random()*.3});renderS101Pattern()};$s('s101PatternClear').onclick=()=>{s101Pattern.forEach(st=>{st.on=false;st.accent=false});renderS101Pattern()};renderS101Pattern();
@@ -3186,7 +3195,7 @@ let __grb=0,__goSection=null;
 function tick(){
  if(!running)return;const r=getRig(),c=r.c,S=ST.seq,la=c.currentTime+GLCTC_CLOCK.AHEAD,K=GLCTC_CLOCK,rb=RATE_BEATS[S.rate]||.25;let g=0;
  if(rb!==__grb){__grb=rb;stepN=Math.ceil(K.beatAt(c.currentTime+.03)/rb-1e-6)}
- if(K.timeOfBeat(stepN*rb)<c.currentTime-.06){const k=Math.max(0,Math.ceil(K.beatAt(c.currentTime+.02)/rb-1e-6)-stepN);for(let i=0;i<k;i++)stp.step();stepN+=k}
+ const caught=K.catchUpStep(stepN,rb,c.currentTime);if(caught!==stepN){stepN=caught;const at=K.prepare('go',stepN*rb);__goSection=at.section;stp=makeStepper(S,Math.floor((at.beat+1e-7)/rb))}
  while(K.timeOfBeat(stepN*rb)<la&&g++<64){const t0=K.timeOfBeat(stepN*rb),dur=K.timeOfBeat((stepN+1)*rb)-t0,sw=(stepN%2)?S.swing*dur*.62:0,t=t0+sw;
   const trans=(S.mode==='seq'&&S.follow&&held.size)?lowestHeld()-rootBase(S):0;
   const songStep=K.prepare('go',stepN*rb);
@@ -3997,7 +4006,7 @@ let __vrb=0;
 function tick(){
  if(!running||!V)return;const c=V.c,la=c.currentTime+GLCTC_CLOCK.AHEAD,K=GLCTC_CLOCK,rb=RATE_BEATS[Q.rate]||.25;let g=0;
  if(rb!==__vrb){__vrb=rb;pos=Math.ceil(K.beatAt(c.currentTime+.03)/rb-1e-6)}
- if(K.timeOfBeat(pos*rb)<c.currentTime-.05)pos=Math.max(pos,Math.ceil(K.beatAt(c.currentTime+.02)/rb-1e-6));
+ pos=K.catchUpStep(pos,rb,c.currentTime);
  while(K.timeOfBeat(pos*rb)<la&&g++<32){const t0=K.timeOfBeat(pos*rb),dur=K.timeOfBeat((pos+1)*rb)-t0,songStep=K.prepare('vox',pos*rb),localPos=Math.floor((songStep.beat+1e-7)/rb),st=Q.steps[localPos%Q.len];let ns=[];
   if(songStep.on&&st&&st.on){const tt=t0+(Math.abs(rb-.25)<1e-6&&localPos%2===1?dur*((window.GLCTC_GROOVE&&+window.GLCTC_GROOVE.swing)||0):0),m=(Q.oct+1)*12+Q.root+st.n;ns=Q.chord?chordFor(m):[m];ns.forEach(n=>{instOn(Q.target,n,st.v,tt,Math.max(.05,dur*Q.gate),true);capSeq(n,st.v,tt,dur*Q.gate)})}
   uiQ.push({t:t0,p:localPos%Q.len,notes:ns});pos++}
@@ -5012,7 +5021,7 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  function hitPerf(k,vel,when){const A=window.GLCTC_PERF_PADS;if(!A||!A.fireAt)return;try{A.fireAt(k,vel,when,bus('ws'))}catch(e){console.warn('PAD-64 live pad failed',k,e)}const d=Math.max(0,((when||0)-(audioCtx?audioCtx.currentTime:0))*1000);setTimeout(()=>{if(A.bank()===(k>>4)){const b=wsPmBtns[k&15];if(b){b.classList.add('hit');setTimeout(()=>b.classList.remove('hit'),90)}}},d)}
  function pTick(){
   if(!pRunning)return;const c=audioCtx,K=GLCTC_CLOCK,loop=P().bars*16;
-  if(K.timeOfBeat(pStep/4)<c.currentTime-GLCTC_CLOCK.AHEAD)pStep=Math.max(pStep,Math.ceil(K.beatAt(c.currentTime-.03)*4));
+  pStep=K.catchUpStep(pStep,.25,c.currentTime);
   let gg=0;
   while(K.timeOfBeat(pStep/4)<c.currentTime+GLCTC_CLOCK.AHEAD&&gg++<64){
    const songStep=K.prepare('ws',pStep/4),t0=K.timeOfBeat(pStep/4),sd=K.timeOfBeat((pStep+1)/4)-t0,ix=Math.round(songStep.beat*4)%loop,when=t0+(ix%2===1?P().swing*sd:0),pt=pat();
@@ -6879,6 +6888,14 @@ function tick(){
  if(!S)return;
  try{
   const h=H(),c=S.ctx,K=window.GLCTC_CLOCK,bs=60/K.bpm,sd=bs/4,now=c.currentTime,beat=K.beatAt(now);S.bpm=K.bpm;
+  const local=st.loop?Math.max(0,beat)%S.total:Math.max(0,Math.min(beat,S.total-1e-8));
+  let current=0;while(current<S.n-1&&local>=S.starts[current+1])current++;
+  const cycle=st.loop?Math.floor(Math.max(0,beat)/S.total):0,nextBoundary=cycle*S.n+current+1;
+  if(S.a<nextBoundary&&K.timeOfBeat(boundaryBeat(S.a))<now-.03){
+   S.a=nextBoundary;S.ph={};
+   MODS.forEach(m=>{if(!m.tr&&S.launched[m.k])setGainNow(m,eff(m,current)>=0?lvl(m):0)});
+   try{fxSection(current,K.timeOfBeat(cycle*S.total+S.starts[current]))}catch(e){}
+  }
   const a=S.a,Bb=boundaryBeat(a),remain=K.timeOfBeat(Bb)-now,last=!st.loop&&a===S.n,ph=S.ph[a]||(S.ph[a]={});
   if(beat>=0){
    const lb=st.loop?beat%S.total:Math.min(beat,S.total-.001);let i=0;
@@ -6908,7 +6925,7 @@ function tick(){
   });
   if(beat>=Bb){
    if(last){if(now>K.timeOfBeat(Bb)+1.2)stopSong('SONG FINISHED')}
-   else S.a++;
+   else{delete S.ph[a-1];S.a++;}
    return;
   }
   if(now>S.t0+1.5&&remain>.6){

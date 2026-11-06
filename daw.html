@@ -6804,7 +6804,7 @@ async function startSong(opts){
   }
   h.stopAll();h.reanchorBpm();
   status('PREPARING MODULES…');
-  await h.prepare();await window.glctcTimeline?.prepare?.();if(request!==songRequest)return;
+  await h.prepare();if(request!==songRequest)return;
   let c=ctxOf();
   if(!c){status('Audio engine is not ready. Tap once on the page and press play again.');return}
   if(c.resume)await c.resume();if(request!==songRequest)return;
@@ -7279,14 +7279,19 @@ const AUTO_LS='glctc1.autoSongOnLoad';
 function songBeats(){const [num,den]=String(byId('timeSig')?.value||'4/4').split('/').map(Number),bb=num*4/den||4;return st.secs.reduce((a,s)=>a+s.bars*bb,0)}
 const TRANSPORT={
  busy:()=>!!(S||starting),
- play(){
+ play(opts){
   if(S||starting)return false;
   const TLx=window.glctcTimeline;
-  if(window.__glctcModMode||!H()?.modulesOn){try{TLx.play()}catch(e){}return true}
+  const composer=opts?.composer===true;
+  // Explicit Composer Play owns the song workflow, including enabling its group.
+  // Ordinary master Play continues to respect Modules Off and manual module mode.
+  if(composer&&window.__glctcModMode)byId('mkModMode')?.click();
+  if(!composer&&(window.__glctcModMode||!H()?.modulesOn)){try{TLx.play()}catch(e){}return true}
   try{if(TLx.playing()&&!TLx.slave())TLx.pause()}catch(e){}
   let from=0;try{from=Math.max(0,+TLx.head()||0)}catch(e){}
   startSong({from});return true;
  },
+ toggleSong(){if(S||starting){stopSong(null,true);return}return TRANSPORT.play({composer:true})},
  toggle(){if(S||starting){stopSong(null,true);return}const TLx=window.glctcTimeline;if(TLx&&TLx.playing()){try{TLx.pause()}catch(e){}return}TRANSPORT.play()},
  stop(){
   if(S||starting){stopSong(null,true);return}
@@ -7311,7 +7316,7 @@ byId('gscApplyFX').onclick=()=>{byId('gscAutoFX').checked=true;window.GLCTC_FX?.
 byId('gscAutoFX').onchange=()=>{window.GLCTC_FX?.composer(byId('gscGenre').value,byId('gscAutoFX').checked);status(byId('gscAutoFX').checked?'AUTO CHANNEL FX ON':'COMPOSER FX OFF · manual channel FX kept')};
 byId('gscSave').onclick=()=>window.GLCTC_COMPOSER_FILES.save();
 byId('gscLoad').onclick=()=>window.GLCTC_COMPOSER_FILES.load();
-byId('gscPlay').addEventListener('click',()=>TRANSPORT.play());
+byId('gscPlay').addEventListener('click',()=>TRANSPORT.play({composer:true}));
 byId('gscStop').addEventListener('click',()=>TRANSPORT.stop());
 /* capture-phase routing so the older handlers on these buttons never run a different kind of play */
 document.addEventListener('click',e=>{
@@ -7319,7 +7324,7 @@ document.addEventListener('click',e=>{
  let act=null;
  if(b.id==='playBtn')act='toggle';
  else if(b.id==='stopBtn')act='stop';
- else if(b.id==='songPlayBtn')act='toggle';
+ else if(b.id==='songPlayBtn')act='toggleSong';
  else if(b.id==='playAllModulesBtn')act=window.__glctcModMode?null:'toggle';
  else if(b.closest('.glctc-transport-box')&&b.parentElement&&b.parentElement.classList.contains('mk-ps'))act=window.__glctcModMode?null:b.classList.contains('mk-stop-btn')?'stop':'play';
  if(!act)return;
@@ -7394,7 +7399,7 @@ function fitRemix(beats){
  else{let used=0;st.secs=old.map((s,i)=>{const bars=i===old.length-1?totalBars-used:Math.max(1,Math.min(totalBars-used-(old.length-i-1),Math.round(s.bars/total*totalBars)));used+=bars;return {...s,bars}})}
  st.loop=false;byId('gscLoop').checked=false;save();renderGrid();refreshTimeline();
 }
-window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
+window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play({composer:true}),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
 })();
 </script>
 

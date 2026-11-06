@@ -6,6 +6,17 @@
 -->
 <html lang="en">
 <head>
+<script>
+window.GLCTC_RADIO_EMBED=false;
+try{window.GLCTC_RADIO_EMBED=window.parent!==window && new URLSearchParams(location.search).get('radio_tv')==='1' && window.parent.location.origin===location.origin && typeof window.parent.GLCTC_MUSIC_TV_FEED==='function';}catch(e){}
+if(window.GLCTC_RADIO_EMBED)document.documentElement.classList.add('radio-tv-embed');
+</script>
+<style>
+html.radio-tv-embed,html.radio-tv-embed body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden!important;background:#02030a!important}
+html.radio-tv-embed body>*{display:none!important}
+html.radio-tv-embed body>#visualCanvas{display:block!important}
+</style>
+
 <link rel="icon" type="image/png" sizes="192x192" href="glctc1-icon-192.png">
 <link rel="apple-touch-icon" href="glctc1-icon-192.png">
 <!-- GLCTC1 GUARD: blocks hate, porn & abuse in every save (swearing allowed). Must load before Supabase. -->
@@ -459,11 +470,16 @@ Nothing is uploaded to a GLCTC1 media library or saved as a permanent media reco
 </main>
 <audio id="sourceAudio" preload="auto" style="display:none"></audio>
 <script>
-(() => { "use strict"; const $ = id => document.getElementById(id); const songInput = $("songInput"); const songStatus = $("songStatus"); const canvas = $("visualCanvas"); const ctx = canvas.getContext("2d");
-const sourceAudio = $("sourceAudio"); const playButton = $("playButton"); const stopButton = $("stopButton"); const downloadButton = $("downloadButton"); const timeline = $("timeline");
+(() => { "use strict"; const TV=window.GLCTC_RADIO_EMBED === true; const $ = id => document.getElementById(id); const songInput = $("songInput"); const songStatus = $("songStatus"); const canvas = $("visualCanvas"); const ctx = canvas.getContext("2d");
+const mediaStub = $("sourceAudio");
+const sourceAudio = !TV ? mediaStub : new Proxy(mediaStub,{get(target,key){
+ if(key === 'currentTime' || key === 'duration') return parent.GLCTC_MUSIC_TV_FEED()[key] || 0;
+ if(key === 'play' || key === 'pause' || key === 'load') return () => {};
+ const value=target[key]; return typeof value === 'function' ? value.bind(target) : value;
+},set(target,key,value){if(key !== 'currentTime' && key !== 'src') target[key]=value;return true;}}); const playButton = $("playButton"); const stopButton = $("stopButton"); const downloadButton = $("downloadButton"); const timeline = $("timeline");
 const currentTime = $("currentTime"); const duration = $("duration"); const autoButton = $("autoButton"); const autoStatus = $("autoStatus"); const mixSlider = $("mixSlider"); const mixValue = $("mixValue");
 const fxGrid = $("fxGrid"); const status = $("experienceStatus"); const aiStatus = $("aiStatus"); const readBass = $("readBass"); const readMid = $("readMid"); const readHigh = $("readHigh");
-const readBpm = $("readBpm"); const charGrid = $("charGrid"); const stageRow = $("stageRow"); const syncSlider = $("syncSlider"); const syncValue = $("syncValue"); let W = 540; const H = 960; const FLOOR = 830;
+const readBpm = $("readBpm"); const charGrid = $("charGrid"); const stageRow = $("stageRow"); const syncSlider = $("syncSlider"); const syncValue = $("syncValue"); let W = TV ? 1200 : 540; const H = 960; const FLOOR = 830; if(TV){canvas.width=W;canvas.height=H;}
 function makeCanvas(){ const c = document.createElement("canvas"); c.width = W; c.height = H; return c; }
 const sceneCanvas = makeCanvas(); const sceneCtx = sceneCanvas.getContext("2d"); const charCanvas = makeCanvas(); const charCtx = charCanvas.getContext("2d"); const wetCanvas = makeCanvas();
 const wetCtx = wetCanvas.getContext("2d"); const tempCanvas = makeCanvas(); const tempCtx = tempCanvas.getContext("2d"); const FX = [ ["kaleidoscope","KALEIDOSCOPE",72], ["wobble","WOBBLE",62], ["warp","WARP",48],
@@ -2498,7 +2514,7 @@ if(!GLR.ok){ for(let i=CHARS.length - 1;i>=0;i--){ if(CHARS[i].glOnly){ CHARS.sp
 const cards = []; const THUMBQ = []; function pumpThumbs(){ const job = THUMBQ.shift(); if(!job){ return; }
 if(glReady(job.ch.glType)){ glThumb(job.c,job.ch.glType); }
 setTimeout(pumpThumbs,40); }
-function drawThumb(c,ch,hot){ if(ch.glType !== undefined && GLR.ok && GLR.progs[ch.glType]){ glThumb(c,ch.glType); return; }
+function drawThumb(c,ch,hot){ if(TV) return; /* Broadcast mode skips hidden editor thumbnails. */ if(ch.glType !== undefined && GLR.ok && GLR.progs[ch.glType]){ glThumb(c,ch.glType); return; }
 if(ch.glType !== undefined && GLR.ok && !GLR.bad[ch.glType]){ THUMBQ.push({ c, ch }); if(THUMBQ.length === 1){ setTimeout(pumpThumbs,60); }
 }
 const g = c.getContext("2d"); g.clearRect(0,0,c.width,c.height); const bg = g.createLinearGradient(0,0,0,c.height); bg.addColorStop(0,"#120626"); bg.addColorStop(1,"#2a0b52");
@@ -3253,7 +3269,7 @@ else{ saveBtn.onclick(); copyCapBtn.onclick(); setMsg("THIS BROWSER HAS NO SHARE
 catch(error){ if(error && error.name === "AbortError"){ setMsg("SHARE CANCELLED."); }
 else{ console.error(error); setMsg("SHARING DIDN'T WORK ON THIS DEVICE — SAVE THE VIDEO AND POST IT FROM YOUR APP."); }
 }
-}; let sbClient = null; function getSupabase(){ if(!sbClient && window.supabase){ sbClient = window.supabase.createClient(STORY_CONFIG.supabaseUrl,STORY_CONFIG.anonKey); }
+}; let sbClient = null; function getSupabase(){ if(TV) return parent.GLCTC_MUSIC_TV_SERVICES(); /* Reuse Radio session. */ if(!sbClient && window.supabase){ sbClient = window.supabase.createClient(STORY_CONFIG.supabaseUrl,STORY_CONFIG.anonKey); }
 return sbClient; }
 storyBtn.onclick = async () => { if(!take){ return; }
 const sb = getSupabase(); if(!sb){ setMsg("THE STORY SERVICE DID NOT LOAD — CHECK YOUR CONNECTION AND TRY AGAIN."); return; }
@@ -3303,15 +3319,31 @@ String( Math.floor( seconds%60
 ).padStart( 2, "0"
 )
 ); }
-function loop(timestamp){ if(S.lastTs === null){ S.lastTs = timestamp; }
+function loop(timestamp){
+ if(!TV){ if(S.lastTs === null){ S.lastTs = timestamp; }
 const dt = Math.min(100,timestamp - S.lastTs); S.lastTs = timestamp; const frozen = S.paused && !(S.repaint > 0); if(!frozen){ if(S.repaint > 0){ S.repaint--; }
 if(!S.paused){ S.clock += dt; }
 track(); vocalTrack(S.clock); facilitator(); autoDecision(); update(dt); render(S.clock); }
-requestAnimationFrame(loop); }
-requestAnimationFrame(loop); window.addEventListener("beforeunload",() => { try{ stop(); }catch(error){}
+requestAnimationFrame(loop);
+ return; }
+ requestAnimationFrame(loop);
+ if(document.hidden || !parent.GLCTC_MUSIC_TV_VISIBLE) { S.lastTs=timestamp; return; }
+ if(S.lastTs !== null && timestamp-S.lastTs < 33) return;
+ const dt=S.lastTs === null ? 33 : Math.min(100,timestamp-S.lastTs); S.lastTs=timestamp;
+ S.clock=sourceAudio.currentTime*1000;
+ tvSync();
+ if(S.paused && !S.repaint) return;
+ S.repaint=Math.max(0,S.repaint-1);
+ S.clock=sourceAudio.currentTime*1000;
+ track(); vocalTrack(S.clock); facilitator(); autoDecision(); update(dt); render(S.clock);
+ parent.GLCTC_MUSIC_TV_READY=true;
+}
+requestAnimationFrame(loop);
+window.addEventListener("beforeunload",() => { if(TV)return; try{ stop(); }catch(error){}
 if(S.songURL){ URL.revokeObjectURL(S.songURL); }
 if(S.ac && S.ac.state !== "closed"){ S.ac.close(); }
 }); 
+
 /* ================= v23 · 7 CHAKRA STAGES · PHOTO AVATARS · SPECIAL MOVES ================= */
 const CHK = [
  { id:"ck_root",   name:"ROOT",         sk:"MULADHARA",    c:"#ff2b3a", c2:"#5a000c", hz:396, pet:4,  yan:"square",   nm:[1,2], y:560 },
@@ -3396,7 +3428,7 @@ async function keyFromBuffer(buf){ const sr0 = buf.sampleRate, dec = Math.max(1,
  const corr = (P,t) => { let mx = 0, my = 0; for(let i = 0; i < 12; i++){ mx += chroma[(i + t)%12]; my += P[i]; } mx /= 12; my /= 12; let a = 0, b = 0, c = 0; for(let i = 0; i < 12; i++){ const x = chroma[(i + t)%12] - mx, y = P[i] - my; a += x*y; b += x*x; c += y*y; } return a/Math.sqrt(b*c + 1e-12); };
  let best = { pc:0, mode:"major", r:-2 }; for(let t = 0; t < 12; t++){ const a = corr(MAJ,t), b = corr(MIN,t); if(a > best.r){ best = { pc:t, mode:"major", r:a }; } if(b > best.r){ best = { pc:t, mode:"minor", r:b }; } } return best; }
 function ckApply(i,why){ S.ck.cur = i; S.ck.why = why; const ci = document.getElementById("ckInfo"); if(ci){ ci.textContent = "CHAKRA · " + CHK[i].sk + " (" + CHK[i].name + ") · " + CHK[i].hz + " Hz — " + why; ci.style.setProperty("--ck",CHK[i].c); }
- if(S.ck.auto){ selectStage(ckStageBase + i); } }
+ if(S.ck.auto && !window.GLCTC_TV_ALL_SCENES){ selectStage(ckStageBase + i); } }
 async function v23Song(buf,lib){ const mine = S.songURL; S.galDone = false; try{ let i = -1, why = "";
   if(lib){ i = ckFromText(lib.chakra); if(i >= 0){ why = "FROM THE MASTER LIBRARY"; } if(i < 0){ i = ckFromHz(lib.hz); if(i >= 0){ why = "FROM THE LIBRARY FREQUENCY " + lib.hz + " Hz"; } } if(i < 0){ const pc = pcFromKey(lib.key); if(pc >= 0){ i = PC2CK[pc]; why = "FROM THE LIBRARY KEY " + lib.key; } } }
   if(i < 0 && buf){ const k = await keyFromBuffer(buf); if(S.songURL !== mine){ return; } if(k){ i = PC2CK[k.pc]; why = "AUDIO ANALYSIS · KEY " + NOTE[k.pc] + " " + k.mode.toUpperCase(); S.ck.key = k; } }
@@ -3404,7 +3436,7 @@ async function v23Song(buf,lib){ const mine = S.songURL; S.galDone = false; try{
 /* ---------- SPECIAL MOVES: fly, big jump, GO FULL GALACTIC ---------- */
 S.sp = null; S.gal = { on:false }; S.autoMoves = true; S.flyCam = 0; let lastDropSeen = null, lastAutoBar = -99;
 function beatSec(){ const b = (S.song && S.song.gridBpm) || S.bpm || 120; return 60/clamp(b,50,220)/(S.speed || 1); }
-function startMove(kind,auto){ const now = performance.now()/1000; if(kind === "galactic"){ if(S.gal.on){ endGalactic(); return; } S.gal = { on:true, t0:now, dur:beatSec()*32, look:S.look, stage:S.stage }; if(STAGES[S.stage].chakra !== true){ selectStage(ckStageBase + 6); } S.look = "psy"; S.flash = 1; S.camKick = 1; try{ confettiBurst(); }catch(e){} }
+function startMove(kind,auto){ const now = (TV ? S.clock/1000 : performance.now()/1000); if(kind === "galactic"){ if(S.gal.on){ endGalactic(); return; } S.gal = { on:true, t0:now, dur:beatSec()*32, look:S.look, stage:S.stage }; if(STAGES[S.stage].chakra !== true){ selectStage(ckStageBase + 6); } S.look = "psy"; S.flash = 1; S.camKick = 1; try{ confettiBurst(); }catch(e){} }
  else{ S.sp = { kind, t0:now, dur:beatSec()*(kind === "fly" ? 16 : kind === "spin" ? 8 : 4) }; }
  movesUi(); if(!auto){ status.textContent = (CHARS[S.char] && CHARS[S.char].photo ? CHARS[S.char].name + " · " : "") + (MOVE_NAMES[kind] || kind); } }
 const MOVE_NAMES = { fly:"🕊 FLY", jump:"⤒ BIG JUMP", spin:"🌀 TORNADO SPIN", galactic:"✦ GO FULL GALACTIC" };
@@ -3412,7 +3444,7 @@ function sigMove(){ const ch = CHARS[S.char]; return (ch && ch.sig) || null; }
 function endGalactic(){ if(!S.gal.on){ return; } S.look = S.gal.look || S.look; if(S.gal.stage !== undefined && STAGES[S.gal.stage] && !(S.ck.auto && STAGES[S.stage].chakra)){ selectStage(S.gal.stage); } S.gal = { on:false }; movesUi(); }
 const sm = x => x*x*(3 - 2*x);
 function setIf(o,k,v){ if(k in o){ o[k] = v; } }
-function v23Moves(target,dt,loud){ const now = performance.now()/1000; let lift = 0;
+function v23Moves(target,dt,loud){ const now = (TV ? S.clock/1000 : performance.now()/1000); let lift = 0;
  /* automatic: big moments of the song trigger the moves */
  if(S.autoMoves && S.playing){ if(S.lastDrop != null && S.lastDrop !== lastDropSeen){ lastDropSeen = S.lastDrop; if(!S.gal.on && !S.sp){ const sg2 = sigMove(); if(sg2 && sg2 !== "galactic"){ startMove(sg2,true); } else if(!S.galDone && loud > .62){ S.galDone = true; startMove("galactic",true); } else{ startMove("jump",true); } } }
   const bar = S.bpNow != null ? Math.floor(S.bpNow/4) : -1; if(bar >= 0 && bar !== lastAutoBar && bar%16 === 12 && !S.sp && !S.gal.on && loud > .5 && hash(bar*13 + 7) < .45){ lastAutoBar = bar; startMove("fly",true); } }
@@ -3438,7 +3470,7 @@ movesRow.innerHTML = '<div class="sub-title">SPECIAL MOVES</div><div class="chip
 movesRow.querySelectorAll(".mv").forEach(b => b.onclick = () => startMove(b.dataset.m,false));
 movesRow.querySelector(".mv-sig").onclick = () => { const m = sigMove(); if(m){ startMove(m,false); } };
 function sigUi(){ const b = movesRow.querySelector(".mv-sig"), m = sigMove(); b.style.display = m ? "" : "none"; if(m){ b.textContent = "⭐ " + CHARS[S.char].name + " · " + MOVE_NAMES[m]; } }
-setInterval(sigUi,700);
+
 movesRow.querySelector(".mv-auto").onclick = e => { S.autoMoves = !S.autoMoves; e.currentTarget.classList.toggle("selected",S.autoMoves); e.currentTarget.textContent = S.autoMoves ? "AUTO MOVES ON" : "AUTO MOVES OFF"; };
 function movesUi(){ movesRow.querySelectorAll(".mv").forEach(b => { const m = b.dataset.m; b.classList.toggle("selected",m === "galactic" ? S.gal.on : !!(S.sp && S.sp.kind === m)); }); const gb = movesRow.querySelector(".mv-gal"); gb.textContent = S.gal.on ? "✦ GALACTIC ON — TAP TO LAND" : "✦ GO FULL GALACTIC"; }
 { const slot = document.getElementById("movesSlot"); if(slot){ slot.appendChild(movesRow); } else{ (playButton.closest(".player-buttons") || playButton.parentElement).after(movesRow); } }
@@ -3640,7 +3672,7 @@ function meshDraw(g,M,mats){ const V = M.V, P = M.pos; let x0 = 1e9, y0 = 1e9, x
   const q = [{ x:P[v0*2], y:P[v0*2+1] },{ x:P[v1*2], y:P[v1*2+1] },{ x:P[v2*2], y:P[v2*2+1] }]; const cx = (q[0].x + q[1].x + q[2].x)/3, cy = (q[0].y + q[1].y + q[2].y)/3;
   g.save(); g.beginPath(); q.forEach((p,k) => { const dx = p.x - cx, dy = p.y - cy, l = Math.hypot(dx,dy) || 1, ex = p.x + dx/l*.7, ey = p.y + dy/l*.7; if(k){ g.lineTo(ex,ey); } else{ g.moveTo(ex,ey); } }); g.closePath(); g.clip(); affine3(g,s,q); g.drawImage(A,0,0); g.restore(); } }
 
-function addAvatarCard(ch){ CHARS.push(ch); const i = CHARS.length - 1; const b = document.createElement("button"); b.type = "button"; b.className = "char-card av-card"; const c = document.createElement("canvas"); c.width = 170; c.height = 240;
+function addAvatarCard(ch){ const found=ch.avatar?.id ? CHARS.findIndex(c=>c.avatar?.id===ch.avatar.id) : -1; if(found>=0)return found; CHARS.push(ch); const i = CHARS.length - 1; const b = document.createElement("button"); b.type = "button"; b.className = "char-card av-card"; const c = document.createElement("canvas"); c.width = 170; c.height = 240;
  const label = document.createElement("span"); label.textContent = "👤 " + ch.name + (ch.sig ? " · " + (MOVE_NAMES[ch.sig] || "").split(" ")[0] : ""); b.append(c,label); b.onclick = () => { if(S.party){ partyToggle(i); } else{ selectChar(i); } };
  if(ch.guest){ const a = document.createElement("small"); a.className = "av-by"; a.textContent = "BY " + (ch.artist || "AN ARTIST"); b.appendChild(a); } else{ const x = document.createElement("i"); x.className = "av-del"; x.textContent = "✕"; x.title = "Delete this avatar"; x.onclick = e => { e.stopPropagation(); avDelete(ch,b); }; b.appendChild(x); }
  charGrid.appendChild(b); cards.push({ b, c, ch }); drawThumb(c,ch,false); return i; }
@@ -3700,7 +3732,7 @@ async function avFromFile(file){ avBox.classList.add("on"); avCur = null; avMsg.
  catch(e){ console.warn("avatar",e); avMsg.textContent = "WE COULDN'T FIND A PERSON IN THAT PHOTO — TRY A FULL-BODY PHOTO ON A PLAIN BACKGROUND."; } }
 { const row = document.createElement("div"); row.className = "chip-row av-row"; row.innerHTML = '<label class="chip av-up">👤 UPLOAD AVATAR — FULL BODY PHOTO<input type="file" accept="image/*" hidden></label><span class="av-hint">Turns a photo of you into a dancing character. Saved to your GLCTC1 account.</span>';
  const inp = row.querySelector("input"); inp.onchange = () => { const f = inp.files && inp.files[0]; inp.value = ""; if(f){ avFromFile(f); } }; charGrid.after(row); }
-setTimeout(avLoadSaved,1200);
+
 /* ---------- CHARACTER SEARCH: your characters + every artist's shared characters ---------- */
 { const box = document.createElement("div"); box.className = "char-search";
  box.innerHTML = '<input type="search" class="cs-in" placeholder="🔍 SEARCH CHARACTERS OR ARTISTS…" autocomplete="off"><div class="cs-note"></div><div class="cs-head" style="display:none">ARTISTS\' CHARACTERS</div><div class="char-grid cs-found"></div>';
@@ -3867,7 +3899,7 @@ function drawUserScene(g,B,w,h,ts,pulse,cam,P,layerView){ const life = P.life ==
 /* ---------- saving: this device (IndexedDB) + your GLCTC1 account (storage) ---------- */
 function scDb(){ return new Promise((res,rej) => { if(SCN.db){ res(SCN.db); return; } const r = indexedDB.open("glctc1-video",1); r.onupgradeneeded = () => { r.result.createObjectStore("scenes",{ keyPath:"id" }); }; r.onsuccess = () => { SCN.db = r.result; res(r.result); }; r.onerror = () => rej(r.error); }); }
 async function scTx(mode,fn){ const db = await scDb(); return new Promise((res,rej) => { const tx = db.transaction("scenes",mode), st = tx.objectStore("scenes"); const q = fn(st); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); }); }
-const scPutLocal = rec => scTx("readwrite",st => st.put(rec)), scAllLocal = () => scTx("readonly",st => st.getAll()), scDelLocal = id => scTx("readwrite",st => st.delete(id));
+const scPutLocal = async rec => { const result=await scTx("readwrite",st => st.put(rec)); announceVideoAssets(); return result; }, scAllLocal = () => scTx("readonly",st => st.getAll()), scDelLocal = id => scTx("readwrite",st => st.delete(id));
 async function scSync(rec){ const u = await avUser(); if(!u){ return "SAVED ON THIS DEVICE · SIGN IN TO KEEP IT IN YOUR ACCOUNT"; } try{ const st = u.sb.storage.from(AV.bucket), base = u.user.id + "/scenes/" + rec.id;
   const a = await st.upload(base + ".jpg",rec.blob,{ contentType:"image/jpeg", upsert:true }); if(a.error){ throw a.error; } const meta = { id:rec.id, name:rec.name, params:rec.params, over:rec.over, created:rec.created, thumb:rec.thumb };
   const b = await st.upload(base + ".json",new Blob([JSON.stringify(meta)],{ type:"application/json" }),{ contentType:"application/json", upsert:true }); if(b.error){ throw b.error; } return true; }
@@ -3931,15 +3963,243 @@ scBox.querySelector(".sc-ok").onclick = async () => { if(!scCur){ return; } cons
  const idx = scRegister(rec); scApplyEnv(rec,SCN.built[rec.id]); S.ck.auto = false; if(S.ck.autoB){ S.ck.autoB.classList.remove("selected"); } selectStage(idx); status.textContent = name + " IS LIVE · SAVING…";
  try{ await scPutLocal(rec); }catch(e){ console.warn("scene save",e); } const r = await scSync(rec); status.textContent = name + " IS LIVE · " + (r === true ? "SAVED TO YOUR ACCOUNT." : r); };
 { const inp = sceneRow.querySelector(".scene-new input"); inp.onchange = () => { const f = inp.files && inp.files[0]; inp.value = ""; if(f){ scFromFile(f); } }; }
-setTimeout(() => { scLoadAll().catch(e => console.warn(e)); },1500);
 
-window.GLCTC_VIDEO = { setAspect, scAnalyse, scBuild, drawUserScene, scRegister, SCN, W:() => W, avSetJ:J0 => { if(!avCur){ return false; } const k = avCur.sc; JNAMES.forEach(n => { if(J0[n]){ avCur.J[n] = [J0[n][0]*k - avCur.off[0],J0[n][1]*k - avCur.off[1]]; } }); avPaint(); return true; }, beatSec, sp:() => S.sp, probe:(kind,ph) => { const sv = S.sp, am = S.autoMoves; S.autoMoves = false; S.sp = { kind, t0:performance.now()/1000 - ph*2, dur:2 }; const t = v23Moves(Object.assign({},REST),16,0); S.sp = sv; S.autoMoves = am; return { hop:t.hop, aLu:t.aLu, bx:S.bxSpin }; }, chk:CHK, ckApply, keyFromBuffer, startMove, endGalactic, buildPhotoChar, addAvatarCard, avFromFile, drawCharacter, REST, CHARS:() => CHARS, defaultJoints, cutoutFallback, state:() => ({ stage:STAGES[S.stage].id, ck:S.ck.cur, why:S.ck.why, auto:S.ck.auto, sp:S.sp && S.sp.kind, gal:S.gal.on, hop:S.pose.hop, look:S.look, chars:CHARS.length }) };
 
-})();
-</script>
+window.GLCTC_VIDEO = { sharedRadioVersion:1, scenes:()=>STAGES, setAspect, scAnalyse, scBuild, drawUserScene, scRegister, SCN, W:() => W, avSetJ:J0 => { if(!avCur){ return false; } const k = avCur.sc; JNAMES.forEach(n => { if(J0[n]){ avCur.J[n] = [J0[n][0]*k - avCur.off[0],J0[n][1]*k - avCur.off[1]]; } }); avPaint(); return true; }, beatSec, sp:() => S.sp, probe:(kind,ph) => { const sv = S.sp, am = S.autoMoves; S.autoMoves = false; S.sp = { kind, t0:performance.now()/1000 - ph*2, dur:2 }; const t = v23Moves(Object.assign({},REST),16,0); S.sp = sv; S.autoMoves = am; return { hop:t.hop, aLu:t.aLu, bx:S.bxSpin }; }, chk:CHK, ckApply, keyFromBuffer, startMove, endGalactic, buildPhotoChar, addAvatarCard, avFromFile, drawCharacter, REST, CHARS:() => CHARS, defaultJoints, cutoutFallback, state:() => ({ stage:STAGES[S.stage].id, ck:S.ck.cur, why:S.ck.why, auto:S.ck.auto, sp:S.sp && S.sp.kind, gal:S.gal.on, hop:S.pose.hop, look:S.look, chars:CHARS.length }) };
+
+// Broadcast director: every eligible character and scene gets a turn, on musical phrases.
+const TVD={seed:0,phrase:-1,cast:-1,revision:0,seenRevision:-1,sceneToken:0,assetGeneration:0,
+ specialPhrase:-1,user:undefined,loading:false,failed:0,sceneJobs:new Map(),sceneUse:[],localLoaded:false};
+function tvHash(text){let h=2166136261;for(const c of String(text))h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0;}
+function tvPool(items){return items.map((x,i)=>i).filter(i=>!items[i].hidden&&!items[i].tvFailed);}
+function tvOrder(items,seed){return tvPool(items).sort((a,b)=>tvHash(seed+'|'+(items[a].id||items[a].name)) - tvHash(seed+'|'+(items[b].id||items[b].name)) || a-b);}
+function tvResetDirector(key){TVD.seed=tvHash(key);TVD.phrase=-1;TVD.cast=-1;TVD.specialPhrase=-1;TVD.sceneToken++;S.party=false;PARTY.D=[];S.look='real';S.speed=1;S.qLock=false;}
+async function tvScene(i){
+ const token=++TVD.sceneToken,stage=STAGES[i];if(!stage||stage.hidden)return;
+ if(stage.user){
+  const id=stage.id.slice(5),rec=SCN.recs[id];if(!rec)return;
+  try{
+   if(!TVD.sceneJobs.has(id))TVD.sceneJobs.set(id,scEnsure(rec));
+   const built=await TVD.sceneJobs.get(id);
+   if(token!==TVD.sceneToken||stage.hidden)return;
+   scApplyEnv(rec,built);
+   TVD.sceneUse=TVD.sceneUse.filter(x=>x!==id);TVD.sceneUse.push(id);
+   while(TVD.sceneUse.length>3){const old=TVD.sceneUse.shift();delete SCN.built[old];TVD.sceneJobs.delete(old);}
+  }catch(e){stage.tvFailed=true;TVD.failed++;TVD.revision++;return;}
+ }
+ if(token!==TVD.sceneToken)return;
+ selectStage(i);S.repaint=2;
+}
+function tvDirector(f){
+ if(!f.track)return;
+ const beat=f.currentTime*((S.song?.gridBpm)||S.bpm||120)/60;
+ const phrase=Math.floor(Math.max(0,beat)/64),cast=Math.floor(phrase/2);
+ if(phrase===TVD.phrase&&TVD.seenRevision===TVD.revision)return;
+ TVD.phrase=phrase;TVD.seenRevision=TVD.revision;
+ // End temporary overrides before directing a new scene.
+ if(S.gal.on)endGalactic();S.sp=null;
+ const characters=tvOrder(CHARS,TVD.seed);
+ if(characters.length){
+  S.party=false;selectChar(characters[cast%characters.length]);TVD.cast=cast;S.move.bar=-1;
+ }
+ const scenes=tvOrder(STAGES,TVD.seed+17);
+ if(scenes.length)tvScene(scenes[phrase%scenes.length]);
+ // Alternate solo performances and an automatically assembled compatible 3D ensemble.
+ const compatible=characters.filter(i=>can3D(i));
+ S.party=!!(GLR.ok&&phrase%2===1&&compatible.length);
+ if(S.party){
+  if(!can3D(S.char))selectChar(compatible[cast%compatible.length]);
+  const pool=compatible.filter(i=>i!==S.char);
+  S.partyPick=[S.char,...pool.slice(0,Math.min(4,PARTY_MAX-1))];
+  partyCast(false);PARTY.bar=-1;S.pshot=0;Object.assign(S.cam,PSHOTS[0]);
+ }else{PARTY.D=[];Object.assign(S.cam,SHOTS[0]);}
+ const loud=loudAt(f.currentTime);
+ S.look=phrase%3===2||loud>.72?'psy':'real';
+ S.speed=S.bpm>155?.5:S.bpm<85&&loud>.65?2:1;
+ S.mouthMode=S.vocal.presence>.12||S.vox?'voice':(loud>.45?'beat':'voice');
+ S.wet=clamp(.55+loud*.3,.55,.85);S.auto=true;S.autoMoves=true;S.qLock=false;
+ // Include spin and signature moves as well as the source engine's drop/fly/galactic triggers.
+
+}
+function tvSpecial(f){
+ const beat=f.currentTime*((S.song?.gridBpm)||S.bpm||120)/60;
+ const phrase=Math.floor(Math.max(0,beat)/64);
+ if(!f.playing||S.party||beat%64<32||TVD.specialPhrase===phrase||S.sp||S.gal.on)return;
+ TVD.specialPhrase=phrase;
+ const moves=['fly','jump','spin','galactic'];startMove(sigMove()||moves[Math.floor(phrase/2)%4],true);
+}
+function tvBlocked(){try{return JSON.parse(localStorage.getItem('glctc1.blockedArtists')||'[]');}catch(e){return [];}}
+async function tvLoadAssets(uid){
+ const generation=++TVD.assetGeneration;TVD.loading=true;
+ const valid=()=>generation===TVD.assetGeneration;
+ const sb=getSupabase(),blocked=tvBlocked();
+ try{
+  if(!TVD.localLoaded){TVD.localLoaded=true;try{for(const rec of await scAllLocal()){if(!valid())return;scRegister(rec);TVD.revision++;}}catch(e){/* Device storage may be unavailable. */}}
+  if(!sb)return;
+  const loadCharacters=async own=>{
+   for(let offset=0;valid();offset+=100){
+    let q=sb.from('video_characters').select('id,user_id,name,artist_name,image_path,joints,special_move,is_public').order('created_at',{ascending:true}).range(offset,offset+99);
+    q=own?q.eq('user_id',uid):q.eq('is_public',true);
+    const {data,error}=await q;if(error){TVD.failed++;break;}if(!valid())return;
+    for(const row of data||[]){
+     if(blocked.includes(row.user_id))continue;
+     const existing=CHARS.find(c=>c.avatar?.id===row.id);
+     if(existing){if(row.is_public)existing.tvPrivate=false;existing.hidden=false;TVD.revision++;continue;}
+     let url;
+     try{
+      const result=await sb.storage.from(AV.bucket).download(row.image_path);if(!result.data||!valid())continue;
+      url=URL.createObjectURL(result.data);const img=await loadImg(url);if(!valid())return;
+      const ch=buildPhotoChar(img,row.joints,row.name,{id:row.id,path:row.image_path});
+      ch.sig=row.special_move||'fly';ch.uid=row.user_id;ch.artist=row.artist_name||'';ch.tvPrivate=own&&!row.is_public;ch.guest=!own;
+      addAvatarCard(ch);TVD.revision++;
+     }catch(e){TVD.failed++;}finally{if(url)URL.revokeObjectURL(url);}
+    }
+    if(!data||data.length<100)break;
+   }
+  };
+  if(uid)await loadCharacters(true);
+  await loadCharacters(false);
+  if(uid&&valid()){
+   const st=sb.storage.from(AV.bucket),dir=uid+'/scenes';
+   for(let offset=0;valid();offset+=100){
+    const {data,error}=await st.list(dir,{limit:100,offset,sortBy:{column:'name',order:'asc'}});if(error){TVD.failed++;break;}
+    for(const file of data||[]){
+     if(!/\.json$/.test(file.name))continue;
+     try{
+      const id=file.name.slice(0,-5);if(SCN.recs[id])continue;
+      const meta=await st.download(dir+'/'+file.name);if(!meta.data)continue;
+      const rec=JSON.parse(await meta.data.text()),pic=await st.download(dir+'/'+id+'.jpg');if(!pic.data||!valid())continue;
+      rec.id=id;rec.blob=pic.data;const index=scRegister(rec);STAGES[index].tvOwner=uid;TVD.revision++;
+     }catch(e){TVD.failed++;}
+    }
+    if(!data||data.length<100)break;
+   }
+  }
+ }catch(e){TVD.failed++;}finally{if(valid())TVD.loading=false;}
+}
+function tvAssetsUser(uid){
+ uid=uid||null;if(uid===TVD.user)return;TVD.user=uid;
+ const blocked=tvBlocked();
+ CHARS.forEach(c=>{if(c.tvPrivate||c.uid)c.hidden=!!((c.tvPrivate&&c.uid!==uid)||blocked.includes(c.uid));});
+ STAGES.forEach(s=>{if(s.tvOwner)s.hidden=s.tvOwner!==uid;});
+ TVD.sceneToken++;TVD.cast=-1;TVD.revision++;
+ // Immediately remove a previous account's scene while the replacement loads.
+ if(STAGES[S.stage]?.hidden)selectStage(0);
+ tvLoadAssets(uid);
+}
+
+window.GLCTC_TV_ALL_SCENES=TV;
+// Radio owns audio, station selection, seek and transport. Video only observes them.
+let tvKey=null, tvTime=0, tvAnalysisBusy=false, tvWanted=null, tvFetch=null;
+async function tvAnalyse(){
+ if(tvAnalysisBusy || !tvWanted || !S.ac) return;
+ const job=tvWanted; tvWanted=null; tvAnalysisBusy=true;
+ try{
+  tvFetch=new AbortController();
+  const timeout=setTimeout(()=>tvFetch?.abort(),25000);
+  let response;try{response=await fetch(job.url,{signal:tvFetch.signal});}finally{clearTimeout(timeout);}
+  if(!response.ok) throw Error('Track analysis unavailable');
+  const blob=await response.blob();
+  if(tvKey!==job.key) return;
+  const result=await analyseSong(blob);
+  if(tvKey!==job.key) return;
+  const buffer=result.buf; delete result.buf; S.song=result;
+  if(Number(job.track.bpm)>0) applyBpm(Number(job.track.bpm));
+  await v23Song(buffer,{chakra:job.track.chakra,hz:job.track.frequency_hz,key:job.track.key});
+  if(tvKey!==job.key) return;
+  const voice=await analyseVocals(buffer,()=>{},{bpm:S.song.gridBpm,t0:S.song.t0});
+  if(tvKey===job.key) S.vox=voice;
+ }catch(e){ /* Live FFT, beat and voice response remain available. */ }
+ finally{tvAnalysisBusy=false;}
+}
+function tvSync(){
+ const f=parent.GLCTC_MUSIC_TV_FEED(), tr=f.track;
+ tvAssetsUser(f.userId);
+ S.ac=f.context; S.an=f.analyser;
+ if(S.an && (!S.freq || S.freq.length!==S.an.frequencyBinCount)){
+  S.freq=new Uint8Array(S.an.frequencyBinCount);S.wave=new Uint8Array(S.an.fftSize);
+ }
+ const key=tr ? String(tr.id || tr.id_cat_no || tr.title)+'|'+String(tr.artist) : '';
+ if(key!==tvKey){
+  if(tvFetch) tvFetch.abort();
+  tvKey=key; S.song=null;S.vox=null;S.songURL=key;S.sp=null;S.gal={on:false};S.galDone=false;
+  S.move={bar:-1,cur:null,prev:null}; S.lastDrop=null;lastDropSeen=null;lastAutoBar=-99;
+  S.prevEnergy=0;S.lastBeat=0;S.lastStrong=0;S.intervals=[];resetAudioExpression();zeroAutomaticState();
+  S.vocal.prevBands=null;S.vocal.lastOnset=0;S.vocal.mouth=0;S.vocal.env=0;
+  S.auto=true;S.autoMoves=true;S.ck.auto=true;S.repaint=2;
+  S.bpm=Number(tr?.bpm)||120;S.external.bpm=Number(tr?.bpm)||null;
+  let seed=0;for(const c of key) seed=(Math.imul(seed,31)+c.charCodeAt(0))>>>0;
+  tvResetDirector(key);
+  let ck=ckFromText(tr?.chakra);if(ck<0) ck=ckFromHz(tr?.frequency_hz);
+  if(ck<0){const pc=pcFromKey(tr?.key);if(pc>=0) ck=PC2CK[pc];}
+  ckApply(ck<0 ? seed%7 : ck,'RADIO TRACK');
+  tvWanted=tr && f.url ? {key,url:f.url,track:tr} : null;
+ }
+ if(Math.abs(f.currentTime-tvTime)>1){S.est=f.currentTime;S.move.bar=-1;S.sp=null;S.gal={on:false};S.repaint=2;}
+ tvTime=f.currentTime;
+ const playing=f.playing && !!tr;
+ if(S.playing!==playing) S.repaint=2;
+ S.playing=playing;S.paused=!playing;
+ if(playing || TVD.phrase<0 || TVD.seenRevision!==TVD.revision) tvDirector(f);
+ tvSpecial(f);
+ if(tvWanted && S.ac && playing) tvAnalyse();
+}
+// Only the broadcast canvas is displayed; editor controls stay detached from playback.
+if(TV){document.body.appendChild(canvas);canvas.style.cssText='position:fixed;inset:0;width:100%;height:100%;display:block';
+
+// Match the canvas to its actual viewport without stretching characters or letterboxing.
+function tvFitViewport(){
+ const vw=window.innerWidth||1200,vh=window.innerHeight||960;
+ if(!(vw>0&&vh>0))return;
+ const nextWidth=Math.max(1,Math.round(H*vw/vh));
+ if(W===nextWidth)return;
+ W=nextWidth;
+ [canvas,sceneCanvas,charCanvas,wetCanvas,tempCanvas,fxBackCanvas,fxFrontCanvas,reflCanvas,ghostCanvas].forEach(c=>{c.width=W;c.height=H;});
+ VIGNETTE=null;Object.keys(RIFT5).forEach(k=>delete RIFT5[k]);
+ S.repaint=2;
+}
+let tvResizePending=false;
+window.addEventListener('resize',()=>{
+ if(tvResizePending)return;tvResizePending=true;
+ requestAnimationFrame(()=>{tvResizePending=false;tvFitViewport();});
+});
+tvFitViewport();
+
+window.GLCTC_TV_STATE=()=>({key:tvKey,playing:S.playing,time:S.est,auto:S.auto,moves:S.autoMoves,chakra:S.ck.cur,character:S.char,stage:STAGES[S.stage].id,party:S.party,cast:S.partyPick||[],characters:tvPool(CHARS).length,scenes:tvPool(STAGES).length,loading:TVD.loading,assetFailures:TVD.failed,look:S.look,speed:S.speed,mouth:S.mouthMode});
+}
+
+const VIDEO_ASSET_KEY='glctc1.videoAssetsChanged';
+let assetChannel=null,assetRefreshTimer=null,editorRefreshBusy=false;
+try{assetChannel=new BroadcastChannel('glctc1-video-assets');}catch(e){}
+function announceVideoAssets(){
+ const message={type:'assets-changed',time:Date.now()};
+ try{localStorage.setItem(VIDEO_ASSET_KEY,JSON.stringify(message));}catch(e){}
+ try{assetChannel?.postMessage(message);}catch(e){}
+}
+async function refreshVideoAssets(){
+ if(document.hidden)return;
+ if(TV){if(TVD.loading)return;await tvLoadAssets(TVD.user||null);}
+ else{
+  if(editorRefreshBusy)return;editorRefreshBusy=true;
+  try{await avLoadSaved();await scLoadAll();}finally{editorRefreshBusy=false;}
+ }
+}
+function queueVideoAssetRefresh(){clearTimeout(assetRefreshTimer);assetRefreshTimer=setTimeout(()=>refreshVideoAssets().catch(e=>console.warn('Video content refresh',e)),500);}
+if(assetChannel)assetChannel.onmessage=e=>{if(e.data?.type==='assets-changed')queueVideoAssetRefresh();};
+window.addEventListener('storage',e=>{if(e.key===VIDEO_ASSET_KEY)queueVideoAssetRefresh();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)queueVideoAssetRefresh();});
+const originalAvatarSave=avSave;
+avSave=async function(...args){const result=await originalAvatarSave(...args);if(result===true)announceVideoAssets();return result;};
+const originalSceneSync=scSync;
+scSync=async function(...args){const result=await originalSceneSync(...args);if(result===true)announceVideoAssets();return result;};
+setInterval(()=>refreshVideoAssets().catch(e=>console.warn('Video content refresh',e)),60000);
+if(!TV)setTimeout(()=>refreshVideoAssets().catch(e=>console.warn('Video startup assets',e)),1500);
+
+})();</script>
 <script>
 /* v24 UI: settings tabs + phone / widescreen switch */
 (function(){
+ if(window.GLCTC_RADIO_EMBED)return;
  const tabs = document.querySelectorAll(".tabs .tab"), panels = document.querySelectorAll(".tab-panel");
  function show(name){ tabs.forEach(t => { const on = t.dataset.tab === name; t.classList.toggle("selected",on); t.setAttribute("aria-selected",on); });
   panels.forEach(p => { p.hidden = p.dataset.panel !== name; }); try{ localStorage.setItem("glctc1.videoTab",name); }catch(e){} }

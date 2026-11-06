@@ -5344,8 +5344,8 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  async function mlOpen(force){mlBox.style.display='';if(force)ML.rows=null;mlRender();try{await mlFetch(force);mlRender();swSay('MASTER LIBRARY · '+ML.rows.length+' TRACKS')}catch(e){mlList.innerHTML='';mlList.append(el('div',{class:'ml-empty',text:'MASTER LIBRARY UNAVAILABLE · '+e.message}));swSay('MASTER LIBRARY UNAVAILABLE')}}
  async function mlLoadMaster(r){try{if(!r.master)throw Error('This track has no master audio');const b=await mlAudio(r.master,'MASTER · '+mlName(r));cnTake(b,mlName(r));swSay('MASTER LOADED · '+(r.bpm?r.bpm+' BPM · ':'')+(r.key?r.key+' · ':'')+swInfo());return b}catch(e){toast(e.message);swSay('LOAD FAILED');return null}}
  async function mlLoadStems(r){try{const list=r.stems.map((p,i)=>[p,i]).filter(x=>x[0]);if(!list.length)throw Error('This track has no stems');const bufs=[];for(const [p,i] of list)bufs.push(await mlAudio(p,'STEM '+(i+1)+' · '+mlName(r)));swStopAll();swStems=bufs;swStemNames=list.map(x=>'STEM '+(x[1]+1));swRenderStems(mlName(r));swSay(bufs.length+' LIBRARY STEMS READY · '+mlName(r));return true}catch(e){toast(e.message);swSay('STEM LOAD FAILED');return false}}
- async function mlRemix(r){try{if(r.bpm&&window.GLCTC_MASTER_SYNC)window.GLCTC_MASTER_SYNC.setBpm(r.bpm);
-   const toTl=()=>{swStems.forEach((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0));swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
+ async function mlRemix(r){try{if(r.bpm&&window.GLCTC_MASTER_SYNC)window.GLCTC_MASTER_SYNC.setBpm(r.bpm);try{if(window.GLCTC_SONG&&GLCTC_SONG.matchTrack)await GLCTC_SONG.matchTrack(r)}catch(e){console.warn('composer match',e)}
+   const toTl=()=>{{const made=swStems.map((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0));try{made.forEach(t=>{const k=project.tracks.indexOf(t);if(k>0){project.tracks.splice(k,1)}});project.tracks.unshift(...made);selectedTrackId=made[0]&&made[0].id;renderAll();markDirty()}catch(e){console.warn('remix stem order',e)}}swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
    if(r.stems.some(Boolean)){if(await mlLoadStems(r))toTl();return}
    const b=await mlLoadMaster(r);if(!b)return;swAfterSplit=()=>{swStemNames=STEM_NAMES.slice();toTl()};swSplit()}catch(e){toast(e.message)}}
  window.GLCTC_ML={remixById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();
@@ -7128,7 +7128,7 @@ function fillPatterns(genre,txt){
  const entropy=window.crypto?.getRandomValues?window.crypto.getRandomValues(new Uint32Array(1))[0]:Math.floor(Math.random()*4294967296);
  const seed=PAT.hash(genre+'|'+txt+'|'+(++fillN)+'|'+Date.now()+'|'+entropy);
  const prev=lastSongVariant[genre],variant=prev===undefined?seed%4:(prev+1+seed%3)%4;
- const pack=PAT.build(genre,seed,{text:txt,variant}),done=PAT.apply(pack);lastSongVariant[genre]=variant;
+ const mk=window.__glctcMatchKey,pack=PAT.build(genre,seed,Object.assign({text:txt,variant},Number.isInteger(mk)?{key:mk}:{})),done=PAT.apply(pack);lastSongVariant[genre]=variant;
  window.GLCTC_GROOVE={swing:swingOn()?PAT.swingFor(genre):0,genre};
  const info=byId('gscFillInfo');if(info){const fl=pack.flavour||{},RN=['I','II','III','IV','V','VI','VII'],ch=(fl.chords||[]).map(d=>RN[d%7]||'I').join(' – ');info.textContent='NEW SONG · GROOVE '+fl.variation+'/4 · KEY '+pack.name+' · CHORDS '+ch+' · LEAD '+(fl.lead||'')+' · HATS '+(fl.hat||'')+' · '+done.length+' modules · seed '+seed}const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=pack.name.toUpperCase();
  try{window.GLCTC_SONG_PATTERN_KEY=pack.name;window.GLCTC_SONG_MODE=pack.scale==='major'?'major':'minor';wsKeyTunes=pack.ws&&pack.ws.tunes||null;try{localStorage.setItem('glctc1.songMode',window.GLCTC_SONG_MODE)}catch(_){}}catch(e){}
@@ -7343,7 +7343,32 @@ if(pa&&!byId('songPlayBtn')){
 }
 renderGrid();
 setTimeout(()=>{if(!S)renderGrid()},1200);window.addEventListener('load',()=>{if(!S)setTimeout(renderGrid,400)});
-window.GLCTC_SONG={restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
+/* REMIX MATCH: make the Composer play in the remixed track's genre, BPM and key */
+async function matchTrack(row){
+ if(!row||S||starting)return false;
+ const txt=[row.genre,row.title,row.artist].join(' ').toLowerCase();
+ let g=detectGenre(txt);const bpm=+row.bpm||0;
+ if(!g&&bpm>=165)g='dnb';
+ if(!g)g=byId('gscGenre').value;
+ /* key: "Am", "F#m", "Bb minor", "C major" or Camelot "8A" / "8B" */
+ let pc=null,mode='';const ks=String(row.key||'').trim();
+ const NOTE={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+ const CAM_A=[8,3,10,5,0,7,2,9,4,11,6,1],CAM_B=[11,6,1,8,3,10,5,0,7,2,9,4];
+ let m=/^(\d{1,2})\s*([AB])$/i.exec(ks);
+ if(m&&+m[1]>=1&&+m[1]<=12){const a=m[2].toUpperCase()==='A';pc=(a?CAM_A:CAM_B)[+m[1]-1];mode=a?'minor':'major'}
+ else if((m=/^([A-G])\s*([#b\u266f\u266d]?)\s*(m(?:in(?:or)?)?|maj(?:or)?)?\b/i.exec(ks))){
+  pc=NOTE[m[1].toUpperCase()];if(/[#\u266f]/.test(m[2]))pc++;else if(/[b\u266d]/.test(m[2]))pc--;pc=(pc+12)%12;
+  const q=(m[3]||'').toLowerCase();mode=q.startsWith('maj')?'major':q.startsWith('m')?'minor':'';
+ }
+ const sel=byId('gscGenre');if(sel)sel.value=g;
+ const pe=byId('gscPrompt');if(pe)pe.value=(bpm?bpm+' bpm ':'')+mode;
+ window.__glctcMatchKey=pc;
+ try{await generate()}finally{window.__glctcMatchKey=null;if(pe)pe.value=''}
+ if(bpm){try{window.GLCTC_MASTER_SYNC&&GLCTC_MASTER_SYNC.setBpm(bpm)}catch(e){}}
+ status('COMPOSER MATCHED TO THE REMIX · '+g.toUpperCase()+(bpm?' · '+bpm+' BPM':'')+(ks?' · '+ks:''));
+ return {genre:g,bpm,key:ks};
+}
+window.GLCTC_SONG={matchTrack,restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
 })();
 </script>
 
@@ -7568,7 +7593,7 @@ window.GLCTC_SONG={restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=
  function apply(k,scroll){const m=MODES.find(x=>x.k===k)||MODES[0];
   const h=H();if(h)h.room=m.mods==='all'?null:new Set(m.mods.concat(['ws']));
   try{setKeyTargets(m.keys||Object.keys(KEYNAME))}catch(e){}
-  applying=true;applyingUntil=performance.now()+400;const show=new Set(m.show);CONTROLLER.forEach(x=>show.add(x));try{ALL.forEach(id=>{if(id==='mixer')return;if(id==='composer'){try{setVisible(PANELS.composer(),m.k==='compose'||m.k==='all',true)}catch(e){}return}try{setVisible(PANELS[id](),m.k==='all'||show.has(id),m.k!=='all')}catch(e){}});try{const mx=PANELS.mixer();if(mx){mx.classList.remove('gm-hide');const tg=mx.querySelector(':scope>.mod-toggle'),open=MIXER_OPEN.has(m.k)||(m.k==='all'&&!mx.classList.contains('mod-collapsed'));if(tg&&mx.classList.contains('mod-collapsed')===open)tg.click()}}catch(e){}}finally{applying=false}
+  applying=true;applyingUntil=performance.now()+400;const show=new Set(m.show);CONTROLLER.forEach(x=>show.add(x));try{ALL.forEach(id=>{if(id==='mixer')return;if(id==='composer'){try{setVisible(PANELS.composer(),m.k==='compose'||m.k==='all'||m.k==='remix',true)}catch(e){}return}try{setVisible(PANELS[id](),m.k==='all'||show.has(id),m.k!=='all')}catch(e){}});try{const mx=PANELS.mixer();if(mx){mx.classList.remove('gm-hide');const tg=mx.querySelector(':scope>.mod-toggle'),open=MIXER_OPEN.has(m.k)||(m.k==='all'&&!mx.classList.contains('mod-collapsed'));if(tg&&mx.classList.contains('mod-collapsed')===open)tg.click()}}catch(e){}}finally{applying=false}
   try{dockApply(m)}catch(e){console.warn('dock',e)}
   syncRoom();
   const bar=q('.mod-allbar');if(bar)bar.classList.toggle('gm-hide',m.k!=='all');

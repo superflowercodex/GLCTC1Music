@@ -6558,7 +6558,7 @@ panel.innerHTML=`<style>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Listens to every module while the song plays and sets a balanced level for each (drums up front, 30LEE, synths and pads sitting underneath). Your faders still work on top."><input id="gscAutoMix" type="checkbox" checked>⚖ AUTO MIX LEVELS</label><div id="gscMixInfo" style="font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere"></div></div>
 </div>
 <div class="gsc-note" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
- <label style="margin:0"><input id="gscAutoFX" type="checkbox" checked> AUTO CHANNEL FX</label>
+ <label style="margin:0"><input id="gscAutoFX" type="checkbox"> AUTO CHANNEL FX</label>
  <button id="gscApplyFX" type="button">Apply Genre FX</button>
  <label for="gscFXModule">EDIT CHANNEL</label><select id="gscFXModule"><option value="bl">80LA8 DRUMS</option><option value="mine">DIVINE09</option><option value="lee">30LEE BASS</option><option value="s101">0010110 SYNTH</option><option value="go">GALACTIC ONE</option><option value="vox">GALACTIC VOX</option><option value="ws">PAD-64</option><option value="lp">LOOPER</option></select>
  <button id="gscEditFX" type="button">Open Channel FX</button>
@@ -6767,7 +6767,7 @@ function setBtn(){
  const on=!!S,busy=on||starting;
  const gen=byId('gscGen'),play=byId('gscPlay'),stop=byId('gscStop');
  if(gen)gen.disabled=busy;
- if(play){play.disabled=busy;play.textContent='▶ PLAY';play.classList.remove('active')}
+ if(play){play.disabled=starting;play.textContent=on?'Ⅱ PAUSE':'▶ PLAY';play.classList.toggle('active',on)}
  if(stop){stop.disabled=false;stop.classList.toggle('active',on)}
  const pa=byId('playAllModulesBtn');if(pa)pa.disabled=on;const ts=byId('timeSig');if(ts)ts.disabled=on;
  ['gscLen','gscGenre'].forEach(id=>{const e=byId(id);if(e)e.disabled=on});
@@ -7263,6 +7263,9 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    const sel=byId('gscGenre');if(sel)sel.value=g;
    resetAllForNewSong();
    const pack=prepareSong(g,rtxt,true);
+   const hub=H();hub.modulesOn=true;hub.modulesSuspendedGroup=false;
+   const mb=byId('modulesBtn');if(mb){mb.textContent='MODULES ON';mb.classList.add('active');mb.setAttribute('aria-pressed','true')}
+   try{localStorage.setItem('glctc1.modulesOn','1')}catch(e){}
    try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(true,g)}catch(e){}
    try{applySwing(g)}catch(e){}
@@ -7279,19 +7282,14 @@ const AUTO_LS='glctc1.autoSongOnLoad';
 function songBeats(){const [num,den]=String(byId('timeSig')?.value||'4/4').split('/').map(Number),bb=num*4/den||4;return st.secs.reduce((a,s)=>a+s.bars*bb,0)}
 const TRANSPORT={
  busy:()=>!!(S||starting),
- play(opts){
+ play(){
   if(S||starting)return false;
   const TLx=window.glctcTimeline;
-  const composer=opts?.composer===true;
-  // Explicit Composer Play owns the song workflow, including enabling its group.
-  // Ordinary master Play continues to respect Modules Off and manual module mode.
-  if(composer&&window.__glctcModMode)byId('mkModMode')?.click();
-  if(!composer&&(window.__glctcModMode||!H()?.modulesOn)){try{TLx.play()}catch(e){}return true}
+  if(window.__glctcModMode)byId('mkModMode')?.click();
   try{if(TLx.playing()&&!TLx.slave())TLx.pause()}catch(e){}
   let from=0;try{from=Math.max(0,+TLx.head()||0)}catch(e){}
   startSong({from});return true;
  },
- toggleSong(){if(S||starting){stopSong(null,true);return}return TRANSPORT.play({composer:true})},
  toggle(){if(S||starting){stopSong(null,true);return}const TLx=window.glctcTimeline;if(TLx&&TLx.playing()){try{TLx.pause()}catch(e){}return}TRANSPORT.play()},
  stop(){
   if(S||starting){stopSong(null,true);return}
@@ -7316,7 +7314,7 @@ byId('gscApplyFX').onclick=()=>{byId('gscAutoFX').checked=true;window.GLCTC_FX?.
 byId('gscAutoFX').onchange=()=>{window.GLCTC_FX?.composer(byId('gscGenre').value,byId('gscAutoFX').checked);status(byId('gscAutoFX').checked?'AUTO CHANNEL FX ON':'COMPOSER FX OFF · manual channel FX kept')};
 byId('gscSave').onclick=()=>window.GLCTC_COMPOSER_FILES.save();
 byId('gscLoad').onclick=()=>window.GLCTC_COMPOSER_FILES.load();
-byId('gscPlay').addEventListener('click',()=>TRANSPORT.play({composer:true}));
+byId('gscPlay').addEventListener('click',()=>TRANSPORT.toggle());
 byId('gscStop').addEventListener('click',()=>TRANSPORT.stop());
 /* capture-phase routing so the older handlers on these buttons never run a different kind of play */
 document.addEventListener('click',e=>{
@@ -7324,9 +7322,9 @@ document.addEventListener('click',e=>{
  let act=null;
  if(b.id==='playBtn')act='toggle';
  else if(b.id==='stopBtn')act='stop';
- else if(b.id==='songPlayBtn')act='toggleSong';
+ else if(b.id==='songPlayBtn')act='toggle';
  else if(b.id==='playAllModulesBtn')act=window.__glctcModMode?null:'toggle';
- else if(b.closest('.glctc-transport-box')&&b.parentElement&&b.parentElement.classList.contains('mk-ps'))act=window.__glctcModMode?null:b.classList.contains('mk-stop-btn')?'stop':'play';
+ else if(b.closest('.glctc-transport-box')&&b.parentElement&&b.parentElement.classList.contains('mk-ps'))act=b.classList.contains('mk-stop-btn')?'stop':'toggle';
  if(!act)return;
  e.stopImmediatePropagation();e.preventDefault();
  try{if(window.GLCTC_WS&&GLCTC_WS.ensureBuses)GLCTC_WS.ensureBuses()}catch(_){}
@@ -7399,7 +7397,7 @@ function fitRemix(beats){
  else{let used=0;st.secs=old.map((s,i)=>{const bars=i===old.length-1?totalBars-used:Math.max(1,Math.min(totalBars-used-(old.length-i-1),Math.round(s.bars/total*totalBars)));used+=bars;return {...s,bars}})}
  st.loop=false;byId('gscLoop').checked=false;save();renderGrid();refreshTimeline();
 }
-window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play({composer:true}),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
+window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{st=JSON.parse(JSON.stringify(d));st.level=st.level||{};st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null};
 })();
 </script>
 
@@ -7660,7 +7658,7 @@ window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{st=JSON.parse(JSON.str
  window.addEventListener('glctc-room-change',e=>{try{const id=e.detail&&e.detail.id,pk=Object.keys(PANEL_MOD).find(k=>PANEL_MOD[k]===id),el=pk&&PANELS[pk]();if(el){applying=true;applyingUntil=performance.now()+400;try{setVisible(el,true)}finally{applying=false}}}catch(_){}paintActive()});
  window.GLCTC_STUDIO_MODE={set:k=>apply(k,true),modes:MODES.map(m=>m.k),active:()=>{const h=H();return h&&h.room?[...h.room]:'all'},revealEl:el=>{const pk=Object.keys(PANELS).find(k=>PANELS[k]()===el);if(pk)reveal(pk);else el.classList.remove('gm-hide')}};
  function mount(){const nav=q('nav.nav');if(nav)nav.insertAdjacentElement('afterend',wrap);else{const app=q('main.app');if(app)app.insertAdjacentElement('beforebegin',wrap);else document.body.prepend(wrap)}
-  layoutUnits();watchToggles();let k='all';try{k=localStorage.getItem(KEY)||'all'}catch(e){}apply(MODES.some(m=>m.k===k)?k:'all',false)}
+  layoutUnits();watchToggles();apply('all',false)}
  if(document.readyState==='complete')setTimeout(mount,50);else window.addEventListener('load',()=>setTimeout(mount,50),{once:true});
 })();
 </script>

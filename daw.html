@@ -4,6 +4,32 @@
 <link rel="icon" type="image/png" sizes="192x192" href="glctc1-icon-192.png">
 <link rel="apple-touch-icon" href="glctc1-icon-192.png">
 <!-- GLCTC1 GUARD: blocks hate, porn & abuse in every save (swearing allowed). Must load before Supabase. -->
+<script>
+/* v92 WORKER FALLBACK: sandboxed previews (e.g. claudeusercontent.com) refuse blob: Workers with a SecurityError.
+   If the browser refuses one, the same worker code runs on the main thread instead, with the same postMessage / onmessage API.
+   In a normal browser the real Worker is used and nothing changes. */
+(function(){
+ if(!window.Worker||window.__glctcWorkerShim)return;window.__glctcWorkerShim=1;
+ var NativeWorker=window.Worker,blobs=new Map(),oc=URL.createObjectURL.bind(URL);
+ URL.createObjectURL=function(o){var u=oc(o);try{if(o instanceof Blob&&/javascript/.test(o.type||''))blobs.set(u,o)}catch(e){}return u};
+ function FakeWorker(url){
+  var me=this,blob=blobs.get(String(url)),dead=false,ready=false,queue=[],scope={};
+  me.onmessage=null;me.onerror=null;
+  var toMain=function(data){setTimeout(function(){if(!dead&&me.onmessage)try{me.onmessage({data:data})}catch(e){console.error(e)}},0)};
+  var fail=function(err){setTimeout(function(){if(!dead&&me.onerror)me.onerror({message:String(err&&err.message||err)})},0)};
+  scope.postMessage=function(d){toMain(d)};scope.close=function(){dead=true};scope.addEventListener=function(t,f){if(t==='message')scope.onmessage=f};
+  var deliver=function(d){setTimeout(function(){if(dead)return;try{if(scope.onmessage)scope.onmessage({data:d})}catch(e){fail(e)}},0)};
+  me.postMessage=function(d){if(ready)deliver(d);else queue.push(d)};
+  me.terminate=function(){dead=true};me.addEventListener=function(t,f){if(t==='message')me.onmessage=f;else if(t==='error')me.onerror=f};
+  if(!blob){fail('Worker script unavailable');return}
+  blob.text().then(function(code){
+   try{(new Function('self','postMessage','close','addEventListener',code)).call(scope,scope,scope.postMessage,scope.close,scope.addEventListener)}catch(e){fail(e);return}
+   ready=true;queue.splice(0).forEach(deliver)}).catch(fail);
+ }
+ window.Worker=function(url,opts){try{return new NativeWorker(url,opts)}catch(e){if(blobs.has(String(url))){window.__glctcWorkerFallback=(window.__glctcWorkerFallback||0)+1;return new FakeWorker(url)}  /* silent: previews surface console warnings as alerts */throw e}};
+ window.Worker.prototype=NativeWorker.prototype;
+})();
+</script>
 <script src="glctc1-guard.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=1280,viewport-fit=cover">
@@ -2500,7 +2526,7 @@ function stop(s){s.tuneRequest=(s.tuneRequest||0)+1;if(s.v){try{s.v.src.stop()}c
 function play(s,when,position){if(!s.proc)return;
  if(s.tunedOriginal!==s.proc||s.tunedHz!==GLCTC_TUNING.hz){const request=(s.tuneRequest||0)+1;s.tuneRequest=request;prepareTunedLoop(s).then(()=>{if(s.tuneRequest===request)play(s,Math.max(when||0,ensureAudio().currentTime+.02),position)}).catch(e=>{console.error(e);toast('Looper tuning failed.')});return}
  const old=s.v;if(old){const at=when??old.src.context.currentTime;old.g.gain.setTargetAtTime(0,at,.005);try{old.src.stop(at+.025)}catch(e){}s.v=null} s.L.loop=true;const c=ensureAudio(),v=build(c,s,trackFx(c,s.t,masterGain));s.v=v;apply(s);v.src.onended=()=>{if(s.v===v){s.v=null;ui()}};const o0=window.__glctcStartStep||0,reg=Math.max(.01,(s.L.end-s.L.start)*s.proc.duration),off=((o0/4)*(60/GLCTC_CLOCK.bpm)*rate(s))%reg;const at=Math.max(c.currentTime,when??window.__glctcMasterStartAt??0),K=GLCTC_CLOCK;
- const phase=position??(s.L.start*s.proc.duration+((K.beatAt(at)*60/K.bpm)*rate(s))%reg);
+ const phase=Math.max(0,position??(s.L.start*s.proc.duration+((((K.beatAt(at)*60/K.bpm)*rate(s))%reg)+reg)%reg)); /* v92: a start just before the clock anchor gave a negative offset */
  v._tuneTime=at;v._tuneBeat=K.beatAt(at);v._tuneBpm=K.bpm;v._tuneRate=rate(s);v._tuneOffset=phase;
  const level=v.g.gain.value;v.g.gain.setValueAtTime(0,at);v.g.gain.linearRampToValueAtTime(level,at+.015);v.src.start(at,phase);ui()}
 async function rec(s){if(s.mr){s.mr.stop();return}try{const st=await navigator.mediaDevices.getUserMedia({audio:true}),mr=new MediaRecorder(st),ch=[];s.mr=mr;mr.ondataavailable=e=>ch.push(e.data);mr.onstop=async()=>{st.getTracks().forEach(t=>t.stop());clearTimeout(s.rt);s.mr=null;try{s.buf=await ensureAudio().decodeAudioData(await new Blob(ch).arrayBuffer());proc(s);draw(s);play(s)}catch(e){toast('Could not read the recording.')}ui()};mr.start();const L=s.L;if(L.bars)s.rt=setTimeout(()=>mr.state==='recording'&&mr.stop(),L.bars*beatsPerBar()*beatSeconds()*1000);ui()}catch(e){toast('Microphone access was blocked.')}}
@@ -6993,25 +7019,26 @@ const TPL={
  demo:[['INTRO','intro',4],['BUILD','build',4],['DROP 1','drop',8],['BREAK','break',4],['BUILD 2','build',4],['DROP 2','drop',8],['OUTRO','outro',4]],
  16:[['INTRO','intro',4],['DROP','drop',8],['OUTRO','outro',4]],
  32:[['INTRO','intro',4],['BUILD','build',4],['DROP 1','drop',8],['BREAK','break',4],['DROP 2','drop',8],['OUTRO','outro',4]],
- 64:[['INTRO','intro',8],['BUILD','build',4],['DROP 1','drop',8],['BREAK','break',8],['BUILD 2','build',4],['DROP 2','drop',8],['BREAK 2','break',4],['BUILD 3','build',4],['DROP 3','drop',8],['OUTRO','outro',8]],
+ 64:[['INTRO','intro',4],['BUILD','build',4],['DROP 1','drop',8],['BREAK','break',8],['BUILD 2','build',4],['DROP 2','drop',8],['BREAK 2','break',4],['BUILD 3','build',4],['DROP 3','drop',8],['OUTRO','outro',8]],
  radio:[['INTRO','intro',4],['VERSE 1','verse',8],['PRE','build',4],['CHORUS 1','drop',8],['VERSE 2','verse',8],['PRE 2','build',4],['CHORUS 2','drop',8],['BRIDGE','break',4],['FINAL','drop',8],['OUTRO','outro',4]],
- epic:[['INTRO','intro',8],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['BREAK 2','break',8],['RISE','build',8],['FINALE','drop',16],['OUTRO','outro',8]],
- club:[['INTRO','intro',16],['GROOVE','verse',8],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['BREAK 2','break',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',16]]
+ epic:[['INTRO','intro',4],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['BREAK 2','break',8],['RISE','build',8],['FINALE','drop',16],['OUTRO','outro',8]],
+ club:[['INTRO','intro',8],['GROOVE','verse',8],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['BREAK 2','break',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',8]]
 };
-/* v88 FULL SONGS: every genre gets its own complete song form (intro → grooves → builds → drops → breakdowns → outro) */
-const CLUB_FULL=[['INTRO','intro',16],['GROOVE','verse',16],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['GROOVE 2','verse',8],['BREAK 2','break',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',16]];
+/* v92 FULL SONGS: every genre gets its own complete song form. Intros are short (4 bars, ambient 8) and already carry the hook
+   or groove, so the audience is pulled in straight away - no long DJ-tool intros. Outros are short too. */
+const CLUB_FULL=[['INTRO','intro',4],['GROOVE','verse',8],['BUILD','build',8],['DROP 1','drop',16],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['GROOVE 2','verse',8],['BUILD 3','build',4],['DROP 3','drop',16],['OUTRO','outro',8]];
 const FULL={
  techno:CLUB_FULL,house:CLUB_FULL,garage:CLUB_FULL,breaks:CLUB_FULL,
- trance:[['INTRO','intro',16],['GROOVE','verse',16],['BUILD','build',8],['DROP 1','drop',16],['BREAKDOWN','break',16],['RISE','build',8],['DROP 2','drop',16],['GROOVE 2','verse',8],['BREAK 2','break',8],['BUILD 3','build',8],['FINALE','drop',16],['OUTRO','outro',16]],
- psytrance:[['INTRO','intro',16],['ROLL','verse',16],['BUILD','build',8],['DROP 1','drop',16],['TWIST','verse',8],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['ROLL 2','verse',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',16]],
- dnb:[['INTRO','intro',16],['BUILD','build',8],['DROP 1','drop',16],['ROLL','verse',16],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['BRIDGE','break',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',16]],
- dubstep:[['INTRO','intro',16],['BUILD','build',8],['DROP 1','drop',16],['VERSE','verse',16],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['BRIDGE','break',8],['BUILD 3','build',8],['DROP 3','drop',16],['OUTRO','outro',8]],
- hiphop:[['INTRO','intro',4],['VERSE 1','verse',16],['HOOK','drop',8],['VERSE 2','verse',16],['HOOK 2','drop',8],['BRIDGE','break',8],['VERSE 3','verse',16],['HOOK 3','drop',8],['OUTRO','outro',4]],
+ trance:[['INTRO','intro',4],['GROOVE','verse',8],['BUILD','build',8],['DROP 1','drop',16],['BREAKDOWN','break',16],['RISE','build',8],['DROP 2','drop',16],['GROOVE 2','verse',8],['BUILD 3','build',4],['FINALE','drop',16],['OUTRO','outro',8]],
+ psytrance:[['INTRO','intro',4],['ROLL','verse',8],['BUILD','build',8],['DROP 1','drop',16],['TWIST','verse',8],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['ROLL 2','verse',8],['BUILD 3','build',4],['DROP 3','drop',16],['OUTRO','outro',8]],
+ dnb:[['INTRO','intro',4],['BUILD','build',4],['DROP 1','drop',16],['ROLL','verse',16],['BREAK','break',16],['BUILD 2','build',8],['DROP 2','drop',16],['ROLL 2','verse',16],['BUILD 3','build',4],['DROP 3','drop',16],['OUTRO','outro',8]],
+ dubstep:[['INTRO','intro',4],['BUILD','build',4],['DROP 1','drop',16],['VERSE','verse',16],['BREAK','break',8],['BUILD 2','build',8],['DROP 2','drop',16],['BRIDGE','break',8],['BUILD 3','build',4],['DROP 3','drop',16],['OUTRO','outro',4]],
+ hiphop:[['INTRO','intro',4],['HOOK','drop',8],['VERSE 1','verse',16],['HOOK 2','drop',8],['VERSE 2','verse',16],['BRIDGE','break',8],['HOOK 3','drop',8],['OUTRO','outro',4]],
  trap:[['INTRO','intro',4],['HOOK','drop',8],['VERSE 1','verse',16],['PRE','build',4],['HOOK 2','drop',8],['VERSE 2','verse',16],['PRE 2','build',4],['HOOK 3','drop',8],['BRIDGE','break',8],['HOOK 4','drop',8],['OUTRO','outro',4]],
- lofi:[['INTRO','intro',4],['THEME','verse',16],['HOOK','drop',8],['THEME 2','verse',16],['HOOK 2','drop',8],['INTERLUDE','break',8],['THEME 3','verse',16],['HOOK 3','drop',8],['OUTRO','outro',8]],
- pop:[['INTRO','intro',8],['VERSE 1','verse',16],['PRE','build',8],['CHORUS','drop',16],['VERSE 2','verse',16],['PRE 2','build',8],['CHORUS 2','drop',16],['BRIDGE','break',8],['BUILD','build',4],['FINAL','drop',16],['OUTRO','outro',8]],
- synthwave:[['INTRO','intro',8],['VERSE 1','verse',16],['BUILD','build',8],['CHORUS','drop',16],['VERSE 2','verse',16],['BREAK','break',8],['BUILD 2','build',8],['CHORUS 2','drop',16],['SOLO','drop',8],['OUTRO','outro',8]],
- ambient:[['INTRO','intro',16],['BLOOM','verse',16],['RISE','build',8],['SWELL','drop',16],['DRIFT','break',16],['SWELL 2','drop',16],['FADE','outro',16]]
+ lofi:[['INTRO','intro',4],['THEME','verse',16],['HOOK','drop',8],['THEME 2','verse',16],['HOOK 2','drop',8],['INTERLUDE','break',8],['THEME 3','verse',8],['HOOK 3','drop',8],['OUTRO','outro',4]],
+ pop:[['INTRO','intro',4],['VERSE 1','verse',16],['PRE','build',4],['CHORUS','drop',16],['VERSE 2','verse',8],['PRE 2','build',4],['CHORUS 2','drop',16],['BRIDGE','break',8],['BUILD','build',4],['FINAL','drop',16],['OUTRO','outro',4]],
+ synthwave:[['INTRO','intro',4],['VERSE 1','verse',16],['BUILD','build',8],['CHORUS','drop',16],['VERSE 2','verse',8],['BREAK','break',8],['BUILD 2','build',4],['CHORUS 2','drop',16],['SOLO','drop',8],['OUTRO','outro',8]],
+ ambient:[['INTRO','intro',8],['BLOOM','verse',16],['RISE','build',8],['SWELL','drop',16],['DRIFT','break',16],['SWELL 2','drop',16],['FADE','outro',8]]
 };
 TPL.full=CLUB_FULL;
 const curGenre=()=>{try{return (document.getElementById('gscGenre')||{}).value||(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||'techno'}catch(e){return 'techno'}};
@@ -7019,17 +7046,17 @@ const mkSecs=(t,g)=>(t==='full'?(FULL[g||curGenre()]||CLUB_FULL):TPL[t]||TPL['32
 const GENRE={
  techno:{patch:'F|GALACTIC MASSIVE',skip:[],pre:{lp:'Techno · Tight Loop',bl:'Techno · Warehouse Kit',mine:'Techno · Peak Time',lee:'Techno · Rolling Acid',s101:'Techno · Dark Stab',go:'F|GALACTIC MASSIVE',vox:'GLITCH VOX',ws:'Techno · Industrial Hits'}},
  house:{patch:'F|POLY KEYS',skip:[],pre:{lp:'House · Filtered Groove',bl:'House · Chicago Groove',mine:'House · Tribal Swing',lee:'House · Funky Bass',s101:'House · Organ Stab',go:'F|POLY KEYS',vox:'CHOIR OF ME',ws:'House · Percussive Groove'}},
- dnb:{patch:'F|COSMIC BASS',skip:['vox'],pre:{lp:'DnB · Chopped Break',bl:'DnB · Liquid Breaks',mine:'DnB · Roller Breaks',lee:'DnB · Reese Growl',s101:'DnB · Neuro Stab',go:'F|COSMIC BASS',vox:'WHISPER',ws:'DnB · Fast Perc & Bass'}},
- hiphop:{patch:'F|LOFI KEYS',skip:['s101'],pre:{lp:'Hip-Hop · Lo-Fi Sample',bl:'Hip-Hop · Dusty Boom Bap',mine:'Hip-Hop · 808 Boom',lee:'Hip-Hop · 808 Sub Bass',s101:'Hip-Hop · Dusty Keys',go:'F|LOFI KEYS',vox:'TRAP AUTOTUNE',ws:'Hip-Hop · Vinyl Perc'}},
- ambient:{patch:'F|INFINITE PAD',skip:['lp','bl','mine','lee'],pre:{lp:'Ambient · Wash',bl:'Ambient · Soft Percussion',mine:'Ambient · Linn Air',lee:'Ambient · Drone Bass',s101:'Ambient · Slow Pad',go:'F|INFINITE PAD',vox:'ANGEL',ws:'Ambient · Texture Layers'}},
+ dnb:{patch:'F|SUPERNOVA LEAD',skip:[],pre:{lp:'DnB · Chopped Break',bl:'DnB · Liquid Breaks',mine:'DnB · Roller Breaks',lee:'DnB · Reese Growl',s101:'DnB · Neuro Stab',go:'F|SUPERNOVA LEAD',vox:'WHISPER',ws:'DnB · Fast Perc & Bass'}},
+ hiphop:{patch:'F|LOFI KEYS',skip:[],pre:{lp:'Hip-Hop · Lo-Fi Sample',bl:'Hip-Hop · Dusty Boom Bap',mine:'Hip-Hop · 808 Boom',lee:'Hip-Hop · 808 Sub Bass',s101:'Hip-Hop · Dusty Keys',go:'F|LOFI KEYS',vox:'TRAP AUTOTUNE',ws:'Hip-Hop · Vinyl Perc'}},
+ ambient:{patch:'F|INFINITE PAD',skip:['mine'],pre:{lp:'Ambient · Wash',bl:'Ambient · Soft Percussion',mine:'Ambient · Linn Air',lee:'Ambient · Drone Bass',s101:'Ambient · Slow Pad',go:'F|INFINITE PAD',vox:'ANGEL',ws:'Ambient · Texture Layers'}},
  pop:{patch:'F|SYNTHWAVE LEAD',skip:[],pre:{lp:'Pop · Clean Hook',bl:'Pop · Radio Kit',mine:'Pop · 707 Clean',lee:'Pop · Pluck Bass',s101:'Pop · Bright Lead',go:'F|SYNTHWAVE LEAD',vox:'STADIUM DOUBLE',ws:'Pop · Clean Hits'}},
  trance:{patch:'F|TRANCE SUPERSAW',skip:[],pre:{lp:'Trance · Euphoric Loop',bl:'Trance · Festival Kit',mine:'Trance · 909 Festival',lee:'Trance · Rolling Offbeat',s101:'Trance · Supersaw Stab',go:'F|TRANCE SUPERSAW',vox:'TRANCE DIVA',ws:'Trance · Uplift FX'}},
- dubstep:{patch:'F|DUBSTEP GROWL',skip:['s101'],pre:{lp:'Dubstep · Dirty Chop',bl:'Dubstep · Half-Time Smash',mine:'Dubstep · Industrial Smash',lee:'Dubstep · Wobble Growl',s101:'Dubstep · Screech Stab',go:'F|DUBSTEP GROWL',vox:'DUBSTEP GROWL VOX',ws:'Dubstep · Impact Pack'}},
+ dubstep:{patch:'F|DUBSTEP GROWL',skip:[],pre:{lp:'Dubstep · Dirty Chop',bl:'Dubstep · Half-Time Smash',mine:'Dubstep · Industrial Smash',lee:'Dubstep · Wobble Growl',s101:'Dubstep · Screech Stab',go:'F|DUBSTEP GROWL',vox:'DUBSTEP GROWL VOX',ws:'Dubstep · Impact Pack'}},
  garage:{patch:'F|GARAGE ORGAN',skip:[],pre:{lp:'Garage · Shuffle Chop',bl:'Garage · 2-Step Shuffle',mine:'Garage · DMX Shuffle',lee:'Garage · Bouncy Sub',s101:'Garage · Organ Chord',go:'F|GARAGE ORGAN',vox:'GARAGE CHOP',ws:'Garage · Shuffle Perc'}},
  synthwave:{patch:'F|OUTRUN BRASS',skip:[],pre:{lp:'Synthwave · Neon Wash',bl:'Synthwave · Gated 80s',mine:'Synthwave · Linn Gated',lee:'Synthwave · Octave Bass',s101:'Synthwave · Brass Stab',go:'F|OUTRUN BRASS',vox:'OUTRUN NEON',ws:'Synthwave · Neon Toms'}},
- trap:{patch:'F|TRAP BELLS',skip:['s101'],pre:{lp:'Trap · Dark Sample',bl:'Trap · 808 Rattle',mine:'Trap · 808 Hats',lee:'Trap · 808 Glide',s101:'Trap · Bell Pluck',go:'F|TRAP BELLS',vox:'TRAP TRIPLE',ws:'Trap · Hi-Hat Rolls'}},
+ trap:{patch:'F|TRAP BELLS',skip:[],pre:{lp:'Trap · Dark Sample',bl:'Trap · 808 Rattle',mine:'Trap · 808 Hats',lee:'Trap · 808 Glide',s101:'Trap · Bell Pluck',go:'F|TRAP BELLS',vox:'TRAP TRIPLE',ws:'Trap · Hi-Hat Rolls'}},
  lofi:{patch:'F|LOFI DREAM PAD',skip:[],pre:{lp:'Lo-Fi · Cassette',bl:'Lo-Fi · Tape Kit',mine:'Lo-Fi · Dusty DMX',lee:'Lo-Fi · Mellow Upright',s101:'Lo-Fi · Rhodes Keys',go:'F|LOFI DREAM PAD',vox:'LOFI TAPE VOX',ws:'Lo-Fi · Dusty Layers'}},
- psytrance:{patch:'F|PSY ZAP LEAD',skip:['vox'],pre:{lp:'Psytrance · Spiral',bl:'Psytrance · Forest Punch',mine:'Psytrance · Electro Rattle',lee:'Psytrance · Gallop',s101:'Psytrance · Acid Zap',go:'F|PSY ZAP LEAD',vox:'PSY SHAMAN',ws:'Psytrance · Zap Rain'}},
+ psytrance:{patch:'F|PSY ZAP LEAD',skip:[],pre:{lp:'Psytrance · Spiral',bl:'Psytrance · Forest Punch',mine:'Psytrance · Electro Rattle',lee:'Psytrance · Gallop',s101:'Psytrance · Acid Zap',go:'F|PSY ZAP LEAD',vox:'PSY SHAMAN',ws:'Psytrance · Zap Rain'}},
  breaks:{patch:'F|BREAKBEAT HOOVER',skip:[],pre:{lp:'Breaks · Crunchy Break',bl:'Breaks · Big Beat',mine:'Breaks · Big Beat Kit',lee:'Breaks · Funk Bass',s101:'Breaks · Rave Hoover',go:'F|BREAKBEAT HOOVER',vox:'BREAKS MC',ws:'Breaks · Big Beat Hits'}}
 };
 const CHILL_BUILD={hiphop:{bl:2,lee:0,s101:0,go:3,ws:2},lofi:{bl:2,lee:0,s101:0,go:3,ws:2,lp:0},ambient:{s101:0,go:3,ws:2}};
@@ -7040,21 +7067,23 @@ function autoCells(secs,genre){
     Drums / bass / PAD-64: 0 main groove · 1 alt groove (even drops) · 2 breakdown · 3 build fill (roll, rising bass, riser).
     0010110 stabs: 0.  Galactic One: 0 main lead · 2 sparse · 3 rise · 4 counter · 5 drop-2 lead · 7 held pad.  -1 / absent = silent. */
  const A='A',L='L'; /* A = main/alt groove by drop number, L = lead main / drop-2 lead by drop number */
+ /* v92: the LOOPER (genre shaker / tambourine / tape loop) and GALACTIC VOX (vocal chop) now play in every genre, so all eight
+    modules layer together. Intros carry the hook or a teaser of it; drops stack everything; breaks strip back to pad, stab and voice. */
  const ARR={
-  techno:{intro:{bl:0,mine:2,ws:2},verse:{bl:0,mine:0,lee:0,ws:0},build:{bl:3,mine:3,lee:3,go:3,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:'C',ws:A},break:{go:7,s101:0,ws:2},outro:{bl:0,mine:2,lee:2,ws:2}},
-  house:{intro:{bl:0,mine:2,ws:0},verse:{bl:0,mine:0,lee:0,s101:0,ws:0},build:{bl:3,mine:3,lee:0,s101:0,go:3,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,ws:2,vox:0},outro:{bl:0,mine:2,lee:0,ws:0}},
-  dnb:{intro:{go:7,mine:2,ws:2},verse:{bl:0,mine:0,lee:0,go:2},build:{bl:3,mine:3,lee:3,go:3,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:L,ws:A},break:{go:7,s101:0,ws:2,lee:2},outro:{bl:0,mine:2,lee:2,go:7}},
-  hiphop:{intro:{go:7,s101:0,mine:2,ws:2},verse:{bl:0,mine:0,lee:0,s101:0,go:2},build:{bl:0,mine:2,lee:0,go:2,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:0,ws:A,vox:0},break:{go:7,s101:0},outro:{bl:2,mine:2,lee:2,go:2}},
-  lofi:{intro:{s101:0,go:7,ws:2,mine:2},verse:{bl:0,mine:0,lee:0,s101:0},build:{bl:0,mine:2,lee:0,s101:0,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:2,ws:A},break:{s101:0,go:7,ws:2},outro:{s101:0,go:7,mine:2}},
-  trap:{intro:{go:2,s101:0},verse:{bl:0,mine:0,lee:0,go:2},build:{bl:0,mine:0,go:2,ws:3},drop:{bl:A,mine:A,lee:A,go:0,s101:0,ws:A},break:{go:2,s101:0,bl:2},outro:{go:2,lee:2,mine:2}},
-  trance:{intro:{bl:0,mine:2,lee:0,ws:2},verse:{bl:0,mine:0,lee:0,s101:0},build:{bl:3,mine:3,lee:3,go:3,s101:0,ws:3},drop:{bl:A,mine:A,lee:A,go:L,s101:0,ws:A},break:{go:7,s101:0,ws:2},outro:{bl:0,mine:0,lee:0,ws:2}},
-  psytrance:{intro:{bl:0,lee:0,mine:2},verse:{bl:0,mine:0,lee:0,go:2},build:{bl:3,mine:3,lee:0,go:3,ws:3},drop:{bl:A,mine:A,lee:A,go:L,s101:0,ws:A},break:{go:7,ws:2,s101:0},outro:{bl:0,lee:0,mine:2}},
-  dubstep:{intro:{go:7,ws:2},verse:{bl:2,mine:2,lee:2,go:2},build:{bl:3,mine:3,lee:3,go:3,ws:3},drop:{bl:A,mine:A,lee:A,go:L,s101:0,ws:A},break:{go:7,ws:2},outro:{bl:2,mine:2,go:7}},
-  garage:{intro:{bl:0,mine:2,ws:0},verse:{bl:0,mine:0,lee:0,s101:0,vox:0},build:{bl:3,mine:3,lee:0,s101:0,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,vox:0},outro:{bl:0,mine:2,lee:0}},
-  synthwave:{intro:{go:7,mine:2,ws:2,lee:2},verse:{bl:0,mine:0,lee:0,go:2},build:{bl:3,mine:3,lee:0,go:3,ws:3},drop:{bl:A,mine:A,lee:A,go:L,s101:0,ws:A},break:{go:7,s101:0,ws:2},outro:{bl:0,lee:0,go:7}},
-  breaks:{intro:{bl:2,mine:2,ws:2},verse:{bl:0,mine:0,lee:0,s101:0},build:{bl:3,mine:3,lee:3,go:3,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:L,ws:A},break:{go:7,s101:0,ws:2},outro:{bl:0,mine:2,lee:2}},
-  pop:{intro:{s101:0,go:7,ws:2,mine:2},verse:{bl:0,mine:2,lee:0,s101:0,vox:0},build:{bl:3,mine:3,lee:0,s101:0,go:3,ws:3},drop:{bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,vox:0},outro:{s101:0,go:7,bl:2}},
-  ambient:{intro:{go:7,ws:2},verse:{go:7,s101:0,ws:2},build:{go:7,s101:0,ws:3},drop:{go:7,s101:0,ws:2,lee:0},break:{go:7,ws:2},outro:{go:7}}
+  techno:{intro:{lp:0,bl:0,mine:2,go:2,ws:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,ws:0},build:{lp:0,bl:3,mine:3,lee:3,s101:0,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:'C',ws:A,vox:0},break:{go:7,s101:0,ws:2,vox:0},outro:{lp:0,bl:0,mine:2,lee:2,go:2}},
+  house:{intro:{lp:0,bl:0,mine:0,s101:0,ws:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,ws:0},build:{lp:0,bl:3,mine:3,lee:0,s101:0,go:3,ws:3,vox:0},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,ws:2,vox:0},outro:{lp:0,bl:0,mine:2,lee:0,s101:0}},
+  dnb:{intro:{lp:0,go:0,mine:2,ws:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,go:2,ws:0},build:{lp:0,bl:3,mine:3,lee:3,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,ws:2,lee:2,vox:0},outro:{lp:0,bl:0,mine:2,lee:2,go:7}},
+  hiphop:{intro:{lp:0,go:0,s101:0,mine:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,go:2},build:{lp:0,bl:0,mine:2,lee:0,go:2,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:0,ws:A,vox:0},break:{lp:0,go:7,s101:0,vox:0},outro:{lp:0,bl:2,mine:2,lee:2,go:2}},
+  lofi:{intro:{lp:0,s101:0,go:7,mine:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,go:2},build:{lp:0,bl:0,mine:2,lee:0,s101:0,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:0,ws:A,vox:0},break:{lp:0,s101:0,go:7,ws:2},outro:{lp:0,s101:0,go:7,mine:2}},
+  trap:{intro:{lp:0,go:0,s101:0},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,go:2},build:{lp:0,bl:0,mine:3,go:2,ws:3,vox:0},drop:{lp:0,bl:A,mine:A,lee:A,go:0,s101:0,ws:A,vox:0},break:{lp:0,go:2,s101:0,bl:2,vox:0},outro:{go:2,lee:2,mine:2}},
+  trance:{intro:{lp:0,bl:0,mine:2,go:2,ws:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,go:6},build:{lp:0,bl:3,mine:3,lee:3,go:3,s101:0,ws:3,vox:0},drop:{lp:0,bl:A,mine:A,lee:A,go:L,s101:0,ws:A,vox:0},break:{go:0,ws:2,vox:0},outro:{lp:0,bl:0,mine:0,lee:0,ws:2}},
+  psytrance:{intro:{lp:0,bl:0,mine:2,go:2},verse:{lp:0,bl:0,mine:0,lee:0,go:1,ws:0},build:{lp:0,bl:3,mine:3,lee:0,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,go:L,s101:0,ws:A,vox:0},break:{go:7,ws:2,s101:0,vox:0},outro:{lp:0,bl:0,lee:0,mine:2}},
+  dubstep:{intro:{lp:0,go:7,mine:2,ws:2},verse:{lp:0,bl:2,mine:2,lee:2,go:2,s101:0},build:{lp:0,bl:3,mine:3,lee:3,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,go:L,s101:0,ws:A,vox:0},break:{go:7,ws:2,vox:0},outro:{bl:2,mine:2,go:7}},
+  garage:{intro:{lp:0,bl:0,mine:0,s101:0,vox:0},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,vox:0},build:{lp:0,bl:3,mine:3,lee:0,s101:0,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{lp:0,go:7,s101:0,vox:0},outro:{lp:0,bl:0,mine:2,lee:0}},
+  synthwave:{intro:{lp:0,go:1,mine:2,ws:2},verse:{lp:0,bl:0,mine:0,lee:0,go:1,s101:0},build:{lp:0,bl:3,mine:3,lee:0,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,go:L,s101:0,ws:A,vox:0},break:{go:7,s101:0,ws:2,vox:0},outro:{lp:0,bl:0,lee:0,go:1}},
+  breaks:{intro:{lp:0,bl:0,mine:2,go:2},verse:{lp:0,bl:0,mine:0,lee:0,s101:0,ws:0},build:{lp:0,bl:3,mine:3,lee:3,go:3,ws:3},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,ws:2,vox:0},outro:{lp:0,bl:0,mine:2,lee:2}},
+  pop:{intro:{lp:0,go:0,s101:0,mine:2},verse:{lp:0,bl:0,mine:2,lee:0,s101:0,vox:0},build:{lp:0,bl:3,mine:3,lee:0,s101:0,go:3,ws:3,vox:0},drop:{lp:0,bl:A,mine:A,lee:A,s101:0,go:L,ws:A,vox:0},break:{go:7,s101:0,vox:0},outro:{lp:0,s101:0,go:0,bl:2}},
+  ambient:{intro:{go:7,lp:0,ws:2},verse:{go:7,s101:0,ws:2,lp:0,lee:0},build:{go:2,s101:0,ws:3,lp:0,lee:0,vox:0},drop:{go:0,s101:0,ws:0,lee:0,bl:0,lp:0,vox:0},break:{go:7,ws:2,vox:0,lp:0},outro:{go:7,lp:0}}
  };
  const plan=ARR[genre]||ARR.techno;let drop=0;const c={};MODS.forEach(m=>c[m.k]=[]);
  secs.forEach(s=>{const o=plan[s.kind]||plan.verse,a=s.kind==='drop'?drop%2:0;
@@ -7147,7 +7176,7 @@ panel.innerHTML=`<style>
 </div>
 <div class="gsc-status" id="gscStatus" role="status">READY</div>
 <div class="gsc-status" id="gscFillInfo" style="opacity:.8"></div>
-<div class="gsc-note">GENERATE NEW SONG makes another variation in your selected genre (a genre named in the prompt takes priority). SURPRISE ME also picks the genre and song length. Four groove foundations per genre combine with new keys, bass rhythms and melodic motifs. Save Composer keeps a favourite exactly as generated. Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. Generation chooses genre-matched sounds from the original and Soundscape banks. The chosen PRESET is loaded during generation and kept when you press PLAY; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
+<div class="gsc-note">GENERATE NEW SONG makes another variation in your selected genre (a genre named in the prompt takes priority). SURPRISE ME also picks the genre and song length. Three or four authentic groove foundations per genre combine with new keys, chord progressions, bass lines, two-bar hooks and a fresh sound palette drawn from every preset bank; all eight modules (Looper and Vox included) layer together, and intros are kept short so the hook arrives straight away. Save Composer keeps a favourite exactly as generated. Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. Generation chooses genre-matched sounds from the original and Soundscape banks. The chosen PRESET is loaded during generation and kept when you press PLAY; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
 const ws=byId('wsPanel');
 if(ws)ws.insertAdjacentElement('afterend',panel);else document.body.append(panel);
 const status=t=>{const s=byId('gscStatus');if(s&&s.textContent!==t)s.textContent=t};   /* v74: only touch the DOM when the text changes (it was rewritten every 10 ms tick) */
@@ -7352,7 +7381,9 @@ function setGainNow(m,target){
 let wsKeyTunes=null;
 try{window.GLCTC_SONG_MODE=localStorage.getItem('glctc1.songMode')||'minor'}catch(e){}
 /* v70 KEY LOCK: a PAD-64 preset load resets its slot tuning, so the song key is written back onto the tuned slots (sub, pluck, stab, pad, lead) after every preset load */
-function wsRetune(){try{const a=window.GLCTC_PAD64_PATTERNS;if(!wsKeyTunes||!a||!a.get||!a.set)return;const d=a.get();d.tunes=Object.assign({},wsKeyTunes);a.set(d)}catch(e){console.warn('pad-64 key lock',e)}}
+function wsRetune(){try{const a=window.GLCTC_PAD64_PATTERNS;if(!wsKeyTunes||!a||!a.get||!a.set)return;const t=Object.assign({},wsKeyTunes);
+ try{const H=window.GLCTC_SONG_HARM,A=window.GLCTC_PRESET_LIBRARIES&&GLCTC_PRESET_LIBRARIES.adapters;if(H&&A&&A.ws&&PAT.wsTune){A.ws.get().pads.slots.forEach((sl,i)=>{if(sl.smp)return;const v=PAT.wsTune(sl.kind,i,H);if(v!=null)t[i]=v})}}catch(_){}  /* v92: tuned from the sound actually in each slot */
+ const d=a.get();d.tunes=t;a.set(d)}catch(e){console.warn('pad-64 key lock',e)}}
 function applyPresets(force){
  MODS.forEach(m=>{
   const v=st.presets[m.k];if(!v||(!used(m)&&m.k==='vox'))return;   /* v71: modules left out of the song still get the genre sound, so ticking one back in sounds right */
@@ -7525,224 +7556,351 @@ if(bpmEl)bpmEl.addEventListener('change',()=>{
  const masterNow=Math.max(30,Math.min(300,GLCTC_CLOCK.bpm));st.bpm=masterNow;byId('gscBpm').textContent=GLCTC_CLOCK.fmt(masterNow);save();if(!S)return;S.bpm=masterNow;
 });
 
-/* ===== GLCTC1 AI PATTERN GENERATOR: writes genre-correct patterns into every module (seeded, key-aware, restorable) ===== */
+/* ===== v92 GENRE ENGINE: genre blueprints written the way each style is actually produced =====
+   Every genre carries 3–4 authentic groove foundations (kick / snare / hat / perc), matching bass lines with real note movement
+   (roots, octaves, fifths, approach notes, 808 glides), a two-bar call-and-answer hook for GALACTIC ONE, a stab / keys part for
+   0010110, a vocal chop for GALACTIC VOX and a hand-percussion line for PAD-64 (or for 80LA8 when a world-percussion kit is loaded).
+   Ownership never changes, so nothing doubles: 80LA8 = kick / snare / clap / toms / rim (+ hand drums on world kits),
+   DIVINE09 = hats / open hats / ride / crash, 30LEE = bass, 0010110 = stab / keys, GALACTIC ONE = hook / arp / pad,
+   VOX = chop, PAD-64 = hand percussion + breakdown pad. Same exported API as before. */
 const PAT=(()=>{
  const hash=s=>{let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0};
  const RNG=seed=>{let a=seed>>>0;return()=>{a=(a+0x6D2B79F5)>>>0;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}};
- const SC={minor:[0,2,3,5,7,8,10],major:[0,2,4,5,7,9,11],phrygian:[0,1,3,5,7,8,10],pentatonic:[0,3,5,7,10]};
+ const SC={minor:[0,2,3,5,7,8,10],major:[0,2,4,5,7,9,11],phrygian:[0,1,3,5,7,8,10],pentatonic:[0,3,5,7,10],dorian:[0,2,3,5,7,9,10]};
  const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
  const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
- const euclid=(k,n,rot)=>Array.from({length:n},(_,i)=>((((i+(rot||0))%n)+n)%n*k)%n<k);
  const semi=(sc,d)=>{const L=sc.length,o=Math.floor(d/L);return sc[((d%L)+L)%L]+12*o};
- const vel=c=>c==='X'?1:c==='x'?.82:c==='o'?.5:c==='g'?.32:0;
- /* kinds: 0 main · 1 alt/drop-2 · 2 breakdown · 3 build/fill. Role letters: K kick S snare C clap H closed-hat O open-hat T low-tom U mid-tom R rim G conga/hi-tom B cowbell/ride P perc1 Q perc2 Z crash */
- /* v72 PUNCH GROOVES: one textbook beat per genre, written as it is played in the clubs - no random extra kicks, ghost notes or shifted percussion.
-    kinds: 0 main groove · 1 drop-2 (same groove, bigger: 16th hats, open hats, crash) · 2 breakdown · 3 build (snare roll).
-    bass rhythms lock to the kick (sub genres) or sit on the off-beats between kicks (four-to-the-floor genres), always on the chord root. */
- const FOURK='X...X...X...X...',BB='....X.......X...',ROLL='x...x...x.x.xxxx',OFF='..x...x...x...x.',EI='x.x.x.x.x.x.x.x.',SX='xoxoxoxoxoxoxoxo',CR='X...............';
- const G={
-  techno:{keys:[0,9,5,7,2,10],scale:'minor',swing:.04,
-   D:[{K:FOURK,C:BB,O:OFF,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,C:BB,O:OFF,H:SX,Z:CR},{O:OFF,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,S:ROLL,O:OFF,H:SX}],
-   bass:[OFF,'..xx..xx..xx..xx','X...............',EI],stab:'x.....x.....x...',voxR:'x...............'},
-  house:{keys:[9,0,7,2,5,4],scale:'minor',swing:.14,
-   D:[{K:FOURK,C:BB,O:OFF,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,C:BB,O:OFF,H:SX,G:'...o..o....o..o.',Z:CR},{C:BB,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,C:ROLL,O:OFF,H:SX}],
-   bass:[OFF,'..x..xx...x..xx.','X...............',EI],stab:'..x...x...x...x.',voxR:'x.......x.......'},
-  dnb:{keys:[9,0,7,5,2,4],scale:'minor',swing:.03,
-   D:[{K:'X.........X.....',S:BB,H:EI},{K:'X.........X.....',S:BB,H:SX,O:'.......x.......x',Z:CR},{H:'x...x...x...x...'},{K:FOURK,S:ROLL,H:SX}],
-   bass:['X.........X.....','X.....x...X.....','X...............',EI],stab:'x.........x.....',voxR:'x...............'},
-  hiphop:{keys:[0,9,5,7,2,10],scale:'minor',swing:.2,
-   D:[{K:'X......X..X.....',S:BB,H:EI},{K:'X......X.XX.....',S:BB,H:EI,O:'..............x.',Z:CR},{K:'X...............',S:'........X.......'},{K:'X......X..X.....',S:BB,H:EI}],
-   bass:['X......X..X.....','X......X.XX.....','X...............','X......X..X.....'],stab:'x.......x.......',voxR:'x...............'},
-  ambient:{keys:[0,2,9,7,5,4],scale:'pentatonic',swing:.06,
-   D:[{K:'o...............',H:'..o...o...o...o.'},{K:'o.......o.......',H:'o...o...o...o...'},{H:'o.......o.......'},{K:'o...............',H:'o.o.o.o.o.o.o.o.'}],
-   bass:['X...............','X.......X.......','X...............','X...............'],stab:'x...............',voxR:'x...............'},
-  pop:{keys:[0,9,7,5,2,4],scale:'major',swing:.03,
-   D:[{K:FOURK,S:BB,C:BB,H:EI},{K:FOURK,S:BB,C:BB,O:OFF,H:SX,Z:CR},{C:BB,H:'x...x...x...x...'},{K:FOURK,S:ROLL,H:EI}],
-   bass:[EI,EI,'X...............',EI],stab:'..x...x...x...x.',voxR:'x.......x.......'},
-  trance:{keys:[9,2,5,7,0,4],scale:'minor',swing:0,
-   D:[{K:FOURK,C:BB,O:OFF,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,C:BB,O:OFF,H:SX,Z:CR},{O:OFF},{K:FOURK,S:ROLL,O:OFF,H:SX}],
-   bass:['.xxx.xxx.xxx.xxx','.xxx.xxx.xxx.xxx','X...............','.xxx.xxx.xxx.xxx'],stab:'..x...x...x...x.',voxR:'x...............'},
-  psytrance:{keys:[4,9,2,7,5,0],scale:'phrygian',swing:0,
-   D:[{K:FOURK,C:BB,O:OFF,H:'.o.o.o.o.o.o.o.o'},{K:FOURK,C:BB,O:OFF,H:SX,Z:CR},{O:OFF},{K:FOURK,S:ROLL,O:OFF,H:SX}],
-   bass:['.xxx.xxx.xxx.xxx','.xxx.xxx.xxx.xxx','X...............','.xxx.xxx.xxx.xxx'],stab:'...x.......x....',voxR:'x...............'},
-  dubstep:{keys:[5,7,2,9,0,10],scale:'minor',swing:.03,
-   D:[{K:'X.........X.....',S:'........X.......',H:EI},{K:'X.........X.....',S:'........X.......',H:EI,O:'......x.......x.',Z:CR},{K:'X...............',H:'x.......x.......'},{K:FOURK,S:ROLL,H:EI}],
-   bass:['X.........X.....','X.....x...X.x...','X...............',EI],stab:'........x.......',voxR:'x...............'},
-  garage:{keys:[9,0,5,2,7,4],scale:'minor',swing:.26,
-   D:[{K:'X.........X.....',S:BB,H:EI},{K:'X.........X.....',S:BB,H:EI,O:'..x.......x.....',Z:CR},{H:EI},{K:'X.........X.....',S:ROLL,H:EI}],
-   bass:['X.........X.....','X..x......X..x..','X...............','X.........X.....'],stab:'x..x....x..x....',voxR:'x.......x.......'},
-  breaks:{keys:[9,0,7,2,5,4],scale:'minor',swing:.08,
-   D:[{K:'X.X.......XX....',S:BB,H:EI},{K:'X.X.......XX....',S:BB,H:SX,O:'..............x.',Z:CR},{K:'X...............',H:'x...x...x...x...'},{K:'X.X.......XX....',S:ROLL,H:EI}],
-   bass:['X.X.......XX....','X.X.......XX....','X...............','X.X.......XX....'],stab:'x.....x.........',voxR:'x...............'},
-  synthwave:{keys:[9,4,2,0,7,5],scale:'minor',swing:0,
-   D:[{K:'X.......X.......',S:BB,H:EI},{K:FOURK,S:BB,H:EI,Z:CR},{H:'x...x...x...x...'},{K:FOURK,S:ROLL,H:EI}],
-   bass:[EI,EI,'X...............',EI],stab:'x.......x.......',voxR:'x...............'},
-  trap:{keys:[0,5,7,10,2,9],scale:'minor',swing:0,
-   D:[{K:'X.....x...X.....',S:'........X.......',H:EI},{K:'X......x..X...x.',S:'........X.......',H:'x.o.x.o.x.o.x.og'},{K:'X...............',S:'........X.......',H:'x...o...x...o...'},{K:'X.....x...X.....',S:'........X.......',H:EI}],
-   bass:['X.....x...X.....','X......x..X...x.','X...............','X.....x...X.....'],stab:'x...............',voxR:'x...............'},
-  lofi:{keys:[2,5,9,0,7,4],scale:'minor',swing:.24,
-   D:[{K:'X......X..X.....',S:BB,H:EI},{K:'X......X..X.....',S:BB,H:EI,O:'..............x.'},{K:'X...............',H:'x...x...x...x...'},{K:'X......X..X.....',S:BB,H:EI}],
-   bass:['X......X..X.....','X......X..X.....','X...............','X......X..X.....'],stab:'x.......x.......',voxR:'x...............'}
- };
- /* Keep the backbeat through every build; variation comes from arrangement,
-    not an unrelated four-on-the-floor roll. Open hats replace closed hats. */
- for(const g of Object.keys(G)){
-  const main=G[g].D[0];
-  if(g!=='trap')G[g].D[1]={...main,...(G[g].D[1].G?{G:G[g].D[1].G}:{})};
-  G[g].D[3]={...main};
-  for(const d of G[g].D){
-   if(d.H&&d.O)d.H=[...d.H].map((c,i)=>vel(d.O[i])?'.':c).join('');
-   if(d.S&&d.C)delete d.C;
-  }
- }
- G.trance.bass[0]=OFF;G.trance.bass[1]=OFF;
- /* Four deliberately sparse groove foundations per genre. The backbeat and
-    instrument ownership stay fixed; variation never changes the mix/presets. */
- const SONG_BANK={
-  techno:{b:[OFF,'..x...x.....x...','...x..x...x...x.','..x.....x.x...x.'],m:['x.....x.....x...','x.......x...x...','..x.....x.....x.','x.....x...x.....']},
-  house:{b:[OFF,'..x..x....x...x.','..x...x..x....x.','..x.....x...x...'],m:['..x...x...x...x.','..x.....x...x...','x.....x...x.....','...x..x.....x...']},
-  trance:{b:[OFF,'..x...x.....x...','..xx..x...xx..x.','..x...xx..x...x.'],m:['..x...x...x...x.','x.......x.......','..x.....x...x...','x.....x.....x...']},
-  psytrance:{b:['.xxx.xxx.xxx.xxx','.xx..xxx.xx..xxx','.xxx.xx..xxx.xx.','.xxx.xxx.xx..xx.'],m:['...x.......x....','x.......x.......','......x.......x.','..x.........x...']},
-  dnb:{k:['X.........X.....','X......x..X.....','X.........X...x.','X.....x...X.....'],m:['x.........x.....','..x.........x...','x.......x.......','......x.......x.']},
-  hiphop:{k:['X......x..X.....','X.....x...X.....','X.........X..x..','X..x......X.....'],m:['x.......x.......','..x.......x.....','x.........x.....','....x.......x...']},
-  dubstep:{k:['X.........X.....','X.....x.........','X..........x....','X..x......X.....'],m:['x...............','....x...........','..x.............','x.........x.....']},
-  garage:{k:['X.........X.....','X......x..X.....','X.....x.........','X.........X..x..'],m:['x..x....x..x....','..x...x.....x...','x.....x....x....','...x....x.....x.']},
-  breaks:{k:['X.X.......X.....','X.....x...X.....','X..x......X...x.','X.X.......XX....'],m:['x.....x.........','..x.......x.....','x.......x.......','....x.......x...']},
-  trap:{k:['X.....x...X.....','X......x..X...x.','X.........X..x..','X..x......X.....'],m:['x...............','x.........x.....','..x.............','x...........x...']},
-  lofi:{k:['X......x..X.....','X.........x.....','X.....x...X.....','X..x......X.....'],m:['x.......x.......','..x.......x.....','x...........x...','....x.......x...']},
-  synthwave:{k:['X.......X.......','X...X...X...X...','X.......X...x...','X...x...X.......'],b:[EI,'x...x...x...x...','x.x...x.x.x...x.','x...x.x.x...x.x.'],m:['x.......x.......','..x.......x.....','x.....x.........','....x.......x...']},
-  pop:{k:['X...X...X...X...','X.......X.......','X.....x.X.......','X.......X..x....'],b:[EI,'x...x...x...x...','x.....x.x.....x.','..x...x...x...x.'],m:['..x...x...x...x.','x.....x...x.....','x.......x...x...','..x.....x.....x.']},
-  ambient:{k:['o...............','........o.......','o.......o.......','....o...........'],b:['X...............','........X.......','X.......X.......','....X...........'],m:['x...............','........x.......','....x...........','............x...']}
- };
- function songGroove(base,g,v){
-  const spec=SONG_BANK[g],d=base.D.map(x=>({...x})),bass=base.bass.slice();
-  for(const kind of [0,1,3]){
-   const i=(v+(kind===1?1:0))%4;
-   if(spec.k)d[kind].K=spec.k[i];
-   if(spec.b)bass[kind]=spec.b[i];else if(spec.k)bass[kind]=spec.k[i];
-   // Re-accent existing hats only: never add a layer or increase hat density.
-   if(d[kind].H)d[kind].H=[...d[kind].H].map((ch,j)=>ch==='.'?'.':(j%4===i%4?'x':'o')).join('');
-   if(d[kind].O&&d[kind].H)d[kind].H=[...d[kind].H].map((ch,j)=>vel(d[kind].O[j])?'.':ch).join('');
-  }
-  return {...base,D:d,bass,stab:spec.m[v]};
- }
- /* bass glide only where the genre is built on it (808 / wobble / acid) */
- const GLIDE={trap:.45,dubstep:.25,techno:.12,psytrance:0};
- const OCTB={synthwave:1,pop:1};   /* octave-pumping 8th bass */
-/* who owns what, so no two modules double the same sound: 80LA8 = kick/snare/clap/toms/rim, DIVINE09 = hats/perc/cowbell/crash, 30LEE = bass, 0010110 = stab, GALACTIC ONE = lead/arp, VOX = hook, PAD-64 = pad + FX */
- const OWN={bl:'KSCTUR',mine:'HOBZ'};   /* v71: congas (G) are played by PAD-64's real CONGA pad only - DIVINE09 used to double them on its HIGH TOM */
- const ROLE={bl:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{K:0,S:1,C:2,H:3,O:4,T:5,U:6,G:7,R:8,B:9,Z:10},ws:{K:0,S:1,C:2,H:3,O:4,T:5,R:6,G:7}};
- /* one bar of drum velocities per role; bar 2 gets a fill at the end so loops breathe */
- /* ===== v15 SONG WRITER: one shared chord vamp for every module, hook-style leads, and a per-song "flavour" so no two songs are alike ===== */
- const PROG={techno:[[0,0],[0,6],[0,5],[0,3]],house:[[0,3],[0,5],[5,6],[3,4],[0,6]],dnb:[[0,5],[0,6],[5,4],[0,3]],hiphop:[[0,3],[0,5],[5,4],[0,6],[3,4]],
-  ambient:[[0,2],[0,3],[3,1],[0,4]],pop:[[0,4],[5,3],[0,3],[3,4],[0,5]],trance:[[0,5],[5,6],[0,6],[3,5],[0,3]],psytrance:[[0,1],[0,0],[0,6]],
-  dubstep:[[0,5],[0,6],[0,1],[0,3]],garage:[[0,3],[0,5],[1,4],[5,6]],synthwave:[[0,5],[5,6],[0,6],[3,4]],trap:[[0,0]],
-  lofi:[[3,6],[0,3],[5,3],[0,5]],breaks:[[0,6],[0,5],[0,3]]};
- const SEVENTH={house:1,garage:1,lofi:1,hiphop:1};
- const FOUR={techno:1,house:1,trance:1,psytrance:1,pop:1,garage:0,synthwave:1};
- const BROKEN={dnb:1,breaks:1,hiphop:1,trap:1,dubstep:1,lofi:1,garage:1};
- const ARPG={trance:1,psytrance:1,synthwave:1};
- let F={g:'techno',H:[0,0]};
- const hc=i=>F.H[(i%16)<8?0:1];                       /* chord (scale degree) under a 16th step: first / second half of the bar */
- const ct=d=>SEVENTH[F.g]?[d,d+2,d+4,d+6]:[d,d+2,d+4]; /* chord tones as scale degrees */
+ const vel=c=>c==='X'?1:c==='x'?.82:c==='o'?.52:c==='g'?.3:0;
  const pick=(r,a)=>a[Math.floor(r()*a.length)];
- const rotS=(s,n)=>{s=s.padEnd(16,'.');n=((n%16)+16)%16;return s.slice(16-n)+s.slice(0,16-n)};
- function bar(g,kind,b,r){
-  const out={};const src=G[g].D[kind];
-  for(const k in src){out[k]=[...src[k].padEnd(16,'.')].map(c=>vel(c))}
-  return out}
- const cell=v=>({on:v>0,accent:v>=1,velocity:v>0?cl(v,.2,1):.8});
- function drumsBL(g,r){return[0,1,2,3].map(k=>{const o=bar(g,k,0,r),steps=Array.from({length:12},()=>Array.from({length:16},()=>({on:false,velocity:.8})));for(const q in o){const ix=ROLE.bl[q];if(ix===undefined||!OWN.bl.includes(q))continue;o[q].forEach((v,i)=>{if(v)steps[ix][i]={on:true,velocity:cl(v,.25,1)}})}return{steps}})}
- function drumsMine(g,r){return[0,1,2,3].map(k=>{const b0=bar(g,k,0,r);return Array.from({length:15},(_,v)=>Array.from({length:128},(_,i)=>{const q=Object.keys(ROLE.mine).find(x=>ROLE.mine[x]===v),a=q&&OWN.mine.includes(q)&&b0[q];return cell(a&&!(q==='Z'&&i>=16)?a[i%16]:0)}))})}
- /* BASS: the genre rhythm, every note on the root of the chord underneath (octave pump for synthwave / pop) */
- function bassLee(g,r,key){const Gg=G[g],sc=SC[Gg.scale];
-  return[0,1,2,3].map(k=>{const rh=(Gg.bass[k]||'').padEnd(16,'.');let last=null;
-   return Array.from({length:16},(_,i)=>{const d=hc(i);let base=36+key+semi(sc,d);while(base>47)base-=12;while(base<28)base+=12;
-    const c=rh[i];if(c==='.')return{on:false,note:base,accent:false,slide:false,velocity:.78};
-    const n=OCTB[g]&&i%4===2?base+12:base;
-    const slide=last!==null&&n!==last&&r()<(GLIDE[g]||0);last=n;return{on:true,note:cl(n,24,60),accent:c==='X'||i%4===0,slide,velocity:c==='X'?.95:.82}})})}
+ const P=(s,n)=>(s||'').padEnd(n||16,'.').slice(0,n||16);
+ const FOURK='X...X...X...X...',BB='....X.......X...',OFF='..x...x...x...x.',E8='x.x.x.x.x.x.x.x.';
+ /* hand-drum families (80LA8 voices on world kits: T tumba · U conga · G conga hi · P bongo lo · Q bongo hi) */
+ const HAND={
+  latin:{U:'......x.....x.x.',G:'..o.......o.....',Q:'o...o.g.o...o.g.'},
+  tribal:{T:'x.....x...x.....',U:'...o......o..o..',G:'.......x.......x',Q:'..g...g...g...g.'},
+  broken:{Q:'..o...o...o..o..',U:'.......x......x.',G:'...o......o.....'},
+  half:{T:'x.......x.x.....',U:'......x.......x.',G:'...o...........o'},
+  soft:{U:'x.......x.......',Q:'....o.......o.g.'}
+ };
+ /* ---------------- GENRE BLUEPRINTS ----------------
+    gr: groove foundations {K kick S snare C clap R rim T/U toms (80LA8) · H hat O open B ride (DIVINE09) · f: DIVINE09 bar-2 ending}
+    bd: build drums · bk: breakdown drums · bass: [main, drop-2] pairs (r root o octave f fifth 3 third 7 seventh p approach · capitals accent)
+    lead: {t:'hook'|'arp'|'gate'|'roll', rh:[[bar1,bar2]…], g:gate (steps), m:motifs} · stab: 0010110 rhythms (mel = melodic)
+    vox: chop rhythms · pc: PAD-64 hand lines · hand: 80LA8 world-kit family · prog: chord pairs (scale degrees, two per bar) */
+ const G={
+  techno:{keys:[0,9,5,7,2,10],scale:'minor',swing:.04,hand:'tribal',
+   prog:[[0,0],[0,6],[0,5],[0,3],[0,4]],
+   gr:[{K:FOURK,C:BB,O:OFF,H:'go.ogo.ogo.ogo.o',R:'.......x......x.',f:{O:'..x...x...x...xx'}},
+       {K:FOURK,C:'....x.......x...',O:OFF,R:'...x..x....x..x.',T:'..........x.....',f:{H:'............o.oo'}},
+       {K:FOURK,C:BB,B:'o.x.o.x.o.x.o.x.',H:'.g.g.g.g.g.g.g.g',R:'......x.......x.',f:{O:'..............x.'}},
+       {K:'X...X...X...X..x',C:BB,O:OFF,H:'g.o.g.o.g.o.g.og',U:'.....x.....x....',f:{H:'g.o.g.o.g.o.oooo'}}],
+   bd:{C:'x...x...x...x...'},bk:{H:'..o...o...o...o.'},
+   bass:[['..r...r...r...r.','..r...r...r..or.'],['..rr..rr..rr..rr','..rr..rr..rr.orr'],['...r..r....r..r.','..rr..r...rr..r.'],['.rr..rr..rr..rro','.rr..rr..rr..ofr']],
+   lead:{t:'hook',g:.55,rh:[['x..x..x...x.....','x..x..x...x..x..'],['x.x...x.x...x...','x.x...x.x...x.x.'],['..x..x..x..x..x.','..x..x..x..x....'],['x..x..x.x..x..x.','x..x..x.x.......']],m:[[0,0,4],[0,2,0,4],[0,4,3,2],[4,0,0,7]]},
+   stab:['x.....x.....x...','..x.....x.....x.','x..x....x..x....','...x..x....x..x.'],vox:['x...............','..x.......x.....','x.......x.x.....'],
+   pc:{7:'..x..x....x..x..',6:'......x.......x.',5:'..........x.....'}},
+  house:{keys:[9,0,7,2,5,4],scale:'minor',swing:.14,hand:'latin',seventh:1,
+   prog:[[0,3],[0,5],[5,6],[3,4],[0,6],[5,4]],
+   gr:[{K:FOURK,C:BB,O:OFF,H:'g...g...g...g...',f:{O:'..x...x...x...xx'}},
+       {K:FOURK,C:BB,O:OFF,H:'.g.g.g.g.g.g.g.g',R:'...x.......x..x.',f:{H:'.g.g.g.g.g.g.ggg'}},
+       {K:FOURK,C:BB,S:'...........g....',O:OFF,B:'o.o.o.o.o.o.o.o.',f:{O:'..x...x...x.x.x.'}},
+       {K:FOURK,C:'....X.....x.X...',O:OFF,H:'.g...g...g...g..',R:'..x.....x.....x.',f:{O:'..x...x...x...x.'}}],
+   bd:{C:'x...x...x...x...'},bk:{H:'.g.g.g.g.g.g.g.g'},
+   bass:[['..r..ro...r..o.r','..r..ro...r..ofr'],['r.....or..r..o..','r.....or..r.o.f.'],['..r...r...r.o.r.','..r..rr...r.o.ro'],['.r..r..o.r..r.o.','.r..r..o.r..rfo.']],
+   lead:{t:'hook',g:1.2,rh:[['x..x..x...x.x...','x..x..x...x.....'],['..x...x...x..x..','..x...x...x.x.x.'],['x.x..x.x..x.....','x.x..x.x..x..x..'],['x...x..x..x.....','x...x..x.x.x....']],m:[[0,2,4,2],[4,2,0,2],[0,4,6,4],[2,4,2,0]]},
+   stab:['..x...x...x...x.','..x..x....x..x..','x..x..x...x.....','.x..x..x..x..x..'],vox:['x..x..x.........','x.......x.......','..x...x.....x...'],
+   pc:{7:'..x...x...x.xx..',6:'x..x..x...x.x...',5:'.......x.......x'}},
+  dnb:{keys:[9,0,7,5,2,4],scale:'minor',swing:.03,hand:'broken',
+   prog:[[0,5],[0,6],[5,4],[0,3],[3,6]],
+   gr:[{K:'X.........X.....',S:'....X..g.g..X...',H:E8,f:{O:'..............x.'}},
+       {K:'X.....x...X.....',S:'....X.......X..g',H:'x.x.x.xxx.x.x.x.',f:{O:'..........x.....'}},
+       {K:'X.........X..x..',S:'....X..g....X...',B:'x.x.x.x.x.x.x.x.',f:{B:'x.x.x.x.x.x.xxxx'}},
+       {K:'X..x......X.....',S:'....X.g.....X.g.',H:'xoxoxoxoxoxoxoxo',f:{O:'......x.......x.'}}],
+   bd:{S:'....X.......X.xx'},bk:{H:'x...x...x...x...'},
+   bass:[['R.........r.....','R.........r..o..'],['R.......f.r.....','R.......f.r...p.'],['R.....r...R.....','R.....r...R..o.r'],['R...........r...','R.......o...r...']],
+   lead:{t:'hook',g:3,rh:[['x.......x..x....','x.....x.x.......'],['x..x......x.....','x..x....x.x.....'],['x.....x.....x...','x.....x...x.x...']],m:[[4,2,0],[0,2,4,6],[7,4,2,4],[2,0,4]]},
+   stab:['x.........x.....','..x.......x..x..','x.....x...x.....'],vox:['x...............','......x.........','x.......x.......'],
+   pc:{7:'.x..x.....x..x..',6:'..x.......x.....',5:'......x.........'}},
+  hiphop:{keys:[0,9,5,7,2,10],scale:'minor',swing:.2,hand:'broken',seventh:1,stabMel:1,
+   prog:[[0,3],[0,5],[5,4],[0,6],[3,4]],
+   gr:[{K:'X......X..X.....',S:'....X.......X...',H:E8,f:{O:'..............x.'}},
+       {K:'X..x......X..x..',S:'....X..g....X...',H:'x.x.x.xox.x.x.x.',f:{H:'x.x.x.x.x.x.x.xx'}},
+       {K:'X.....xX..X.....',S:'....X.......X.g.',H:'o.o.o.o.o.o.o.o.',f:{O:'..........x.....'}},
+       {K:'X.x.......X..x..',S:'....X.......X...',R:'..g.....g.....g.',H:E8,f:{}}],
+   bd:{},bk:{K:'X...............',S:'........X.......'},
+   bass:[['R......r..r.....','R......r..f.....'],['R..r......R..r..','R..r......R..o..'],['R.....rR..r.....','R.....rR..f..p..'],['R.r.......R..r..','R.r.......R..f.p']],
+   lead:{t:'hook',g:2,rh:[['x...x..x..x.....','x...x..x........'],['..x.x...x.......','..x.x...x...x...'],['x..x..x.........','x..x..x...x.....']],m:[[4,2,0],[0,2,4,6],[6,4,2,0],[2,4,2]]},
+   stab:['x.......x.......','x.....x.....x...','..x.......x.....'],vox:['x...x...........','........x.x.....','x.........x.....'],
+   pc:{7:'...x.....x..x...',6:'.......x.......x'}},
+  ambient:{keys:[0,2,9,7,5,4],scale:'pentatonic',swing:.06,hand:'soft',stabMel:1,
+   prog:[[0,2],[0,3],[3,1],[0,4]],
+   gr:[{K:'o...............',H:'........o.......',f:{}},{K:'o.......o.......',H:'....o.......o...',f:{}},{K:'o...........o...',B:'o.......o.......',f:{}}],
+   bd:{H:'o.o.o.o.o.o.o.o.'},bk:{H:'o.......o.......'},
+   bass:[['R...............','R.......f.......'],['R.......r.......','R.......o.......']],
+   lead:{t:'hook',g:7,rh:[['x.......x.......','x...............'],['x...........x...','x.......x.......']],m:[[0,2,4],[4,2,1],[2,4,7]]},
+   stab:['x.......x.......','x...x.......x...','x.....x.....x...'],vox:['x...............','x.......x.......'],
+   pc:{7:'x.......x.......',6:'....x.......x...'}},
+  pop:{keys:[0,9,7,5,2,4],scale:'major',swing:.03,hand:'latin',
+   prog:[[0,4],[5,3],[0,3],[3,4],[0,5],[5,4]],
+   gr:[{K:FOURK,C:BB,S:BB,H:E8,f:{O:'..............x.'}},
+       {K:'X.......X.x.....',S:BB,C:BB,H:E8,f:{H:'x.x.x.x.x.x.xxxx'}},
+       {K:FOURK,C:BB,O:OFF,H:'x...x...x...x...',f:{O:'..x...x...x.x.x.'}},
+       {K:'X..x..x.X.......',S:BB,C:BB,H:'x.xox.xox.xox.xo',f:{}}],
+   bd:{C:'x...x...x...x...'},bk:{H:'x...x...x...x...'},
+   bass:[['r.r.r.r.r.r.r.r.','r.r.r.o.r.r.r.o.'],['r..r..r.r..r..r.','r..r..o.r..r..o.'],['r.....r.r.....p.','r.....o.r...f.p.'],['rrr.rr.rrrr.rr.r','rrr.rr.ooor.rr.r']],
+   lead:{t:'hook',g:1.4,rh:[['x.x.x..x..x.x...','x.x.x..x.x......'],['..x.x.x.x..x....','..x.x.x.x...x...'],['x..x..x.x.x.....','x..x..x.x.......'],['x.x.x.x...x..x..','x.x.x.x...x.....']],m:[[4,4,2,0],[0,2,4,5],[2,4,7,4],[4,2,4,7]]},
+   stab:['..x...x...x...x.','x.....x.....x...','x..x..x...x.....'],vox:['x.x.....x.......','..x.x...x.......','x.......x.x.x...'],
+   pc:{7:'..x...x...x...x.',6:'....x.......x...'}},
+  trance:{keys:[9,2,5,7,0,4],scale:'minor',swing:0,hand:'tribal',
+   prog:[[0,5],[5,6],[0,6],[3,5],[0,3]],
+   gr:[{K:FOURK,C:BB,O:OFF,H:'gg.ggg.ggg.ggg.g',f:{O:'..x...x...x...xx'}},
+       {K:FOURK,C:BB,O:OFF,H:'.g.g.g.g.g.g.g.g',f:{H:'.g.g.g.g.g.g.ggg'}},
+       {K:FOURK,C:BB,S:'..............g.',O:OFF,H:'g...g...g...g...',f:{O:'..x...x...x.x.x.'}}],
+   bd:{C:'x...x...x...x...'},bk:{O:OFF},
+   bass:[['..r...r...r...r.','..r...r...r...o.'],['.rrr.rrr.rrr.rrr','.rrr.rrr.rrr.ror'],['..r...r...r...r.','..rr..rr..rr..rr']],
+   lead:{t:'gate',g:1.6,rh:[['x..x..x.x..x..x.','x..x..x.x..x....'],['x..x..x...x.x...','x..x..x...x.....'],['x.xx.xx.x.xx.xx.','x.xx.xx.x.......']],m:[[0,2,4,2,4,7],[4,2,0,2,4,2],[0,4,7,4,2,4],[7,4,2,4,0,2]]},
+   stab:['..x...x...x...x.','x..x..x.x..x..x.','..x..x..x..x..x.'],vox:['x...............','x.......x.......'],
+   pc:{7:'..x...x...x...x.',6:'....x.......x...'}},
+  psytrance:{keys:[4,9,2,7,5,0],scale:'phrygian',swing:0,hand:'tribal',
+   prog:[[0,1],[0,0],[0,6],[0,5]],
+   gr:[{K:FOURK,C:BB,O:OFF,H:'gg.ggg.ggg.ggg.g',f:{H:'gg.ggg.ggg.ggggg'}},
+       {K:FOURK,C:BB,O:OFF,B:'.g.g.g.g.g.g.g.g',f:{O:'..x...x...x...xx'}},
+       {K:FOURK,S:'....x.......x...',O:OFF,H:'.g.g.g.g.g.g.g.g',R:'.......g.......g',f:{}}],
+   bd:{C:'x...x...x...x...'},bk:{O:OFF},
+   bass:[['.rrr.rrr.rrr.rrr','.rrr.rrr.rrr.rpr'],['.rr..rrr.rr..rrr','.rrr.rrr.rrr.rrr'],['.rrr.rrr.rrr.rrr','.rrr.rrr.rro.rrr']],
+   lead:{t:'roll',g:.5,rh:[['x.xxx.xxx.xxx.xx','x.xxx.xxx.x.x.x.'],['xxx.xxx.xxx.x.x.','xxx.xxx.xxx.xxx.'],['x.x.xx.xx.x.xx.x','x.x.xx.xx.x.x...']],m:[[0,1,0,4],[0,0,1,3],[4,1,0,1],[0,7,4,1]]},
+   stab:['...x.......x....','......x.......x.','..x.........x...'],vox:['x...............','........x.......'],
+   pc:{7:'..x..x..x..x..x.',6:'x.......x.......'}},
+  dubstep:{keys:[5,7,2,9,0,10],scale:'minor',swing:.03,hand:'half',
+   prog:[[0,5],[0,6],[0,1],[0,3]],
+   gr:[{K:'X.........X.....',S:'........X.......',H:E8,f:{O:'..............x.'}},
+       {K:'X.....x.........',S:'........X.......',H:'x.x.x.xxx.x.x.x.',f:{H:'x.x.x.x.x.x.xxxx'}},
+       {K:'X..........x....',S:'........X.....g.',B:'x.......x.......',H:'..x...x...x...x.',f:{O:'..........x.....'}},
+       {K:'X..x......X.....',S:'........X.......',H:E8,R:'......g.......g.',f:{}}],
+   bd:{S:'........X...x.xx'},bk:{K:'X...............',H:'x.......x.......'},
+   bass:[['R.........R.....','R.....r...R.r...'],['R.....r.........','R.....r...o.r...'],['R..........r....','R..........r..o.'],['R..r......R.....','R..r......R..r.o']],
+   lead:{t:'hook',g:1.1,rh:[['x..x....x.x.x...','x..x....xxx.....'],['x.....x.x.......','x.....x.x...x.x.'],['x..x..x.....x.x.','x..x..x...x.xx..']],m:[[0,0,7,6],[0,6,4,0],[0,7,0,3],[0,3,4,0]]},
+   stab:['........x.......','........x.....x.','x.......x.......'],vox:['x...............','........x.......'],
+   pc:{5:'x.......x.......',7:'...x.......x....'}},
+  garage:{keys:[9,0,5,2,7,4],scale:'minor',swing:.26,hand:'broken',seventh:1,
+   prog:[[0,3],[0,5],[0,4],[5,6],[3,4]],
+   gr:[{K:'X.........X.....',S:'....X.......X...',H:E8,f:{O:'..............x.'}},
+       {K:'X......x..X.....',S:'....X.......X...',H:'..x...x...x...x.',R:'...g......g.....',f:{}},
+       {K:'X.....x...x.....',S:'....X..g....X...',H:E8,f:{O:'..x...........x.'}},
+       {K:'X.........X..x..',C:'....X.......X...',H:'.o.o.o.o.o.o.o.o',f:{H:'.o.o.o.o.o.o.ooo'}}],
+   bd:{S:'....X.......X.xx'},bk:{H:E8},
+   bass:[['R..r......R..o..','R..r......R..of.'],['R.........r..o..','R.....o...r..o..'],['R.....r...R.....','R.....r...R..o.r'],['R..o......R..r..','R..o.f....R..rp.']],
+   lead:{t:'hook',g:1,rh:[['x..x..x...x..x..','x..x..x...x.....'],['x..x....x..x....','x..x....x..x..x.'],['..x..x....x..x..','..x..x....x.....']],m:[[0,2,4,2],[4,6,4,2],[0,4,2,0],[2,4,6,4]]},
+   stab:['x..x....x..x....','..x...x.....x...','x.....x....x....','...x....x.....x.'],vox:['x..x....x.......','..x..x.....x....','x.....x.x.......'],
+   pc:{7:'..x..x....x..x.x',6:'...x....x.....x.'}},
+  breaks:{keys:[9,0,7,2,5,4],scale:'minor',swing:.08,hand:'broken',
+   prog:[[0,6],[0,5],[0,3],[3,6]],
+   gr:[{K:'X.X.......X.....',S:'....X.......X...',H:E8,f:{O:'..............x.'}},
+       {K:'X.X.......XX....',S:'....X..g.g..X...',H:E8,f:{H:'x.x.x.x.x.x.xxxx'}},
+       {K:'X.....x...X.....',S:'....X.......X..g',B:'x.x.x.x.x.x.x.x.',f:{O:'..........x.....'}},
+       {K:'X..x......X...x.',S:'....X..g....X...',H:'x.xox.xox.xox.xo',f:{}}],
+   bd:{S:'....X.......X.xx'},bk:{K:'X...............',H:'x...x...x...x...'},
+   bass:[['R.r.......Rr..o.','R.r.......Rr.ofr'],['R.....r...R.....','R.....r...R..o.r'],['R..r......R...r.','R..r......R..or.']],
+   lead:{t:'hook',g:.8,rh:[['x.....x.....x...','x.....x.....x.x.'],['x.x...x...x.x...','x.x...x...x.....'],['x..x......x.....','x..x....x.x.....']],m:[[0,0,4],[0,4,7],[7,4,0],[0,3,4]]},
+   stab:['x.....x.........','..x.......x.....','x.......x.....x.'],vox:['x...............','x.......x.......','......x.....x...'],
+   pc:{7:'..x.x.....x.x...',6:'...x......x.....',5:'......x.......x.'}},
+  synthwave:{keys:[9,4,2,0,7,5],scale:'minor',swing:0,hand:'latin',
+   prog:[[0,5],[5,6],[0,6],[3,4],[0,3]],
+   gr:[{K:'X.......X.......',S:BB,H:E8,f:{O:'..............x.'}},
+       {K:FOURK,S:BB,H:E8,f:{H:'x.x.x.x.x.x.xxxx'}},
+       {K:'X.......X.x.....',S:BB,H:'x.xox.xox.xox.xo',f:{}},
+       {K:FOURK,S:BB,O:OFF,f:{O:'..x...x...x.x.x.'}}],
+   bd:{S:'....X.......X.xx'},bk:{H:'x...x...x...x...'},
+   bass:[['r.o.r.o.r.o.r.o.','rorororororororo'],['rrrrrrrrrrrrrrrr','rrrrrrrorrrrrrro'],['r.r.r.r.r.r.r.r.','r.o.r.o.r.o.r.o.']],
+   lead:{t:'hook',g:2.5,rh:[['x.....x.x...x...','x.....x.x.......'],['x...x...x.x.x...','x...x...x.......'],['x.x.x...x.....x.','x.x.x...x.......']],m:[[0,2,4,7],[4,2,0,2],[7,4,2,4],[2,4,5,4]],arp:1},
+   stab:['x.......x.......','x...x...x...x...','..x...x...x...x.'],vox:['x...............','x.......x.......'],
+   pc:{7:'..x...x...x...x.',5:'............x.x.'}},
+  trap:{keys:[0,5,7,10,2,9],scale:'minor',swing:0,hand:'broken',stabMel:1,
+   prog:[[0,0],[0,5],[0,6],[5,6]],
+   gr:[{K:'X.....x...X.....',S:'........X.......',H:'x.x.x.xxx.x.x.x.',f:{H:'x.x.x.x.xxxxxxxx'}},
+       {K:'X......x..X...x.',S:'........X.......',H:'x.xxx.x.x.xxx.x.',f:{O:'..............x.'}},
+       {K:'X.........X..x..',S:'........X.......',C:'........X.......',H:'x.x.x.x.x.x.x.x.',f:{H:'x.x.x.x.x.x.xxxx'}},
+       {K:'X..x......X.....',S:'........X.......',H:'xxx.x.x.xxx.x.x.',R:'....g.......g...',f:{}}],
+   bd:{H:'x.x.x.x.xxxxxxxx'},bk:{K:'X...............',H:'x...x...x...x...'},
+   bass:[['R.....r...R.....','R.....r...R...o.'],['R......r..R...r.','R......r..R..op.'],['R.........R..r..','R.........R..o..'],['R..r......R.....','R..r......o.....']],
+   lead:{t:'hook',g:1.4,rh:[['x..x..x..x..x...','x..x..x..x......'],['..x..x..x..x.x..','..x..x..x.......'],['x..x..x.....x.x.','x..x..x.........']],m:[[0,2,4,2],[4,3,2,0],[7,4,2,4],[0,4,3,0]]},
+   stab:['x...............','....x.......x...','x.......x.......'],vox:['x.x.x...........','........x.x.x...'],
+   pc:{7:'.....x.......x..',6:'x..x..x...x.....'}},
+  lofi:{keys:[2,5,9,0,7,4],scale:'minor',swing:.24,hand:'soft',seventh:1,stabMel:1,
+   prog:[[3,6],[0,3],[5,3],[0,5],[5,4]],
+   gr:[{K:'X......X..X.....',S:'....X.......X...',H:E8,f:{}},
+       {K:'X.........X.....',S:'....X..g....X...',H:'o.o.o.o.o.o.o.o.',f:{O:'..............x.'}},
+       {K:'X.....x...X.....',S:'....X.......X..g',R:'..g.......g.....',H:E8,f:{}},
+       {K:'X..x......X.....',S:'....X.......X...',B:'o.o.o.o.o.o.o.o.',f:{}}],
+   bd:{},bk:{K:'X...............',H:'x...x...x...x...'},
+   bass:[['R......r..f.....','R......r..f..p..'],['R.........r.....','R.......f.r.....'],['R.....r...R.....','R.....r...R..p..']],
+   lead:{t:'hook',g:3,rh:[['x..x...x..x.....','x..x...x........'],['..x...x.x.......','..x...x.x...x...'],['x.....x...x.....','x.....x.x.......']],m:[[4,2,0],[6,4,2,0],[2,4,6],[0,2,4,2]]},
+   stab:['x.......x.......','x.....x.........','..x.......x.....'],vox:['x...............','........x.......'],
+   pc:{7:'..x.....x.x.....',6:'......x.......x.'}}
+ };
+ const ROLE={bl:{K:0,S:1,C:2,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{H:3,O:4,B:9,Z:10}};
+ const GLIDE={trap:.55,dubstep:.25,techno:.08,psytrance:0,dnb:.15};
+ let F={g:'techno',H:[0,0]},Gg=G.techno;
+ const hc=i=>F.H[(i%16)<8?0:1];
+ const ct=d=>Gg.seventh?[d,d+2,d+4,d+6]:[d,d+2,d+4];
+ /* ---------------- drums ---------------- */
+ function kit(kind){
+  const base=Object.assign({},F.gr);
+  if(kind===1){ /* drop 2: same groove, more energy on the tops + crash on the downbeat */
+   base.Z='X...............';const four=/^(techno|house|trance|psytrance)$/.test(F.g);
+   if(!base.B&&/^(techno|house|trance|psytrance|garage|breaks|dnb)$/.test(F.g))base.B=base.O?'o...o...o...o...':'..o...o...o...o.';
+   if(four&&base.H){const Ob=P(base.O);base.H=P(base.H).split('').map((c,i)=>c==='.'&&i%2===1&&Ob[i]==='.'?'g':c).join('')}
+  }
+  if(kind===2)return Object.assign({f:{}},Gg.bk);
+  if(kind===3)Object.assign(base,Gg.bd||{});
+  return base;
+ }
+ function drumsBL(hand){return[0,1,2,3].map(kind=>{const o=kit(kind),steps=Array.from({length:12},()=>Array.from({length:16},()=>({on:false,velocity:.8})));
+  const put=(q,str)=>{const ix=ROLE.bl[q];if(ix===undefined)return;P(str).split('').forEach((c,i)=>{const v=vel(c);if(v)steps[ix][i]={on:true,velocity:cl(v,.22,1)}})};
+  ['K','S','C','R','T','U'].forEach(q=>{if(o[q])put(q,o[q])});
+  if(hand&&kind!==2){const hd=HAND[Gg.hand]||HAND.latin;for(const q in hd){if(kind===3&&q!=='Q')continue;put(q,hd[q])}} /* world kits: the hand-drum section plays the genre's percussion line */
+  return{steps}})}
+ function drumsMine(){return[0,1,2,3].map(kind=>{const o=kit(kind),f=o.f||{},rows=Array.from({length:15},()=>Array.from({length:128},()=>({on:false,accent:false,velocity:.8})));
+  for(let b=0;b<2;b++){const Ob=P(b===1&&f.O?f.O:o.O);
+   for(const q in ROLE.mine){const v=ROLE.mine[q];if(q==='Z'&&b===1)continue;const src=P(b===1&&f[q]?f[q]:o[q]);
+    for(let i=0;i<16;i++){const x=vel(src[i]);if(!x)continue;if(q==='H'&&vel(Ob[i]))continue; /* an open hat replaces the closed hat on its step */
+     rows[v][b*16+i]={on:true,accent:x>=1,velocity:cl(x,.2,1)}}}}
+  for(let i=32;i<128;i++)for(let v=0;v<15;v++)rows[v][i]=Object.assign({},rows[v][i%32]);
+  return rows})}
+ /* ---------------- bass ---------------- */
+ function bassNote(ch,i,key,sc){const d=hc(i),nx=F.H[((i%16)<8?1:0)];let deg=d;
+  if(ch==='f'||ch==='F')deg=d+4;else if(ch==='3')deg=d+2;else if(ch==='7')deg=d+6;else if(ch==='p'||ch==='P')deg=nx-1;
+  let base=36+key+semi(sc,deg);while(base>47)base-=12;while(base<28)base+=12;
+  if(ch==='o'||ch==='O')base+=12;return base}
+ function bassLee(r,key,which){const sc=SC[Gg.scale]||SC.minor,pair=which;
+  return[pair[0],pair[1],'R...............',pair[0]].map((rh,k)=>{rh=P(rh);let last=null;
+   return Array.from({length:16},(_,i)=>{const c=rh[i];if(c==='.')return{on:false,note:bassNote('r',i,key,sc),accent:false,slide:false,velocity:.78};
+    const n=bassNote(c,i,key,sc),acc=c===c.toUpperCase()&&/[A-Z]/.test(c)||i%4===0;
+    const slide=last!==null&&n!==last&&(r()<(GLIDE[F.g]||0)||(F.g==='trap'&&(c==='o'||c==='p')));last=n;
+    return{on:true,note:cl(n,24,60),accent:acc,slide,velocity:acc?.95:.82}})})}
+ /* ---------------- GALACTIC ONE: hook, arp, pad ---------------- */
  const fitNote=n=>{while(n>19)n-=12;while(n< -12)n+=12;return n};
  const goStep=(on,n,v,g,a,s)=>({on:on?1:0,n:on?fitNote(n):0,v:v??.8,g:g??.7,p:1,r:1,c:0,a:a?1:0,s:s?1:0});
- /* LEAD: a short riff on the genre stab rhythm - chord root, fifth on the last hit of each bar. Trance / psy / synthwave keep a plain 8th-note arp. */
- function riff(sc,rh,o){o=o||{};const off=o.oct||0,steps=Array.from({length:32},()=>goStep(0));rh=rh.padEnd(16,'.');
-  let hit=0;for(let i=0;i<32;i++){const c=rh[i%16];if(c==='.')continue;let lastHit=true;for(let j=(i%16)+1;j<16;j++)if(rh[j]!=='.'){lastHit=false;break}
-   const motif=F.motif||[0,2,4,2];const d=hc(i)+motif[(hit++)%motif.length]+off;steps[i]=goStep(1,semi(sc,d),o.v||.82,o.g||.5,i%16===0,0)}
+ /* two-bar call and answer: bar 1 states the motif on chord tones, bar 2 repeats its start and resolves to the root */
+ function hook(sc,rh2,o){o=o||{};const L=sc.length,off=o.oct||0,steps=Array.from({length:32},()=>goStep(0)),rh=P(rh2[0])+P(rh2[1]),m=o.m||F.motif;
+  const hits=[];for(let i=0;i<32;i++)if(rh[i]!=='.')hits.push(i);
+  const b1=hits.filter(i=>i<16),b2=hits.filter(i=>i>=16);
+  hits.forEach((i,h)=>{let d;const inB2=i>=16,j=inB2?b2.indexOf(i):h;
+   if(!inB2)d=hc(i)+m[j%m.length];
+   else if(j<Math.ceil(b2.length/2))d=hc(i)+m[j%m.length];
+   else if(j===b2.length-1)d=hc(i)+(o.resolve??0);
+   else d=hc(i)+m[(m.length-1-(j%m.length)+m.length)%m.length];
+   const nextHit=hits[h+1]??32,gap=nextHit-i,g=Math.min(o.g||1,gap*.92);
+   const slide=!!o.slide&&h>0&&gap<=2&&F.rnd()<.3;
+   steps[i]=goStep(1,semi(sc,d+off),cl((o.v||.82)+(i%8===0?.08:0),.3,1),Math.max(.35,g),i%16===0,slide)});
   return{len:32,steps}}
- function arp(r,sc,o){o=o||{};const L=sc.length,off=o.oct||0,steps=Array.from({length:32},()=>goStep(0));let j=0;
-  for(let i=0;i<32;i+=2){const ch=ct(hc(i)).slice(0,3),seq=(o.dir||1)>0?ch:ch.slice().reverse();
-   steps[i]=goStep(1,semi(sc,seq[(F.motif||[0,1,2,1])[j%4]%seq.length]+off),cl((o.v||.78)+(i%8===0?.1:0),.3,1),o.g||.45,i%8===0,0);j++}
+ function arp(sc,o){o=o||{};const off=o.oct||0,steps=Array.from({length:32},()=>goStep(0)),st=o.step||2;let j=0;
+  for(let i=0;i<32;i+=st){const ch=ct(hc(i)).slice(0,3).concat([hc(i)+sc.length]),seq=(o.dir||1)>0?ch:ch.slice().reverse(),pat=o.pat||[0,1,2,3,2,1];
+   steps[i]=goStep(1,semi(sc,seq[pat[j%pat.length]%seq.length]+off),cl((o.v||.78)+(i%8===0?.1:0),.3,1),o.g||(st*.45),i%8===0,0);j++}
   return{len:32,steps}}
- function goPats(g,r,key){const Gg=G[g],sc=SC[Gg.scale],L=sc.length,rh=Gg.stab;
-  const mainP=ARPG[g]?arp(r,sc,{dir:F.arpDir}):riff(sc,rh,{fifth:true});
-  const altP=ARPG[g]?arp(r,sc,{dir:-F.arpDir,oct:L}):riff(sc,rh,{fifth:true,oct:L});
-  const sparse=(()=>{const s=Array.from({length:32},()=>goStep(0));[0,16].forEach(i=>{s[i]=goStep(1,semi(sc,hc(i)),.7,7.5,i===0,0)});return{len:32,steps:s}})();
-  const rise=(()=>{const s=Array.from({length:32},()=>goStep(0));for(let i=0;i<16;i+=2){s[i]=goStep(1,semi(sc,F.H[0]+(i>=8?L:0)),.45+i*.035,.4,i===0,0)}return{len:16,steps:s}})();
-  const counter=(()=>{const s=Array.from({length:32},()=>goStep(0));[0,16].forEach(i=>{s[i]=goStep(1,semi(sc,hc(i)+L),.65,7.5,0,0)});return{len:32,steps:s}})();
-  const drop2=ARPG[g]?arp(r,sc,{dir:F.arpDir,oct:L,v:.85}):riff(sc,rh,{fifth:true,oct:L,v:.9});
-  const pulse=(()=>{const s=Array.from({length:32},()=>goStep(0));for(let i=0;i<32;i+=4)s[i]=goStep(1,semi(sc,hc(i)-L),i%8===0?.85:.7,.5,i%16===0,0);return{len:32,steps:s}})();
-  const pad=(()=>{const s=Array.from({length:32},()=>goStep(0));[0,16].forEach(i=>{s[i]=goStep(1,semi(sc,hc(i)),.7,15.6,0,0)});return{len:32,steps:s}})();
+ function goPats(r,key){const sc=SC[Gg.scale]||SC.minor,L=sc.length,ld=Gg.lead,rh=F.leadRh;
+  let mainP,altP,drop2;
+  if(ld.t==='roll'){ /* psy: rolling 16th zap line, motif on the root / b2 / fifth */
+   mainP=hook(sc,rh,{g:ld.g,m:F.motif,v:.78});altP=arp(sc,{step:1,g:.4,pat:[0,0,1,0,2,0,1,3],v:.72});drop2=hook(sc,rh,{g:ld.g,m:F.motif,oct:L,v:.82});}
+  else if(ld.t==='gate'){ /* trance: 3-3-2 lead hook, 16th gated arp for the second drop */
+   mainP=hook(sc,rh,{g:ld.g,m:F.motif,v:.86});altP=arp(sc,{step:1,g:.5,pat:[0,1,2,3,2,1,2,1],dir:F.arpDir});drop2=hook(sc,rh,{g:ld.g,m:F.motif,oct:L,v:.9});}
+  else{mainP=hook(sc,rh,{g:ld.g,m:F.motif,slide:F.g==='dubstep'||F.g==='trap'});
+   altP=ld.arp?arp(sc,{step:2,dir:F.arpDir,g:.9}):hook(sc,rh,{g:ld.g,m:F.motif,resolve:4});
+   drop2=hook(sc,rh,{g:ld.g,m:F.motif,oct:/^(dubstep|trap|hiphop|lofi|dnb)$/.test(F.g)?0:L,v:.9,resolve:F.g==='dubstep'?7:0});}
+  const sparse=(()=>{const s=Array.from({length:32},()=>goStep(0));const m=F.motif;[0,6,16,22].forEach((i,j)=>{if(j%2===1&&F.g!=='ambient')return;s[i]=goStep(1,semi(sc,hc(i)+m[j%m.length]),.7,j%2?4:6,i===0,0)});return{len:32,steps:s}})();
+  const rise=(()=>{const s=Array.from({length:32},()=>goStep(0));for(let i=0;i<16;i+=(i<8?2:1)){s[i]=goStep(1,semi(sc,F.H[0]+(i>=12?L:i>=8?4:0)),.42+i*.035,.4,i===0,0)}return{len:16,steps:s}})();
+  const counter=(()=>{const s=Array.from({length:32},()=>goStep(0));[0,8,16,24].forEach((i,j)=>{s[i]=goStep(1,semi(sc,hc(i)+L+(j%2?2:4)),.62,7.2,0,0)});return{len:32,steps:s}})();
+  const pulse=(()=>{const s=Array.from({length:32},()=>goStep(0));for(let i=0;i<32;i+=4)s[i]=goStep(1,semi(sc,hc(i)+(i%8?2:0)),i%8===0?.8:.66,.6,i%16===0,0);return{len:32,steps:s}})();
+  const pad=(()=>{const s=Array.from({length:32},()=>goStep(0));[0,8,16,24].forEach((i,j)=>{s[i]=goStep(1,semi(sc,hc(i)+(j%2?2:0)),.66,7.8,0,0)});return{len:32,steps:s}})();
   return[mainP,altP,sparse,rise,counter,drop2,pulse,pad]}
- /* STAB: the genre stab rhythm on the chord root */
- function s101Pat(g,r){const rh=G[g].stab.padEnd(16,'.');
-  return Array.from({length:16},(_,i)=>{const on=rh[i]!=='.';return{on,note:on?Math.max(0,hc(i)):0,accent:on&&i%8===0,velocity:on&&i%8===0?.92:.8}})}
- /* VOX: one sung note per bar (two in house / pop / garage), root then fifth */
- function voxPat(g,r){const Gg=G[g],sc=SC[Gg.scale],rh=Gg.voxR.padEnd(16,'.');let j=0;
-  return Array.from({length:16},(_,i)=>{const on=rh[i]==='x';let n=0;if(on){const ch=ct(hc(i));n=cl(semi(sc,ch[(j++%2)*2]),-12,19)}return{on:on?1:0,n,v:.85}})}
- function wsPats(g,r,key){const Gg=G[g];
-  /* v86 PAD-64 PART: a genre percussion groove on the tom / rim-clave / conga-bongo lanes (Latin, Afro and world kits play
-     tumba, clave and bongos here), a pad in breakdowns, a riser into every drop and an impact on the drop downbeat.
-     Kick, snare, clap, closed hat and bass stay with the drum and bass modules so nothing doubles. */
-  const PG={
-   techno:{7:'..x..x....x..x..',6:'......x.......x.',5:'..........x.....'},
-   house:{7:'..x...x...x.xx..',6:'x..x..x...x.x...',5:'.......x.......x'},
-   dnb:{7:'.x..x.....x..x..',6:'..x.......x.....',5:'......x.........'},
-   hiphop:{7:'...x.....x..x...',6:'.......x.......x'},
-   lofi:{7:'..x.....x.x.....',6:'......x.......x.'},
-   trap:{7:'.....x.......x..',6:'x..x..x...x.....'},
-   trance:{7:'..x...x...x...x.',6:'....x.......x...'},
-   psytrance:{7:'..x..x..x..x..x.',6:'x.......x.......'},
-   dubstep:{5:'x.......x.......',7:'...x.......x....'},
-   garage:{7:'..x..x....x..x.x',6:'...x....x.....x.'},
-   synthwave:{7:'..x...x...x...x.',5:'............x.x.'},
-   breaks:{7:'..x.x.....x.x...',6:'...x......x.....',5:'......x.......x.'},
-   pop:{7:'..x...x...x...x.',6:'....x.......x...'},
-   ambient:{7:'x.......x.......',13:'............x...'}
-  }[g]||{7:'..x...x...x...x.'};
+ /* ---------------- 0010110: stab / keys ---------------- */
+ function s101Pat(){const rh=P(F.stab);let j=0;const m=Gg.stabMel?[0,2,4,2]:[0,0,0,4];
+  return Array.from({length:16},(_,i)=>{const on=rh[i]!=='.';let note=0;if(on){note=Math.max(0,hc(i)+(Gg.stabMel?m[j%4]:0));j++}
+   return{on,note:on?note:0,accent:on&&i%8===0,velocity:on&&i%8===0?.92:.78}})}
+ /* ---------------- VOX: a short sung chop on the chord tones ---------------- */
+ function voxPat(){const sc=SC[Gg.scale]||SC.minor,rh=P(F.vox);let j=0;const shape=pick(F.rnd,[[4,2,0],[0,2,4],[2,4,2],[4,4,2,0],[0,4,2]]);
+  return Array.from({length:16},(_,i)=>{const on=rh[i]!=='.';let n=0;if(on){n=cl(semi(sc,hc(i)+shape[j%shape.length]),-12,19);j++}return{on:on?1:0,n,v:.85}})}
+ /* ---------------- PAD-64: hand percussion, world instruments, breakdown pad, build roll ---------------- */
+ /* the world / instrument PAD-64 kits (lane → instrument). Their signature sounds sit on lanes 3 and 9–13, so they get real parts here */
+ const WS_KITS={
+  'Techno · Afro Percussion':{3:'SHAKER',5:'DJEMBE',6:'CLAVE',7:'CONGA SLAP',9:'MARIMBA',13:'AGOGO'},
+  'House · Latin Bongos & Congas':{3:'SHAKER',5:'TUMBA',6:'CLAVE',7:'BONGO HI',9:'GUITAR PLUCK',10:'BRASS HIT',12:'BONGO LO',13:'TIMBALE'},
+  'DnB · Jungle Percussion':{5:'BONGO LO',6:'WOODBLOCK',7:'BONGO HI',9:'KALIMBA',13:'GUIRO'},
+  'Hip-Hop · Soul Guitar Chops':{6:'CAJON',7:'BONGO HI',9:'GUITAR PLUCK',10:'GUITAR STRUM',11:'STRING HIT',13:'TAMBOURINE'},
+  'Ambient · Kalimba Garden':{3:'SHAKER',7:'TABLA',9:'KALIMBA',10:'MARIMBA',12:'STEEL DRUM',13:'TRIANGLE'},
+  'Pop · Acoustic Strum & Claps':{3:'SHAKER',7:'TAMBOURINE',9:'GUITAR PLUCK',10:'GUITAR STRUM',11:'STRING HIT',13:'TRIANGLE'},
+  'Trance · Steel & Tribal':{5:'TUMBA',7:'DJEMBE',9:'KALIMBA',10:'STEEL DRUM',13:'TRIANGLE'},
+  'Dubstep · Taiko & Brass':{5:'TUMBA',6:'TIMBALE',10:'BRASS HIT',11:'STRING HIT',13:'CAJON'},
+  'Garage · Steel Drum Shuffle':{3:'SHAKER',6:'CLAVE',7:'BONGO HI',10:'STEEL DRUM',12:'MARIMBA',13:'AGOGO'},
+  'Synthwave · Freestyle Perc & Strings':{5:'TUMBA',6:'COWBELL',7:'CONGA SLAP',9:'MUTED GTR',11:'STRING HIT',13:'TIMBALE'},
+  'Trap · Flamenco Guitar & Claves':{6:'CLAVE',7:'BONGO HI',9:'GUITAR PLUCK',10:'GUITAR STRUM',11:'STRING HIT',13:'GUIRO'},
+  'Lo-Fi · Jazz Guitar & Brushes':{3:'SHAKER',6:'WOODBLOCK',7:'BONGO LO',9:'MUTED GTR',10:'GUITAR STRUM',12:'MARIMBA',13:'TAMBOURINE'},
+  'Psytrance · Tabla & Sitar Perc':{3:'MARACAS',5:'DJEMBE',6:'WOODBLOCK',7:'TABLA',9:'KALIMBA',13:'GUIRO'},
+  'Breaks · Funk Guitar & Bongos':{3:'SHAKER',5:'BONGO LO',6:'COWBELL',7:'BONGO HI',9:'MUTED GTR',10:'BRASS HIT',13:'TIMBALE'}};
+ const INST_PC={'GUITAR PLUCK':7,'GUITAR STRUM':2,'MUTED GTR':2,'MARIMBA':0,'STEEL DRUM':7,'KALIMBA':4,'BRASS HIT':10,'STRING HIT':7}; /* pitch class each instrument sounds at tune 0 */
+ const CHORDAL={'GUITAR STRUM':1,'BRASS HIT':1,'STRING HIT':1};
+ const INST_RH={SHAKER:'.x.x.x.x.x.x.x.x',MARACAS:'.x.x.x.x.x.x.x.x',TAMBOURINE:'....x.......x...',AGOGO:'x..x..x...x.x...',GUIRO:'x.......x.......',TRIANGLE:'x...............',CAJON:'x.....x...x.....',
+  'GUITAR PLUCK':'..x...x...x...x.','MUTED GTR':'x.xx..x.x.xx..x.',MARIMBA:'x..x..x...x.x...',KALIMBA:'..x.....x.x.....','STEEL DRUM':'x..x..x.x.x.....','GUITAR STRUM':'x.....x.........','BRASS HIT':'x.........x.....','STRING HIT':'x...............','BONGO LO':'....x..x....x.x.'};
+ const wrap=n=>((n%12)+18)%12-6;
+ function wsPats(r,key,handBL,kit){
+  const PG=Gg.pc||{7:'..x...x...x...x.'},sc=SC[Gg.scale]||SC.minor,pent=sc.length<7;
+  const T=[0,3,4].find(d=>F.H.includes(d))??0;   /* chord the strum / brass / string hits are tuned to (its quality matches the song mode) */
+  const okTonic=i=>pent||[0,3,5].includes(((hc(i)%7)+7)%7),okChord=i=>hc(i)===T;
   const rot=(s,n)=>n?s.slice(-n)+s.slice(0,-n):s;
-  return[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));
-   const put=(lane,str,bars,vel)=>{for(const b of bars)for(let s=0;s<16;s++){const ch=str[s];if(!ch||ch==='.')continue;if(b%2===1&&ch!=='X'&&r()<.18)continue;L[lane][b*16+s]=vel||(ch==='X'||s%8===0?2:1)}};
-   if(k===0||k===1){const ln=PG[7]?7:+Object.keys(PG)[0],pat=PG[ln];put(ln,k===1?rot(pat,2):pat,[0,1,2]);put(ln,pat.slice(0,12)+'....',[3]);[56,58,60,61,62,63].forEach((s,j)=>{L[7][s]=j>3?2:1});L[5][62]=1} /* v90 drops: one hand-drum line, 4th bar ends in a short fill */
-   else if(k===2){if(PG[7])put(7,'x.......x.......',[0,1,2,3],1);L[11][0]=1;L[11][32]=1;if(PG[13])put(13,PG[13],[1,3],1)} /* breakdown: sparse hand drum + held pad */
-   else{const ln=PG[7]?7:+Object.keys(PG)[0];put(ln,PG[ln],[2,3])}                      /* build: groove enters, roll into the drop (riser comes from the drop FX) */
-   return L})}
- const wsTunes=key=>{const wrap=n=>((n%12)+18)%12-6;return{8:wrap(key-9),9:wrap(key-9),10:wrap(key-9),11:wrap(key),12:wrap(key-9)}};
- function flavour(genre,r){
-  /* A short repeating chord-tone motif makes each song coherent. */
-  return{g:genre,H:pick(r,PROG[genre]||PROG.techno),motif:pick(r,[[0,2,4,2],[0,4,2,4],[0,0,4,2],[0,2,2,4],[0,4,4,2],[0,0,2,4]]),rot:0,hat:0,roll:false,ghost:null,pick:0,kAdd:null,busy:0,oct:0,goRot:0,arpDir:r()<.5?1:-1,
-   stab:(G[genre]||G.techno).stab.padEnd(16,'.'),stabCyc:[0],voxRot:0,voxSeq:[0,2]};
- }
+  const inst=kit?Object.keys(kit).map(Number).filter(l=>l===3||l>=9).filter(l=>!(handBL&&/BONGO|CAJON/.test(kit[l]))):[];
+  const pats=[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));
+   const put=(lane,str,bars,vv,ok)=>{str=P(str);for(const b of bars)for(let s=0;s<16;s++){const ch=str[s];if(ch==='.')continue;if(ok&&!ok(s))continue;if(b%2===1&&ch!=='X'&&s%4!==0&&r()<.15)continue;L[lane][b*16+s]=vv||(ch==='X'||s%8===0?2:1)}};
+   let lanes=Object.keys(PG).map(Number).filter(l=>!(handBL&&(l===7||l===5)));  /* 80LA8 plays the hand drums on world kits: PAD-64 keeps the rim / clave */
+   if(!lanes.length)lanes=[6];
+   const PGx=Object.assign({6:'...x.......x....'},PG);
+   if(k===0||k===1){lanes.forEach(ln=>put(ln,k===1&&ln===7?rot(PGx[ln],2):PGx[ln],[0,1,2]));lanes.forEach(ln=>put(ln,P(PGx[ln]).slice(0,12)+'....',[3]));
+    if(!handBL){[56,58,60,61,62,63].forEach((s,j)=>{L[7][s]=j>3?2:1});L[5][62]=1}else{L[6][60]=1;L[6][62]=2}
+    inst.forEach(ln=>{const n=kit[ln];
+     if(n==='TIMBALE'){L[ln][0]=2;[60,61,62,63].forEach(s=>L[ln][s]=s>61?2:1);return}   /* timbale: phrase downbeat + fill into the next phrase */
+     let rh=INST_RH[n];if(!rh)return;
+     if(CHORDAL[n]&&!P(rh).split('').some((c,i)=>c!=='.'&&okChord(i)))rh=rot(P(rh),8);   /* chord hits land on the half-bar that carries their chord */
+     if(n==='STRING HIT'){const at=okChord(0)?0:okChord(8)?8:-1;if(at>=0)L[ln][at]=2;return}
+     if(ln===3){put(ln,rh,[0,1,2,3],1);return}   /* shaker / maracas: soft 16th off-beats under the hats */
+     put(ln,rh,[0,1,2,3],0,CHORDAL[n]?okChord:INST_PC[n]!==undefined?okTonic:null)})}
+   else if(k===2){if(PG[7]&&!handBL)put(7,'x.......x.......',[0,1,2,3],1);L[11][0]=1;L[11][32]=1;
+    inst.forEach(ln=>{const n=kit[ln];if(INST_PC[n]!==undefined&&!CHORDAL[n])put(ln,'x.......x.......',[0,2],1,okTonic);if(n==='TRIANGLE')put(ln,'x...............',[0,2],1)})}
+   else{lanes.forEach(ln=>put(ln,PGx[ln],[2,3]));if(!handBL){[60,61,62,63].forEach(s=>{L[5][s]=s>61?2:1})}
+    inst.forEach(ln=>{const n=kit[ln];if(ln===3)put(ln,INST_RH[n]||'',[1,2,3],1);else if(INST_PC[n]!==undefined&&!CHORDAL[n])put(ln,INST_RH[n],[2,3],0,okTonic)})}
+   return L});
+  /* key lock: the default synth lanes (sub / pluck / stab / lead from A, pad from C) and every pitched world instrument from its own pitch */
+  const tunes={8:wrap(key-9),9:wrap(key-9),10:wrap(key-9),11:wrap(key),12:wrap(key-9)};
+  if(kit)for(const l in kit){const n=kit[l];if(INST_PC[n]===undefined)continue;tunes[l]=wrap(key+(CHORDAL[n]?semi(sc,T):0)-INST_PC[n])}
+  return{pats,tunes,semiT:semi(sc,T)}}
+ /* key-lock tune for whatever sound sits in a PAD-64 slot (used again after every PAD-64 preset load) */
+ function wsTune(kind,lane,H){if(!H)return null;if(kind<16)return[8,9,10,12].includes(lane)?wrap(H.key-9):lane===11?wrap(H.key):null;
+  const n=((window.GLCTC_INSTR&&GLCTC_INSTR.NAMES)||[])[kind-16];if(INST_PC[n]===undefined)return null;return wrap(H.key+(CHORDAL[n]?H.semiT:0)-INST_PC[n])}
  function build(genre,seed,opts){
-  genre=G[genre]?genre:'techno';
-  let Gg=G[genre],r=RNG(seed),keys=Gg.keys,key=opts&&opts.key!=null?opts.key:keys[Math.floor(r()*keys.length)];
-  let scale=Gg.scale;const t=(opts&&opts.text)||'';if(/major|happy|bright|uplift|euphor/.test(t))scale='major';else if(/phrygian|spook|dark|menac/.test(t))scale='phrygian';else if(/minor|sad|melanch/.test(t))scale='minor';
-  const sw=(()=>{try{const e=document.getElementById('gscSwing');return e&&e.checked}catch(_){return false}})();const variant=opts&&Number.isInteger(opts.variant)?((opts.variant%4)+4)%4:Math.floor(r()*4);const GG=Object.assign(songGroove(Gg,genre,variant),{scale,swing:sw?Gg.swing:0});const old=G[genre];G[genre]=GG;Gg=GG;
-  F=flavour(genre,r);
-  try{
-   const pack={genre,seed,key,scale,name:NN[key]+' '+scale.toUpperCase(),flavour:{variation:variant+1,motif:F.motif.slice(),chords:F.H.slice(),hat:['AS WRITTEN','BUSY 16THS','TIGHT 8THS'][F.hat],perc:F.rot,lead:ARPG[genre]?'ARP':'RIFF'},
-    bl:{patterns:drumsBL(genre,r),swing:Gg.swing},
-    mine:{patterns:drumsMine(genre,r),bars:2,swing:Gg.swing},
-    lee:{patterns:bassLee(genre,r,key),length:16,swing:Gg.swing},
-    s101:{steps:s101Pat(genre,r),root:48+key,scale:scale==='phrygian'?'phrygian':scale==='major'?'major':scale==='pentatonic'?'pentatonic':'minor',len:16},
-    go:{pats:goPats(genre,r,key),root:key,scale:scale==='pentatonic'?'minor':scale,swing:Math.min(1,(Gg.swing||0)/.62),oct:4},
-    vox:{steps:voxPat(genre,r),len:16,root:key,scale:scale==='pentatonic'?'minor':scale,oct:4},
-    ws:{pats:wsPats(genre,r,key),bars:4,swing:Gg.swing,tunes:wsTunes(key)}};
-   return pack}finally{G[genre]=old}}
+  genre=G[genre]?genre:'techno';opts=opts||{};Gg=G[genre];
+  const r=RNG(seed),key=opts.key!=null?opts.key:Gg.keys[Math.floor(r()*Gg.keys.length)];
+  let scale=Gg.scale;const t=opts.text||'';if(/major|happy|bright|uplift|euphor/.test(t))scale='major';else if(/phrygian|spook|dark|menac/.test(t))scale='phrygian';else if(/minor|sad|melanch/.test(t))scale='minor';
+  const sw=(()=>{try{const e=document.getElementById('gscSwing');return !e||e.checked}catch(_){return false}})();
+  const nv=Gg.gr.length,variant=Number.isInteger(opts.variant)?((opts.variant%nv)+nv)%nv:Math.floor(r()*nv);
+  const old=Gg;Gg=Object.assign({},old,{scale});
+  const li=Math.floor(r()*Gg.lead.rh.length);
+  F={g:genre,rnd:r,H:pick(r,Gg.prog),gr:Gg.gr[variant],motif:pick(r,Gg.lead.m),leadRh:Gg.lead.rh[li],arpDir:r()<.5?1:-1,stab:pick(r,Gg.stab),vox:pick(r,Gg.vox)};
+  const bassPair=Gg.bass[(variant+Math.floor(r()*2))%Gg.bass.length];
+  const handBL=!!opts.handBL,swing=sw?Gg.swing:0;
+  const pack={genre,seed,key,scale,name:NN[key]+' '+scale.toUpperCase(),flavour:{variation:variant+1,of:nv,motif:F.motif.slice(),chords:F.H.slice(),hat:handBL?'HAND DRUMS':'AS WRITTEN',perc:li,lead:{hook:'HOOK',gate:'3-3-2 GATE',roll:'ROLLING',arp:'ARP'}[Gg.lead.t]||'HOOK'},
+   bl:{patterns:drumsBL(handBL),swing},
+   mine:{patterns:drumsMine(),bars:2,swing},
+   lee:{patterns:bassLee(r,key,bassPair),length:16,swing},
+   s101:{steps:s101Pat(),root:48+key,scale:scale==='phrygian'?'phrygian':scale==='major'?'major':scale==='pentatonic'?'pentatonic':'minor',len:16},
+   go:{pats:goPats(r,key),root:key,scale:scale==='pentatonic'?'minor':scale,swing:Math.min(1,(swing||0)/.62),oct:4},
+   vox:{steps:voxPat(),len:16,root:key,scale:scale==='pentatonic'?'minor':scale,oct:4},
+   ws:null};
+  {const w=wsPats(r,key,handBL,WS_KITS[opts.wsPreset]||null);pack.ws={pats:w.pats,bars:4,swing,tunes:w.tunes};pack.harm={key,semiT:w.semiT};if(WS_KITS[opts.wsPreset])pack.flavour.perc='WORLD KIT'}
+  Gg=old;return pack}
  const API={bl:()=>window.GLCTC_80LA8_PATTERNS,mine:()=>window.GLCTC_DIVINE09_PATTERNS,lee:()=>window.GLCTC_30LEE_PATTERNS,s101:()=>window.GLCTC_0010110_PATTERNS,go:()=>window.GALACTIC_ONE&&GALACTIC_ONE.patterns,vox:()=>window.GALACTIC_VOX&&GALACTIC_VOX.patterns,ws:()=>window.GLCTC_PAD64_PATTERNS};
  let backup=null;
  function snapshot(){const o={};for(const k in API){try{const a=API[k]();if(a)o[k]=a.get()}catch(e){}}return o}
  function apply(pack){if(!backup)backup=snapshot();const done=[];for(const k in API){try{const a=API[k]();if(a&&pack[k]){a.set(pack[k]);done.push(k)}}catch(e){console.warn('pattern fill failed:',k,e)}}return done}
  function restore(){if(!backup)return false;for(const k in API){try{const a=API[k]();if(a&&backup[k])a.set(backup[k])}catch(e){console.warn('pattern restore failed:',k,e)}}backup=null;return true}
- return{build,apply,restore,hasBackup:()=>!!backup,hash,genres:Object.keys(G),swingFor:g=>(G[g]||G.techno).swing||0}
+ return{build,apply,restore,hasBackup:()=>!!backup,hash,genres:Object.keys(G),swingFor:g=>(G[g]||G.techno).swing||0,variants:g=>(G[g]||G.techno).gr.length,wsTune}
 })();
 
 /* v12 GROOVE: one swing amount for the whole song, shared by 80LA8, DIVINE09, 30LEE, GALACTIC ONE, PAD-64, 0010110 and VOX */
@@ -7762,11 +7920,13 @@ let fillN=0;const lastSongVariant={};
 function fillPatterns(genre,txt){
  const entropy=window.crypto?.getRandomValues?window.crypto.getRandomValues(new Uint32Array(1))[0]:Math.floor(Math.random()*4294967296);
  const seed=PAT.hash(genre+'|'+txt+'|'+(++fillN)+'|'+Date.now()+'|'+entropy);
- const prev=lastSongVariant[genre],variant=prev===undefined?seed%4:(prev+1+seed%3)%4;
- const mk=window.__glctcMatchKey,pack=PAT.build(genre,seed,Object.assign({text:txt,variant},Number.isInteger(mk)?{key:mk}:{})),done=PAT.apply(pack);lastSongVariant[genre]=variant;
+ const nv=PAT.variants?PAT.variants(genre):4,prev=lastSongVariant[genre],variant=prev===undefined?seed%nv:(prev+1+seed%Math.max(1,nv-1))%nv; /* never the same groove twice in a row */
+ /* v92: a world-percussion 80LA8 kit (bongos / congas / djembe / taiko) gets its hand-drum section written; PAD-64 then steps back to rim / clave so nothing doubles */
+ const blPre=String((st.presets||{}).bl||''),handBL=!!(GENRE_PACK[genre]&&GENRE_PACK[genre].bl===blPre)||/bongo|conga|djembe|taiko|hand drum|tribal perc|latin perc|tribal toms/i.test(blPre);
+ const mk=window.__glctcMatchKey,pack=PAT.build(genre,seed,Object.assign({text:txt,variant,handBL,wsPreset:String((st.presets||{}).ws||'')},Number.isInteger(mk)?{key:mk}:{})),done=PAT.apply(pack);lastSongVariant[genre]=variant;
  window.GLCTC_GROOVE={swing:swingOn()?PAT.swingFor(genre):0,genre};
- const info=byId('gscFillInfo');if(info){const fl=pack.flavour||{},RN=['I','II','III','IV','V','VI','VII'],ch=(fl.chords||[]).map(d=>RN[d%7]||'I').join(' – ');info.textContent='NEW SONG · GROOVE '+fl.variation+'/4 · KEY '+pack.name+' · CHORDS '+ch+' · LEAD '+(fl.lead||'')+' · HATS '+(fl.hat||'')+' · '+done.length+' modules · seed '+seed}const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=pack.name.toUpperCase();
- try{window.GLCTC_SONG_PATTERN_KEY=pack.name;window.GLCTC_SONG_MODE=pack.scale==='major'?'major':'minor';wsKeyTunes=pack.ws&&pack.ws.tunes||null;try{localStorage.setItem('glctc1.songMode',window.GLCTC_SONG_MODE)}catch(_){}}catch(e){}
+ const info=byId('gscFillInfo');if(info){const fl=pack.flavour||{},RN=['I','II','III','IV','V','VI','VII'],ch=(fl.chords||[]).map(d=>RN[d%7]||'I').join(' – ');info.textContent='NEW SONG · GROOVE '+fl.variation+'/'+(fl.of||4)+' · KEY '+pack.name+' · CHORDS '+ch+' · LEAD '+(fl.lead||'')+' · HATS '+(fl.hat||'')+' · '+done.length+' modules · seed '+seed}const keyOut=byId('gscKey');if(keyOut)keyOut.textContent=pack.name.toUpperCase();
+ try{window.GLCTC_SONG_PATTERN_KEY=pack.name;window.GLCTC_SONG_MODE=pack.scale==='major'?'major':'minor';wsKeyTunes=pack.ws&&pack.ws.tunes||null;window.GLCTC_SONG_HARM=pack.harm||null;try{localStorage.setItem('glctc1.songMode',window.GLCTC_SONG_MODE)}catch(_){}}catch(e){}
  return pack}
 window.GLCTC_PATTERNS=PAT;
 /* ---------------- AI tempo → single DAW master BPM ---------------- */
@@ -7878,7 +8038,7 @@ const GENRE_SHAPE={
   s101:{attack:.01,decay:.5,sustain:.3,release:.5,env:.25,res:1.5,sub:0.05,glide:0},
   go:{aa:.01,ad:.8,as:.4,ar:.7,glide:0,sub:0.1},ws:{all:1.05,sub:{decay:1.6}},vox:{chAtk:.03,chRel:.45}},
  ambient:{lee:{attack:.12,decay:1.4,envMod:.1,resonance:2.0,cutoff:300,sub:0.6,gate:1.4,slideTime:.3,drive:0.02},
-  s101:{attack:.8,decay:1.5,sustain:.8,release:2.5,env:.15,res:1.5,sub:0.1,glide:.12},
+  s101:{attack:.04,decay:1.5,sustain:.8,release:2.5,env:.15,res:1.5,sub:0.1,glide:.12},
   go:{aa:1.2,ad:2,as:.85,ar:4,glide:.1,sub:0.1},ws:{all:1.5,sub:{decay:1.6}},vox:{chAtk:.6,chRel:3,spAtk:.3,spRel:2}},
  pop:{lee:{attack:.003,decay:.2,envMod:.5,resonance:5.0,cutoff:1000,sub:0.45,gate:.5,slideTime:.04,drive:0.12},
   s101:{attack:.005,decay:.25,sustain:.45,release:.35,env:.35,res:2.0,sub:0.1,glide:.02},
@@ -7920,47 +8080,61 @@ function shapeGenreSound(genre){
  try{if(SH.ws&&A.ws){const d=A.ws.get(),cust=isPack('ws');d.pads.slots.forEach((s,i)=>{if(i===8){Object.assign(s,SH.ws.sub)}else if(!cust||s.kind<16)s.decay=Math.max(.2,Math.min(2,(s.decay||1)*SH.ws.all))});A.ws.set(d)}}catch(e){console.warn('shape pads',e)}
  try{const V=window.GALACTIC_VOX;if(SH.vox&&V&&V.projectState&&V.restoreProject){const p=V.projectState();Object.assign(p.S,SH.vox);V.restoreProject(p)}}catch(e){console.warn('shape vox',e)}
 }
-/* Choose only the two curated sounds for each genre/module role. */
+/* v92 SOUND PALETTE: every module draws its sound from ALL of its banks for the genre - the original genre preset, the
+   Soundscape preset, the world / instrument pack and hand-picked factory, character, acid and voice presets that are
+   authentic to the style. Weighted so the core genre sound leads, with a fresh, complementary assortment on every song,
+   and every song features at least one signature world / instrument texture. GALACTIC ONE stays a synth lead. */
+const GENRE_EXTRA={
+ techno:{bl:['Factory · Deep Techno','Character · Minimal Click'],mine:['Factory · 909 Punch','Factory · Industrial','Character · 606 Tick'],lee:['Acid · Deep Hypno','Acid · Squelch Lab','Factory · Acid Classic'],s101:['Lead · Classic Mono','Pluck · Marimba'],go:['F|ACID SEQ','F|CHROME STAB','F|RAVE STAB'],vox:['ROBOT','VOCODER CHOIR','CYBORG'],ws:['Character · Dry & Tight'],lp:['Character · Dub Space']},
+ house:{bl:['Factory · Studio Kit'],mine:['Factory · 909 Punch','Character · DMX Funk'],lee:['Bass · Rubber Pluck','Factory · Deep Sub'],s101:['Keys · Clavinet','Pad · Warm Strings'],go:['F|SPACE ORGAN','F|GLASS KEYS','F|CLOUD CHORDS'],vox:['GOSPEL STACK','NATURAL'],lp:['Character · Warm Saturation']},
+ dnb:{bl:['Factory · Jungle Breaks'],mine:['Character · Clean Studio'],lee:['Bass · Clean Sine Sub','Factory · Deep Sub'],s101:['Pad · Warm Strings','Factory · Glass Pluck'],go:['F|SUPERNOVA LEAD','F|GLASS KEYS','F|ETHEREAL BELLS','F|CLOUD CHORDS'],vox:['ANGEL','GHOST'],lp:['Character · Reverse Atmos']},
+ hiphop:{bl:['Character · Soft Lounge'],mine:['Character · DMX Funk','Factory · 808 Sub'],lee:['Bass · Clean Sine Sub'],s101:['Keys · Clavinet'],go:['F|POLY KEYS','F|FM BELL'],vox:['NATURAL','JAZZ CROONER'],lp:['Character · Warm Saturation']},
+ ambient:{bl:['Character · Soft Lounge'],lee:['Bass · Clean Sine Sub'],s101:['Pad · Warm Strings','Factory · Infinite Pad','Factory · Glass Pluck'],go:['F|AURORA','F|CLOUD CHORDS','F|CHOIR AIR','F|ETHEREAL BELLS','F|WARP PAD'],vox:['CHOIR OF ME','GHOST'],ws:['Factory · Ambient Layers','Character · Wide Ambience'],lp:['Character · Reverse Atmos','Character · Dub Space']},
+ pop:{bl:['Character · Bright Pop Snap','Factory · Studio Kit'],mine:['Factory · 707 Bright','Character · Clean Studio'],lee:['Bass · Rubber Pluck'],s101:['Factory · Glass Pluck','Pluck · Marimba'],go:['F|SUPERNOVA LEAD','F|PIXEL LEAD','F|ARP PLUCK'],vox:['HYPERPOP','NATURAL'],lp:['Character · Octave Up Sparkle']},
+ trance:{mine:['Factory · 909 Punch'],lee:['Bass · Rubber Pluck'],s101:['Lead · Detuned Sync','Factory · Glass Pluck'],go:['F|TRANCE GATE PLUCK','F|SUNRISE ARP','F|STARFIELD ARP','F|LASER HARP'],vox:['ANGEL'],ws:['Character · FX & Risers Up'],lp:['Character · Octave Up Sparkle']},
+ psytrance:{mine:['Character · Electro Zap','Factory · 909 Punch'],lee:['Acid · Squelch Lab','Acid · Screamer'],s101:['FX · Laser Zap','Lead · Classic Mono'],go:['F|ACID SEQ','F|RING ROBOT','F|LASER HARP'],vox:['ALIEN','DEMON'],lp:['Character · Dub Space']},
+ dubstep:{bl:['Character · Distorted Rave'],mine:['Factory · Industrial','Character · Noise Glitch'],lee:['Bass · Dirty Fuzz','Factory · Resonant Bite'],s101:['Lead · Detuned Sync'],go:['F|RING ROBOT','F|HOOVER LEAD'],vox:['DEMON','GIANT','ROBOT'],lp:['Character · 8-Bit Crush']},
+ garage:{mine:['Character · DMX Funk'],lee:['Bass · Rubber Pluck','Factory · Deep Sub'],s101:['Keys · Clavinet'],go:['F|SPACE ORGAN','F|POLY KEYS'],vox:['NATURAL','CHILD']},
+ breaks:{bl:['Factory · Jungle Breaks','Character · Distorted Rave'],mine:['Character · DMX Funk'],lee:['Acid · Squelch Lab','Bass · Dirty Fuzz'],s101:['Keys · Clavinet','Lead · Classic Mono'],go:['F|HOOVER LEAD','F|RAVE STAB','F|FUNK CLAV'],vox:['MEGAPHONE'],lp:['Character · Warm Saturation']},
+ synthwave:{mine:['Factory · Linn Soft','Factory · 707 Bright'],lee:['Bass · Rubber Pluck'],s101:['Pad · Warm Strings','Lead · Classic Mono'],go:['F|SYNTHWAVE LEAD','F|JUPITER BRASS','F|PWM STRINGS','F|VINTAGE SOLO'],vox:['VOCODER CHOIR','ROBOT'],lp:['Character · Warm Saturation']},
+ trap:{mine:['Factory · 808 Sub'],lee:['Bass · Clean Sine Sub'],s101:['Factory · Glass Pluck'],go:['F|FM BELL','F|ETHEREAL BELLS'],vox:['TRAP AUTOTUNE','HYPERPOP']},
+ lofi:{bl:['Character · Soft Lounge'],mine:['Factory · Linn Soft'],lee:['Bass · Clean Sine Sub'],s101:['Hip-Hop · Dusty Keys'],go:['F|LOFI KEYS','F|GLASS KEYS','F|POLY KEYS'],vox:['TELEPHONE','WHISPER'],lp:['Character · Telephone','Character · Warm Saturation']}
+};
+/* weights: core genre preset · Soundscape preset · world / instrument pack · extras (each) */
+const PAL_W={bl:[4,3,2,1],mine:[3,4,2,1],lee:[4,3,2,1.2],s101:[3,3,2,1],go:[4,3,0,1.3],vox:[3,3,2,1],ws:[3,3,3,1],lp:[3,3,3,1]};
 const lastSoundPalette={};
 function chooseSongPresets(genre,original){
- const q=window.GLCTC_SOUNDSCAPES?.find(x=>x.id===genre);
- if(!q)return {...original};
- const roles={bl:0,mine:1,lee:2,s101:3,go:4,vox:5,ws:6,lp:7},out={...original},choices=[];
- MODS.forEach(m=>{
-  const index=roles[m.k];if(index===undefined)return;
-  const name=q.label+' · '+q.names[index];
-  const expanded=m.k==='go'?'F|'+name.toUpperCase():m.k==='vox'?name.toUpperCase():name;
-  const available=new Set(presetOpts(m).map(o=>o[0]));
-  const pool=[original[m.k],expanded].filter((v,i,a)=>v&&available.has(v)&&a.indexOf(v)===i);
-  if(!pool.length)return;
-  out[m.k]=pool[Math.floor(Math.random()*pool.length)];
-  if(pool.includes(expanded)&&st.on[m.k]!==false&&(st.cells[m.k]||[]).some(v=>+v>=0))choices.push({key:m.k,pool,expanded});
- });
- // Every generated song can showcase an available new sound in an audible role.
- if(choices.length&&!choices.some(c=>out[c.key]===c.expanded)){
-  const c=choices[Math.floor(Math.random()*choices.length)];out[c.key]=c.expanded;
- }
- const signature=()=>choices.map(c=>out[c.key]).join('|');
- if(signature()===lastSoundPalette[genre]){
-  const alternatives=choices.filter(c=>c.pool.length>1&&
-   (out[c.key]!==c.expanded||choices.some(other=>other!==c&&out[other.key]===other.expanded)));
-  if(alternatives.length){const c=alternatives[Math.floor(Math.random()*alternatives.length)];out[c.key]=c.pool.find(v=>v!==out[c.key])}
- }
- lastSoundPalette[genre]=signature();return castGenrePack(genre,out);
+ const q=window.GLCTC_SOUNDSCAPES?.find(x=>x.id===genre),pk=GENRE_PACK[genre]||{},ex=GENRE_EXTRA[genre]||{};
+ const roles={bl:0,mine:1,lee:2,s101:3,go:4,vox:5,ws:6,lp:7},out={...original};
+ const wpick=list=>{const tot=list.reduce((a,x)=>a+x[1],0);let r=Math.random()*tot;for(const x of list){r-=x[1];if(r<=0)return x[0]}return list[0][0]};
+ const build=()=>{const o={...original};MODS.forEach(m=>{
+  const available=new Set(presetOpts(m).map(x=>x[0])),W=PAL_W[m.k]||[3,3,1,1],list=[];
+  const add=(v,w)=>{if(v&&w>0&&available.has(v)&&!list.some(x=>x[0]===v))list.push([v,w])};
+  add(original[m.k],W[0]);
+  if(q&&roles[m.k]!==undefined){const name=q.label+' · '+q.names[roles[m.k]];add(m.k==='go'?'F|'+name.toUpperCase():m.k==='vox'?name.toUpperCase():name,W[1])}
+  add(pk[m.k],W[2]);(ex[m.k]||[]).forEach(v=>add(v,W[3]));
+  if(list.length)o[m.k]=wpick(list)});return o};
+ let pal=build(),tries=0;const sig=o=>MODS.map(m=>o[m.k]).join('|');
+ while(sig(pal)===lastSoundPalette[genre]&&tries++<6)pal=build();   /* never the exact same sound stack twice in a row */
+ Object.assign(out,pal);
+ /* every song features at least one signature world / instrument texture on an audible module */
+ const showcase=['ws','lp','s101','vox','bl'].filter(k=>pk[k]&&st.on[k]!==false&&(st.cells[k]||[]).some(v=>+v>=0)&&presetOpts(MODS.find(m=>m.k===k)).some(o=>o[0]===pk[k]));
+ if(showcase.length&&!showcase.some(k=>out[k]===pk[k])){const k=showcase[Math.floor(Math.random()*showcase.length)];out[k]=pk[k]}
+ lastSoundPalette[genre]=sig(out);return out;
 }
 function prepareSong(genreKey,txt,forceFill){
  try{freshKnobs()}catch(e){console.warn('knob reset',e)}
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
  st.len=TPL[len]?len:'full';st.secs=mkSecs(st.len,genreKey);st.cells=autoCells(st.secs,genreKey);
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
- const skip=new Set([...g.skip,'lp','vox']);
- if(/acid|303/.test(txt))skip.delete('lee');
- if(/vocal|vox|choir|sing|voice/.test(txt))skip.delete('vox');
+ const skip=new Set(g.skip);   /* v92: every module plays - LOOPER and GALACTIC VOX are part of every genre's layer stack */
+ if(/instrumental|no vocals?|no vox|without vocals?/.test(txt))skip.add('vox');
+ if(/no loop|without loop/.test(txt))skip.add('lp');
  if(/no drums|without drums|drumless/.test(txt)){['bl','mine','ws','lp'].forEach(k=>skip.add(k))}
  if(/minimal/.test(txt)){skip.add('s101');skip.add('vox')}
  MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});
  /* v86 GENRE MIX BALANCE: kick and bass forward for club genres, heavy 808 for trap, louder lead for trance / synthwave, warmer keys for lo-fi */
- st.level=({ambient:{go:85,s101:65,ws:50,vox:60},
+ st.level=({ambient:{go:85,s101:65,ws:55,vox:55,bl:55,lee:70,lp:50},
   techno:{bl:100,mine:85,lee:88,s101:60,go:62,vox:55,ws:60,lp:40},house:{bl:95,mine:85,lee:85,s101:72,go:68,vox:65,ws:62,lp:45},
   dnb:{bl:100,mine:85,lee:92,s101:58,go:70,vox:60,ws:55,lp:40},hiphop:{bl:100,mine:80,lee:90,s101:60,go:62,vox:65,ws:55,lp:45},
   pop:{bl:92,mine:80,lee:80,s101:70,go:75,vox:70,ws:58,lp:40},trance:{bl:95,mine:82,lee:85,s101:65,go:80,vox:60,ws:55,lp:40},

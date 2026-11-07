@@ -9,7 +9,7 @@
 <meta name="viewport" content="width=1280,viewport-fit=cover">
 <script>
 /* v80 GLCTC1 PACKAGE BOOT: when a .glctc1 package is being opened, put its settings back BEFORE any module reads them */
-(function(){try{if(localStorage.getItem('glctc1.pkg.pending')!=='1')return;window.__glctcProjectOpened=true;window.__glctcPkgBoot=true;
+(function(){try{var pf=localStorage.getItem('glctc1.pkg.pending');if(!pf)return;if(!(Date.now()-Number(pf)<120000)){localStorage.removeItem('glctc1.pkg.pending');sessionStorage.removeItem('glctc1.pkg.pendingLS');return}window.__glctcProjectOpened=true;window.__glctcPkgBoot=true;
  var raw=sessionStorage.getItem('glctc1.pkg.pendingLS');if(!raw)return;var d=JSON.parse(raw),ks=[];for(var i=0;i<localStorage.length;i++)ks.push(localStorage.key(i));
  ks.forEach(function(k){if(/^glctc/i.test(k)&&k!=='glctc1.pkg.pending')localStorage.removeItem(k)});Object.keys(d).forEach(function(k){try{localStorage.setItem(k,d[k])}catch(e){}});sessionStorage.removeItem('glctc1.pkg.pendingLS')}catch(e){console.warn('GLCTC1 package boot',e)}})();
 /* Shared musical tuning. The selected frequency is the A4 reference, relative to 440 Hz.
@@ -1715,14 +1715,15 @@ const GLCTC_PKG=(()=>{
   await pending('put',buf.byteOffset===0&&buf.byteLength===buf.buffer.byteLength?buf.buffer:buf.slice().buffer);
   const ls=man.localStorage||{};
   try{sessionStorage.setItem(PENDING_LS,JSON.stringify(ls))}catch(e){console.warn('GLCTC1 package: settings will be applied directly',e)}
-  applyLS(ls);try{localStorage.setItem(FLAG,'1')}catch(e){}
+  applyLS(ls);try{localStorage.setItem(FLAG,String(Date.now()))}catch(e){}
   status('Opening package · restarting the studio…');toast('Opening '+(man.name||'package')+' · the studio restarts once to load every module');
   window.__glctcReloading=true;setTimeout(()=>location.reload(),350);return true;
  }
  function applyLS(ls){Object.keys(localStorage).filter(ourKey).forEach(k=>localStorage.removeItem(k));Object.entries(ls||{}).forEach(([k,v])=>{try{localStorage.setItem(k,v)}catch(e){console.warn('GLCTC1 package: setting not restored',k,e)}})}
  async function resume(){
-  let flag=null;try{flag=localStorage.getItem(FLAG)}catch(e){}if(flag!=='1')return;
+  let flag=null;try{flag=localStorage.getItem(FLAG)}catch(e){}if(!flag)return;
   const finish=()=>{try{localStorage.removeItem(FLAG)}catch(e){}pending('del').catch(()=>{})};
+  if(!(Date.now()-Number(flag)<120000)){finish();return} /* a stale or interrupted open never blocks the new song on load */
   try{const raw=await pending('get');if(!raw){finish();return}
    const {man,get}=await parse(raw);
    const p=JSON.parse(JSON.stringify(man.project));
@@ -4081,19 +4082,9 @@ registerProcessor('gv-ps',P);`;
 let wlState=new WeakMap();
 async function loadWorklet(c){if(wlState.has(c))return wlState.get(c);let ok=false;
  if(c.audioWorklet){const urls=['data:application/javascript;base64,'+btoa(WL)];try{urls.push(URL.createObjectURL(new Blob([WL],{type:'application/javascript'})))}catch(e){}let lastErr='';for(const u of urls){try{await c.audioWorklet.addModule(u);ok=true;break}catch(e){lastErr=e&&e.message}}
-  if(!ok)console.info('GALACTIC VOX: this page is not allowed to load audio worklets here ('+lastErr+') · using the built-in pitch engine instead')}
+  if(!ok)console.info('GALACTIC VOX: this page is not allowed to load audio worklets here ('+lastErr+') · VOX pitch / harmony effects are off on this setup; everything else works')}
  wlState.set(c,ok);return ok}
-/* v82: same pitch-shifter as the worklet, run on a ScriptProcessor, for hosts that block data:/blob: worklet modules */
-function mkSPS(c){if(!c.createScriptProcessor)return null;let sp;try{sp=c.createScriptProcessor(512,1,1)}catch(e){return null}
- const N=16384,m=N-1,W=2048,b=new Float32Array(N);let w=0,ph=0;
- const P={value:1,_t:1,_tc:.02,setTargetAtTime(v,t,tc){this._t=v;this._tc=Math.max(.001,tc||.02)},setValueAtTime(v){this.value=this._t=v},cancelScheduledValues(){}};
- const rd=d=>{let q=w-d;if(q<0)q+=N;const i0=Math.floor(q),f=q-i0;return b[i0&m]*(1-f)+b[(i0+1)&m]*f};
- sp.onaudioprocess=e=>{const x=e.inputBuffer.getChannelData(0),y=e.outputBuffer.getChannelData(0);P.value+=(P._t-P.value)*(1-Math.exp(-x.length/c.sampleRate/P._tc));
-  const r=Math.max(.25,Math.min(4,P.value)),dph=(1-r)/W;
-  for(let n=0;n<y.length;n++){b[w]=x[n];const p1=ph;let p2=p1+.5;if(p2>=1)p2-=1;const g1=Math.sin(Math.PI*p1),g2=Math.sin(Math.PI*p2);
-   y[n]=rd(p1*W+1)*g1*g1+rd(p2*W+1)*g2*g2;w=(w+1)&m;ph+=dph;if(ph>=1)ph-=1;else if(ph<0)ph+=1}};
- sp.parameters=new Map([['ratio',P]]);return sp}
-function mkPS(c){if(wlState.get(c)){try{return new AudioWorkletNode(c,'gv-ps',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCount:1,channelCountMode:'explicit'})}catch(e){}}return mkSPS(c)}
+function mkPS(c){try{return new AudioWorkletNode(c,'gv-ps',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],channelCount:1,channelCountMode:'explicit'})}catch(e){return null}}
 const setRatio=(n,v,tc)=>{if(!n)return;const p=n.parameters.get('ratio');try{p.setTargetAtTime(cl(v,.25,4),n.context.currentTime,tc||.02)}catch(e){p.value=v}};
 
 /* ---------- pitch detection (YIN) ---------- */
@@ -4174,7 +4165,7 @@ function build(c){
 }
 async function ensure(){
  const c=ensureAudio();if(V&&V.c===c)return V;if(building)return building;
- building=(async()=>{try{hasWL=(await loadWorklet(c))||typeof c.createScriptProcessor==='function';V=build(c);rebuildVoc();applyAll();route();return V}finally{building=null}})();
+ building=(async()=>{try{hasWL=await loadWorklet(c);V=build(c);rebuildVoc();applyAll();route();return V}finally{building=null}})();
  return building}
 function route(){if(!V)return;try{V.tap.disconnect()}catch(e){}const c=V.c;if($('voxSendMaster').checked&&typeof masterGain!=='undefined'&&masterGain)V.tap.connect(WSB('vox',masterGain));else V.tap.connect(c.destination);if(V.recDest)V.tap.connect(V.recDest)}
 
@@ -7836,7 +7827,7 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    const sel=byId('gscGenre');if(sel)sel.value=g;
    resetAllForNewSong();
    const pack=prepareSong(g,rtxt,true);
-   const hub=H();hub.modulesSuspendedGroup=false;
+   const hub=H();hub.modulesSuspendedGroup=false;hub.modulesOn=true;try{localStorage.setItem('glctc1.modulesOn','1')}catch(e){}try{hub.paintModulesBtn()}catch(e){} /* a fresh visit = a full new song, modules ON */
    try{applyPresets(true)}catch(e){console.warn('preset apply',e)}
    try{window.lpLoadDemo&&window.lpLoadDemo(true,g)}catch(e){}
    try{applySwing(g)}catch(e){}

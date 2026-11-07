@@ -6406,9 +6406,10 @@ function composerRecipe(genre){
  /* v84 GENRE FX: every genre gets its own channel colour. Space (big reverb / delay returns) comes from the master
     genre character; these chains give each channel the genre's texture - saturation, filters, movement, gating, crush. */
  const comp=(thr,ratio,att,rel=.16)=>({type:'comp',p:{thr,ratio,att,rel,mk:0}});
- const rev=(mix,size=1.2,type=0,damp=.5)=>({type:'reverb',p:{type,size,damp,pre:.015,mix}});
- const dly=(div,fb,mix,tone=4500)=>({type:'delay',p:{div,fb,tone,mix}});
- const pp=(div,fb,mix,tone=5000)=>({type:'pingpong',p:{div,fb,tone,mix}});
+ const rev_old=(mix,size=1.2,type=0,damp=.5)=>({type:'reverb',p:{type,size,damp,pre:.015,mix}});
+ const dly_old=(div,fb,mix,tone=4500)=>({type:'delay',p:{div,fb,tone,mix}});
+ const pp_old=(div,fb,mix,tone=5000)=>({type:'pingpong',p:{div,fb,tone,mix}});
+ const rev=()=>null,dly=()=>null,pp=()=>null,pump=()=>null; /* v90: space + pump live on the master character only */
  const drive=(drv,mix,tone=7000)=>({type:'eq3',p:{low:1,mid:0,mf:1000,high:Math.min(2,tone/6000)}}); /* v89: no drive - a gentle EQ lift instead */
  const dist=(drv,mix,tone=4000)=>({type:'lpf',p:{f:Math.max(2500,tone),q:.7,slope:0}}); /* v89: no fuzz - a soft high cut instead */
  const tape=(drv,mix,warm=9000,wow=.1)=>({type:'tape',p:{drv:Math.min(.08,drv),warm,wow,mix:Math.min(.35,mix)}}); /* v89: tape warmth only */
@@ -6417,7 +6418,7 @@ function composerRecipe(genre){
  const phaser=(rate,depth,mix,f=900,fb=.45)=>({type:'phaser',p:{rate,depth,fb,f,mix}});
  const flanger=(rate,depth,mix,fb=.5)=>({type:'flanger',p:{rate,depth,fb,mix}});
  const wah=(f,depth,div,q=6,type=0)=>({type:'autof',p:{type,f,depth,sync:1,div,q,wave:0,rate:1}});
- const pump=(depth,div=8)=>({type:'pump',p:{depth,div}});
+ const pump_old=(depth,div=8)=>({type:'pump',p:{depth,div}});
  const gate=(depth,div,duty)=>({type:'gate',p:{depth,div,duty}});
  const hpf=f=>({type:'hpf',p:{f,q:.7,slope:0}}),lpf=f=>({type:'lpf',p:{f,q:.7,slope:0}});
  const eq=(low,mid,high,mf=1000)=>({type:'eq3',p:{low,mid,mf,high}});
@@ -6439,7 +6440,7 @@ function composerRecipe(genre){
   psytrance:{bl:[comp(-14,4,.002)],mine:[hpf(400),dly(4,.3,.12)],lee:[comp(-14,4,.003)],s101:[phaser(.3,.8,.45,1200,.6),dly(4,.45,.28)],go:[flanger(.15,.7,.35,.6),dly(4,.5,.3)],vox:[dly(4,.45,.28),rev(.25,3,1)],ws:[dly(4,.35,.18)],lp:[wah(1500,.6,5,5,1)]},
   breaks:{bl:[drive(.4,.5,7000),comp(-14,4,.005)],mine:[tape(.4,.5)],lee:[drive(.35,.45,3500)],s101:[phaser(.4,.6,.35),rev(.12,1.4)],go:[phaser(.35,.6,.35),dly(7,.35,.18)],vox:[tele(1600,.4,.5),dly(8,.3,.18)],ws:[drive(.3,.4)],lp:[drive(.3,.4),tape(.3,.4)]}
  };
- return R[genre]||R.techno;
+ const out=R[genre]||R.techno;Object.keys(out).forEach(k=>out[k]=out[k].filter(Boolean));return out;
 }
 function composerFX(genre,on=true){
  const recipe=composerRecipe(genre);
@@ -7710,9 +7711,9 @@ const PAT=(()=>{
   const rot=(s,n)=>n?s.slice(-n)+s.slice(0,-n):s;
   return[0,1,2,3].map(k=>{const L=Array.from({length:16},()=>Array(64).fill(0));
    const put=(lane,str,bars,vel)=>{for(const b of bars)for(let s=0;s<16;s++){const ch=str[s];if(!ch||ch==='.')continue;if(b%2===1&&ch!=='X'&&r()<.18)continue;L[lane][b*16+s]=vel||(ch==='X'||s%8===0?2:1)}};
-   if(k===0||k===1){for(const lane in PG)put(+lane,k===1&&+lane===7?rot(PG[lane],2):PG[lane],[0,1,2]);put(+Object.keys(PG)[0],PG[Object.keys(PG)[0]].slice(0,12)+'....',[3]);[56,58,60,61,62,63].forEach((s,j)=>{L[7][s]=j>3?2:1});L[5][60]=1;L[5][62]=2} /* drops: groove, 4th bar ends in a hand-drum fill */
+   if(k===0||k===1){const ln=PG[7]?7:+Object.keys(PG)[0],pat=PG[ln];put(ln,k===1?rot(pat,2):pat,[0,1,2]);put(ln,pat.slice(0,12)+'....',[3]);[56,58,60,61,62,63].forEach((s,j)=>{L[7][s]=j>3?2:1});L[5][62]=1} /* v90 drops: one hand-drum line, 4th bar ends in a short fill */
    else if(k===2){if(PG[7])put(7,'x.......x.......',[0,1,2,3],1);L[11][0]=1;L[11][32]=1;if(PG[13])put(13,PG[13],[1,3],1)} /* breakdown: sparse hand drum + held pad */
-   else{for(const lane in PG)put(+lane,PG[lane],[2,3]);put(6,'..x.x.x.x.x.x.xx',[3],1)}                      /* build: groove enters, roll into the drop (riser comes from the drop FX) */
+   else{const ln=PG[7]?7:+Object.keys(PG)[0];put(ln,PG[ln],[2,3])}                      /* build: groove enters, roll into the drop (riser comes from the drop FX) */
    return L})}
  const wsTunes=key=>{const wrap=n=>((n%12)+18)%12-6;return{8:wrap(key-9),9:wrap(key-9),10:wrap(key-9),11:wrap(key),12:wrap(key-9)}};
  function flavour(genre,r){
@@ -7828,13 +7829,13 @@ const GENRE_PACK={
  breaks:{bl:'Breaks · Funky Bongos',mine:'Breaks · Funk Kit',lee:'Breaks · Funk Slap Bass',s101:'Breaks · Wah Clav',ws:'Breaks · Funk Guitar & Bongos',lp:'Breaks · Funk Chop',go:'F|WAH FUNK GUITAR'}
 };
 /* the modules that carry the genre's identity: the core sound stays most of the time, the signature textures join in */
-const PACK_ODDS={bl:.35,mine:.3,lee:.35,s101:.5,ws:.6,lp:.4,go:.35,vox:.5};
+const PACK_ODDS={bl:.25,mine:.2,lee:.2,s101:.25,ws:.5,lp:.3,go:0,vox:.3}; /* v90: the lead synth is never swapped for an instrument */
 function castGenrePack(genre,out){
  const pk=GENRE_PACK[genre];if(!pk)return out;const cast=[];
  MODS.forEach(m=>{const v=pk[m.k];if(!v)return;const ok=presetOpts(m).some(o=>o[0]===v);if(!ok)return;
-  if(Math.random()<(PACK_ODDS[m.k]||.3)){out[m.k]=v;cast.push(m.k)}});
+  if(Math.random()<(PACK_ODDS[m.k]??.3)){out[m.k]=v;cast.push(m.k)}});
  /* every song showcases at least one signature texture on an audible melodic / percussion module */
- const audible=['ws','s101','go'].filter(k=>pk[k]&&st.on[k]!==false&&(st.cells[k]||[]).some(v=>+v>=0)&&presetOpts(MODS.find(m=>m.k===k)).some(o=>o[0]===pk[k]));
+ const audible=['ws'].filter(k=>pk[k]&&st.on[k]!==false&&(st.cells[k]||[]).some(v=>+v>=0)&&presetOpts(MODS.find(m=>m.k===k)).some(o=>o[0]===pk[k]));
  if(!audible.some(k=>cast.includes(k))&&audible.length){const k=audible[Math.floor(Math.random()*audible.length)];out[k]=pk[k]}
  return out;
 }
@@ -7866,46 +7867,46 @@ function applyGenreSound(genre){
 const GENRE_SHAPE={
  techno:{lee:{attack:.002,decay:.18,envMod:.6,resonance:10,cutoff:700,sub:0.35,gate:.55,slideTime:.07,drive:0.2},
   s101:{attack:.003,decay:.16,sustain:.15,release:.18,env:.6,res:6,sub:0.15,glide:0},
-  go:{aa:.004,ad:.35,as:.4,ar:.35,fa:.002,fd:.3,fs:.25,fr:.3,fenv:.55,res:0.3,glide:0,sub:0.15},ws:{all:.85,sub:{decay:.9}},vox:{chAtk:.08,chRel:.6}},
+  go:{aa:.004,ad:.35,as:.4,ar:.35,glide:0,sub:0.15},ws:{all:.85,sub:{decay:.9}},vox:{chAtk:.08,chRel:.6}},
  house:{lee:{attack:.004,decay:.26,envMod:.45,resonance:6.0,cutoff:850,sub:0.5,gate:.6,slideTime:.05,drive:0.15},
   s101:{attack:.005,decay:.25,sustain:.2,release:.25,env:.45,res:3.0,sub:0.1,glide:0},
-  go:{aa:.005,ad:.45,as:.5,ar:.4,fa:.003,fd:.35,fs:.35,fr:.35,fenv:.4,res:0.18,glide:0,sub:0.15},ws:{all:1,sub:{decay:1}},vox:{chAtk:.1,chRel:.8}},
+  go:{aa:.005,ad:.45,as:.5,ar:.4,glide:0,sub:0.15},ws:{all:1,sub:{decay:1}},vox:{chAtk:.1,chRel:.8}},
  dnb:{lee:{attack:.006,decay:.6,envMod:.35,resonance:6.0,cutoff:520,sub:0.7,gate:1,slideTime:.12,drive:0.2},
   s101:{attack:.004,decay:.3,sustain:.35,release:.3,env:.5,res:5.0,sub:0.1,glide:.02},
-  go:{aa:.01,ad:.6,as:.7,ar:.6,fa:.01,fd:.5,fs:.5,fr:.5,fenv:.35,res:0.2,glide:.05,sub:0.2},ws:{all:.9,sub:{decay:1.3}},vox:{chAtk:.15,chRel:1.2}},
+  go:{aa:.01,ad:.6,as:.7,ar:.6,glide:.05,sub:0.2},ws:{all:.9,sub:{decay:1.3}},vox:{chAtk:.15,chRel:1.2}},
  hiphop:{lee:{attack:.003,decay:.9,envMod:.15,resonance:2.0,cutoff:380,sub:0.7,gate:1.1,slideTime:.12,drive:0.2},
   s101:{attack:.01,decay:.5,sustain:.3,release:.5,env:.25,res:1.5,sub:0.05,glide:0},
-  go:{aa:.01,ad:.8,as:.4,ar:.7,fa:.01,fd:.6,fs:.3,fr:.6,fenv:.25,res:0.1,glide:0,sub:0.1},ws:{all:1.05,sub:{decay:1.6}},vox:{chAtk:.03,chRel:.45}},
+  go:{aa:.01,ad:.8,as:.4,ar:.7,glide:0,sub:0.1},ws:{all:1.05,sub:{decay:1.6}},vox:{chAtk:.03,chRel:.45}},
  ambient:{lee:{attack:.12,decay:1.4,envMod:.1,resonance:2.0,cutoff:300,sub:0.6,gate:1.4,slideTime:.3,drive:0.02},
   s101:{attack:.8,decay:1.5,sustain:.8,release:2.5,env:.15,res:1.5,sub:0.1,glide:.12},
-  go:{aa:1.2,ad:2,as:.85,ar:4,fa:1.5,fd:2.5,fs:.7,fr:4,fenv:.2,res:0.1,glide:.1,sub:0.1},ws:{all:1.5,sub:{decay:1.6}},vox:{chAtk:.6,chRel:3,spAtk:.3,spRel:2}},
+  go:{aa:1.2,ad:2,as:.85,ar:4,glide:.1,sub:0.1},ws:{all:1.5,sub:{decay:1.6}},vox:{chAtk:.6,chRel:3,spAtk:.3,spRel:2}},
  pop:{lee:{attack:.003,decay:.2,envMod:.5,resonance:5.0,cutoff:1000,sub:0.45,gate:.5,slideTime:.04,drive:0.12},
   s101:{attack:.005,decay:.25,sustain:.45,release:.35,env:.35,res:2.0,sub:0.1,glide:.02},
-  go:{aa:.006,ad:.4,as:.7,ar:.45,fa:.004,fd:.35,fs:.45,fr:.4,fenv:.3,res:0.15,glide:.03,sub:0.1},ws:{all:1,sub:{decay:1}},vox:{chAtk:.08,chRel:.9}},
+  go:{aa:.006,ad:.4,as:.7,ar:.45,glide:.03,sub:0.1},ws:{all:1,sub:{decay:1}},vox:{chAtk:.08,chRel:.9}},
  trance:{lee:{attack:.002,decay:.14,envMod:.7,resonance:8.0,cutoff:950,sub:0.5,gate:.4,slideTime:.03,drive:0.2},
   s101:{attack:.003,decay:.22,sustain:.1,release:.45,env:.55,res:5.0,sub:0.1,glide:0},
-  go:{aa:.004,ad:.5,as:.75,ar:.9,fa:.003,fd:.45,fs:.5,fr:.8,fenv:.35,res:0.2,glide:.02,sub:0.15},ws:{all:1.1,sub:{decay:.8}},vox:{chAtk:.2,chRel:1.6}},
+  go:{aa:.004,ad:.5,as:.75,ar:.9,glide:.02,sub:0.15},ws:{all:1.1,sub:{decay:.8}},vox:{chAtk:.2,chRel:1.6}},
  dubstep:{lee:{attack:.004,decay:.8,envMod:.85,resonance:10,cutoff:480,sub:0.7,gate:1.2,slideTime:.1,drive:0.2},
   s101:{attack:.004,decay:.3,sustain:.5,release:.2,env:.75,res:6,sub:0.15,glide:.03},
-  go:{aa:.004,ad:.5,as:.8,ar:.25,fa:.004,fd:.4,fs:.6,fr:.25,fenv:.6,res:0.3,glide:.06,sub:0.25},ws:{all:1,sub:{decay:1.5}},vox:{chAtk:.05,chRel:.8}},
+  go:{aa:.004,ad:.5,as:.8,ar:.25,glide:.06,sub:0.25},ws:{all:1,sub:{decay:1.5}},vox:{chAtk:.05,chRel:.8}},
  garage:{lee:{attack:.003,decay:.3,envMod:.4,resonance:5.0,cutoff:750,sub:0.7,gate:.6,slideTime:.08,drive:0.2},
   s101:{attack:.004,decay:.2,sustain:.2,release:.2,env:.45,res:3.0,sub:0.1,glide:0},
-  go:{aa:.004,ad:.35,as:.4,ar:.3,fa:.003,fd:.3,fs:.25,fr:.3,fenv:.45,res:0.2,glide:0,sub:0.15},ws:{all:.95,sub:{decay:1.1}},vox:{chAtk:.05,chRel:.6}},
+  go:{aa:.004,ad:.35,as:.4,ar:.3,glide:0,sub:0.15},ws:{all:.95,sub:{decay:1.1}},vox:{chAtk:.05,chRel:.6}},
  synthwave:{lee:{attack:.004,decay:.24,envMod:.4,resonance:4.0,cutoff:950,sub:0.45,gate:.5,slideTime:.05,drive:0.1},
   s101:{attack:.02,decay:.4,sustain:.6,release:.6,env:.3,res:2.5,sub:0.1,glide:.04},
-  go:{aa:.02,ad:.6,as:.75,ar:.8,fa:.02,fd:.5,fs:.5,fr:.7,fenv:.3,res:0.15,glide:.05,sub:0.15},ws:{all:1.15,sub:{decay:1}},vox:{chAtk:.15,chRel:1.4}},
+  go:{aa:.02,ad:.6,as:.75,ar:.8,glide:.05,sub:0.15},ws:{all:1.15,sub:{decay:1}},vox:{chAtk:.15,chRel:1.4}},
  trap:{lee:{attack:.002,decay:1.3,envMod:.12,resonance:2.0,cutoff:340,sub:0.7,gate:1.3,slideTime:.14,drive:0.2},
   s101:{attack:.002,decay:.5,sustain:.05,release:.6,env:.2,res:1.0,sub:0.0,glide:0},
-  go:{aa:.003,ad:.8,as:.2,ar:.8,fa:.002,fd:.5,fs:.2,fr:.6,fenv:.2,res:0.1,glide:0,sub:0.05},ws:{all:.9,sub:{decay:1.8}},vox:{chAtk:.02,chRel:.4}},
+  go:{aa:.003,ad:.8,as:.2,ar:.8,glide:0,sub:0.05},ws:{all:.9,sub:{decay:1.8}},vox:{chAtk:.02,chRel:.4}},
  lofi:{lee:{attack:.006,decay:.5,envMod:.2,resonance:2.0,cutoff:520,sub:0.7,gate:.8,slideTime:.08,drive:0.12},
   s101:{attack:.012,decay:.6,sustain:.3,release:.6,env:.2,res:1.0,sub:0.05,glide:0},
-  go:{aa:.012,ad:.8,as:.35,ar:.7,fa:.01,fd:.6,fs:.25,fr:.6,fenv:.2,res:0.08,glide:0,sub:0.1},ws:{all:1.1,sub:{decay:1.3}},vox:{chAtk:.05,chRel:.7}},
+  go:{aa:.012,ad:.8,as:.35,ar:.7,glide:0,sub:0.1},ws:{all:1.1,sub:{decay:1.3}},vox:{chAtk:.05,chRel:.7}},
  psytrance:{lee:{attack:.001,decay:.09,envMod:.85,resonance:10,cutoff:620,sub:0.55,gate:.3,slideTime:.02,drive:0.2},
   s101:{attack:.002,decay:.12,sustain:.05,release:.15,env:.75,res:6,sub:0.05,glide:0},
-  go:{aa:.002,ad:.25,as:.3,ar:.25,fa:.002,fd:.2,fs:.15,fr:.2,fenv:.7,res:0.3,glide:.04,sub:0.1},ws:{all:.75,sub:{decay:.5}},vox:{chAtk:.1,chRel:1}},
+  go:{aa:.002,ad:.25,as:.3,ar:.25,glide:.04,sub:0.1},ws:{all:.75,sub:{decay:.5}},vox:{chAtk:.1,chRel:1}},
  breaks:{lee:{attack:.003,decay:.2,envMod:.6,resonance:8.0,cutoff:900,sub:0.5,gate:.45,slideTime:.04,drive:0.2},
   s101:{attack:.004,decay:.2,sustain:.2,release:.2,env:.55,res:5.0,sub:0.1,glide:0},
-  go:{aa:.004,ad:.4,as:.5,ar:.35,fa:.003,fd:.3,fs:.3,fr:.3,fenv:.5,res:0.3,glide:0,sub:0.15},ws:{all:.95,sub:{decay:1.1}},vox:{chAtk:.05,chRel:.6}}
+  go:{aa:.004,ad:.4,as:.5,ar:.35,glide:0,sub:0.15},ws:{all:.95,sub:{decay:1.1}},vox:{chAtk:.05,chRel:.6}}
 };
 /* the natural instruments keep their own envelope (a guitar must pluck, a marimba must ring) */
 const SHAPE_KEEP_GO=new Set(['NYLON GUITAR','SPANISH GUITAR','ACOUSTIC GUITAR','JAZZ GUITAR','WAH FUNK GUITAR','POWER GUITAR','SITAR','MARIMBA','VIBRAPHONE','KALIMBA','STEEL DRUM','PAN FLUTE','SALSA PIANO','LIQUID RHODES','BRASS SECTION','MARIACHI TRUMPET','DISCO STRINGS','PIZZICATO STRINGS','FRETLESS BASS','ACCORDION']);
@@ -7959,7 +7960,7 @@ function prepareSong(genreKey,txt,forceFill){
  if(/minimal/.test(txt)){skip.add('s101');skip.add('vox')}
  MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});
  /* v86 GENRE MIX BALANCE: kick and bass forward for club genres, heavy 808 for trap, louder lead for trance / synthwave, warmer keys for lo-fi */
- st.level=({ambient:{go:85,s101:65,ws:60,vox:60},
+ st.level=({ambient:{go:85,s101:65,ws:50,vox:60},
   techno:{bl:100,mine:85,lee:88,s101:60,go:62,vox:55,ws:60,lp:40},house:{bl:95,mine:85,lee:85,s101:72,go:68,vox:65,ws:62,lp:45},
   dnb:{bl:100,mine:85,lee:92,s101:58,go:70,vox:60,ws:55,lp:40},hiphop:{bl:100,mine:80,lee:90,s101:60,go:62,vox:65,ws:55,lp:45},
   pop:{bl:92,mine:80,lee:80,s101:70,go:75,vox:70,ws:58,lp:40},trance:{bl:95,mine:82,lee:85,s101:65,go:80,vox:60,ws:55,lp:40},

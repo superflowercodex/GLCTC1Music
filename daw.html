@@ -1283,6 +1283,28 @@ window.glctcResetAll=function(){if(!confirm('RESET EVERYTHING?\n\nThis clears ev
 document.addEventListener('DOMContentLoaded',function(){var r=document.querySelector('.brand-right');if(!r)return;var w=document.createElement('div');w.style.cssText='display:flex;gap:6px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap';function b(t,title,fn,danger){var x=document.createElement('button');x.type='button';x.textContent=t;x.title=title;x.style.cssText='padding:5px 9px;font-size:10px;letter-spacing:.1em;'+(danger?'color:#ff8497':'');x.onclick=fn;w.appendChild(x)}b('↻ REFRESH','Stop all sound, free stuck notes and reload the page (your work is kept)',window.glctcRefresh);b('⟲ RESET ALL','Clear all saved settings, mutes and solos, then reload',window.glctcResetAll,true);r.appendChild(w)});
 </script>
 <script>
+/* v105 GLCTC_LAT · LATENCY ENGINE
+   Browser compressors look ahead ~6 ms and oversampled saturators delay their output ~3-4 ms. Wherever a dry signal
+   is mixed back with one of those, the two copies arrive at different times and comb-filter (hollow, phasey sound),
+   and channels with more processing play later than channels with less. GLCTC_LAT measures the real delays of THIS
+   browser once, and every compensation delay in the desk (parallel dry paths, channel alignment, bus returns) follows it. */
+(()=>{'use strict';
+ const L={comp:.006,f2:128,f4:192,ready:false,reg:[]};
+ L.ws=(os,sr)=>os==='4x'?L.f4/sr:os==='2x'?L.f2/sr:0;
+ /* keep a DelayNode equal to fn() seconds, now and after the measurement lands */
+ L.hold=(node,fn)=>{const set=()=>{try{const v=Math.max(0,Math.min(.9,fn()||0));node.delayTime.value=v}catch(e){}};set();L.reg.push(set);return node};
+ L.refresh=()=>{L.reg=L.reg.filter(f=>{try{f();return true}catch(e){return false}})};
+ async function peakAt(build){const sr=44100,c=new OfflineAudioContext(1,4096,sr),b=c.createBuffer(1,4096,sr);b.getChannelData(0)[64]=.25;const s=c.createBufferSource();s.buffer=b;const n=build(c);s.connect(n);n.connect(c.destination);s.start();const r=await c.startRendering(),d=r.getChannelData(0);let m=0;for(let i=0;i<d.length;i++)if(Math.abs(d[i])>Math.abs(d[m]))m=i;return {f:m-64,sr}}
+ async function measure(){try{if(typeof OfflineAudioContext==='undefined')return;
+  const ws=os=>c=>{const w=c.createWaveShaper(),cv=new Float32Array(1025);for(let i=0;i<1025;i++)cv[i]=i/512-1;w.curve=cv;w.oversample=os;return w};
+  const a=await peakAt(ws('2x')),b=await peakAt(ws('4x')),k=await peakAt(c=>{const x=c.createDynamicsCompressor();x.threshold.value=0;x.ratio.value=1;return x});
+  if(a.f>=0&&a.f<1024)L.f2=a.f;if(b.f>=0&&b.f<1024)L.f4=b.f;if(k.f>=0&&k.f<2048)L.comp=k.f/k.sr;L.ready=true;L.refresh();
+  try{window.dispatchEvent(new Event('glctc-lat'))}catch(e){}}catch(e){console.warn('latency probe',e)}}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',measure,{once:true});else measure();
+ window.GLCTC_LAT=L;
+})();
+</script>
+<script>
 (() => {
 'use strict';
 const $ = id => document.getElementById(id);
@@ -1361,22 +1383,22 @@ const totalBeats=()=>Math.max(beatsPerBar()*32,(window.GLCTC_SONG&&GLCTC_SONG.le
 function toast(message){$('toast').textContent=message;$('toast').classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),2800)}
 function status(message){const e=$('status');if(e&&e.textContent!==message)e.textContent=message}
 function defaultProject(){return {version:1,id:uid(),name:'Untitled Galactic Project',tuningHz:639,bpm:130,timeSig:'4/4',master:.8,tracks:[
- {id:uid(),name:'Drums',type:'audio',color:COLORS[0],volume:.9,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Bass',type:'midi',color:COLORS[1],volume:.85,pan:0,mute:false,solo:false,clips:[{id:uid(),name:'Bass Pattern',start:0,length:16,kind:'midi',notes:[]} ]},
+ {id:uid(),name:'Drums',type:'audio',color:COLORS[0],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'Bass',type:'midi',color:COLORS[1],volume:.8,pan:0,mute:false,solo:false,clips:[{id:uid(),name:'Bass Pattern',start:0,length:16,kind:'midi',notes:[]} ]},
  {id:uid(),name:'Percussion',type:'audio',color:COLORS[2],volume:.8,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Synth Lead',type:'midi',color:COLORS[3],volume:.75,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Vocals',type:'audio',color:COLORS[4],volume:1,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'FX',type:'audio',color:COLORS[5],volume:.7,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Video',type:'video',color:COLORS[6],volume:1,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Video FX',type:'video',color:COLORS[7],volume:1,pan:0,mute:false,solo:false,clips:[]},
- {id:uid(),name:'Looper · Module Track',type:'audio',color:'#19baff',volume:.8,pan:0,mute:false,solo:false,clips:[],looper:true},
+ {id:uid(),name:'Synth Lead',type:'midi',color:COLORS[3],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'Vocals',type:'audio',color:COLORS[4],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'FX',type:'audio',color:COLORS[5],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'Video',type:'video',color:COLORS[6],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'Video FX',type:'video',color:COLORS[7],volume:.8,pan:0,mute:false,solo:false,clips:[]},
+ {id:uid(),name:'Looper · Module Track',type:'audio',color:'#19baff',volume:1,pan:0,mute:false,solo:false,clips:[],looper:true},
  {id:uid(),name:'GLCTC1 80LA8 · Module Track',type:'audio',color:'#19baff',volume:.8,pan:0,mute:false,solo:false,clips:[]},
  {id:uid(),name:'90MINE · Module Track',type:'audio',color:'#ff8a48',volume:.8,pan:0,mute:false,solo:false,clips:[]},
  {id:uid(),name:'30LEE · Module Track',type:'audio',color:'#ff6eae',volume:.8,pan:0,mute:false,solo:false,clips:[]},
  {id:uid(),name:'0010110 · Module Track',type:'audio',color:'#75e4ff',volume:.8,pan:0,mute:false,solo:false,clips:[]},
  {id:uid(),name:'GALACTIC ONE · Module Track',type:'audio',color:'#40eaff',volume:.8,pan:0,mute:false,solo:false,clips:[]}
  ],assets:[],created:Date.now(),updated:Date.now()}}
-function ensureAudio(){if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"});GLCTC_CLOCK.install(audioCtx);const createShaper=audioCtx.createWaveShaper.bind(audioCtx);audioCtx.createWaveShaper=(...args)=>{const n=createShaper(...args);window.GLCTC_PERF?.registerShaper(n);return n};masterGain=audioCtx.createGain();audioCtx._fin=audioCtx.createGain();masterFilter=audioCtx.createBiquadFilter();masterFilter.type='lowpass';masterFilter.frequency.value=18000;delayNode=audioCtx.createDelay(2);GLCTC_CLOCK.syncDelay(delayNode,.75);const fb=audioCtx.createGain();fb.gain.value=.22;delayNode.connect(fb);fb.connect(delayNode);delayWet=audioCtx.createGain();delayDry=audioCtx.createGain();const lim=audioCtx.createDynamicsCompressor();lim.threshold.value=0;lim.knee.value=0;lim.ratio.value=1;lim.attack.value=.003;lim.release.value=.1;audioCtx._lim=lim;audioCtx._mg=masterGain;const mIn=audioCtx.createGain(),mOut=audioCtx.createGain();masterGain.connect(mIn);mIn.connect(mOut);mOut.connect(lim);audioCtx._limIn=mIn;audioCtx._mIns=[mIn,mOut];const limTrim=audioCtx.createGain();audioCtx._limTrim=limTrim;lim.connect(limTrim);limTrim.connect(masterFilter);sendBus=audioCtx.createGain();audioCtx._send=sendBus;const tr=mkRev(audioCtx);audioCtx._rev=tr.in;tr.out.connect(masterGain);const md=mkDelay(audioCtx),mr=mkRev(audioCtx),mDW=audioCtx.createGain(),mRW=audioCtx.createGain();const satIn=audioCtx.createGain(),sat=audioCtx.createWaveShaper(),cv=new Float32Array(4097);satIn.gain.value=.5;for(let i=0;i<cv.length;i++){const x=(i/(cv.length-1)*2-1)*2,ax=Math.abs(x),y=ax<=.8?ax:.8+.2*Math.tanh((ax-.8)/.2);cv[i]=(x<0?-y:y)*.98}sat.curve=cv;sat.oversample='2x';satIn.connect(sat);sat.connect(audioCtx.destination);audioCtx._sat=satIn;/* v73 FINAL SAFETY LIMITER: master + master delay/reverb returns are summed and held under the output soft-clipper (-3.5 dBFS, browser make-up gain cancelled) */const post=audioCtx.createGain(),fl=audioCtx.createDynamicsCompressor(),flT=audioCtx.createGain();fl.threshold.value=-3.5;fl.knee.value=0;fl.ratio.value=20;fl.attack.value=.001;fl.release.value=.08;flT.gain.value=1/Math.pow(1/Math.pow(10,(-3.5+3.5/20)/20),.6);post.connect(fl);fl.connect(flT);flT.connect(satIn);flT.connect(audioCtx._fin);audioCtx._post=post;audioCtx._final=flT;masterFilter.connect(md.in);md.out.connect(mDW);mDW.connect(post);masterFilter.connect(mr.in);mr.out.connect(mRW);mRW.connect(post);audioCtx._m={volume:masterGain.gain,filter:masterFilter.frequency,delay:mDW.gain,reverb:mRW.gain};sendBus.connect(delayNode);masterFilter.connect(post);delayNode.connect(delayWet);delayWet.connect(masterGain);setMaster()}if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
+function ensureAudio(){if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"});GLCTC_CLOCK.install(audioCtx);const createShaper=audioCtx.createWaveShaper.bind(audioCtx);audioCtx.createWaveShaper=(...args)=>{const n=createShaper(...args);window.GLCTC_PERF?.registerShaper(n);return n};masterGain=audioCtx.createGain();audioCtx._fin=audioCtx.createGain();masterFilter=audioCtx.createBiquadFilter();masterFilter.type='lowpass';masterFilter.frequency.value=18000;delayNode=audioCtx.createDelay(2);GLCTC_CLOCK.syncDelay(delayNode,.75);const fb=audioCtx.createGain();fb.gain.value=.22;delayNode.connect(fb);fb.connect(delayNode);delayWet=audioCtx.createGain();delayDry=audioCtx.createGain();const lim=audioCtx.createDynamicsCompressor();lim.threshold.value=0;lim.knee.value=0;lim.ratio.value=1;lim.attack.value=.003;lim.release.value=.1;audioCtx._lim=lim;audioCtx._mg=masterGain;const mIn=audioCtx.createGain(),mOut=audioCtx.createGain();masterGain.connect(mIn);mIn.connect(mOut);mOut.connect(lim);audioCtx._limIn=mIn;audioCtx._mIns=[mIn,mOut];const limTrim=audioCtx.createGain();audioCtx._limTrim=limTrim;lim.connect(limTrim);limTrim.connect(masterFilter);sendBus=audioCtx.createGain();audioCtx._send=sendBus;const tr=mkRev(audioCtx);audioCtx._rev=tr.in;tr.out.connect(masterGain);const md=mkDelay(audioCtx),mr=mkRev(audioCtx),mDW=audioCtx.createGain(),mRW=audioCtx.createGain();const satIn=audioCtx.createGain(),sat=audioCtx.createWaveShaper(),cv=new Float32Array(4097);satIn.gain.value=.5;for(let i=0;i<cv.length;i++){const x=(i/(cv.length-1)*2-1)*2,ax=Math.abs(x),y=ax<=.8?ax:.8+.2*Math.tanh((ax-.8)/.2);cv[i]=(x<0?-y:y)*.98}sat.curve=cv;sat.oversample='2x';satIn.connect(sat);sat.connect(audioCtx.destination);audioCtx._sat=satIn;/* v73 FINAL SAFETY LIMITER: master + master delay/reverb returns are summed and held under the output soft-clipper (-3.5 dBFS, browser make-up gain cancelled) */const post=audioCtx.createGain(),fl=audioCtx.createDynamicsCompressor(),flT=audioCtx.createGain();fl.threshold.value=-1;fl.knee.value=0;fl.ratio.value=20;fl.attack.value=.001;fl.release.value=.08;flT.gain.value=1/Math.pow(1/Math.pow(10,(-1+1/20)/20),.6);   /* v105: mastering ceiling -1 dBFS */audioCtx._flim=fl;post.connect(fl);fl.connect(flT);flT.connect(satIn);flT.connect(audioCtx._fin);audioCtx._post=post;audioCtx._final=flT;masterFilter.connect(md.in);md.out.connect(mDW);mDW.connect(post);masterFilter.connect(mr.in);mr.out.connect(mRW);mRW.connect(post);audioCtx._m={volume:masterGain.gain,filter:masterFilter.frequency,delay:mDW.gain,reverb:mRW.gain};sendBus.connect(delayNode);masterFilter.connect(post);delayNode.connect(delayWet);delayWet.connect(masterGain);setMaster()}if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
 function setMaster(){if(!masterGain)return;const m=mfx();masterGain.gain.value=Number($('masterVol').value);masterFilter.frequency.value=m.on&&m.flt?Number($('filterCutoff').value):20000;if(audioCtx&&audioCtx._m){audioCtx._m.delay.value=m.on&&m.dly?Number($('delayMix').value):0;audioCtx._m.reverb.value=m.on&&m.rev?Number($('reverbMix').value):0}if(delayWet)delayWet.gain.value=.8}
 function stopSources(){activeSources.forEach(s=>{try{s.stop?.()}catch(e){}try{s.disconnect?.()}catch(e){}});activeSources=[];startedClips.clear();resetAuto()}
 function trackAudible(track){if(track.type==='auto')return !track.mute;/* v67 GLOBAL SOLO: a soloed module silences every un-soloed track too */const anySolo=project.tracks.some(t=>t.solo&&t.type!=='auto')||!!(window.glctcModSolo&&window.glctcModSolo());return !track.mute&&(!anySolo||track.solo)}
@@ -1802,7 +1824,7 @@ function mkRev(ctx){const i=ctx.createGain(),c=ctx.createConvolver();c.buffer=ma
 function fxApply(b){const f=tfx(b.track),on=f.on;b.filter.value=on&&f.flt?f.cut:20000;b.delay.value=on&&f.dly?f.ds:0;b.reverb.value=on&&f.rev?f.rs:0}
 function fxAll(){Object.values(audioCtx?._buses||{}).forEach(fxApply)}
 /* v73 DIRECT OUT: every channel's straight-to-master signal goes through one node, so soloing a BUS can silence the direct outs while the sends keep feeding the buses */
-window.GLCTC_DIRECT=c=>{if(!c._direct){c._direct=c.createGain();c._direct.connect(c._mg||masterGain)}return c._direct};
+window.GLCTC_DIRECT=c=>{if(!c._direct){c._direct=c.createGain();c._dd=c.createDelay(1);c._dd.delayTime.value=0;c._direct.connect(c._dd);c._dd.connect(c._mg||masterGain)}return c._direct};   /* v105: _dd lines the direct outs up with the bus returns */
 function trackBus(ctx,track){const M=ctx._buses||(ctx._buses={});if(M[track.id])return M[track.id];const input=ctx.createGain(),flt=ctx.createBiquadFilter(),tap=ctx.createGain(),ds=ctx.createGain(),rs=ctx.createGain();flt.type='lowpass';input.connect(flt);flt.connect(tap);tap.connect(ds);tap.connect(rs);if(ctx._send)ds.connect(ctx._send);if(ctx._rev)rs.connect(ctx._rev);const b=M[track.id]={in:input,volume:input.gain,filter:flt.frequency,delay:ds.gain,reverb:rs.gain,tap,track,flt};fxApply(b);return b}
 function trackFx(ctx,track,dest){const b=trackBus(ctx,track);b.track=track;if(!b.wired){b.tap.connect(dest);b.wired=true}return b.in}
 function fxStrip(box,t){const f=tfx(t),row=document.createElement('div');row.className='controls-row';[['on','FX'],['flt','FLT'],['dly','DLY'],['rev','REV']].forEach(([k,n])=>{const b=document.createElement('button');b.className='tiny'+(f[k]?' active':'');b.textContent=n;b.title=n==='FX'?'Track FX on/off':n+' on/off';b.onclick=()=>{f[k]=!f[k];b.classList.toggle('active',f[k]);fxAll();renderTimeline();markDirty()};row.append(b)});box.append(row);[['cut','Cutoff',200,18000,1],['ds','Delay send',0,1,.01],['rs','Reverb send',0,1,.01]].forEach(([k,n,mn,mx,st])=>{const l=document.createElement('label');l.textContent=n;const r=document.createElement('input');r.type='range';r.min=mn;r.max=mx;r.step=st;r.value=f[k];r.setAttribute('aria-label',t.name+' '+n);r.oninput=()=>{f[k]=Number(r.value);fxAll();markDirty()};box.append(l,r)})}
@@ -2515,6 +2537,9 @@ function proc(s){const b=s.buf;if(!b)return;const L=s.L,c=ensureAudio(),o=c.crea
 const tunedLoops=new WeakMap();
 function prepareTunedLoop(s){
  const original=s.proc,hz=GLCTC_TUNING.hz;if(!original)return Promise.resolve(null);
+ /* v105: the built-in groove loop is unpitched percussion - time-stretching it to the chakra tuning only smeared its hits
+    2-7 ms off the beat (a drifting saw-tooth against the other modules). It now plays sample-accurate, untouched. */
+ if(s.buf&&s.buf.__noTune){s.tuned=original;s.tunedOriginal=original;s.tunedHz=hz;return Promise.resolve(original)}
  let cache=tunedLoops.get(original);if(!cache){cache=new Map();tunedLoops.set(original,cache)}
  if(cache.has(hz))return cache.get(hz).then(out=>{if(s.proc===original&&GLCTC_TUNING.hz===hz){s.tuned=out;s.tunedOriginal=original;s.tunedHz=hz}return out});
  const job=stretchAsync(original,hz/440).then(stretched=>{
@@ -2536,6 +2561,7 @@ window.lpLive=()=>Object.values(LP).forEach(a=>a.forEach(s=>{if(s&&s.v&&s.proc)a
 window.GLCTC_LOOPER_FILES_REFRESH=kind=>{const t=getTrack($('lpTrack').value);if(!t?.looper)return;(LP[t.id]||[]).forEach(s=>{if(!s)return;s.L=t.looper.pads[s.i];if(kind==='preset'&&s.buf){const at=s.v?s.v.src.context.currentTime+.02:null,pos=s.v?loopPosition(s,at):null;proc(s);if(at!=null)play(s,at,pos)}else if(s.v)apply(s)});ui()};
 function stop(s){s.tuneRequest=(s.tuneRequest||0)+1;if(s.v){try{s.v.src.stop()}catch(e){}try{s.v.src.disconnect()}catch(e){}s.v=null}}
 function play(s,when,position){if(!s.proc)return;
+ if(s.buf&&s.buf.__noTune){s.tuned=s.proc;s.tunedOriginal=s.proc;s.tunedHz=GLCTC_TUNING.hz}
  if(s.tunedOriginal!==s.proc||s.tunedHz!==GLCTC_TUNING.hz){const request=(s.tuneRequest||0)+1;s.tuneRequest=request;prepareTunedLoop(s).then(()=>{if(s.tuneRequest===request)play(s,Math.max(when||0,ensureAudio().currentTime+.02),position)}).catch(e=>{console.error(e);toast('Looper tuning failed.')});return}
  const old=s.v;if(old){const at=when??old.src.context.currentTime;old.g.gain.setTargetAtTime(0,at,.005);try{old.src.stop(at+.025)}catch(e){}s.v=null} s.L.loop=true;const c=ensureAudio(),v=build(c,s,trackFx(c,s.t,masterGain));s.v=v;apply(s);v.src.onended=()=>{if(s.v===v){s.v=null;ui()}};const o0=window.__glctcStartStep||0,reg=Math.max(.01,(s.L.end-s.L.start)*s.proc.duration),off=((o0/4)*(60/GLCTC_CLOCK.bpm)*rate(s))%reg;const at=Math.max(c.currentTime,when??window.__glctcMasterStartAt??0),K=GLCTC_CLOCK;
  const phase=Math.max(0,position??(s.L.start*s.proc.duration+((((K.beatAt(at)*60/K.bpm)*rate(s))%reg)+reg)%reg)); /* v92: a start just before the clock anchor gave a negative offset */
@@ -2558,7 +2584,7 @@ window.lpLoadDemo=(force,genre)=>{try{const t=project.tracks.find(x=>x.looper);i
  for(let i=0;i<bars*16;i++){const st=Math.round((i+(i%2===1?sw:0))*sx);if(st>=len)continue;const a=GR.sh[i%GR.sh.length]||0,tb=GR.tb?GR.tb[i%16]:0;
   if(a)hit(st,a*.6*(.92+.16*Math.abs(rnd())),.011,.045,false);if(tb)hit(st,tb*.6,.034,.14,true)}
  if(GR.cr){const nC=Math.round(len/sr*14*GR.cr);for(let j=0;j<nC;j++){const at=Math.floor((rnd()*.5+.5)*(len-4)),amp=(.04+.14*Math.pow(Math.abs(rnd()),3))*(rnd()<0?-1:1);d[at]+=amp;d[at+1]-=amp*.6;d[at+2]+=amp*.2}}
- s.buf=b;const L=t.looper.pads[0];L.bars=bars;L.warp=true;L.mode='loop';L.loop=true;t.looper.sel=0;proc(s);ui();draw(s)}catch(e){console.warn('Looper demo',e)}};
+ b.__noTune=true;s.buf=b;const L=t.looper.pads[0];L.bars=bars;L.warp=true;L.mode='loop';L.loop=true;t.looper.sel=0;proc(s);ui();draw(s)}catch(e){console.warn('Looper demo',e)}};
 function refresh(){const sel=$('lpTrack'),v=sel.value;sel.innerHTML='';project.tracks.filter(t=>t.looper).forEach(t=>sel.append(new Option(t.name,t.id)));if([...sel.options].some(o=>o.value===v))sel.value=v;ui()}
 window.lpUse=id=>{const t=getTrack(id);if(!t)return;ensure(t);markDirty();renderAll();$('lpTrack').value=id;ui();$('looperPanel').__noJump?.({behavior:'smooth'})};
 const _ra4=renderAll;renderAll=function(){const r=_ra4.apply(this,arguments);refresh();window.lpLive();return r};
@@ -5079,6 +5105,8 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  const AM={on:true,active:false,tdb:{},master:0,hist:{},an:{},mAn:null,mHist:[],mPk:0,buf:new Float32Array(2048),last:0,lastM:0,note:'',lpBase:null,lpSet:null,lpTap:null,genre:'',mt:-14.5};
  const AM_TARGET={sub:-20,bl:-16,mine:-25,lee:-23,s101:-26,go:-24,vox:-25,ws:-29,lp:-33};   /* v104 BALANCE: leads / stabs / pads were sitting 15-20 dB under the drums - now lead ~8 dB, stabs ~11 dB, pads ~13 dB under the kit */   /* v71: DIVINE09 only plays hats / ride / crash now, so it sits under the kick and snare instead of matching them; the Looper is a texture layer */   /* loud-passage level of each sound (dBFS), peak-aware */
  const AM_START={sub:-6,bl:-1,mine:-2,lee:-8,s101:-12,go:-12,vox:-10,ws:-6};   /* v73: no channel starts above 0 dB - a hot preset can never blast before it is measured */   /* v70: measured average of where the auto mix settles, so every sound already sits right the first time it enters (a build is not learned from) */                    /* first guess, so nothing blasts before it has been measured */
+ /* v105: measured settle point of the auto mix for every genre (dB) */
+ const AM_START_G=GLCTC_GFILL({"techno":{"bl":-2.9,"mine":2,"sub":-20.2,"lee":-12.7,"s101":-9,"go":-14.4,"master":-4.0},"house":{"bl":-4.1,"mine":2,"sub":-17.6,"lee":-5,"s101":-9.3,"go":-4.9,"master":-1.1},"deephouse":{"bl":0.1,"mine":2,"sub":-15.8,"lee":-5,"s101":-0.1,"go":-7.6,"master":0},"techhouse":{"bl":-3.2,"mine":2,"sub":-19.1,"lee":-3.8,"s101":-7.6,"go":-6.4,"ws":0,"master":-2.2},"tribalhouse":{"bl":-1,"mine":2,"sub":-15.9,"lee":-3.5,"go":-6.3,"vox":0,"ws":0,"master":0},"hardhouse":{"bl":-3.3,"mine":2,"sub":-18.9,"lee":-3.8,"s101":-13.7,"go":-10.2,"master":-2.9},"trance":{"bl":-1,"mine":2,"sub":-16.8,"lee":-9.4,"s101":-9.0,"go":2,"master":-0.9},"psytrance":{"bl":1.5,"mine":2,"sub":-8.6,"lee":0,"s101":-9.5,"go":0.2,"master":-1.1},"happyhardcore":{"bl":-2.8,"mine":2,"sub":-18.2,"lee":-2,"s101":-7.9,"go":-1.5,"master":-2.2},"dnb":{"bl":3,"mine":2,"sub":-16.4,"lee":0,"s101":-12,"go":-6.1,"master":0},"jungle":{"bl":-1.4,"mine":2,"sub":-19.6,"lee":-2.4,"s101":-10.9,"go":-11.0,"master":-2.4},"liquid":{"bl":3,"mine":2,"sub":-16.4,"lee":-3.5,"s101":-6,"go":-3,"master":0},"breaks":{"bl":-1.4,"mine":-1.1,"sub":-21.5,"lee":-15.7,"s101":-18.5,"go":-12.6,"master":-4.8},"nuskool":{"bl":3,"mine":2,"sub":-15.9,"lee":-8,"s101":-4.5,"go":0,"master":0},"electro":{"bl":-3.3,"mine":2,"sub":-20.5,"lee":-6.1,"s101":-12.3,"go":-5.7,"master":-4.6},"garage":{"bl":-2.5,"mine":2,"sub":-17.1,"lee":-9.3,"s101":-9,"go":-7.5,"master":-1.0},"dubstep":{"bl":2,"mine":-15.0,"sub":-18.3,"lee":-11.4,"s101":-7.5,"go":-13.0,"master":-1.8},"eastcoast":{"bl":-3.1,"mine":0.5,"sub":-19.1,"lee":-13.4,"s101":-18.8,"go":-11.7,"master":-4.3},"westcoast":{"bl":-4.1,"mine":2,"sub":-19.4,"lee":-3.1,"s101":-12.7,"go":-9.4,"master":-3.8},"south":{"bl":-5.1,"mine":2,"sub":-19.1,"lee":-6.0,"s101":-11.2,"go":-6.1,"master":-3.3},"ukhiphop":{"bl":-1.5,"mine":2,"sub":-18.1,"lee":-3.5,"s101":-9.5,"go":-4.1,"master":-2.3},"drill":{"bl":-5.4,"mine":2,"sub":-19.4,"lee":-6.5,"s101":-11.9,"go":-9.5,"master":-3.8},"trap":{"bl":-6.2,"mine":2,"sub":-19.4,"lee":-5,"s101":-9.0,"go":-4.0,"master":-3.6},"lofi":{"bl":-0.8,"mine":-10.0,"sub":-20.8,"lee":-15.7,"s101":-14.8,"go":-9.7,"master":-4.1},"reggae":{"bl":3,"mine":2,"sub":-16.1,"lee":-3.5,"s101":-6.7,"go":-3.3,"master":0},"ska":{"bl":3,"mine":2,"sub":-16.5,"lee":-5,"s101":-7.6,"go":-1.5,"master":0},"pop":{"bl":-2.5,"mine":2,"sub":-18.2,"lee":-3.5,"s101":-10.5,"go":-4.8,"master":-1.1},"synthwave":{"bl":-2.1,"mine":2,"sub":-16.8,"lee":-11.4,"s101":-12,"go":-6,"master":-1.1},"ambient":{"sub":-15.5,"lee":-8.2,"s101":-3.3,"go":-1.5,"ws":0,"master":0.9},"meditation":{"sub":-17.7,"lee":-13.2,"s101":-9.5,"go":-5.8,"vox":0,"ws":0,"master":-1.8}});
  const AM_MAXUP={sub:0,mine:2,ws:0,bl:3,lee:0,s101:0,go:2,vox:0};   /* Auto-mix ceilings preserve the beat-first balance, including sparse synth tails. */
  /* Melodic auto-trims stay below unity: sparse tails must never be promoted to lead volume. */
  const AM_LS='glctc1.autoMix',AM_MASTER_BY={ambient:-22,lofi:-20,hiphop:-18,techno:-16.5,dnb:-16.5,dubstep:-16.5,psytrance:-16.5,house:-17,trance:-17,breaks:-17,garage:-17,trap:-17.5,pop:-17,synthwave:-17.5} /* v89: modest lift over the original -18 */ /* v88 genre loudness targets: club genres hit harder, soft genres stay soft */,AM_LEARN='glctc1.autoMix.learned';
@@ -5097,7 +5125,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  function amLoopNode(){const lt=amLoop(),c=audioCtx;const b=lt&&c&&c._buses?c._buses[lt.id]:null;return b&&b.head?b.head.gain:null}
  function amLoopTrim(v){AM.lpSet=v;const g=amLoopNode();if(g){try{g.setTargetAtTime(v==null?1:v,audioCtx.currentTime,.05)}catch(e){g.value=v==null?1:v}}}
  function amRestoreLoop(){AM.lpBase=null;amLoopTrim(null);AM.lpSet=null}
- function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=AM_START[m.id]||0});AM.master=0;AM.locked=false;AM.stable=0;
+ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};const G0=AM_START_G[AM.genre]||{};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=G0[m.id]??AM_START[m.id]??0});AM.master=G0.master??0;   /* v105: every genre starts where its auto mix settles, so the intro is not louder than the drop */AM.locked=false;AM.stable=0;
   AM.hist={};AM.measured=new Set();AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
   if(AM.on){const lt=amLoop();if(lt)amLoopTrim(.4)}
   try{applyMix()}catch(e){}amNote(AM.on?'AUTO MIX · LISTENING…':'AUTO MIX OFF')}
@@ -5197,7 +5225,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    bSolo=el('button',{class:'solo',text:'S',title:m.track?'Solo (follows the Looper timeline track)':'Solo this module in the mix',onclick:()=>toggleAudio(m,'solo')}),
    bMute=el('button',{class:'mute',text:'M',title:'Mute this module (keeps playing, silent)',onclick:()=>toggleAudio(m,'mute')}),
    bByp=el('button',{text:'BYP',title:'Bypass: exclude from master / Play All',onclick:()=>{const mm=HUB.mods[m.id],e=mm&&$(mm.bypassEl);if(e){e.checked=!e.checked;e.dispatchEvent(new Event('change'))}}}),
-   vol=el('input',{type:'range',min:0,max:1.25,step:.01,value:1,'aria-label':m.name+' level',oninput:()=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.volume=cl(+vol.value,0,1);window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).vol=+vol.value;applyMix();saveSoon()}}}),
+   vol=el('input',{type:'range',min:0,max:1.25,step:.01,value:1,'aria-label':m.name+' level',oninput:()=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.volume=cl(+vol.value,0,1.25);window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).vol=+vol.value;applyMix();saveSoon()}}}),
    pan=el('input',{type:'range',min:-1,max:1,step:.05,value:0,title:'Pan','aria-label':m.name+' pan',oninput:()=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.pan=+pan.value;window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).pan=+pan.value;applyMix();saveSoon()}}}),
    mt=el('div',{class:'ws-meter'},el('i')),
    go=el('button',{class:'tiny qmx-nojump',text:'↗',title:'Jump to this module',onclick:()=>gotoPanel(m)}),
@@ -5478,7 +5506,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
  UI.fxOn=fxBtn('FX',$('mfxOn'));UI.fxF=fxBtn('FILTER','[data-mfx="flt"]');UI.fxD=fxBtn('DELAY','[data-mfx="dly"]');UI.fxR=fxBtn('REVERB','[data-mfx="rev"]');
  UI.lim=el('button',{class:'tiny',text:'LIMITER',title:'Brick-wall style safety limiter on the master',onclick:()=>{ST.lim=!ST.lim;applyLimiter();save();refresh()}});
  /* v73: the browser compressor adds its own make-up gain, which pushed the limited master back over the top into the output soft-clipper. The trim after it cancels that make-up, so LIMITER ON is a real ceiling around -4 dBFS (below the clipper) */
-function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.lim){T=-4.5;R=20;l.threshold.value=T;l.knee.value=0;l.ratio.value=R;l.attack.value=.001;l.release.value=.1}else{T=-6;R=3;l.threshold.value=T;l.knee.value=10;l.ratio.value=R;l.attack.value=.006;l.release.value=.2}
+function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.lim){T=-1.3;R=20;l.threshold.value=T;l.knee.value=0;l.ratio.value=R;l.attack.value=.001;l.release.value=.09}   /* v105: brick-wall at -1.3 dBFS (was -4.5) - the mastering drive decides how hard it works */else{T=-6;R=3;l.threshold.value=T;l.knee.value=10;l.ratio.value=R;l.attack.value=.006;l.release.value=.2}
  if(c._limTrim){const full=Math.pow(10,(T-T/R)/20),makeup=Math.pow(1/full,.6);c._limTrim.gain.value=1/makeup}}
  masC.c.append(el('div',{class:'ws-master'},el('div',{},el('div',{class:'ws-mm'},UI.mm[0],UI.mm[1]),UI.db,UI.clip),
   el('div',{style:'display:grid;gap:8px'},mir('Master volume','masterVol',v=>Math.round(v*100)+'%'),mir('Filter cutoff','filterCutoff',v=>v>=17900?'OPEN':Math.round(v)+' Hz'),mir('Delay','delayMix',v=>Math.round(v*100)+'%'),mir('Reverb','reverbMix',v=>Math.round(v*100)+'%'),
@@ -5826,7 +5854,7 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
    bSolo=el('button',{class:'cn-b solo',type:'button',text:'S',title:'Solo',onclick:()=>toggleAudio(m,'solo')}),
    bMute=el('button',{class:'cn-b mute',type:'button',text:'M',title:'Mute',onclick:()=>toggleAudio(m,'mute')}),
    go=el('button',{class:'cn-b qmx-nojump',type:'button',text:'↗',title:'Jump to this module',onclick:()=>gotoPanel(m)}),
-   vol=cnFader(m.name+' level',0,m.track?1:1.25,.01,1,v=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.volume=cl(v,0,1);window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).vol=v;applyMix();saveSoon()}},1,1),
+   vol=cnFader(m.name+' level',0,1.25,.01,1,v=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.volume=cl(v,0,1.25);window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).vol=v;applyMix();saveSoon()}},1,1),
    pk=mkKnob('PAN',-1,1,.05,0,v=>{ensureBuses();if(m.track){const t=lpTrack();if(t){t.pan=v;window.lpLive&&window.lpLive();markDirty()}}else{ms(m.id).pan=v;applyMix();saveSoon()}},v=>Math.abs(v)<.03?'C':(v<0?'L':'R')+Math.round(Math.abs(v)*100),0),
    pan=pk.el,mt=el('i',{'data-v':'1'}),meter=el('div',{class:'cn-led'},mt);
   Object.defineProperty(pan,'value',{get:pk.get,set:x=>pk.set(x,true)});
@@ -6369,7 +6397,7 @@ function chain(c,dest){
  if(c._b8&&c._b8.dest===dest)return c._b8.list;
  const list=[];
  for(let i=0;i<NB;i++){
-  const B={i,in:c.createGain(),lc:c.createBiquadFilter(),hc:c.createBiquadFilter(),dry:c.createGain(),sh:c.createWaveShaper(),wet:c.createGain(),sum:c.createGain(),comp:c.createDynamicsCompressor(),mk:c.createGain(),vol:c.createGain(),gate:c.createGain(),pan:c.createStereoPanner(),an:c.createAnalyser(),ds:c.createGain(),rs:c.createGain(),k:-1,topo:''};
+  const B={i,in:c.createGain(),lc:c.createBiquadFilter(),hc:c.createBiquadFilter(),dry:c.createGain(),sh:c.createWaveShaper(),wet:c.createGain(),sum:c.createGain(),comp:c.createDynamicsCompressor(),dly:c.createDelay(.1),mk:c.createGain(),vol:c.createGain(),gate:c.createGain(),pan:c.createStereoPanner(),an:c.createAnalyser(),ds:c.createGain(),rs:c.createGain(),k:-1,topo:''};if(window.GLCTC_LAT)GLCTC_LAT.hold(B.dly,()=>GLCTC_LAT.comp);else B.dly.delayTime.value=.006;
   B.in.channelCount=2;B.in.channelCountMode='explicit';B.in.channelInterpretation='speakers';
   B.lc.type='highpass';B.lc.Q.value=.707;B.hc.type='lowpass';B.hc.Q.value=.707;B.sh.oversample='none';B.an.fftSize=512;B.ds.gain.value=0;B.rs.gain.value=0;
   B.sh.connect(B.wet);B.dry.connect(B.sum);B.wet.connect(B.sum);B.ix=c.createGain();B.ox=c.createGain();B.mk.connect(B.ix);B.ix.connect(B.ox);B.ox.connect(B.vol);B.vol.connect(B.gate);B.gate.connect(B.pan);
@@ -6384,12 +6412,12 @@ function topo(c,B){
  const b=S.buses[B.i],f=b.fx,on=!!f.on,fed=feeders(B.i)>0||(c!==AC()&&!!(c._b8s&&Object.values(c._b8s).length));
  const L=on&&f.lc>21,H=on&&f.hc<19900,D=on&&f.drv>0,G=on&&f.glue>0,R=on&&(f.dly>0||f.rev>0);
  const sig=[fed,L,H,D,G,R].map(x=>x?1:0).join('');if(sig===B.topo)return;B.topo=sig;
- [B.in,B.lc,B.hc,B.comp].forEach(n=>{try{n.disconnect()}catch(e){}});try{B.sum.disconnect()}catch(e){}try{B.pan.disconnect()}catch(e){}
+ [B.in,B.lc,B.hc,B.comp,B.dly].forEach(n=>{try{n.disconnect()}catch(e){}});try{B.sum.disconnect()}catch(e){}try{B.pan.disconnect()}catch(e){}
  if(!fed)return;
  let x=B.in;const to=n=>{x.connect(n);x=n};
  if(L)to(B.lc);if(H)to(B.hc);
  if(D){x.connect(B.dry);x.connect(B.sh);x=B.sum}
- if(G)to(B.comp);
+ if(G)to(B.comp);else to(B.dly);   /* v105: a bus always runs the compressor's look-ahead time, glue or not, so its return lines up with the direct outs */
  x.connect(B.mk);
  B.pan.connect(B.dest||c._b8.dest);B.pan.connect(B.an);if(R){B.pan.connect(B.ds);B.pan.connect(B.rs)}
 }
@@ -6509,7 +6537,12 @@ function build_sends(){const ms=document.querySelector('#qmxDesk .qmx-mods .cn-s
 
 /* v74 CPU: desk meters only repaint while the desk is on screen */
 (function deskVis(){const d=document.getElementById('qmxDesk');if(!d||!window.IntersectionObserver){setTimeout(deskVis,1000);return}new IntersectionObserver(es=>{es.forEach(e=>{window.__glctcDeskVis=e.isIntersecting})},{rootMargin:'200px'}).observe(d)})();
-window.GLCTC_BUSES={sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
+/* v105: while any bus is fed, the direct outs wait for the bus path (compressor look-ahead + the slowest bus insert chain) */
+function align(){const c=AC();if(!c||!c._dd)return;let fed=false;for(let i=0;i<NB;i++)if(feeders(i)>0){fed=true;break}
+ const P=window.GLCTC_FX&&GLCTC_FX.pdc?GLCTC_FX.pdc():{bus:0},v=fed?((window.GLCTC_LAT?GLCTC_LAT.comp:.006)+(P.bus||0)):0;
+ if(Math.abs(c._dd.delayTime.value-v)>2e-5){try{c._dd.delayTime.setTargetAtTime(v,c.currentTime,.01)}catch(e){c._dd.delayTime.value=v}}}
+setInterval(()=>{try{align()}catch(e){}},600);
+window.GLCTC_BUSES={align,sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
  set(i,o){Object.assign(S.buses[i],o);if(o&&o.fx)S.buses[i].fx={...S.buses[i].fx,...o.fx};save();apply();refresh(true)},
  nodes:()=>{const c=AC();return c&&c._b8?c._b8.list:null},_trackFx:(...a)=>trackFx(...a),_chain:(c,d)=>chain(c,d),_apply:c=>apply(c),_k:(d,gdb)=>{BUS_DRV_K=d;BUS_GLUE_DB=gdb},rebuild:()=>{built=false;document.getElementById('qmxBuses')?.remove();build()}};
 })();
@@ -6541,6 +6574,9 @@ const ON=v=>v?'ON':'OFF';
 function mixer(c){const n={in:c.createGain(),out:c.createGain(),dry:c.createGain(),wet:c.createGain()};n.in.connect(n.dry);n.dry.connect(n.out);n.wet.connect(n.out);
  n.mix=m=>{m=cl(m,0,1);n.dry.gain.setTargetAtTime(m<.5?1:2*(1-m),c.currentTime,.02);n.wet.gain.setTargetAtTime(m<.5?2*m:1,c.currentTime,.02)};return n}
 const st=(c,p,v,tc)=>{try{p.setTargetAtTime(v,c.currentTime,tc||.02)}catch(e){p.value=v}};
+/* v105: a unit whose wet path is late (oversampled shaper / base delay) delays its dry path by the same amount, so MIX never comb-filters. Returns the unit latency (s) for channel alignment. */
+const LATC=()=>window.GLCTC_LAT?GLCTC_LAT.comp:.006;
+function alignDry(c,m,os){const dd=c.createDelay(.05);try{m.in.disconnect(m.dry)}catch(e){}m.in.connect(dd);dd.connect(m.dry);const f=()=>typeof os==='number'?os:(window.GLCTC_LAT?GLCTC_LAT.ws(os,c.sampleRate):0);if(window.GLCTC_LAT)GLCTC_LAT.hold(dd,f);else dd.delayTime.value=f();return f}
 function lfo(c,type){const o=c.createOscillator(),g=c.createGain();o.type=type||'sine';o.connect(g);o.start();return {o,g}}
 function stereo(n){n.channelCount=2;n.channelCountMode='explicit';n.channelInterpretation='speakers';return n}
 const curveTanh=(k,n=2048)=>{const a=new Float32Array(n);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;a[i]=Math.tanh(k*x)/Math.tanh(k)}return a};
@@ -6578,24 +6614,24 @@ const FX={
  autof:{n:'Auto Filter / Wah',cat:'EQ & FILTER',sync:1,p:[['type','TYPE',0,2,1,0,null,['LOW-PASS','BAND-PASS','HIGH-PASS']],['f','FREQ',60,12000,10,800,fHz],['depth','DEPTH',0,1,.01,.6,fPct],['sync','RATE MODE',0,1,1,1,null,SYNC],['rate','RATE Hz',.05,12,.01,1,fX],['div','RATE (SYNC)',0,12,1,8,v=>DIVS[v][0],DIVS.map(d=>d[0])],['q','RESO',.5,15,.1,4,fX],['wave','WAVE',0,3,1,0,null,WAVES]],
   make(c){const a=c.createBiquadFilter(),L=lfo(c);L.g.connect(a.detune);return{in:a,out:a,sync:true,stop(){try{L.o.stop()}catch(e){}},set(p){a.type=['lowpass','bandpass','highpass'][p.type|0];st(c,a.frequency,p.f);st(c,a.Q,p.q);L.o.type=WT[p.wave|0];st(c,L.g.gain,p.depth*2400);st(c,L.o.frequency,p.sync?1/divSec(p.div):p.rate)}}}},
  comp:{n:'Compressor',cat:'DYNAMICS',p:[['thr','THRESHOLD',-60,0,.5,-18,fDb],['ratio','RATIO',1,20,.1,4,fRat],['att','ATTACK',.001,.2,.001,.01,fMs],['rel','RELEASE',.02,1,.01,.2,fMs],['mk','MAKE-UP',0,24,.5,0,fDb]],
-  make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=6;a.connect(g);return{in:a,out:g,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;const full=Math.pow(10,(p.thr-p.thr/p.ratio)/20),auto=Math.pow(1/full,.6);st(c,g.gain,Math.pow(10,p.mk/20)/auto)}}}},
+  make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=6;a.connect(g);return{in:a,out:g,lat:LATC,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;const full=Math.pow(10,(p.thr-p.thr/p.ratio)/20),auto=Math.pow(1/full,.6);st(c,g.gain,Math.pow(10,p.mk/20)/auto)}}}},
  lim:{n:'Limiter',cat:'DYNAMICS',p:[['ceil','CEILING',-18,0,.1,-1,fDb],['rel','RELEASE',.01,.6,.01,.08,fMs],['gain','INPUT GAIN',0,18,.5,0,fDb]],
-  make(c){const i=c.createGain(),a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=0;a.ratio.value=20;a.attack.value=.001;i.connect(a);a.connect(g);return{in:i,out:g,set(p){st(c,i.gain,Math.pow(10,p.gain/20));a.threshold.value=p.ceil;a.release.value=p.rel;const full=Math.pow(10,(p.ceil-p.ceil/20)/20);st(c,g.gain,1/Math.pow(1/full,.6))}}}},
+  make(c){const i=c.createGain(),a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=0;a.ratio.value=20;a.attack.value=.001;i.connect(a);a.connect(g);return{in:i,out:g,lat:LATC,set(p){st(c,i.gain,Math.pow(10,p.gain/20));a.threshold.value=p.ceil;a.release.value=p.rel;const full=Math.pow(10,(p.ceil-p.ceil/20)/20);st(c,g.gain,1/Math.pow(1/full,.6))}}}},
  drive:{n:'Overdrive',cat:'DISTORTION',p:[['drv','DRIVE',0,1,.01,.4,fPct],['tone','TONE',500,16000,10,6000,fHz],['mix','MIX',0,1,.01,1,fPct]],
-  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='2x';sh.curve=curveTanh(1);l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);
-   return{in:m.in,out:m.out,set(p){const g=Math.pow(10,p.drv*30/20);st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,.9));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
+  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='2x';sh.curve=curveTanh(1);l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);const lat=alignDry(c,m,'2x');
+   return{in:m.in,out:m.out,lat,set(p){const g=Math.pow(10,p.drv*30/20);st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,.9));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
  dist:{n:'Distortion / Fuzz',cat:'DISTORTION',p:[['drv','AMOUNT',0,1,.01,.5,fPct],['tone','TONE',500,16000,10,5000,fHz],['mix','MIX',0,1,.01,1,fPct]],
-  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='4x';l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);let k0=-1;
-   return{in:m.in,out:m.out,set(p){const k=1+p.drv*40;if(Math.abs(k-k0)>.1){sh.curve=curveHard(k);k0=k}st(c,pre.gain,1);st(c,post.gain,.65/Math.pow(k,.5));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
+  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='4x';l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);let k0=-1;const lat=alignDry(c,m,'4x');
+   return{in:m.in,out:m.out,lat,set(p){const k=1+p.drv*40;if(Math.abs(k-k0)>.1){sh.curve=curveHard(k);k0=k}st(c,pre.gain,1);st(c,post.gain,.65/Math.pow(k,.5));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
  crush:{n:'Bit Crusher',cat:'DISTORTION',p:[['bits','BITS',1,16,1,8,v=>v+'-bit'],['hold','DOWNSAMPLE',1,40,1,4,v=>'÷'+v],['mix','MIX',0,1,.01,1,fPct]],
   make(c){const m=mixer(c),sh=c.createWaveShaper();m.in.connect(sh);let w=null;if(crushReady(c)){try{w=new AudioWorkletNode(c,'glctc-crush',{outputChannelCount:[2]});sh.connect(w);w.connect(m.wet)}catch(e){w=null}}if(!w)sh.connect(m.wet);let b0=-1;
    return{in:m.in,out:m.out,set(p){if(p.bits!==b0){sh.curve=curveBits(p.bits);b0=p.bits}if(w)st(c,w.parameters.get('hold'),p.hold,.005);m.mix(p.mix)}}}},
  tape:{n:'Tape Saturation',cat:'DISTORTION',p:[['drv','SATURATE',0,1,.01,.35,fPct],['warm','WARMTH',2000,20000,10,9000,fHz],['wow','WOW / FLUTTER',0,1,.01,.2,fPct],['mix','MIX',0,1,.01,1,fPct]],
-  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),d=c.createDelay(.05),L=lfo(c),L2=lfo(c),post=c.createGain();sh.curve=curveTanh(1.6);l.type='lowpass';d.delayTime.value=.008;L.o.frequency.value=.55;L2.o.frequency.value=6.2;L.g.connect(d.delayTime);L2.g.connect(d.delayTime);
-   m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(d);d.connect(post);post.connect(m.wet);return{in:m.in,out:m.out,stop(){[L,L2].forEach(x=>{try{x.o.stop()}catch(e){}})},set(p){const g=1+p.drv*5;st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,1.25));st(c,l.frequency,p.warm);st(c,L.g.gain,p.wow*.0016);st(c,L2.g.gain,p.wow*.00012);m.mix(p.mix)}}}},
+  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),d=c.createDelay(.05),L=lfo(c),L2=lfo(c),post=c.createGain();sh.curve=curveTanh(1.6);l.type='lowpass';d.delayTime.value=.004;L.o.frequency.value=.55;L2.o.frequency.value=6.2;L.g.connect(d.delayTime);L2.g.connect(d.delayTime);
+   m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(d);d.connect(post);post.connect(m.wet);const lat=alignDry(c,m,.004);return{in:m.in,out:m.out,lat,stop(){[L,L2].forEach(x=>{try{x.o.stop()}catch(e){}})},set(p){const g=1+p.drv*5;st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,1.25));st(c,l.frequency,p.warm);st(c,L.g.gain,p.wow*.0016);st(c,L2.g.gain,p.wow*.00012);m.mix(p.mix)}}}},
  lofi:{n:'Lo-Fi',cat:'DISTORTION',p:[['tone','TONE',800,8000,10,3500,fHz],['bits','BITS',4,16,1,10,v=>v+'-bit'],['wob','WOBBLE',0,1,.01,.3,fPct],['mix','MIX',0,1,.01,1,fPct]],
-  make(c){const m=mixer(c),h=c.createBiquadFilter(),l=c.createBiquadFilter(),sh=c.createWaveShaper(),d=c.createDelay(.05),L=lfo(c,'triangle');h.type='highpass';h.frequency.value=160;l.type='lowpass';d.delayTime.value=.01;L.o.frequency.value=.8;L.g.connect(d.delayTime);
-   m.in.connect(h);h.connect(l);l.connect(sh);sh.connect(d);d.connect(m.wet);let b0=-1;return{in:m.in,out:m.out,stop(){try{L.o.stop()}catch(e){}},set(p){st(c,l.frequency,p.tone);if(p.bits!==b0){sh.curve=curveBits(p.bits);b0=p.bits}st(c,L.g.gain,p.wob*.003);m.mix(p.mix)}}}},
+  make(c){const m=mixer(c),h=c.createBiquadFilter(),l=c.createBiquadFilter(),sh=c.createWaveShaper(),d=c.createDelay(.05),L=lfo(c,'triangle');h.type='highpass';h.frequency.value=160;l.type='lowpass';d.delayTime.value=.004;L.o.frequency.value=.8;L.g.connect(d.delayTime);
+   m.in.connect(h);h.connect(l);l.connect(sh);sh.connect(d);d.connect(m.wet);let b0=-1;const lat=alignDry(c,m,.004);return{in:m.in,out:m.out,lat,stop(){try{L.o.stop()}catch(e){}},set(p){st(c,l.frequency,p.tone);if(p.bits!==b0){sh.curve=curveBits(p.bits);b0=p.bits}st(c,L.g.gain,p.wob*.003);m.mix(p.mix)}}}},
  chorus:{n:'Chorus',cat:'MODULATION',p:[['rate','RATE Hz',.05,5,.01,.8,fX],['depth','DEPTH',0,1,.01,.5,fPct],['mix','MIX',0,1,.01,.5,fPct]],
   make(c){const m=mixer(c),sp=c.createChannelSplitter(2),mg=c.createChannelMerger(2),dl=c.createDelay(.05),dr=c.createDelay(.05),L=lfo(c),inv=c.createGain();stereo(m.in);dl.delayTime.value=dr.delayTime.value=.016;inv.gain.value=-1;
    m.in.connect(sp);sp.connect(dl,0);sp.connect(dr,1);L.g.connect(dl.delayTime);L.g.connect(inv);inv.connect(dr.delayTime);dl.connect(mg,0,0);dr.connect(mg,0,1);mg.connect(m.wet);
@@ -6613,7 +6649,7 @@ const FX={
  ring:{n:'Ring Modulator',cat:'MODULATION',p:[['f','FREQ',20,3000,1,440,fHz],['mix','MIX',0,1,.01,.5,fPct]],
   make(c){const m=mixer(c),g=c.createGain(),o=c.createOscillator();g.gain.value=0;o.connect(g.gain);o.start();m.in.connect(g);g.connect(m.wet);return{in:m.in,out:m.out,stop(){try{o.stop()}catch(e){}},set(p){st(c,o.frequency,p.f);m.mix(p.mix)}}}},
  vib:{n:'Vibrato',cat:'MODULATION',p:[['rate','RATE Hz',.5,12,.01,5,fX],['depth','DEPTH',0,1,.01,.4,fPct]],
-  make(c){const d=c.createDelay(.03),L=lfo(c);d.delayTime.value=.006;L.g.connect(d.delayTime);return{in:d,out:d,stop(){try{L.o.stop()}catch(e){}},set(p){st(c,L.o.frequency,p.rate);st(c,L.g.gain,p.depth*.0035)}}}},
+  make(c){const d=c.createDelay(.03),L=lfo(c);d.delayTime.value=.006;L.g.connect(d.delayTime);return{in:d,out:d,lat:()=>.006,stop(){try{L.o.stop()}catch(e){}},set(p){st(c,L.o.frequency,p.rate);st(c,L.g.gain,p.depth*.0035)}}}},
  delay:{n:'Tempo Delay',cat:'DELAY & REVERB',sync:1,p:[['div','TIME (SYNC)',0,12,1,7,v=>DIVS[v][0],DIVS.map(d=>d[0])],['fb','FEEDBACK',0,.95,.01,.4,fPct],['tone','TONE',500,16000,10,5000,fHz],['mix','MIX',0,1,.01,.3,fPct]],
   make(c){const m=mixer(c),d=c.createDelay(5),fb=c.createGain(),l=c.createBiquadFilter(),h=c.createBiquadFilter();l.type='lowpass';h.type='highpass';h.frequency.value=120;m.in.connect(d);d.connect(l);l.connect(h);h.connect(fb);fb.connect(d);h.connect(m.wet);
    return{in:m.in,out:m.out,sync:true,set(p){st(c,d.delayTime,Math.min(4.9,divSec(p.div)),.05);st(c,fb.gain,p.fb);st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
@@ -6662,12 +6698,24 @@ function buildSlot(sl,chain){
  sl.units.forEach(u=>{try{u.stop&&u.stop()}catch(e){}[u.in,u.out].forEach(n=>{try{n.disconnect()}catch(e){}})});sl.units=[];
  try{sl.ix.disconnect()}catch(e){}
  let x=sl.ix;const byp=!!(FS.arm&&FS.arm[sl.key]===false);(chain||[]).forEach((f,i)=>{if(!f||f.on===false||!FX[f.type])return;if(byp&&!f._eq)return;try{const u=FX[f.type].make(sl.c);u.idx=i;u.type=f.type;u.set({...defP(f.type),...f.p});x.connect(u.in);x=u.out;sl.units.push(u)}catch(e){console.warn('fx',f.type,e)}});
- x.connect(sl.ox);sl.sig=JSON.stringify((chain||[]).map(f=>f&&[f.type,f.on!==false]));
+ if(sl.c===AC2()&&slotGroup(sl.key)){if(!sl.pdc||sl.pdc.context!==sl.c)sl.pdc=sl.c.createDelay(1);try{sl.pdc.disconnect()}catch(e){}x.connect(sl.pdc);sl.pdc.connect(sl.ox)}else x.connect(sl.ox);
+ sl.sig=JSON.stringify((chain||[]).map(f=>f&&[f.type,f.on!==false]));
 }
-function attach(c,key,ix,ox){const sl={c,key,ix,ox,units:[],sig:''};buildSlot(sl,chainOf(key));if(c===AC2())SLOTS.set(key,sl);return sl}
-function rebuild(key){const sl=SLOTS.get(key);if(sl&&sl.c===AC2())buildSlot(sl,chainOf(key))}
+/* v105 CHANNEL ALIGNMENT (delay compensation): every channel's insert chain is padded to the slowest one in its group, so a
+   compressed kick and an uncompressed sub (or a saturated lead and a clean pad) leave the desk on the same sample. */
+const PDC={ch:0,bus:0};
+const MODLAT={mine:.0061,go:.0064,vox:.0065};   /* measured latency inside a module before its channel strip (s): DIVINE09, GALACTIC ONE and VOX each run an internal compressor / limiter */
+function slotGroup(key){return key==='master'?null:key.startsWith('bus:')?'bus':'ch'}
+function slotLat(sl){let l=0;sl.units.forEach(u=>{try{l+=typeof u.lat==='function'?(+u.lat()||0):(+u.lat||0)}catch(e){}});return l}
+function updatePDC(){const c=AC2();if(!c)return;const M={ch:0,bus:0};
+ SLOTS.forEach(sl=>{if(sl.c!==c||!sl.pdc)return;const g=slotGroup(sl.key);if(!g)return;const id=sl.key.startsWith('mod:')?sl.key.slice(4):'';sl.L=(MODLAT[id]||0)+slotLat(sl);if(sl.L>M[g])M[g]=sl.L});
+ SLOTS.forEach(sl=>{if(sl.c!==c||!sl.pdc)return;const g=slotGroup(sl.key);if(!g)return;const v=Math.max(0,Math.min(.9,M[g]-sl.L));if(Math.abs(sl.pdc.delayTime.value-v)>2e-5){try{sl.pdc.delayTime.setTargetAtTime(v,c.currentTime,.01)}catch(e){sl.pdc.delayTime.value=v}}});
+ PDC.ch=M.ch;PDC.bus=M.bus;try{window.GLCTC_BUSES&&GLCTC_BUSES.align&&GLCTC_BUSES.align()}catch(e){}}
+window.addEventListener('glctc-lat',()=>{try{updatePDC()}catch(e){}});
+function attach(c,key,ix,ox){const sl={c,key,ix,ox,units:[],sig:''};buildSlot(sl,chainOf(key));if(c===AC2()){SLOTS.set(key,sl);updatePDC()}return sl}
+function rebuild(key){const sl=SLOTS.get(key);if(sl&&sl.c===AC2()){buildSlot(sl,chainOf(key));updatePDC()}}
 function liveSet(key,idx){const sl=SLOTS.get(key);if(!sl)return;const f=chainOf(key)[idx];const u=sl.units.find(u=>u.idx===idx);if(u&&f)u.set({...defP(f.type),...f.p})}
-function refreshAll(){SLOTS.forEach((sl,key)=>{if(sl.c===AC2())buildSlot(sl,chainOf(key))})}
+function refreshAll(){SLOTS.forEach((sl,key)=>{if(sl.c===AC2())buildSlot(sl,chainOf(key))});updatePDC()}
 /* module channels: after the module high-pass, before its fader */
 const MODIDS=['bl','mine','sub','lee','s101','go','vox','ws'];
 function attachLive(){const c=AC2();if(!c||!c._mg)return;
@@ -6910,7 +6958,35 @@ function composerFX(genre,on=true){
   ch.splice(0,ch.length,...manual,...auto.slice(0,Math.max(0,MAXFX-manual.length)));
   persist(key);rebuild(key);
  });
+ try{composerBuses(genre,on)}catch(e){console.warn('composer buses',e)}
  render();window.GLCTC_CHARACTER?.apply();
+}
+/* v105 COMPOSER BUSES: the song uses the desk's group buses like a mix engineer would.
+   BUS 7 DRUM PUNCH - parallel (New York) compression: drums and percussion squashed hard and blended under the dry kit
+   BUS 8 EXCITER    - the stabs, lead, vocal and pads above 3 kHz, gently saturated and glued, blended back for presence and air
+   Both returns are time-aligned with the dry channels (see GLCTC_LAT), so the blend adds weight and shine without phasing.
+   A bus you have renamed or fed yourself is never touched. */
+const CB_IDS=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
+function composerBuses(genre,on){
+ const B=window.GLCTC_BUSES;if(!B||!B.state)return;const BS=B.state();
+ const mine=i=>{const b=BS.buses[i];if(!b)return false;if(b._c)return true;const fresh=b.name==='BUS '+(i+1);const fed=CB_IDS.some(id=>(B.sends('mod:'+id)[i]||0)>0);return fresh&&!fed};
+ const names0=BS.buses.map(b=>b.name).join('|');
+ const g=String(genre||'');
+ const soft=/^(ambient|meditation)$/.test(g),dark=/^(lofi|eastcoast|meditation)$/.test(g);
+ const hard=/^(techno|techhouse|hardhouse|happyhardcore|psytrance|dnb|jungle|dubstep|breaks|nuskool|electro|trap|drill|south|ukhiphop)$/.test(g);
+ const plan=[
+  {i:6,name:'DRUM PUNCH',use:on&&!soft,vol:hard?.6:.5,fx:{on:true,lc:35,hc:15000,drv:hard?.22:.12,glue:.9,dly:0,rev:0},
+   sends:{bl:hard?.55:.45,mine:.22,ws:.32,lp:.2}},
+  {i:7,name:'EXCITER',use:on,vol:soft?.25:dark?.28:.45,fx:{on:true,lc:3000,hc:20000,drv:dark?.3:.6,glue:.35,dly:0,rev:0},
+   sends:{s101:.3,go:.35,vox:.35,ws:.12,mine:.1}}];
+ plan.forEach(P=>{if(!mine(P.i))return;
+  CB_IDS.forEach(id=>{if((B.sends('mod:'+id)[P.i]||0)>0)B.setSend('mod:'+id,P.i,0)});
+  if(!P.use){B.set(P.i,{name:'BUS '+(P.i+1),vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0},_c:false});return}
+  B.set(P.i,{name:P.name,vol:P.vol,pan:0,mute:false,solo:false,fx:P.fx,_c:true});
+  for(const id in P.sends)B.setSend('mod:'+id,P.i,P.sends[id]);
+ });
+ try{B.sync()}catch(e){}
+ if(BS.buses.map(b=>b.name).join('|')!==names0)try{B.rebuild&&B.rebuild()}catch(e){}   /* the MUTE / SOLO pads take the new bus names */
 }
 function fxSnapshot(){return JSON.parse(JSON.stringify(FS))}
 function fxRestore(data){
@@ -6924,7 +7000,7 @@ function fxRestore(data){
  for(let i=0;i<8;i++)FS.buses[i]=clean(data.buses?.[i]);
  fsave();refreshAll();render();window.GLCTC_CHARACTER?.apply();
 }
-window.GLCTC_FX={mark:()=>{try{const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state();if(BS)BS.buses.forEach((b,i)=>{if(b.fx&&b.fx.on&&FS.arm['bus:'+i]===false){FS.arm['bus:'+i]=true;fsave()}});markStrips();syncEq(sel);paintSelEq()}catch(e){}},composerRecipe,composer:composerFX,snapshot:fxSnapshot,restore:fxRestore,select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
+window.GLCTC_FX={pdc:()=>PDC,modLat:o=>{if(o)Object.assign(MODLAT,o);updatePDC();return MODLAT},mark:()=>{try{const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state();if(BS)BS.buses.forEach((b,i)=>{if(b.fx&&b.fx.on&&FS.arm['bus:'+i]===false){FS.arm['bus:'+i]=true;fsave()}});markStrips();syncEq(sel);paintSelEq()}catch(e){}},composerRecipe,composer:composerFX,snapshot:fxSnapshot,restore:fxRestore,select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
  add(key,type,p){const ch=chainOf(key,true);const f=newFx(type);if(p)Object.assign(f.p,p);ch.push(f);persist(key);rebuild(key);if(sel===key)render();return ch.length-1},
  set(key,i,p){const f=chainOf(key)[i];if(!f)return;Object.assign(f.p,p);persist(key);liveSet(key,i)},
  clear(key){const ch=chainOf(key);ch.splice(0);persist(key);rebuild(key);if(sel===key)render()},slots:()=>SLOTS};
@@ -9870,7 +9946,7 @@ function build(c){
  N.comp=c.createDynamicsCompressor();N.make=c.createGain();
  N.dry=c.createGain();N.sat=c.createWaveShaper();N.sat.oversample='2x';N.wet=c.createGain();N.out=c.createGain();N.lc=c.createGain();N.aIn=c.createAnalyser();N.aOut=c.createAnalyser();N.aIn.fftSize=N.aOut.fftSize=2048;N.pIn=0;N.pOut=0;
  N.in.connect(N.low);N.low.connect(N.mud);N.mud.connect(N.pres);N.pres.connect(N.air);N.air.connect(N.tone);N.tone.connect(N.comp);N.comp.connect(N.make);
- N.make.connect(N.dry);N.make.connect(N.sat);N.sat.connect(N.wet);N.dry.connect(N.out);N.wet.connect(N.out);
+ /* v105: the dry path waits for the oversampled saturator, so dry + saturation add up instead of comb-filtering */N.dd=c.createDelay(.05);if(window.GLCTC_LAT)GLCTC_LAT.hold(N.dd,()=>GLCTC_LAT.ws('2x',c.sampleRate));N.make.connect(N.dd);N.dd.connect(N.dry);N.make.connect(N.sat);N.sat.connect(N.wet);N.dry.connect(N.out);N.wet.connect(N.out);
  /* reverb return */
  N.revIn=c.createGain();N.revPre=c.createDelay(.2);N.rev=c.createConvolver();N.revRet=c.createGain();
  N.revIn.connect(N.revPre);N.revPre.connect(N.rev);N.rev.connect(N.revRet);N.revRet.connect(N.in);
@@ -9925,6 +10001,7 @@ function kickLane(){
   E.kick={on:p&&p.steps&&p.steps[0]?p.steps[0].map(s=>!!(s&&s.on&&(s.velocity||0)>.15)):[],sw:+(d&&d.swing)||0}}catch(e){E.kick={on:[],sw:0}}
  return E.kick;
 }
+const pdcOff=()=>{try{const P=window.GLCTC_FX&&GLCTC_FX.pdc&&GLCTC_FX.pdc();return P?P.ch||0:0}catch(e){return 0}};   /* v105: the duck lands when the (aligned) kick does */
 function pumpTick(){
  if(!E||!E.Q||!E.a)return;const dep=E.Q.pump.depth||{};if(!Object.values(dep).some(v=>v>0))return;
  const K=window.GLCTC_CLOCK,H=window.GLCTC_HUB,c=E.c;
@@ -9936,7 +10013,7 @@ function pumpTick(){
  if(s==null||K.timeOfBeat(s/4)<now)s=Math.ceil(K.beatAt(now+.03)*4);
  let g=0;
  while(K.timeOfBeat(s/4)<hor&&g++<32){
-  if(s>=0){const ix=((s%16)+16)%16;if(kk.on[ix]){const sd=K.timeOfBeat((s+1)/4)-K.timeOfBeat(s/4),t=K.timeOfBeat(s/4)+(ix%2?sd*kk.sw:0);
+  if(s>=0){const ix=((s%16)+16)%16;if(kk.on[ix]){const sd=K.timeOfBeat((s+1)/4)-K.timeOfBeat(s/4),t=K.timeOfBeat(s/4)+(ix%2?sd*kk.sw:0)+pdcOff();
    for(const id in dep){const d=Math.min(.85,dep[id]*Math.min(1.3,E.a));if(!(d>0))continue;const b=E.buses[id]||busOf(id);if(!b||b.c!==c)continue;E.buses[id]=b;
     try{const gp=b.tap.gain;gp.setTargetAtTime(1-d,t,.004);gp.setTargetAtTime(1,t+.035,Math.max(.03,E.Q.pump.rel/3))}catch(e){}}}}
   s++;
@@ -10357,6 +10434,93 @@ window.GLCTC_MODULE_FILES={capture,apply,validate,importFile,save,load};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 })();
 
+</script>
+<script>
+/* v105 MASTERING STAGE · the last link before the limiter
+   mono-maker   : everything below 120 Hz is summed to mono (chorus / ping-pong / reverb can no longer smear the kick and sub)
+   loudness     : a drive into the limiter that is set per genre and fine-tuned on the first drop of every song, then held
+                  for the rest of the song, so the track sits at a mastered level from the first bar to the last
+   ceiling      : brick-wall limiter at -1.3 dBFS, safety limiter at -1.0 dBFS, soft clip above - no overs, no browser clipping
+   The meter reads K-weighted short-term loudness (LUFS) and the limiter's gain reduction on the real output. */
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const dB=v=>Math.pow(10,v/20);
+/* drop loudness each genre is mastered to (short-term LUFS): club styles loud and dense, chilled styles keep their dynamics */
+const TARGET=GLCTC_GFILL({techno:-8.5,house:-9,deephouse:-10,techhouse:-8.5,tribalhouse:-9,hardhouse:-8,trance:-8.5,psytrance:-8,happyhardcore:-8,
+ dnb:-8.5,jungle:-9,liquid:-10,breaks:-9,nuskool:-8.5,electro:-9,garage:-9,dubstep:-8,eastcoast:-9.5,westcoast:-9.5,south:-9,ukhiphop:-9,drill:-9,
+ trap:-9,hiphop:-9.5,lofi:-11.5,reggae:-10.5,ska:-10,pop:-9,synthwave:-9.5,ambient:-14,meditation:-16});
+/* starting drive (dB into the limiter), measured on every genre so the first bar is already at level */
+const DRIVE0=GLCTC_GFILL({"techno":4.2,"house":6.6,"deephouse":5.3,"techhouse":7.3,"tribalhouse":6.5,"hardhouse":5.6,"trance":7.5,"psytrance":10.5,"happyhardcore":6.7,"dnb":6.8,"jungle":3.8,"liquid":5.0,"breaks":4.3,"nuskool":8.7,"electro":4.5,"garage":9.0,"dubstep":6.3,"eastcoast":7.7,"westcoast":8.5,"south":8.5,"ukhiphop":7.8,"drill":9.1,"trap":5.2,"lofi":7.1,"reggae":7.1,"ska":8.1,"pop":8.9,"synthwave":7.1,"ambient":5.9,"meditation":1.9});
+const LS='glctc1.mastering.v1';
+const S={on:true,genre:null,drive:3,locked:false,st:[],drop:0,lastAdj:0,learn:{},gr:0,lufs:null};
+try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x){S.on=x.on!==false;if(x.learn&&typeof x.learn==='object')S.learn=x.learn}}catch(e){}
+const save=()=>{try{localStorage.setItem(LS,JSON.stringify({on:S.on,learn:S.learn}))}catch(e){}};
+const ac=()=>{try{return window.GLCTC_WS&&GLCTC_WS.ac&&GLCTC_WS.ac()}catch(e){return null}};
+let N=null;
+function build(c){
+ if(!c||!c._mIns||!c._lim||!c._fin)return null;
+ const mOut=c._mIns[1],lim=c._lim,g=(v)=>{const n=c.createGain();n.gain.value=v;return n};
+ const X={c};
+ X.in=g(1);X.in.channelCount=2;X.in.channelCountMode='explicit';X.in.channelInterpretation='speakers';
+ X.sp=c.createChannelSplitter(2);X.mg=c.createChannelMerger(2);
+ X.mid=g(1);X.side=g(1);X.l2m=g(.5);X.r2m=g(.5);X.l2s=g(.5);X.r2s=g(-.5);X.inv=g(-1);
+ X.hp1=c.createBiquadFilter();X.hp2=c.createBiquadFilter();[X.hp1,X.hp2].forEach(f=>{f.type='highpass';f.Q.value=.707;f.frequency.value=120});
+ X.in.connect(X.sp);X.sp.connect(X.l2m,0);X.sp.connect(X.r2m,1);X.sp.connect(X.l2s,0);X.sp.connect(X.r2s,1);
+ X.l2m.connect(X.mid);X.r2m.connect(X.mid);X.l2s.connect(X.side);X.r2s.connect(X.side);
+ X.side.connect(X.hp1);X.hp1.connect(X.hp2);
+ X.mid.connect(X.mg,0,0);X.mid.connect(X.mg,0,1);X.hp2.connect(X.mg,0,0);X.hp2.connect(X.inv);X.inv.connect(X.mg,0,1);
+ X.drive=g(1);X.mg.connect(X.drive);
+ try{mOut.disconnect(lim)}catch(e){}mOut.connect(X.in);X.drive.connect(lim);
+ /* K-weighted loudness meter on the real output */
+ X.k1=c.createBiquadFilter();X.k1.type='highshelf';X.k1.frequency.value=1681;X.k1.gain.value=4;X.k2=c.createBiquadFilter();X.k2.type='highpass';X.k2.frequency.value=38;X.k2.Q.value=.5;
+ X.ks=c.createChannelSplitter(2);X.aL=c.createAnalyser();X.aR=c.createAnalyser();X.aL.fftSize=X.aR.fftSize=4096;
+ X.pa=c.createAnalyser();X.pa.fftSize=4096;c._fin.connect(X.pa);c._fin.connect(X.k1);X.k1.connect(X.k2);X.k2.connect(X.ks);X.ks.connect(X.aL,0);X.ks.connect(X.aR,1);X.buf=new Float32Array(4096);
+ return X;
+}
+function ensure(){const c=ac();if(!c)return null;if(!N||N.c!==c)N=build(c);return N}
+function setDrive(d){S.drive=Math.max(-6,Math.min(12,d));const X=ensure();if(!X)return;const v=S.on?dB(S.drive):1;try{X.drive.gain.setTargetAtTime(v,X.c.currentTime,.25)}catch(e){X.drive.gain.value=v}}
+function setMono(){const X=ensure();if(!X)return;const f=S.on?120:10;X.hp1.frequency.value=f;X.hp2.frequency.value=f}
+function startSong(genre){
+ S.genre=genre||S.genre;S.locked=false;S.st=[];S.dst=[];S.ok=0;S.next=25;S.kind=null;S.drop=0;
+ const L=S.learn[S.genre];setDrive(Number.isFinite(L)?L:(DRIVE0[S.genre]??3));setMono();paint();
+}
+function ms(a){a.getFloatTimeDomainData(N.buf);let s=0;const d=N.buf;for(let i=0;i<d.length;i++)s+=d[i]*d[i];return s/d.length}
+function kind(){try{const G=window.GLCTC_SONG;return G&&G.running()&&G.sectionKind?G.sectionKind():null}catch(e){return null}}
+function tick(){
+ const X=ensure();if(!X||X.c.state!=='running')return;
+ const p=ms(X.aL)+ms(X.aR);S.st.push(p);if(S.st.length>30)S.st.shift();
+ {X.pa.getFloatTimeDomainData(N.buf);let q=0;for(let i=0;i<N.buf.length;i++){const v=Math.abs(N.buf[i]);if(v>q)q=v}S.pks=(S.pks||[]).concat(q).slice(-20);S.pk=Math.max(...S.pks)}
+ try{S.gr=Math.max(-(X.c._lim.reduction||0),-((X.c._flim&&X.c._flim.reduction)||0))}catch(e){S.gr=0}
+ const m=S.st.reduce((a,b)=>a+b,0)/S.st.length;S.lufs=m>1e-10?-.691+10*Math.log10(m):null;
+ const k=kind();if(k!==S.kind){S.kind=k;if(k==="drop"){S.dst=[];S.ok=0;S.next=40}}
+ if(!S.on||S.locked||k!=='drop'||!S.genre){return}
+ /* only drop audio counts: a fresh window after every move, judged on 2.5 s of it */
+ S.dst.push(p);S.drop++;if(S.dst.length<(S.next||25))return;
+ const dm=S.dst.slice(-40).reduce((a,b)=>a+b,0)/Math.min(40,S.dst.length),dl=dm>1e-10?-.691+10*Math.log10(dm):-70;
+ const err=(TARGET[S.genre]??-9)-dl;let step=Math.max(-2,Math.min(2,err*.75));
+ if(S.gr>6&&step>0)step=-.5;   /* never push the limiter past ~6 dB of gain reduction */
+ if(Math.abs(err)<.6){S.ok++}else S.ok=0;
+ if(S.ok>=2||S.drop>400){S.locked=true;S.learn[S.genre]=+(Number.isFinite(S.learn[S.genre])?(S.learn[S.genre]*.5+S.drive*.5):S.drive).toFixed(2);save();paint();return}
+ if(S.ok){S.next=S.dst.length+10;return}
+ setDrive(S.drive+step);S.dst=[];S.next=30;
+}
+setInterval(()=>{try{tick()}catch(e){}},100);
+setInterval(()=>{try{paint()}catch(e){}},500);
+function paint(){const e=$('gscMastInfo');if(!e)return;
+ if(!S.on){e.textContent='MASTERING OFF · raw mix into the safety limiter';return}
+ e.textContent='MASTER · '+(S.lufs!=null&&S.lufs>-60?S.lufs.toFixed(1)+' LUFS':'— LUFS')+' · PEAK '+(S.pk>1e-4?(20*Math.log10(S.pk)).toFixed(1)+' dBFS':'—')+(S.gr>.3?' · LIMITING -'+S.gr.toFixed(1)+' dB':'')+' · DRIVE '+(S.drive>=0?'+':'')+S.drive.toFixed(1)+' dB · TARGET '+(TARGET[S.genre]??-9)+' · CEILING -1.0'+(S.locked?' · LOCKED':'')}
+function initUi(){const box=$('gscAutoMix');if(!box){setTimeout(initUi,500);return}if($('gscMaster'))return;
+ const lab=document.createElement('label');lab.style.cssText='display:flex;gap:6px;align-items:center;margin:0 0 9px';lab.title='Mastering on the master bus: low end summed to mono below 120 Hz, the mix driven into a -1 dBFS brick-wall limiter at the loudness of the genre (learned on the first drop of each song, then held).';
+ const cb=document.createElement('input');cb.type='checkbox';cb.id='gscMaster';cb.checked=S.on;lab.append(cb,document.createTextNode('🎚 MASTERING · LOUD & LIMITED'));
+ const info=document.createElement('div');info.id='gscMastInfo';info.style.cssText='font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere';
+ const mi=$('gscMixInfo');(mi||box.parentElement).insertAdjacentElement('afterend',info);info.insertAdjacentElement('beforebegin',lab);
+ cb.onchange=()=>{S.on=cb.checked;save();setDrive(S.drive);setMono();paint()};paint()}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initUi,{once:true});else initUi();
+/* follow every new song: GLCTC_MIX.autoSong(genre) is called by GENERATE, NEW SONG ON LOAD and SURPRISE */
+(function hook(){const M=window.GLCTC_MIX;if(!M||!M.autoSong){setTimeout(hook,400);return}if(M.autoSong.__mst)return;const f=M.autoSong,w=function(g){const r=f.apply(this,arguments);try{if(typeof g==='string'&&g)startSong(g)}catch(e){}return r};w.__mst=1;M.autoSong=w})();
+setInterval(()=>{try{if(ac()&&(!N||N.c!==ac())){ensure();setDrive(S.drive);setMono()}}catch(e){}},700);
+window.GLCTC_MASTERING={state:()=>({on:S.on,genre:S.genre,drive:S.drive,locked:S.locked,lufs:S.lufs,gr:S.gr,target:TARGET[S.genre]}),set:on=>{S.on=!!on;save();setDrive(S.drive);setMono();paint()},startSong,setDrive,TARGET,DRIVE0};
+})();
 </script>
 </body>
 </html>

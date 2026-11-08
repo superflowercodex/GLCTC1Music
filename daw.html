@@ -2430,7 +2430,7 @@ window.glctcTrackMix={
 function eqOf(t){PLUG.ensureAll(t);return t.plugs.find(e=>e.type==='eq')}
 window.GLCTC_TRKEQ={get(id){try{const t=project.tracks.find(x=>String(x.id)===String(id));const e=t&&eqOf(t),p=(e&&e.p)||{};return{lo:p.lo||0,mid:p.mid||0,hi:p.hi||0}}catch(_){return{lo:0,mid:0,hi:0}}},
  set(id,k,v){try{const t=project.tracks.find(x=>String(x.id)===String(id));if(!t)return;setEq(t,k,v);clearTimeout(window.__trkEqT);window.__trkEqT=setTimeout(()=>{try{mixUi()}catch(_){}},500)}catch(_){}}};   /* v103: lets the master-section EQ drive a track's EQ */
-function setEq(t,k,v){const e=eqOf(t);if(!e)return;e.p=e.p||{};e.p[k]=v;const want=!(Math.abs(e.p.lo||0)>.01||Math.abs(e.p.mid||0)>.01||Math.abs(e.p.hi||0)>.01);if(e.off!==want){e.off=want;PLUG.rebuildAll()}else PLUG.liveSet(e);markDirty()}
+function setEq(t,k,v){const e=eqOf(t);if(!e)return;e.p=e.p||{};e.p[k]=v;const want=!(Math.abs(e.p.lo||0)>.01||Math.abs(e.p.mid||0)>.01||Math.abs(e.p.hi||0)>.01);if(e.off!==want){e.off=want;PLUG.rebuildAll()}else PLUG.liveSet(e);markDirty();try{window.GLCTC_FX&&GLCTC_FX.mark&&GLCTC_FX.mark()}catch(_){}}
 function rackUi(){const box=$('qmxRack');if(!box)return;box.innerHTML='';const t=rackId&&project&&project.tracks.find(x=>x.id===rackId);if(!t){box.classList.remove('on');return}
  box.classList.add('on');box.style.setProperty('--sc',t.color||'#ffd36a');
  const close=h('button',{className:'cn-b',textContent:'✕ CLOSE',type:'button'});close.onclick=()=>{rackId=null;rackUi();mixUi()};
@@ -2457,7 +2457,7 @@ project.tracks.filter(t=>t.type!=='auto'&&!t.looper).forEach(t=>{const f=tfx(t),
  m.onclick=()=>{t.mute=!t.mute;rebase();renderAll();markDirty()};so.onclick=()=>{t.solo=!t.solo;rebase();renderAll();markDirty()};
  const live=(t.plugs||[]).filter(e=>!e.off).length+(f.on?1:0);
  const fxb=h('button',{className:'cn-b'+(rackId===t.id?' on':''),textContent:'FX'+(live?' •':''),title:'Open this track\'s FX rack (track FX + insert FX)',type:'button'}),go=h('button',{className:'cn-b qmx-nojump',textContent:'↗',title:'Show this track in the timeline',type:'button'});
- fxb.dataset.fxkey='trk:'+t.id;fxb.onclick=()=>{if(window.GLCTC_FX){GLCTC_FX.select('trk:'+t.id,true);return}rackId=rackId===t.id?null:t.id;rackUi();mixUi()};
+ fxb.dataset.fxkey='trk:'+t.id;setTimeout(()=>{try{window.GLCTC_FX&&GLCTC_FX.mark&&GLCTC_FX.mark()}catch(e){}},0);fxb.onclick=()=>{if(window.GLCTC_FX){GLCTC_FX.select('trk:'+t.id,true);return}rackId=rackId===t.id?null:t.id;rackUi();mixUi()};
  go.onclick=()=>{const tl=document.querySelector('.panel.timeline-panel');if(tl){tl.classList.remove('gm-hide');tl.__noJump?.({behavior:'smooth',block:'start'})}};
  const kind=(t.type||'audio').toUpperCase()+(t.send===false?' · OFF MST':'');
  const s=h('div',{className:'cn-ch qmx-tr'+(t.mute?' dim':'')});s.style.setProperty('--sc',t.color||'#ffd36a');
@@ -2968,11 +2968,12 @@ const tune=n=>{try{window.GLCTC_TUNING&&GLCTC_TUNING.attach(n)}catch(e){}return 
 const WAVES=[['sine'],['triangle'],['sine','triangle'],['sine','square']];   /* v99: SOFT SQR keeps a sine core */
 /* mono voice with glide / legato: a slid note re-pitches the sounding voice instead of retriggering */
 function noteAt(m,vel,when,dur,slide){const a=chain(),c=a.c,p=S.p,t=Math.max(when||c.currentTime,c.currentTime),f=hz(m+12*p.oct),len=Math.max(.05,dur||.25);
- if(voice&&voice.end>t&&(slide||p.glide>.08)){const g=Math.max(.01,p.glide||.06);voice.oscs.forEach(o=>{o.x.frequency.cancelScheduledValues(t);o.x.frequency.setValueAtTime(o.x.frequency.value||f*o.mul,t);o.x.frequency.exponentialRampToValueAtTime(f*o.mul,t+g)});
+ if(voice&&voice.end>t+.01&&slide&&voice.c===c){const g=Math.max(.01,p.glide||.06);voice.oscs.forEach(o=>{o.x.frequency.cancelScheduledValues(t);o.x.frequency.setValueAtTime(o.x.frequency.value||f*o.mul,t);o.x.frequency.exponentialRampToValueAtTime(f*o.mul,t+g)});
+  {const vg=voice.g.gain,sus=Math.max(.0002,cl(vel??.9,.05,1)*Math.max(p.s,.35));if(vg.cancelAndHoldAtTime)vg.cancelAndHoldAtTime(t);else{vg.cancelScheduledValues(t);vg.setValueAtTime(sus,t)}vg.linearRampToValueAtTime(sus,t+.012)}   /* v104: a slide re-opens the level - a slid note after a finished release used to stay silent (and every note after it) */
   const rel=t+len;voice.g.gain.cancelScheduledValues(rel);voice.g.gain.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));voice.oscs.forEach(o=>{try{o.x.stop(rel+p.r*1.5+.1)}catch(e){}});voice.end=rel+p.r*1.5;return}
  if(voice&&voice.end>t+.01&&voice.w===p.wave&&voice.s2===(p.sub2>0)&&voice.c===c){   /* v97 CPU: mono retrigger - reuse the running oscillators, no new nodes per note */
   const vg=voice.g.gain,v=cl(vel??.9,.05,1),sus=Math.max(.0002,v*p.s),rel=t+len,end=rel+p.r*1.5+.05;
-  voice.oscs.forEach(o=>{const f0=f*o.mul,fr=o.x.frequency;fr.cancelScheduledValues(t);fr.setValueAtTime(f0*Math.pow(2,(p.penv||0)/12),t);if(p.penv)fr.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime));try{o.x.stop(end)}catch(e){}});
+  voice.oscs.forEach(o=>{const f0=f*o.mul,fr=o.x.frequency;fr.cancelScheduledValues(t);if(p.glide>.08&&!p.penv){fr.setValueAtTime(Math.max(10,fr.value||f0),t);fr.exponentialRampToValueAtTime(f0,t+p.glide)}else{fr.setValueAtTime(f0*Math.pow(2,(p.penv||0)/12),t);if(p.penv)fr.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime))}try{o.x.stop(end)}catch(e){}});
   if(vg.cancelAndHoldAtTime)vg.cancelAndHoldAtTime(t);else{vg.cancelScheduledValues(t);vg.setValueAtTime(sus,t)}
   vg.linearRampToValueAtTime(v,t+Math.max(.004,p.a));vg.setTargetAtTime(sus,t+Math.max(.004,p.a),Math.max(.01,p.d/3));vg.setValueAtTime(sus,rel);vg.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));voice.end=end;return}
  const g=c.createGain(),oscs=[],v=cl(vel??.9,.05,1),types=WAVES[p.wave]||WAVES[0];
@@ -5075,9 +5076,9 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
 
  /* ---------- v68 AUTO MIX: measures every sound while the song plays and trims it to a balanced level ---------- */
  const AM={on:true,active:false,tdb:{},master:0,hist:{},an:{},mAn:null,mHist:[],mPk:0,buf:new Float32Array(2048),last:0,lastM:0,note:'',lpBase:null,lpSet:null,lpTap:null,genre:'',mt:-14.5};
- const AM_TARGET={sub:-21,bl:-16,mine:-26,lee:-24,s101:-30,go:-29,vox:-29,ws:-33,lp:-35};   /* v71: DIVINE09 only plays hats / ride / crash now, so it sits under the kick and snare instead of matching them; the Looper is a texture layer */   /* loud-passage level of each sound (dBFS), peak-aware */
+ const AM_TARGET={sub:-20,bl:-16,mine:-25,lee:-23,s101:-26,go:-24,vox:-25,ws:-29,lp:-33};   /* v104 BALANCE: leads / stabs / pads were sitting 15-20 dB under the drums - now lead ~8 dB, stabs ~11 dB, pads ~13 dB under the kit */   /* v71: DIVINE09 only plays hats / ride / crash now, so it sits under the kick and snare instead of matching them; the Looper is a texture layer */   /* loud-passage level of each sound (dBFS), peak-aware */
  const AM_START={sub:-6,bl:-1,mine:-2,lee:-8,s101:-12,go:-12,vox:-10,ws:-6};   /* v73: no channel starts above 0 dB - a hot preset can never blast before it is measured */   /* v70: measured average of where the auto mix settles, so every sound already sits right the first time it enters (a build is not learned from) */                    /* first guess, so nothing blasts before it has been measured */
- const AM_MAXUP={sub:0,mine:0,ws:-4,bl:3,lee:-4,s101:-10,go:-10,vox:-8};   /* Auto-mix ceilings preserve the beat-first balance, including sparse synth tails. */
+ const AM_MAXUP={sub:0,mine:2,ws:0,bl:3,lee:0,s101:0,go:2,vox:0};   /* Auto-mix ceilings preserve the beat-first balance, including sparse synth tails. */
  /* Melodic auto-trims stay below unity: sparse tails must never be promoted to lead volume. */
  const AM_LS='glctc1.autoMix',AM_MASTER_BY={ambient:-22,lofi:-20,hiphop:-18,techno:-16.5,dnb:-16.5,dubstep:-16.5,psytrance:-16.5,house:-17,trance:-17,breaks:-17,garage:-17,trap:-17.5,pop:-17,synthwave:-17.5} /* v89: modest lift over the original -18 */ /* v88 genre loudness targets: club genres hit harder, soft genres stay soft */,AM_LEARN='glctc1.autoMix.learned';
  const amLearned=()=>{try{return JSON.parse(localStorage.getItem(AM_LEARN)||'{}')||{}}catch(e){return {}}};
@@ -5126,7 +5127,7 @@ let MIXBOOST=1;window.GLCTC_MIX={get boost(){return MIXBOOST},set boost(v){MIXBO
    if(Math.abs(err)>=1.3){const step=Math.max(-6,Math.min(1.5,err*.8)),nv=Math.max(.02,Math.min(1.5,AM.lpSet*Math.pow(10,step/20)));if(Math.abs(nv-AM.lpSet)>.002){const dl=20*Math.log10(nv/AM.lpSet);amLoopTrim(nv);for(let i=0;i<AM.hist.lp.length;i++)AM.hist.lp[i]+=dl;changed=true}}}
   /* overall level: shifts every target together, so the balance between sounds never changes */
   if(now-AM.lastM>=6000&&AM.mHist.length>=30){const p90=amPct(AM.mHist,.9);let step=Math.max(-3,Math.min(2,(AM.mt-p90)*.5));if(AM.mPk>1.3)step=Math.min(step,-1.5);
-   if(Math.abs(AM.mt-p90)>=1.5||step<=-1.5){const nm=Math.max(-12,Math.min(2,AM.master+step));if(nm!==AM.master){AM.master=nm;AM.mHist=[];AM.mPk=0;AM.lastM=now;changed=true}}else AM.mPk=0}
+   if(Math.abs(AM.mt-p90)>=1.5||step<=-1.5){const nm=Math.max(-12,Math.min(5,AM.master+step));if(nm!==AM.master){AM.master=nm;AM.mHist=[];AM.mPk=0;AM.lastM=now;changed=true}}else AM.mPk=0}
   if(changed){try{applyMix()}catch(e){}}
 
   measured.clear();
@@ -6484,16 +6485,16 @@ function fxUi(){if(fxBox){fxBox.innerHTML='';fxBox.classList.remove('on')}}
 /* the bus's built-in tone FX, drawn inside the CHANNEL FX panel */
 function toneUi(box,bi){
  const CN=window.GLCTC_CN,b=S.buses[bi],f=b.fx;box.innerHTML='';
- const onB=E('button',{type:'button',class:'cn-b'+(f.on?' on':''),text:f.on?'ON':'OFF',title:'Bypass the bus tone FX'});onB.onclick=()=>{f.on=!f.on;save();apply();toneUi(box,bi);refresh()};
+ const onB=E('button',{type:'button',class:'cn-b'+(f.on?' on':''),text:f.on?'ON':'OFF',title:'Bypass the bus tone FX'});onB.onclick=()=>{f.on=!f.on;save();apply();toneUi(box,bi);refresh();window.GLCTC_FX&&GLCTC_FX.mark&&GLCTC_FX.mark()};
  const hz=v=>v>=1000?(v/1000).toFixed(v>=10000?0:1)+'k':Math.round(v)+'';
- const K=(lab,min,max,st,key,fmt,def)=>{const k=CN.knob(lab,min,max,st,f[key],v=>{f[key]=v;if(!f.on&&v!==def){f.on=true;onB.classList.add('on');onB.textContent='ON'}save();apply();refresh()},fmt,def);k.el.classList.add('qmx-k');return k.el};
+ const K=(lab,min,max,st,key,fmt,def)=>{const k=CN.knob(lab,min,max,st,f[key],v=>{f[key]=v;if(!f.on&&v!==def){f.on=true;onB.classList.add('on');onB.textContent='ON'}save();apply();refresh();window.GLCTC_FX&&GLCTC_FX.mark&&GLCTC_FX.mark()},fmt,def);k.el.classList.add('qmx-k');return k.el};
  box.append(E('div',{class:'qfx-head'},E('b',{text:'BUS'}),E('span',{class:'qfx-tname',text:'BUS TONE · level-matched'}),onB),
   E('div',{class:'qfx-knobs'},K('LOW CUT',20,1000,1,'lc',hz,20),K('HIGH CUT',500,20000,10,'hc',hz,20000),K('DRIVE',0,1,.01,'drv',pctf,0),K('GLUE',0,1,.01,'glue',pctf,0),K('DELAY',0,1,.01,'dly',pctf,0),K('REVERB',0,1,.01,'rev',pctf,0)));
 }
 function refresh(full){
  if(!built)return;const solo=anySolo();
  strips.forEach((s,i)=>{const b=S.buses[i];s.nm.textContent=b.name;s.so.classList.toggle('on',!!b.solo);s.mu.classList.toggle('on',!!b.mute);
-  const f=b.fx,live=(f.on&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))||(window.GLCTC_FX&&GLCTC_FX.count('bus:'+i)>0);s.fx.textContent='FX'+(live?' •':'');
+  /* v104: the FX lamp is painted by CHANNEL FX (markStrips) */
   const n=feeders(i);s.ins.textContent=n?n+' SEND'+(n>1?'S':''):'NO SENDS';s.led.classList.toggle('on',!b.mute&&!(solo&&!b.solo)&&n>0);s.ch.classList.toggle('dim',!!b.mute||(solo&&!b.solo));
   if(full){s.fd.value=b.vol;try{s.pk.set(b.pan,true)}catch(e){}}});
  document.querySelectorAll('#qmxDesk .qmx-send').forEach(x=>x.__fill&&x.__fill());
@@ -6706,26 +6707,23 @@ function render(){
  ch.forEach((f,i)=>{if(!f||!FX[f.type])return;const d=FX[f.type],p={...defP(f.type),...f.p};f.p=p;
   const slot=E('div',{class:'qfx-slot'+(f.on===false?' off':'')});slot.dataset.cat=d.cat;
   const ts=fxSelect(f.type,v=>{ch[i]=newFx(v);persist(sel);rebuild(sel);render()});
-  const onB=E('button',{type:'button',class:'cn-b'+(f.on!==false?' on':''),text:f.on!==false?'ON':'OFF',title:'Switch this FX on / off'});onB.onclick=()=>{f.on=f.on===false;persist(sel);rebuild(sel);render()};
+  const onB=E('button',{type:'button',class:'cn-b'+(f.on!==false?' on':''),text:f.on!==false?'ON':'OFF',title:'Switch this FX on / off'});onB.onclick=()=>{f.on=f.on===false;persist(sel);rebuild(sel);render()};if(f._eq){const tg=E('small',{class:'qfx-eqtag',text:'STRIP EQ'});slot.append(tg)}
   const up=E('button',{type:'button',class:'cn-b',text:'▲',title:'Move up'}),dn=E('button',{type:'button',class:'cn-b',text:'▼',title:'Move down'}),rm=E('button',{type:'button',class:'cn-b qfx-x',text:'✕',title:'Remove'});
-  up.disabled=i===0;dn.disabled=i===ch.length-1;up.onclick=()=>{ch.splice(i-1,0,ch.splice(i,1)[0]);persist(sel);rebuild(sel);render()};dn.onclick=()=>{ch.splice(i+1,0,ch.splice(i,1)[0]);persist(sel);rebuild(sel);render()};rm.onclick=()=>{ch.splice(i,1);persist(sel);rebuild(sel);render()};
+  up.disabled=i===0;dn.disabled=i===ch.length-1;up.onclick=()=>{ch.splice(i-1,0,ch.splice(i,1)[0]);persist(sel);rebuild(sel);render()};dn.onclick=()=>{ch.splice(i+1,0,ch.splice(i,1)[0]);persist(sel);rebuild(sel);render()};rm.onclick=()=>{ch.splice(i,1);persist(sel);rebuild(sel);render();syncEq(sel)};
   slot.append(E('div',{class:'qfx-head'},E('b',{text:String(i+1)}),ts,onB,up,dn,rm));
   const kg=E('div',{class:'qfx-knobs'});
   d.p.forEach(([k,l,min,max,step,def,fmt,opts])=>{
    if(opts){const s=E('select',{class:'qfx-opt','aria-label':l});opts.forEach((t,j)=>{const o=E('option',{value:String(j)});o.textContent=t;s.append(o)});s.value=String(p[k]|0);s.onchange=()=>{p[k]=+s.value;persist(sel);liveSet(sel,i)};kg.append(E('label',{class:'qfx-optw'},E('span',{text:l}),s));return}
-   if(!CN||!CN.knob)return;const kn=CN.knob(l,min,max,step,p[k],v=>{p[k]=v;persist(sel);liveSet(sel,i)},fmt||(v=>String(v)),def);kn.el.classList.add('qmx-k');kg.append(kn.el)});
+   if(!CN||!CN.knob)return;const kn=CN.knob(l,min,max,step,p[k],v=>{p[k]=v;persist(sel);liveSet(sel,i);if(f._eq)syncEq(sel)},fmt||(v=>String(v)),def);kn.el.classList.add('qmx-k');kg.append(kn.el)});
   slot.append(kg);body.append(slot)});
  addBox.innerHTML='';if(ch.length<MAXFX){const add=fxSelect('',v=>{chainOf(sel,true).push(newFx(v));persist(sel);rebuild(sel);render()},'＋ ADD FX');add.classList.add('qfx-add');addBox.append(add)}else addBox.append(E('span',{class:'qfx-empty',text:'8 FX MAX'}));
  markStrips();
 }
-function select(key,scroll){sel=key;if(!panel)build();render();try{paintSelEq()}catch(e){}if(scroll&&panel)setTimeout(()=>{try{panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
+function select(key,scroll){sel=key;if(!panel)build();render();try{paintSelEq()}catch(e){}if(scroll&&panel)setTimeout(()=>{try{const r=panel.getBoundingClientRect();if(r.top>innerHeight-80||r.bottom<80)panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
 function markStrips(){
- /* FX buttons on strips show a dot when that channel has FX, and the selected channel is outlined */
- /* v77: an FX button only lights while that channel really has FX switched on - choosing a channel never latches it */
- const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state&&GLCTC_BUSES.state();
- document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey;let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]&&!x._eq).length;
-  if(k.startsWith('bus:')&&BS){const bb=BS.buses[+k.slice(4)],f=bb&&bb.fx;if(f&&f.on&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))n++}   /* v103: a bus with its BUS TONE switched on lights its FX button */
-  b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',n>0);const ch=b.closest('.cn-ch');if(ch)ch.classList.toggle('qfx-sel',k===sel&&!ch.classList.contains('cn-master'))})}
+ document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=liveCount(k),txt=(b.dataset.fxlabel||'FX')+(n?' •':'');if(b.textContent!==txt)b.textContent=txt;b.classList.toggle('on',n>0);b.classList.toggle('open',k===sel);
+  const ch=b.closest('.cn-ch');if(ch&&!ch.classList.contains('cn-master'))ch.classList.toggle('qfx-sel',k===sel)});
+ const m=document.querySelector('#qmxDesk .cn-master');if(m)m.classList.toggle('qfx-sel',sel==='master')}
 function build(){
  const desk=document.getElementById('qmxDesk'),wrap=desk&&desk.querySelector('.qmx-wrap');if(!wrap||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
  panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);   /* v103: also repaints the selected-channel EQ */
@@ -6745,40 +6743,70 @@ function hookStrips(){
  const ms=document.querySelector('#qmxDesk .cn-master .cn-fxb');if(ms&&!ms.querySelector('[data-fxkey="master"]')){const b=E('button',{type:'button',class:'tiny','data-fxkey':'master',text:'FX',title:'Master FX: open MASTER in CHANNEL FX'});b.onclick=()=>select('master',true);ms.prepend(b)}
  hidePanelMasterFx();
  markStrips()}
-/* v103 STRIP EQ: HI / MID / LO on every module and bus strip (a 3-band EQ at the top of that channel's insert chain - it only
-   exists while a band is moved off 0 dB, so a flat EQ costs nothing), and a big EQ for the SELECTED channel under the master fader. */
+/* v104 MIXER: STRIP EQ · CHANNEL SELECT · FX LAMPS
+   - HI / MID / LO on every module and bus strip, laid out like the sequencer-track strips. Each is a 3-band EQ at the top
+     of that channel's insert chain; it only exists while a band is off 0 dB, so a flat EQ costs nothing.
+   - The SELECTED channel's EQ sits under the master fader. Select a channel by tapping its strip (name / empty space),
+     its FX button, or the CHANNEL list - the strip lights up and the EQ, CHANNEL FX and outline all follow it.
+   - FX buttons: red with a dot whenever that channel processes sound (insert FX, strip EQ, bus tone, track rack / plug-ins);
+     gold ring = the channel open in CHANNEL FX. Updated the moment anything changes. */
 const EQMAP={lo:'low',mid:'mid',hi:'high',mf:'mf'},EQUI={};
 function eqGet(key){if(key.startsWith('trk:')){const T=window.GLCTC_TRKEQ;const r=T?T.get(key.slice(4)):{lo:0,mid:0,hi:0};r.mf=null;return r}
- const f=chainOf(key).find(x=>x&&x._eq),p=f?{...defP('eq3'),...f.p}:defP('eq3');return{lo:p.low||0,mid:p.mid||0,hi:p.high||0,mf:p.mf||1000}}
+ const f=chainOf(key).find(x=>x&&x._eq),p=f?{...defP('eq3'),...f.p}:defP('eq3');return{lo:+p.low||0,mid:+p.mid||0,hi:+p.high||0,mf:+p.mf||1000}}
 function eqSet(key,band,v){
- if(key.startsWith('trk:')){window.GLCTC_TRKEQ&&GLCTC_TRKEQ.set(key.slice(4),band,v);syncEq(key);return}
+ if(key.startsWith('trk:')){window.GLCTC_TRKEQ&&GLCTC_TRKEQ.set(key.slice(4),band,v);syncEq(key);markStrips();return}
  const ch=chainOf(key,true);let i=ch.findIndex(x=>x&&x._eq);
- if(i<0){if(band==='mf'||Math.abs(v)<.01){syncEq(key);return}if(ch.length>=MAXFX)return;const f=newFx('eq3');f._eq=1;ch.unshift(f);i=0;f.p[EQMAP[band]]=v;persist(key);rebuild(key)}
- else{const f=ch[i];f.p={...defP('eq3'),...f.p};f.p[EQMAP[band]]=v;f.on=true;
-  if(Math.abs(f.p.low)<.01&&Math.abs(f.p.mid)<.01&&Math.abs(f.p.high)<.01){ch.splice(i,1);persist(key);rebuild(key)}else{persist(key);liveSet(key,i)}}
- syncEq(key);if(key===sel&&body&&!(panel&&panel.contains(document.activeElement)))clearTimeout(eqSet._t),eqSet._t=setTimeout(render,400)}
-function syncEq(key){const q=eqGet(key);[EQUI[key],key===sel?EQUI.__sel:null].forEach(u=>{if(!u)return;['hi','mid','lo','mf'].forEach(b=>{if(u[b]&&q[b]!=null&&document.activeElement!==u[b].el.querySelector('.k37-knob'))u[b].set(q[b],true)})})}
+ if(i<0){if(band==='mf'||Math.abs(v)<.01){syncEq(key);return}if(ch.length>=MAXFX){syncEq(key);return}const f=newFx('eq3');f._eq=1;f.p[EQMAP[band]]=v;ch.unshift(f);persist(key);rebuild(key)}
+ else{const f=ch[i];f.p={...defP('eq3'),...f.p};f.p[EQMAP[band]]=v;
+  if(Math.abs(f.p.low)<.01&&Math.abs(f.p.mid)<.01&&Math.abs(f.p.high)<.01){ch.splice(i,1);persist(key);rebuild(key)}
+  else if(f.on===false){f.on=true;persist(key);rebuild(key)}else{persist(key);liveSet(key,i)}}
+ syncEq(key);markStrips();
+ if(key===sel&&body){clearTimeout(eqSet._t);eqSet._t=setTimeout(()=>{if(!(panel&&panel.contains(document.activeElement)))render()},450)}}
+function eqFlat(key){['lo','mid','hi'].forEach(b=>eqSet(key,b,0))}
+function syncEq(key){const q=eqGet(key);[EQUI[key],key===sel?EQUI.__sel:null].forEach(u=>{if(!u)return;['hi','mid','lo','mf'].forEach(b=>{const k=u[b];if(!k||q[b]==null)return;const cap=k.el.querySelector('.k37-knob');if(document.activeElement!==cap)k.set(q[b],true)});
+  if(u.box)u.box.classList.toggle('live',Math.abs(q.lo)>.01||Math.abs(q.mid)>.01||Math.abs(q.hi)>.01)})}
 const dbf=v=>(v>0?'+':'')+(Math.round(v*2)/2)+'dB';
-function eqKnobs(key,cls){const CN=window.GLCTC_CN;if(!CN||!CN.knob)return null;const q=eqGet(key),u={},box=E('div',{class:'qmx-kg qmx-eqk '+(cls||'')});
- [['hi','HI'],['mid','MID'],['lo','LO']].forEach(([b,l])=>{const k=CN.knob(l,-15,15,.5,q[b],v=>eqSet(cls==='sel'?sel:key,b,v),dbf,0);k.el.classList.add('qmx-k');k.el.title='EQ '+l;u[b]=k;box.append(k.el)});
- if(cls==='sel'){const k=CN.knob('MID HZ',200,5000,10,q.mf||1000,v=>eqSet(sel,'mf',v),v=>v>=1000?(v/1000).toFixed(1)+'k':String(Math.round(v)),1000);k.el.classList.add('qmx-k');u.mf=k;box.append(k.el)}
+function eqKnobs(key,big){const CN=window.GLCTC_CN;if(!CN||!CN.knob)return null;const q=eqGet(key),u={},box=E('div',{class:'qmx-kg qmx-eqk'+(big?' big':'')});
+ const tgt=()=>big?sel:key;
+ [['hi','HI'],['mid','MID'],['lo','LO']].forEach(([b,l])=>{const k=CN.knob(l,-15,15,.5,q[b],v=>eqSet(tgt(),b,v),dbf,0);k.el.classList.add('qmx-k');k.el.title='EQ '+l+' · drag up / down · double-tap = 0 dB';u[b]=k;box.append(k.el)});
+ if(big){const k=CN.knob('MID HZ',200,5000,10,q.mf||1000,v=>eqSet(sel,'mf',v),v=>v>=1000?(v/1000).toFixed(1)+'k':String(Math.round(v)),1000);k.el.classList.add('qmx-k');u.mf=k;box.append(k.el)}
  u.box=box;return u}
+const STRIP_IDS=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
+function stripKey(ch){if(!ch)return null;if(ch.classList.contains('cn-master'))return 'master';const b=ch.querySelector('[data-fxkey]');return b?b.dataset.fxkey:null}
 function hookEq(){
- const mods=document.querySelector('#qmxDesk .qmx-mods .cn-strips');const ids=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
- const put=(row,key)=>{if(!row||row.querySelector('.qmx-eqk'))return;const u=eqKnobs(key);if(!u)return;EQUI[key]=u;const fw=row.querySelector('.cn-fw');row.insertBefore(u.box,fw||null)};
- if(mods)[...mods.children].forEach((row,i)=>{if(ids[i])put(row,'mod:'+ids[i])});
+ const mods=document.querySelector('#qmxDesk .qmx-mods .cn-strips');
+ const put=(row,key)=>{if(!row||row.querySelector('.qmx-eqk'))return;const u=eqKnobs(key,false);if(!u)return;EQUI[key]=u;const fw=row.querySelector('.cn-fw');row.insertBefore(u.box,fw||null);syncEq(key)};
+ if(mods)[...mods.children].forEach((row,i)=>{if(STRIP_IDS[i])put(row,'mod:'+STRIP_IDS[i])});
  document.querySelectorAll('#qmxBuses .qmx-bus').forEach((row,i)=>put(row,'bus:'+i));
- /* the selected channel's EQ, under the master fader */
- const ms=document.querySelector('#qmxDesk .cn-master');if(ms&&!ms.querySelector('.qmx-seleq')){const u=eqKnobs(sel,'sel');if(u){const box=E('div',{class:'qmx-seleq'},E('div',{class:'qmx-seleqh'},E('b',{text:'EQ'}),E('span',{class:'qmx-seleqn',text:''})),u.box);EQUI.__sel=u;ms.append(box);paintSelEq()}}}
+ const ms=document.querySelector('#qmxDesk .cn-master');if(ms&&!ms.querySelector('.qmx-seleq')){const u=eqKnobs(sel,true);if(u){const fl=E('button',{type:'button',class:'cn-b qmx-eqflat',text:'FLAT',title:'Reset this channel\'s EQ to 0 dB'});fl.onclick=()=>{eqFlat(sel);paintSelEq()};
+  const box=E('div',{class:'qmx-seleq'},E('div',{class:'qmx-seleqh'},E('b',{text:'CHANNEL EQ'}),E('span',{class:'qmx-seleqn',text:''})),u.box,fl);EQUI.__sel=u;ms.append(box);paintSelEq()}}
+ /* tap a strip to select it (one listener for the whole desk) */
+ const desk=document.getElementById('qmxDesk');if(desk&&!desk.__selHook){desk.__selHook=1;desk.addEventListener('click',e=>{const t=e.target;if(!t||!t.closest)return;const ch=t.closest('.cn-ch');if(!ch||!desk.contains(ch))return;
+  if(t.closest('button,input,select,option,label,.k37-knob,.cn-fw,.qmx-send,.qmx-seleq,a'))return;const k=stripKey(ch);if(k&&k!==sel)select(k,false)})}}
 function paintSelEq(){const u=EQUI.__sel;if(!u)return;const box=u.box.closest('.qmx-seleq');if(!box)return;const info=chInfo(sel),q=eqGet(sel);box.style.setProperty('--sc',info.col);box.querySelector('.qmx-seleqn').textContent=info.name;
- ['hi','mid','lo'].forEach(b=>u[b].set(q[b],true));if(u.mf){u.mf.el.style.display=q.mf==null?'none':'';if(q.mf!=null)u.mf.set(q.mf,true)}}
-{const st=document.createElement('style');st.textContent=`#qmxDesk .qmx-eqk{margin:4px auto 2px}#qmxDesk .qmx-bus .qmx-eqk,#qmxDesk .qmx-mods .qmx-eqk{grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;width:100%}
-#qmxDesk .qmx-mods .qmx-eqk .k37-kwrap,#qmxDesk .qmx-bus .qmx-eqk .k37-kwrap{transform:scale(.82);transform-origin:top center;margin-bottom:-8px}
-#qmxDesk .qmx-seleq{margin-top:10px;border-top:1px solid #2a2a30;padding-top:8px;width:100%}
-#qmxDesk .qmx-seleqh{display:flex;flex-direction:column;align-items:center;gap:1px;margin-bottom:4px}#qmxDesk .qmx-seleqh b{font-size:10px;letter-spacing:.2em;color:var(--sc,#ffd36a)}
-#qmxDesk .qmx-seleqn{font-size:9px;letter-spacing:.08em;color:#bbb;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#qmxDesk .qmx-seleq .qmx-eqk{display:grid;grid-template-columns:1fr;justify-items:center;gap:6px}
-#qmxDesk .cn-ch .cn-b[data-fxkey].on{background:#c8102e!important;color:#fff!important;border-color:#ff4d6a!important}`;document.head.appendChild(st)}
+ ['hi','mid','lo'].forEach(b=>u[b].set(q[b],true));if(u.mf){u.mf.el.style.display=q.mf==null?'none':'';if(q.mf!=null)u.mf.set(q.mf,true)}
+ u.box.classList.toggle('live',Math.abs(q.lo)>.01||Math.abs(q.mid)>.01||Math.abs(q.hi)>.01)}
+/* how many things are shaping this channel's sound right now */
+function liveCount(k){let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]).length;
+ if(k.startsWith('bus:')){try{const f=GLCTC_BUSES.state().buses[+k.slice(4)].fx;if(f&&f.on&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))n++}catch(e){}}
+ if(k.startsWith('trk:')){try{const t=trackOfKey(k);if(t){n+=(t.plugs||[]).filter(e=>e&&!e.off&&e.type).length;if(t.fx&&t.fx.on&&(t.fx.flt||t.fx.dly||t.fx.rev))n++}}catch(e){}}
+ return n}
+{const st=document.createElement('style');st.textContent=`
+#qmxDesk .qmx-mods .qmx-eqk,#qmxDesk .qmx-bus .qmx-eqk{display:grid;grid-template-columns:39px 39px;justify-content:center;gap:2px 4px;margin:4px auto 4px;padding:3px 0 2px;border-radius:8px;border:1px solid transparent}
+#qmxDesk .qmx-eqk.live{border-color:color-mix(in srgb,var(--sc,#ffd36a) 55%,transparent);background:color-mix(in srgb,var(--sc,#ffd36a) 8%,transparent)}
+#qmxDesk .qmx-seleq{margin-top:10px;border-top:1px solid #2a2a30;padding-top:8px;width:100%;display:flex;flex-direction:column;align-items:center}
+#qmxDesk .qmx-seleqh{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:6px;max-width:100%}#qmxDesk .qmx-seleqh b{font-size:10px;letter-spacing:.18em;color:var(--sc,#ffd36a)}
+#qmxDesk .qmx-seleqn{font-size:10px;font-weight:800;letter-spacing:.06em;color:#eee;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#qmxDesk .qmx-seleq .qmx-eqk.big{display:grid;grid-template-columns:1fr;justify-items:center;gap:8px;padding:6px 4px;border:1px solid #2a2a30}
+#qmxDesk .qmx-seleq .qmx-eqk.big .k37-kwrap{transform:scale(1.18);transform-origin:center;margin:6px 0}
+#qmxDesk .qmx-eqflat{margin-top:8px;min-height:30px;font-size:10px;padding:4px 10px}
+#qmxDesk .cn-ch{cursor:default}#qmxDesk .cn-ch .cn-chn{cursor:pointer}
+#qmxDesk .cn-ch.qfx-sel{outline:2px solid var(--sc,#ffd36a);outline-offset:-2px;box-shadow:0 0 0 1px #0008,0 0 18px color-mix(in srgb,var(--sc,#ffd36a) 45%,transparent)}
+#qmxDesk .cn-ch.qfx-sel .cn-chn{color:var(--sc,#ffd36a)}
+#qmxDesk .cn-b[data-fxkey].on{background:linear-gradient(#e0193a,#a50d26)!important;color:#fff!important;border-color:#ff5a74!important;box-shadow:0 0 10px #ff2a4c88!important}
+#qmxDesk .cn-b[data-fxkey].open,#qmxDesk .tiny[data-fxkey].open{outline:2px solid #ffd36a;outline-offset:1px}
+#qmxDesk .tiny[data-fxkey].on{background:#c8102e!important;color:#fff!important;border-color:#ff5a74!important}
+#qfxPanel .qfx-eqtag{display:inline-block;margin:0 0 4px 30px;font-size:9px;letter-spacing:.14em;color:#ffd36a}`;document.head.appendChild(st)}
 setInterval(()=>{try{if(!panel)build();else{hookStrips();hookEq();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
 /* Composer uses the existing channel inserts. Never stack a second preset on regeneration. */
 const SONG_FX_IDS=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
@@ -6854,7 +6882,7 @@ function composerFX(genre,on=true){
   if(L&&L.hp)L.hp.frequency.setTargetAtTime(on&&nw?52:32,L.c.currentTime,.05);if(S&&S.hp)S.hp.frequency.setTargetAtTime(on?26:18,S.c.currentTime,.05)}catch(e){}
  SONG_FX_IDS.forEach(id=>{
   const key='mod:'+id,ch=chainOf(key,true),manual=ch.filter(f=>!f._composer);
-  const auto=on?recipe[id].filter(f=>!manual.some(m=>m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
+  const auto=on?recipe[id].filter(f=>!manual.some(m=>!m._eq&&m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
   ch.splice(0,ch.length,...manual,...auto.slice(0,Math.max(0,MAXFX-manual.length)));
   persist(key);rebuild(key);
  });
@@ -6864,7 +6892,7 @@ function fxSnapshot(){return JSON.parse(JSON.stringify(FS))}
 function fxRestore(data){
  if(!data||typeof data!=='object')return;
  const clean=list=>(Array.isArray(list)?list:[]).slice(0,MAXFX).filter(f=>f&&FX[f.type]).map(f=>{
-  const out={...newFx(f.type),on:f.on!==false,_composer:!!f._composer};
+  const out={...newFx(f.type),on:f.on!==false,_composer:!!f._composer};if(f._eq)out._eq=1;
   for(const [k,,lo,hi,step,def] of FX[f.type].p){const v=Number(f.p?.[k]);out.p[k]=Number.isFinite(v)?cl(v,lo,hi):def}return out;
  });
  FS={mods:{},buses:{},master:clean(data.master)};
@@ -6872,7 +6900,7 @@ function fxRestore(data){
  for(let i=0;i<8;i++)FS.buses[i]=clean(data.buses?.[i]);
  fsave();refreshAll();render();window.GLCTC_CHARACTER?.apply();
 }
-window.GLCTC_FX={composerRecipe,composer:composerFX,snapshot:fxSnapshot,restore:fxRestore,select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
+window.GLCTC_FX={mark:()=>{try{markStrips();syncEq(sel);paintSelEq()}catch(e){}},composerRecipe,composer:composerFX,snapshot:fxSnapshot,restore:fxRestore,select,attach,chains:()=>FS,chainOf,lib:()=>FX,rebuild,refreshAll,count:activeCount,render,
  add(key,type,p){const ch=chainOf(key,true);const f=newFx(type);if(p)Object.assign(f.p,p);ch.push(f);persist(key);rebuild(key);if(sel===key)render();return ch.length-1},
  set(key,i,p){const f=chainOf(key)[i];if(!f)return;Object.assign(f.p,p);persist(key);liveSet(key,i)},
  clear(key){const ch=chainOf(key);ch.splice(0);persist(key);rebuild(key);if(sel===key)render()},slots:()=>SLOTS};
@@ -7687,7 +7715,7 @@ panel.innerHTML=`<style>
  <button id="gscLoad">Load Composer</button>
  <button id="gscSurprise" title="Random genre, key, tempo and song shape, with every module written in the same key">🎲 SURPRISE ME</button>
 </div>
-<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v103 · SUB-01 IN EVERY SONG</div>
+<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v104 · SUB-01 IN EVERY SONG</div>
 <div class="gsc-status" id="gscFillInfo" style="opacity:.8"></div>
 <div class="gsc-note">GENERATE NEW SONG makes another variation in your selected genre (a genre named in the prompt takes priority). SURPRISE ME also picks the genre and song length. Three or four authentic groove foundations per genre combine with new keys, chord progressions, bass lines, two-bar hooks and a fresh sound palette drawn from every preset bank; intros are kept short so the hook arrives straight away. 30 genres. Songs repeat when they finish. KEY FROM CHAKRA (on) builds every song on the chakra frequency you select and keeps bass and leads in a natural register. Galactic Vox sings (chants, ooh / aah choirs, crew shouts) in the vocal genres - Deep / Tribal House, Happy Hardcore, Liquid, Reggae, Ska, Garage, Meditation - and the Looper adds texture to Lo-Fi, East Coast and Meditation; elsewhere ask for them in the prompt (vocal / chant / loop / texture) or tick them in. To keep the CPU light, no section plays more than five modules at once. Save Composer keeps a favourite exactly as generated. Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. Generation chooses genre-matched sounds from the original and Soundscape banks. The chosen PRESET is loaded during generation and kept when you press PLAY; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
 const ws=byId('wsPanel');

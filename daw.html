@@ -6373,8 +6373,8 @@ const NB=8,LS='glctc1.buses.v1';
 const COLS=['#ff5d73','#ffb347','#ffe066','#6dff8b','#4fd8ff','#7a8cff','#c77dff','#ff7ad9'];
 const defFx=()=>({on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0});
 const defBus=i=>({name:'BUS '+(i+1),vol:1,pan:0,mute:false,solo:false,fx:defFx()});
-let S={buses:Array.from({length:NB},(_,i)=>defBus(i)),sends:{},sel:{}};
-try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x&&Array.isArray(x.buses)){S.buses=S.buses.map((d,i)=>{const b=x.buses[i]||{};return {...d,...b,fx:{...defFx(),...(b.fx||{})},solo:false}});S.sends=x.sends&&typeof x.sends==='object'?x.sends:{};S.sel=x.sel&&typeof x.sel==='object'?x.sel:{}}}catch(e){}
+let S={buses:Array.from({length:NB},(_,i)=>defBus(i)),sends:{},sel:{},route:{}};
+try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x&&Array.isArray(x.buses)){S.buses=S.buses.map((d,i)=>{const b=x.buses[i]||{};return {...d,...b,fx:{...defFx(),...(b.fx||{})},solo:false}});S.sends=x.sends&&typeof x.sends==='object'?x.sends:{};S.sel=x.sel&&typeof x.sel==='object'?x.sel:{};S.route=x.route&&typeof x.route==='object'?x.route:{}}}catch(e){}
 let saveT=0;const save=()=>{clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}},250)};
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const dirty=()=>{try{typeof markDirty==='function'&&markDirty()}catch(e){}};
@@ -6451,7 +6451,18 @@ function allKeys(){const k=MODIDS.map(id=>'mod:'+id);const P=proj();if(P&&P.trac
 function sync(){const c=AC();if(!c||!c._mg)return;chain(c,c._mg);
  /* tracks wired before the direct-out node existed: move their master feed onto it */
  if(c._buses)for(const id in c._buses){const b=c._buses[id];if(b&&b.mst&&!b._dirOk){try{b.mst.disconnect();b.mst.connect(GLCTC_DIRECT(c))}catch(e){}b._dirOk=1}}
- allKeys().forEach(k=>wire(k,c));apply(c)}
+ allKeys().forEach(k=>wire(k,c));applyRoutes(c);apply(c)}
+/* v106 GROUP ROUTING: a channel ROUTED to a bus leaves the desk only through that bus (its own direct out is lifted), like a
+   subgroup on a real console - so the bus EQ, glue and FX process the whole sound, not a parallel copy. Sends still work as sends. */
+function routeOf(key){const v=S.route[key];return Number.isInteger(v)&&v>=0&&v<NB?v:null}
+function directNode(key,c){
+ if(key.startsWith('mod:')&&key!=='mod:lp'){try{const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(key.slice(4));return b&&b.c===c?b.pan:null}catch(e){return null}}
+ const t=trackOf(key);if(!t||!c._buses)return null;const b=c._buses[t.id];return b?b.tap:null}
+function applyRoutes(c){c=c||AC();if(!c||!c._mg)return;const D=GLCTC_DIRECT(c);
+ allKeys().forEach(k=>{const n=directNode(k,c);if(!n)return;const r=routeOf(k),want=r!=null&&(+sendsOf(k)[r]||0)>0;   /* never silence a channel whose route send was turned off */
+  if(want&&n.__routed!==D){try{n.disconnect(D)}catch(e){}n.__routed=D}
+  else if(!want&&n.__routed===D){try{n.connect(D)}catch(e){}n.__routed=null}})}
+function setRoute(key,i){if(i==null||i<0){const was=routeOf(key);delete S.route[key];if(was!=null)setSend(key,was,0)}else{const was=routeOf(key);if(was!=null&&was!==i)setSend(key,was,0);S.route[key]=i;setSend(key,i,1)}save();sync()}
 setInterval(()=>{try{sync()}catch(e){}},600);
 
 /* tracks: straight-to-master goes through the direct node; the offline WAV render gets the buses too */
@@ -6524,7 +6535,7 @@ function refresh(full){
  if(!built)return;const solo=anySolo();
  strips.forEach((s,i)=>{const b=S.buses[i];s.nm.textContent=b.name;s.so.classList.toggle('on',!!b.solo);s.mu.classList.toggle('on',!!b.mute);
   /* v104: the FX lamp is painted by CHANNEL FX (markStrips) */
-  const n=feeders(i);s.ins.textContent=n?n+' SEND'+(n>1?'S':''):'NO SENDS';s.led.classList.toggle('on',!b.mute&&!(solo&&!b.solo)&&n>0);s.ch.classList.toggle('dim',!!b.mute||(solo&&!b.solo));
+  const n=feeders(i),r=Object.keys(S.route).filter(k=>routeOf(k)===i).length;s.ins.textContent=r?r+' ROUTED'+(n>r?' · '+(n-r)+' SEND'+(n-r>1?'S':''):''):n?n+' SEND'+(n>1?'S':''):'NO SENDS';s.led.classList.toggle('on',!b.mute&&!(solo&&!b.solo)&&n>0);s.ch.classList.toggle('dim',!!b.mute||(solo&&!b.solo));
   if(full){s.fd.value=b.vol;try{s.pk.set(b.pan,true)}catch(e){}}});
  document.querySelectorAll('#qmxDesk .qmx-send').forEach(x=>x.__fill&&x.__fill());
  if(full)fxUi();
@@ -6542,7 +6553,7 @@ function align(){const c=AC();if(!c||!c._dd)return;let fed=false;for(let i=0;i<N
  const P=window.GLCTC_FX&&GLCTC_FX.pdc?GLCTC_FX.pdc():{bus:0},v=fed?((window.GLCTC_LAT?GLCTC_LAT.comp:.006)+(P.bus||0)):0;
  if(Math.abs(c._dd.delayTime.value-v)>2e-5){try{c._dd.delayTime.setTargetAtTime(v,c.currentTime,.01)}catch(e){c._dd.delayTime.value=v}}}
 setInterval(()=>{try{align()}catch(e){}},600);
-window.GLCTC_BUSES={align,sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
+window.GLCTC_BUSES={align,setRoute,routeOf,routes:()=>S.route,sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
  set(i,o){Object.assign(S.buses[i],o);if(o&&o.fx)S.buses[i].fx={...S.buses[i].fx,...o.fx};save();apply();refresh(true)},
  nodes:()=>{const c=AC();return c&&c._b8?c._b8.list:null},_trackFx:(...a)=>trackFx(...a),_chain:(c,d)=>chain(c,d),_apply:c=>apply(c),_k:(d,gdb)=>{BUS_DRV_K=d;BUS_GLUE_DB=gdb},rebuild:()=>{built=false;document.getElementById('qmxBuses')?.remove();build()}};
 })();
@@ -6961,31 +6972,47 @@ function composerFX(genre,on=true){
  try{composerBuses(genre,on)}catch(e){console.warn('composer buses',e)}
  render();window.GLCTC_CHARACTER?.apply();
 }
-/* v105 COMPOSER BUSES: the song uses the desk's group buses like a mix engineer would.
-   BUS 7 DRUM PUNCH - parallel (New York) compression: drums and percussion squashed hard and blended under the dry kit
-   BUS 8 EXCITER    - the stabs, lead, vocal and pads above 3 kHz, gently saturated and glued, blended back for presence and air
-   Both returns are time-aligned with the dry channels (see GLCTC_LAT), so the blend adds weight and shine without phasing.
-   A bus you have renamed or fed yourself is never touched. */
+/* v106 COMPOSER GROUP BUSES: every module is ROUTED (not sent) to its own group bus, and each group gets its own EQ,
+   glue compression and colour before the master - the way a mix engineer bus-processes a track:
+   BUS 1 DRUMS (80LA8 · DIVINE09 · LOOPER) · BUS 2 SUB (SUB-01) · BUS 3 BASS (30LEE) · BUS 4 SYNTHS (0010110 · GALACTIC ONE)
+   BUS 5 INSTRUMENTS (PAD-64) · BUS 6 VOCALS (GALACTIC VOX). Buses 7 and 8 are left free for your own sends.
+   Every bus path is time-aligned (GLCTC_LAT), and the mastering stage then balances the finished mix to the genre's loudness.
+   A bus you have renamed or fed yourself is never taken over - those channels simply stay on their direct outs. */
 const CB_IDS=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
+const CB_OLD=['DRUM PUNCH','EXCITER'];
 function composerBuses(genre,on){
- const B=window.GLCTC_BUSES;if(!B||!B.state)return;const BS=B.state();
- const mine=i=>{const b=BS.buses[i];if(!b)return false;if(b._c)return true;const fresh=b.name==='BUS '+(i+1);const fed=CB_IDS.some(id=>(B.sends('mod:'+id)[i]||0)>0);return fresh&&!fed};
+ const B=window.GLCTC_BUSES;if(!B||!B.state||!B.setRoute)return;const BS=B.state();
  const names0=BS.buses.map(b=>b.name).join('|');
+ const routedTo=i=>CB_IDS.some(id=>B.routeOf('mod:'+id)===i);
+ const mine=i=>{const b=BS.buses[i];if(!b)return false;if(b._c||CB_OLD.includes(b.name))return true;const fresh=b.name==='BUS '+(i+1);const fed=CB_IDS.some(id=>(B.sends('mod:'+id)[i]||0)>0)||routedTo(i);return fresh&&!fed};
  const g=String(genre||'');
- const soft=/^(ambient|meditation)$/.test(g),dark=/^(lofi|eastcoast|meditation)$/.test(g);
+ const soft=/^(ambient|meditation)$/.test(g),dark=/^(lofi|eastcoast|meditation)$/.test(g),boom=/^(trap|drill|south|westcoast|eastcoast|hiphop|ukhiphop|lofi|reggae|dubstep)$/.test(g);
  const hard=/^(techno|techhouse|hardhouse|happyhardcore|psytrance|dnb|jungle|dubstep|breaks|nuskool|electro|trap|drill|south|ukhiphop)$/.test(g);
+ const peq=(f1,g1,q1,f2,g2,q2)=>({type:'peq',p:{f1,g1,q1,f2,g2,q2}});
  const plan=[
-  {i:6,name:'DRUM PUNCH',use:on&&!soft,vol:hard?.6:.5,fx:{on:true,lc:35,hc:15000,drv:hard?.22:.12,glue:.9,dly:0,rev:0},
-   sends:{bl:hard?.55:.45,mine:.22,ws:.32,lp:.2}},
-  {i:7,name:'EXCITER',use:on,vol:soft?.25:dark?.28:.45,fx:{on:true,lc:3000,hc:20000,drv:dark?.3:.6,glue:.35,dly:0,rev:0},
-   sends:{s101:.3,go:.35,vox:.35,ws:.12,mine:.1}}];
+  {i:0,name:'DRUMS',ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19000,drv:hard?.14:.06,glue:soft?.3:hard?.6:.5,dly:0,rev:0},
+   ins:[peq(380,-2,1.1,5200,dark?0:1.5,.7)]},
+  {i:1,name:'SUB',ids:['sub'],vol:boom?.85:.92,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
+   ins:[{type:'util',p:{gain:0,pan:0,mono:1,inv:0}}]},
+  {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:11000,drv:hard?.12:.05,glue:.45,dly:0,rev:0},
+   ins:[peq(260,-2,1,1100,1.5,.9)]},
+  {i:3,name:'SYNTHS',ids:['s101','go'],fx:{on:true,lc:140,hc:19500,drv:0,glue:.35,dly:0,rev:0},
+   ins:[peq(420,-2,1,3200,dark?.5:1.5,.8),{type:'width',p:{w:soft?1.3:1.15,bass:180}}]},
+  {i:4,name:'INSTRUMENTS',ids:['ws'],fx:{on:true,lc:100,hc:18500,drv:0,glue:.3,dly:0,rev:0},
+   ins:[peq(320,-1.5,1,6000,dark?0:1.5,.7)]},
+  {i:5,name:'VOCALS',ids:['vox'],fx:{on:true,lc:170,hc:16500,drv:0,glue:.5,dly:0,rev:0},
+   ins:[peq(300,-2,1,3500,2,.8)]},
+  {i:6,free:true},{i:7,free:true}];
+ const clearIns=i=>{const ch=chainOf('bus:'+i,true),keep=ch.filter(f=>!f._composer);ch.splice(0,ch.length,...keep);persist('bus:'+i);rebuild('bus:'+i)};
  plan.forEach(P=>{if(!mine(P.i))return;
-  CB_IDS.forEach(id=>{if((B.sends('mod:'+id)[P.i]||0)>0)B.setSend('mod:'+id,P.i,0)});
-  if(!P.use){B.set(P.i,{name:'BUS '+(P.i+1),vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0},_c:false});return}
-  B.set(P.i,{name:P.name,vol:P.vol,pan:0,mute:false,solo:false,fx:P.fx,_c:true});
-  for(const id in P.sends)B.setSend('mod:'+id,P.i,P.sends[id]);
+  CB_IDS.forEach(id=>{const k='mod:'+id;if(B.routeOf(k)===P.i)B.setRoute(k,null);if((B.sends(k)[P.i]||0)>0)B.setSend(k,P.i,0)});
+  clearIns(P.i);
+  if(P.free||!on){B.set(P.i,{name:'BUS '+(P.i+1),vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0},_c:false});return}
+  B.set(P.i,{name:P.name,vol:P.vol??1,pan:0,mute:false,solo:false,fx:P.fx,_c:true});
+  const ch=chainOf('bus:'+P.i,true);P.ins.forEach(f=>{if(ch.length<MAXFX)ch.push({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})});FS.arm['bus:'+P.i]=true;persist('bus:'+P.i);rebuild('bus:'+P.i);
+  P.ids.forEach(id=>B.setRoute('mod:'+id,P.i));
  });
- try{B.sync()}catch(e){}
+ try{fsave()}catch(e){}try{B.sync()}catch(e){}
  if(BS.buses.map(b=>b.name).join('|')!==names0)try{B.rebuild&&B.rebuild()}catch(e){}   /* the MUTE / SOLO pads take the new bus names */
 }
 function fxSnapshot(){return JSON.parse(JSON.stringify(FS))}
@@ -10110,7 +10137,7 @@ function resetEverything(){
  /* 6. v75: sequencer tracks cleared (standard track set, no clips), buses and every channel FX back to normal */
  try{window.GLCTC_CLEAR_TRACKS&&GLCTC_CLEAR_TRACKS()}catch(e){console.warn('clear tracks',e)}
  try{window.GLCTC_COMPOSER_CLEAR&&GLCTC_COMPOSER_CLEAR()}catch(e){console.warn('clear composer',e)}
- try{const B=window.GLCTC_BUSES;if(B){const S2=B.state();S2.sends={};S2.sel={};for(let i=0;i<8;i++)B.set(i,{vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0}});B.sync()}}catch(e){}
+ try{const B=window.GLCTC_BUSES;if(B){const S2=B.state();S2.sends={};S2.sel={};S2.route={};for(let i=0;i<8;i++)B.set(i,{vol:1,pan:0,mute:false,solo:false,fx:{on:true,lc:20,hc:20000,drv:0,glue:0,dly:0,rev:0}});B.sync()}}catch(e){}
  try{const F=window.GLCTC_FX;if(F){['lp','bl','mine','lee','s101','go','vox','ws'].forEach(id=>F.clear('mod:'+id));for(let i=0;i<8;i++)F.clear('bus:'+i)}}catch(e){}
  try{window.GLCTC_NEW_SONG=null;const f=$('gscFillInfo');if(f)f.textContent='ALL MODULES RESET · NO PATTERNS · write your own, or press ✦ GENERATE SONG';const k=$('gscKey');if(k)k.textContent='C MINOR'}catch(e){}
  toast2('↺ RESET ALL · every module at factory settings with empty patterns · all sequencer tracks removed · composer empty · mixer, buses and FX back to normal');
@@ -10450,7 +10477,7 @@ const TARGET=GLCTC_GFILL({techno:-8.5,house:-9,deephouse:-10,techhouse:-8.5,trib
  dnb:-8.5,jungle:-9,liquid:-10,breaks:-9,nuskool:-8.5,electro:-9,garage:-9,dubstep:-8,eastcoast:-9.5,westcoast:-9.5,south:-9,ukhiphop:-9,drill:-9,
  trap:-9,hiphop:-9.5,lofi:-11.5,reggae:-10.5,ska:-10,pop:-9,synthwave:-9.5,ambient:-14,meditation:-16});
 /* starting drive (dB into the limiter), measured on every genre so the first bar is already at level */
-const DRIVE0=GLCTC_GFILL({"techno":4.2,"house":6.6,"deephouse":5.3,"techhouse":7.3,"tribalhouse":6.5,"hardhouse":5.6,"trance":7.5,"psytrance":10.5,"happyhardcore":6.7,"dnb":6.8,"jungle":3.8,"liquid":5.0,"breaks":4.3,"nuskool":8.7,"electro":4.5,"garage":9.0,"dubstep":6.3,"eastcoast":7.7,"westcoast":8.5,"south":8.5,"ukhiphop":7.8,"drill":9.1,"trap":5.2,"lofi":7.1,"reggae":7.1,"ska":8.1,"pop":8.9,"synthwave":7.1,"ambient":5.9,"meditation":1.9});
+const DRIVE0=GLCTC_GFILL({"techno":8.6,"house":7.9,"deephouse":6.6,"techhouse":8.6,"tribalhouse":7.8,"hardhouse":6.9,"trance":8.8,"psytrance":9.5,"happyhardcore":8.0,"dnb":7.3,"jungle":5.1,"liquid":6.3,"breaks":5.6,"nuskool":9.5,"electro":5.8,"garage":9.5,"dubstep":7.6,"eastcoast":9.0,"westcoast":9.5,"south":9.5,"ukhiphop":9.1,"drill":9.5,"trap":7.2,"lofi":9.2,"reggae":7.7,"ska":9.4,"pop":8.9,"synthwave":8.4,"ambient":6.1,"meditation":3.2});   /* v106: re-measured with the group buses in the path */
 const LS='glctc1.mastering.v1';
 const S={on:true,genre:null,drive:3,locked:false,st:[],drop:0,lastAdj:0,learn:{},gr:0,lufs:null};
 try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x){S.on=x.on!==false;if(x.learn&&typeof x.learn==='object')S.learn=x.learn}}catch(e){}

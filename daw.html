@@ -2428,6 +2428,8 @@ window.glctcTrackMix={
  isOn(){return !(project&&mx().tracksOff)}
 };
 function eqOf(t){PLUG.ensureAll(t);return t.plugs.find(e=>e.type==='eq')}
+window.GLCTC_TRKEQ={get(id){try{const t=project.tracks.find(x=>String(x.id)===String(id));const e=t&&eqOf(t),p=(e&&e.p)||{};return{lo:p.lo||0,mid:p.mid||0,hi:p.hi||0}}catch(_){return{lo:0,mid:0,hi:0}}},
+ set(id,k,v){try{const t=project.tracks.find(x=>String(x.id)===String(id));if(!t)return;setEq(t,k,v);clearTimeout(window.__trkEqT);window.__trkEqT=setTimeout(()=>{try{mixUi()}catch(_){}},500)}catch(_){}}};   /* v103: lets the master-section EQ drive a track's EQ */
 function setEq(t,k,v){const e=eqOf(t);if(!e)return;e.p=e.p||{};e.p[k]=v;const want=!(Math.abs(e.p.lo||0)>.01||Math.abs(e.p.mid||0)>.01||Math.abs(e.p.hi||0)>.01);if(e.off!==want){e.off=want;PLUG.rebuildAll()}else PLUG.liveSet(e);markDirty()}
 function rackUi(){const box=$('qmxRack');if(!box)return;box.innerHTML='';const t=rackId&&project&&project.tracks.find(x=>x.id===rackId);if(!t){box.classList.remove('on');return}
  box.classList.add('on');box.style.setProperty('--sc',t.color||'#ffd36a');
@@ -3549,20 +3551,21 @@ function playNote(rig,P,pi,midi,vel,when,dur,o){
  const peak=cl(P.vol*(1-P.avel+P.avel*vel)*(1+cl(base.amp,-.9,1))*(o.gain||1),0,2);
  const envF=makeEnv(fe.offset,t0,P.fa,P.fd,P.fs,1,0,P.fr,dur!=null?t0+dur:null);
  const envA=makeEnv(vca.gain,t0,P.aa,P.ad,P.as,Math.max(.0002,peak),0,P.ar,dur!=null?t0+dur:null);
+ const ext=[],EXT=(a,b)=>{a.connect(b);ext.push([a,b])};   /* v103 LEAK FIX: global sources (bend, tape, macro cut, wheel, LFOs) feed each voice - these edges are cut when the voice ends, or every note stayed alive forever */
  // ----- pitch bus (bend, tape-stop, LFO vibrato, matrix, env→pitch)
  const busP=reg(c.createGain());T.pitch.forEach(p=>busP.connect(p));
- const bg=reg(c.createGain());bg.gain.value=Math.max(1,P.bend);G.bend.connect(bg);bg.connect(busP);G.tape.connect(busP);
+ const bg=reg(c.createGain());bg.gain.value=Math.max(1,P.bend);EXT(G.bend,bg);bg.connect(busP);EXT(G.tape,busP);
  if(Math.abs(P.penv)>.01){const pe2=reg(c.createGain());pe2.gain.value=P.penv*100;fe.connect(pe2);pe2.connect(busP)}
  if(Math.abs(base.pitch)>.01){const s=reg(c.createConstantSource());s.offset.value=base.pitch;s.connect(busP);srcs.push(s)}
  // ----- global macro cutoff + wheel cutoff
- const busC=reg(c.createGain());T.cut.forEach(p=>busC.connect(p));G.mcut.connect(busC);
- if(P.mwcut>.001){const wg=reg(c.createGain());wg.gain.value=P.mwcut*4800;G.wheel.connect(wg);wg.connect(busC)}
+ const busC=reg(c.createGain());T.cut.forEach(p=>busC.connect(p));EXT(G.mcut,busC);
+ if(P.mwcut>.001){const wg=reg(c.createGain());wg.gain.value=P.mwcut*4800;EXT(G.wheel,wg);wg.connect(busC)}
  // ----- LFO1 built-in routing
  const l1=G.lfo[pi*2],l2=G.lfo[pi*2+1];
  const need1=P.l1pitch>.001||P.l1cut>.001||P.l1pw>.001||P.l1amp>.001||P.mwvib>.001;
- if(need1){const lv=reg(c.createGain());lv.gain.setValueAtTime(P.l1delay>0?0:1,t0);if(P.l1delay>0){lv.gain.setValueAtTime(0,t0+P.l1delay);lv.gain.linearRampToValueAtTime(1,t0+P.l1delay+.3)}l1.out.connect(lv);
+ if(need1){const lv=reg(c.createGain());lv.gain.setValueAtTime(P.l1delay>0?0:1,t0);if(P.l1delay>0){lv.gain.setValueAtTime(0,t0+P.l1delay);lv.gain.linearRampToValueAtTime(1,t0+P.l1delay+.3)}EXT(l1.out,lv);
   if(P.l1pitch>.001){const g=reg(c.createGain());g.gain.value=P.l1pitch*P.l1pitch*1200;lv.connect(g);g.connect(busP)}
-  if(P.mwvib>.001){const wv=reg(c.createGain()),wk=reg(c.createGain());wv.gain.value=0;wk.gain.value=P.mwvib*P.mwvib*900;G.wheel.connect(wk);wk.connect(wv.gain);lv.connect(wv);wv.connect(busP)}
+  if(P.mwvib>.001){const wv=reg(c.createGain()),wk=reg(c.createGain());wv.gain.value=0;wk.gain.value=P.mwvib*P.mwvib*900;EXT(G.wheel,wk);wk.connect(wv.gain);lv.connect(wv);wv.connect(busP)}
   if(P.l1cut>.001){const g=reg(c.createGain());g.gain.value=P.l1cut*3600;lv.connect(g);g.connect(busC)}
   if(P.l1pw>.001&&T.pw.length){const g=reg(c.createGain());g.gain.value=P.l1pw*.45;lv.connect(g);T.pw.forEach(p=>g.connect(p))}
   if(P.l1amp>.001){const g=reg(c.createGain());g.gain.value=P.l1amp*.45;lv.connect(g);g.connect(trem.gain)}}
@@ -3570,7 +3573,7 @@ function playNote(rig,P,pi,midi,vel,when,dur,o){
  const buses={};
  slots.forEach(([s,d,a])=>{const key=BN[d];if(!T[key]||!T[key].length)return;
   if(!buses[key]){const b=reg(c.createGain());T[key].forEach(p=>b.connect(p));buses[key]=b}
-  const src=s===1?l1.out:s===2?l2.out:s===3?fe:G.wheel;const g=reg(c.createGain());g.gain.value=a*(key==='x'?nf*1.6:SC[d]);src.connect(g);g.connect(buses[key])});
+  const src=s===1?l1.out:s===2?l2.out:s===3?fe:G.wheel;const g=reg(c.createGain());g.gain.value=a*(key==='x'?nf*1.6:SC[d]);EXT(src,g);g.connect(buses[key])});
  // ----- start & lifetime
  const stopAt=t=>srcs.forEach(s=>{try{s.stop(t)}catch(e){}});
  srcs.forEach(s=>{try{s.__noise?s.start(t0,Math.random()*1.5):s.start(t0)}catch(e){console.warn('start',e)}});
@@ -3579,7 +3582,7 @@ function playNote(rig,P,pi,midi,vel,when,dur,o){
   kill(tr){if(this.dead)return;this.dead=true;tr=Math.max(tr==null?c.currentTime:tr,c.currentTime);try{envA.release(tr,.03)}catch(e){}const e=tr+.12;this.end=e;stopAt(e);cleanup(e)},
   setNote(m,glideT,when){this.midi=m;const t=when||c.currentTime,f=mtof(m);fp.forEach(x=>{try{x.p.cancelScheduledValues(t);x.p.setTargetAtTime(f*x.m,t,Math.max(.002,(glideT||0)/3))}catch(e){}})}};
  if(dur!=null){const e=t0+dur+Math.max(P.ar,P.fr)*2.6+.08;v.released=true;v.end=e;stopAt(e);cleanup(e)}
- function cleanup(e){if(!rig.live)return;const ms=Math.max(50,(e-c.currentTime)*1000+300);setTimeout(()=>{keep.forEach(n=>{try{n.disconnect()}catch(x){}})},ms)}
+ function cleanup(e){if(!rig.live)return;const ms=Math.max(50,(e-c.currentTime)*1000+300);setTimeout(()=>{ext.forEach(([a,b])=>{try{a.disconnect(b)}catch(x){}});keep.forEach(n=>{try{n.disconnect()}catch(x){}})},ms)}
  rig.voices.push(v);pruneVoices(rig);
  if(rig.live){const cap=Math.min(20,((typeof ST!=='undefined'&&ST.voices)||14)+6);if(rig.voices.length>cap){const old=rig.voices.find(x=>x!==v&&!x.dead);if(old)old.kill()}}
  return v;
@@ -6715,14 +6718,17 @@ function render(){
  addBox.innerHTML='';if(ch.length<MAXFX){const add=fxSelect('',v=>{chainOf(sel,true).push(newFx(v));persist(sel);rebuild(sel);render()},'＋ ADD FX');add.classList.add('qfx-add');addBox.append(add)}else addBox.append(E('span',{class:'qfx-empty',text:'8 FX MAX'}));
  markStrips();
 }
-function select(key,scroll){sel=key;if(!panel)build();render();if(scroll&&panel)setTimeout(()=>{try{panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
+function select(key,scroll){sel=key;if(!panel)build();render();try{paintSelEq()}catch(e){}if(scroll&&panel)setTimeout(()=>{try{panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
 function markStrips(){
  /* FX buttons on strips show a dot when that channel has FX, and the selected channel is outlined */
  /* v77: an FX button only lights while that channel really has FX switched on - choosing a channel never latches it */
- document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=activeCount(k);b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',n>0);const ch=b.closest('.cn-ch');if(ch)ch.classList.remove('qfx-sel')})}
+ const BS=window.GLCTC_BUSES&&GLCTC_BUSES.state&&GLCTC_BUSES.state();
+ document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey;let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]&&!x._eq).length;
+  if(k.startsWith('bus:')&&BS){const bb=BS.buses[+k.slice(4)],f=bb&&bb.fx;if(f&&f.on&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))n++}   /* v103: a bus with its BUS TONE switched on lights its FX button */
+  b.textContent=(b.dataset.fxlabel||'FX')+(n?' •':'');b.classList.toggle('on',n>0);const ch=b.closest('.cn-ch');if(ch)ch.classList.toggle('qfx-sel',k===sel&&!ch.classList.contains('cn-master'))})}
 function build(){
  const desk=document.getElementById('qmxDesk'),wrap=desk&&desk.querySelector('.qmx-wrap');if(!wrap||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
- panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);
+ panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);   /* v103: also repaints the selected-channel EQ */
  addBox=E('span',{class:'qfx-addw'});body=E('div',{class:'qfx-body'});
  panel.append(E('div',{class:'qfx-bar'},E('b',{class:'qfx-h',text:'CHANNEL FX'}),E('i',{class:'qfx-led'}),titleEl,addBox,E('label',{class:'qfx-pickw'},E('span',{text:'CHANNEL'}),picker)),body);
  /* v77: in the master column, in the free space under MASTER / HEADPHONES / BOOTH, beside the bus tracks. It takes the column's width and never makes it wider */
@@ -6739,7 +6745,41 @@ function hookStrips(){
  const ms=document.querySelector('#qmxDesk .cn-master .cn-fxb');if(ms&&!ms.querySelector('[data-fxkey="master"]')){const b=E('button',{type:'button',class:'tiny','data-fxkey':'master',text:'FX',title:'Master FX: open MASTER in CHANNEL FX'});b.onclick=()=>select('master',true);ms.prepend(b)}
  hidePanelMasterFx();
  markStrips()}
-setInterval(()=>{try{if(!panel)build();else{hookStrips();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
+/* v103 STRIP EQ: HI / MID / LO on every module and bus strip (a 3-band EQ at the top of that channel's insert chain - it only
+   exists while a band is moved off 0 dB, so a flat EQ costs nothing), and a big EQ for the SELECTED channel under the master fader. */
+const EQMAP={lo:'low',mid:'mid',hi:'high',mf:'mf'},EQUI={};
+function eqGet(key){if(key.startsWith('trk:')){const T=window.GLCTC_TRKEQ;const r=T?T.get(key.slice(4)):{lo:0,mid:0,hi:0};r.mf=null;return r}
+ const f=chainOf(key).find(x=>x&&x._eq),p=f?{...defP('eq3'),...f.p}:defP('eq3');return{lo:p.low||0,mid:p.mid||0,hi:p.high||0,mf:p.mf||1000}}
+function eqSet(key,band,v){
+ if(key.startsWith('trk:')){window.GLCTC_TRKEQ&&GLCTC_TRKEQ.set(key.slice(4),band,v);syncEq(key);return}
+ const ch=chainOf(key,true);let i=ch.findIndex(x=>x&&x._eq);
+ if(i<0){if(band==='mf'||Math.abs(v)<.01){syncEq(key);return}if(ch.length>=MAXFX)return;const f=newFx('eq3');f._eq=1;ch.unshift(f);i=0;f.p[EQMAP[band]]=v;persist(key);rebuild(key)}
+ else{const f=ch[i];f.p={...defP('eq3'),...f.p};f.p[EQMAP[band]]=v;f.on=true;
+  if(Math.abs(f.p.low)<.01&&Math.abs(f.p.mid)<.01&&Math.abs(f.p.high)<.01){ch.splice(i,1);persist(key);rebuild(key)}else{persist(key);liveSet(key,i)}}
+ syncEq(key);if(key===sel&&body&&!(panel&&panel.contains(document.activeElement)))clearTimeout(eqSet._t),eqSet._t=setTimeout(render,400)}
+function syncEq(key){const q=eqGet(key);[EQUI[key],key===sel?EQUI.__sel:null].forEach(u=>{if(!u)return;['hi','mid','lo','mf'].forEach(b=>{if(u[b]&&q[b]!=null&&document.activeElement!==u[b].el.querySelector('.k37-knob'))u[b].set(q[b],true)})})}
+const dbf=v=>(v>0?'+':'')+(Math.round(v*2)/2)+'dB';
+function eqKnobs(key,cls){const CN=window.GLCTC_CN;if(!CN||!CN.knob)return null;const q=eqGet(key),u={},box=E('div',{class:'qmx-kg qmx-eqk '+(cls||'')});
+ [['hi','HI'],['mid','MID'],['lo','LO']].forEach(([b,l])=>{const k=CN.knob(l,-15,15,.5,q[b],v=>eqSet(cls==='sel'?sel:key,b,v),dbf,0);k.el.classList.add('qmx-k');k.el.title='EQ '+l;u[b]=k;box.append(k.el)});
+ if(cls==='sel'){const k=CN.knob('MID HZ',200,5000,10,q.mf||1000,v=>eqSet(sel,'mf',v),v=>v>=1000?(v/1000).toFixed(1)+'k':String(Math.round(v)),1000);k.el.classList.add('qmx-k');u.mf=k;box.append(k.el)}
+ u.box=box;return u}
+function hookEq(){
+ const mods=document.querySelector('#qmxDesk .qmx-mods .cn-strips');const ids=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
+ const put=(row,key)=>{if(!row||row.querySelector('.qmx-eqk'))return;const u=eqKnobs(key);if(!u)return;EQUI[key]=u;const fw=row.querySelector('.cn-fw');row.insertBefore(u.box,fw||null)};
+ if(mods)[...mods.children].forEach((row,i)=>{if(ids[i])put(row,'mod:'+ids[i])});
+ document.querySelectorAll('#qmxBuses .qmx-bus').forEach((row,i)=>put(row,'bus:'+i));
+ /* the selected channel's EQ, under the master fader */
+ const ms=document.querySelector('#qmxDesk .cn-master');if(ms&&!ms.querySelector('.qmx-seleq')){const u=eqKnobs(sel,'sel');if(u){const box=E('div',{class:'qmx-seleq'},E('div',{class:'qmx-seleqh'},E('b',{text:'EQ'}),E('span',{class:'qmx-seleqn',text:''})),u.box);EQUI.__sel=u;ms.append(box);paintSelEq()}}}
+function paintSelEq(){const u=EQUI.__sel;if(!u)return;const box=u.box.closest('.qmx-seleq');if(!box)return;const info=chInfo(sel),q=eqGet(sel);box.style.setProperty('--sc',info.col);box.querySelector('.qmx-seleqn').textContent=info.name;
+ ['hi','mid','lo'].forEach(b=>u[b].set(q[b],true));if(u.mf){u.mf.el.style.display=q.mf==null?'none':'';if(q.mf!=null)u.mf.set(q.mf,true)}}
+{const st=document.createElement('style');st.textContent=`#qmxDesk .qmx-eqk{margin:4px auto 2px}#qmxDesk .qmx-bus .qmx-eqk,#qmxDesk .qmx-mods .qmx-eqk{grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;width:100%}
+#qmxDesk .qmx-mods .qmx-eqk .k37-kwrap,#qmxDesk .qmx-bus .qmx-eqk .k37-kwrap{transform:scale(.82);transform-origin:top center;margin-bottom:-8px}
+#qmxDesk .qmx-seleq{margin-top:10px;border-top:1px solid #2a2a30;padding-top:8px;width:100%}
+#qmxDesk .qmx-seleqh{display:flex;flex-direction:column;align-items:center;gap:1px;margin-bottom:4px}#qmxDesk .qmx-seleqh b{font-size:10px;letter-spacing:.2em;color:var(--sc,#ffd36a)}
+#qmxDesk .qmx-seleqn{font-size:9px;letter-spacing:.08em;color:#bbb;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#qmxDesk .qmx-seleq .qmx-eqk{display:grid;grid-template-columns:1fr;justify-items:center;gap:6px}
+#qmxDesk .cn-ch .cn-b[data-fxkey].on{background:#c8102e!important;color:#fff!important;border-color:#ff4d6a!important}`;document.head.appendChild(st)}
+setInterval(()=>{try{if(!panel)build();else{hookStrips();hookEq();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
 /* Composer uses the existing channel inserts. Never stack a second preset on regeneration. */
 const SONG_FX_IDS=['lp','bl','mine','sub','lee','s101','go','vox','ws'];
 function composerRecipe(genre){
@@ -7647,7 +7687,7 @@ panel.innerHTML=`<style>
  <button id="gscLoad">Load Composer</button>
  <button id="gscSurprise" title="Random genre, key, tempo and song shape, with every module written in the same key">🎲 SURPRISE ME</button>
 </div>
-<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v102 · SUB-01 IN EVERY SONG</div>
+<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v103 · SUB-01 IN EVERY SONG</div>
 <div class="gsc-status" id="gscFillInfo" style="opacity:.8"></div>
 <div class="gsc-note">GENERATE NEW SONG makes another variation in your selected genre (a genre named in the prompt takes priority). SURPRISE ME also picks the genre and song length. Three or four authentic groove foundations per genre combine with new keys, chord progressions, bass lines, two-bar hooks and a fresh sound palette drawn from every preset bank; intros are kept short so the hook arrives straight away. 30 genres. Songs repeat when they finish. KEY FROM CHAKRA (on) builds every song on the chakra frequency you select and keeps bass and leads in a natural register. Galactic Vox sings (chants, ooh / aah choirs, crew shouts) in the vocal genres - Deep / Tribal House, Happy Hardcore, Liquid, Reggae, Ska, Garage, Meditation - and the Looper adds texture to Lo-Fi, East Coast and Meditation; elsewhere ask for them in the prompt (vocal / chant / loop / texture) or tick them in. To keep the CPU light, no section plays more than five modules at once. Save Composer keeps a favourite exactly as generated. Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. Generation chooses genre-matched sounds from the original and Soundscape banks. The chosen PRESET is loaded during generation and kept when you press PLAY; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
 const ws=byId('wsPanel');

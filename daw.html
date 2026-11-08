@@ -2229,7 +2229,7 @@ delay:{n:'Delay',p:[['time','Time s',.02,1,.01,.3],['fb','Feedback',0,.9,.01,.35
 reverb:{n:'Reverb',p:[['mix','Mix',0,1,.01,.3]],make(c){const i=c.createGain(),o=c.createGain(),r=mkRev(c),w=c.createGain();i.connect(o);i.connect(r.in);r.out.connect(w);w.connect(o);return{in:i,out:o,set(p){w.gain.value=p.mix??.3}}}}};
 const wamLive={};
 function plugRebuild(c,tr,b){try{b.head.disconnect()}catch(e){}(b.nodes||[]).forEach(n=>{try{n.out.disconnect()}catch(e){}});b.nodes=[];let prev=b.head;
-for(const e of tr.plugs||[]){if(e.off)continue;let n;if(e.type==='wam'){const w=c===audioCtx&&wamLive[e.id];if(!w)continue;n={in:w.audioNode,out:w.audioNode}}else{const d=FX[e.type];if(!d)continue;n=d.make(c);n.set(e.p||{})}n.e=e;prev.connect(n.in);prev=n.out;b.nodes.push(n)}prev.connect(b.inner)}
+for(const e of tr.plugs||[]){if(e.off||(tr.fxByp&&e.type!=='eq'))continue;let n;if(e.type==='wam'){const w=c===audioCtx&&wamLive[e.id];if(!w)continue;n={in:w.audioNode,out:w.audioNode}}else{const d=FX[e.type];if(!d)continue;n=d.make(c);n.set(e.p||{})}n.e=e;prev.connect(n.in);prev=n.out;b.nodes.push(n)}prev.connect(b.inner)}
 const _tb=trackBus;trackBus=function(c,tr){const had=c._buses&&c._buses[tr.id],b=_tb(c,tr);if(!had){b.inner=b.in;b.head=c.createGain();b.in=b.head;plugRebuild(c,tr,b)}return b};
 const rebuildAll=()=>Object.values(audioCtx?._buses||{}).forEach(b=>b.track&&b.head&&plugRebuild(audioCtx,b.track,b));
 const liveSet=e=>Object.values(audioCtx?._buses||{}).forEach(b=>(b.nodes||[]).forEach(n=>{if(n.e===e&&n.set)n.set(e.p)}));
@@ -2428,6 +2428,7 @@ window.glctcTrackMix={
  isOn(){return !(project&&mx().tracksOff)}
 };
 function eqOf(t){PLUG.ensureAll(t);return t.plugs.find(e=>e.type==='eq')}
+window.GLCTC_TRKFX={byp(id,off){try{const t=project.tracks.find(x=>String(x.id)===String(id));if(!t)return;const f=tfx(t);t.fxByp=!!off;if(off){t.fxPrevOn=f.on;f.on=false}else{f.on=t.fxPrevOn??true;delete t.fxPrevOn}PLUG.rebuildAll();fxAll();markDirty();clearTimeout(window.__trkFxT);window.__trkFxT=setTimeout(()=>{try{mixUi()}catch(_){}},60)}catch(_){}}};   /* v105: track FX on / off from the strip FX button */
 window.GLCTC_TRKEQ={get(id){try{const t=project.tracks.find(x=>String(x.id)===String(id));const e=t&&eqOf(t),p=(e&&e.p)||{};return{lo:p.lo||0,mid:p.mid||0,hi:p.hi||0}}catch(_){return{lo:0,mid:0,hi:0}}},
  set(id,k,v){try{const t=project.tracks.find(x=>String(x.id)===String(id));if(!t)return;setEq(t,k,v);clearTimeout(window.__trkEqT);window.__trkEqT=setTimeout(()=>{try{mixUi()}catch(_){}},500)}catch(_){}}};   /* v103: lets the master-section EQ drive a track's EQ */
 function setEq(t,k,v){const e=eqOf(t);if(!e)return;e.p=e.p||{};e.p[k]=v;const want=!(Math.abs(e.p.lo||0)>.01||Math.abs(e.p.mid||0)>.01||Math.abs(e.p.hi||0)>.01);if(e.off!==want){e.off=want;PLUG.rebuildAll()}else PLUG.liveSet(e);markDirty();try{window.GLCTC_FX&&GLCTC_FX.mark&&GLCTC_FX.mark()}catch(_){}}
@@ -6525,7 +6526,8 @@ window.GLCTC_BUSES={sendUi,toneUi,state:()=>S,sends:sendsOf,setSend,sync,apply,
 (()=>{'use strict';
 const LSFX='glctc1.fx.v1',MAXFX=8;
 let FS={mods:{},buses:{},master:[]};
-try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{};FS.master=Array.isArray(x.master)?x.master:[]}}catch(e){}
+try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{};FS.master=Array.isArray(x.master)?x.master:[];FS.byp=x.byp&&typeof x.byp==='object'?x.byp:{}}}catch(e){}
+if(!FS.byp)FS.byp={};
 let fsT=0;const fsave=()=>{clearTimeout(fsT);fsT=setTimeout(()=>{try{localStorage.setItem(LSFX,JSON.stringify(FS))}catch(e){}},250)};
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const AC2=()=>{try{return audioCtx}catch(e){return null}};
@@ -6659,7 +6661,7 @@ const SLOTS=new Map();   /* live slots by channel key */
 function buildSlot(sl,chain){
  sl.units.forEach(u=>{try{u.stop&&u.stop()}catch(e){}[u.in,u.out].forEach(n=>{try{n.disconnect()}catch(e){}})});sl.units=[];
  try{sl.ix.disconnect()}catch(e){}
- let x=sl.ix;(chain||[]).forEach((f,i)=>{if(!f||f.on===false||!FX[f.type])return;try{const u=FX[f.type].make(sl.c);u.idx=i;u.type=f.type;u.set({...defP(f.type),...f.p});x.connect(u.in);x=u.out;sl.units.push(u)}catch(e){console.warn('fx',f.type,e)}});
+ let x=sl.ix;const byp=!!(FS.byp&&FS.byp[sl.key]);(chain||[]).forEach((f,i)=>{if(!f||f.on===false||!FX[f.type])return;if(byp&&!f._eq)return;try{const u=FX[f.type].make(sl.c);u.idx=i;u.type=f.type;u.set({...defP(f.type),...f.p});x.connect(u.in);x=u.out;sl.units.push(u)}catch(e){console.warn('fx',f.type,e)}});
  x.connect(sl.ox);sl.sig=JSON.stringify((chain||[]).map(f=>f&&[f.type,f.on!==false]));
 }
 function attach(c,key,ix,ox){const sl={c,key,ix,ox,units:[],sig:''};buildSlot(sl,chainOf(key));if(c===AC2())SLOTS.set(key,sl);return sl}
@@ -6717,18 +6719,19 @@ function render(){
    if(!CN||!CN.knob)return;const kn=CN.knob(l,min,max,step,p[k],v=>{p[k]=v;persist(sel);liveSet(sel,i);if(f._eq)syncEq(sel)},fmt||(v=>String(v)),def);kn.el.classList.add('qmx-k');kg.append(kn.el)});
   slot.append(kg);body.append(slot)});
  addBox.innerHTML='';if(ch.length<MAXFX){const add=fxSelect('',v=>{chainOf(sel,true).push(newFx(v));persist(sel);rebuild(sel);render()},'＋ ADD FX');add.classList.add('qfx-add');addBox.append(add)}else addBox.append(E('span',{class:'qfx-empty',text:'8 FX MAX'}));
- markStrips();
+ markStrips();try{const pw=panel.__pwr,has=fxCount(sel),off=isByp(sel);pw.textContent=!has?'NO FX':off?'FX OFF':'FX ON';pw.classList.toggle('on',has>0&&!off);pw.disabled=!has;panel.classList.toggle('qfx-bypassed',off&&has>0)}catch(e){}
 }
 function select(key,scroll){sel=key;if(!panel)build();render();try{paintSelEq()}catch(e){}if(scroll&&panel)setTimeout(()=>{try{const r=panel.getBoundingClientRect();if(r.top>innerHeight-80||r.bottom<80)panel.scrollIntoView({behavior:'smooth',block:'nearest'})}catch(e){}},30)}
 function markStrips(){
- document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,n=liveCount(k),txt=(b.dataset.fxlabel||'FX')+(n?' •':'');if(b.textContent!==txt)b.textContent=txt;b.classList.toggle('on',n>0);b.classList.toggle('open',k===sel);
+ document.querySelectorAll('#qmxDesk [data-fxkey]').forEach(b=>{const k=b.dataset.fxkey,has=fxCount(k),off=isByp(k)&&has>0,on=has>0&&!off,txt=(b.dataset.fxlabel||'FX')+(on?' ON':off?' OFF':'');if(b.textContent!==txt)b.textContent=txt;b.classList.toggle('on',on);b.classList.toggle('fxoff',off);b.classList.toggle('open',k===sel);b.title=on?'FX ON - tap to switch this channel\'s FX off':off?'FX OFF - tap to switch them back on':'No FX yet - tap to add one';
   const ch=b.closest('.cn-ch');if(ch&&!ch.classList.contains('cn-master'))ch.classList.toggle('qfx-sel',k===sel)});
  const m=document.querySelector('#qmxDesk .cn-master');if(m)m.classList.toggle('qfx-sel',sel==='master')}
 function build(){
  const desk=document.getElementById('qmxDesk'),wrap=desk&&desk.querySelector('.qmx-wrap');if(!wrap||!window.GLCTC_CN)return false;if(document.getElementById('qfxPanel'))return true;
  panel=E('div',{class:'qfx-panel',id:'qfxPanel'});titleEl=E('b',{class:'qfx-title'});picker=E('select',{class:'qfx-pick','aria-label':'Channel'});picker.onchange=()=>select(picker.value);   /* v103: also repaints the selected-channel EQ */
  addBox=E('span',{class:'qfx-addw'});body=E('div',{class:'qfx-body'});
- panel.append(E('div',{class:'qfx-bar'},E('b',{class:'qfx-h',text:'CHANNEL FX'}),E('i',{class:'qfx-led'}),titleEl,addBox,E('label',{class:'qfx-pickw'},E('span',{text:'CHANNEL'}),picker)),body);
+ const pwr=E('button',{type:'button',class:'cn-b qfx-pwr',text:'FX ON'});pwr.onclick=()=>fxToggle(sel);panel.__pwr=pwr;
+ panel.append(E('div',{class:'qfx-bar'},E('b',{class:'qfx-h',text:'CHANNEL FX'}),E('i',{class:'qfx-led'}),titleEl,pwr,addBox,E('label',{class:'qfx-pickw'},E('span',{text:'CHANNEL'}),picker)),body);
  /* v77: in the master column, in the free space under MASTER / HEADPHONES / BOOTH, beside the bus tracks. It takes the column's width and never makes it wider */
  const mb=desk.querySelector('.qmx-mblock');if(!mb)return false;mb.append(panel);hidePanelMasterFx();hookStrips();render();return true}
 /* v77: the old MASTER FX box is gone - master FX are done in CHANNEL FX (select MASTER) like every other channel */
@@ -6781,15 +6784,29 @@ function hookEq(){
  const ms=document.querySelector('#qmxDesk .cn-master');if(ms&&!ms.querySelector('.qmx-seleq')){const u=eqKnobs(sel,true);if(u){const fl=E('button',{type:'button',class:'cn-b qmx-eqflat',text:'FLAT',title:'Reset this channel\'s EQ to 0 dB'});fl.onclick=()=>{eqFlat(sel);paintSelEq()};
   const box=E('div',{class:'qmx-seleq'},E('div',{class:'qmx-seleqh'},E('b',{text:'CHANNEL EQ'}),E('span',{class:'qmx-seleqn',text:''})),u.box,fl);EQUI.__sel=u;ms.append(box);paintSelEq()}}
  /* tap a strip to select it (one listener for the whole desk) */
- const desk=document.getElementById('qmxDesk');if(desk&&!desk.__selHook){desk.__selHook=1;desk.addEventListener('click',e=>{const t=e.target;if(!t||!t.closest)return;const ch=t.closest('.cn-ch');if(!ch||!desk.contains(ch))return;
+ const desk=document.getElementById('qmxDesk');if(desk&&!desk.__fxHook){desk.__fxHook=1;desk.addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('[data-fxkey]');if(!b||!desk.contains(b))return;e.preventDefault();e.stopImmediatePropagation();fxToggle(b.dataset.fxkey)},true)}
+ if(desk&&!desk.__selHook){desk.__selHook=1;desk.addEventListener('click',e=>{const t=e.target;if(!t||!t.closest)return;const ch=t.closest('.cn-ch');if(!ch||!desk.contains(ch))return;
   if(t.closest('button,input,select,option,label,.k37-knob,.cn-fw,.qmx-send,.qmx-seleq,a'))return;const k=stripKey(ch);if(k&&k!==sel)select(k,false)})}}
 function paintSelEq(){const u=EQUI.__sel;if(!u)return;const box=u.box.closest('.qmx-seleq');if(!box)return;const info=chInfo(sel),q=eqGet(sel);box.style.setProperty('--sc',info.col);box.querySelector('.qmx-seleqn').textContent=info.name;
  ['hi','mid','lo'].forEach(b=>u[b].set(q[b],true));if(u.mf){u.mf.el.style.display=q.mf==null?'none':'';if(q.mf!=null)u.mf.set(q.mf,true)}
  u.box.classList.toggle('live',Math.abs(q.lo)>.01||Math.abs(q.mid)>.01||Math.abs(q.hi)>.01)}
+/* v105 FX ON / OFF: tap a strip's FX button to switch that channel's FX on or off (the settings are kept). A channel with no FX
+   yet opens CHANNEL FX so you can add one. The strip EQ is not part of it - EQ stays as set. */
+function fxCount(k){let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]&&!x._eq).length;
+ if(k.startsWith('bus:')){try{const f=GLCTC_BUSES.state().buses[+k.slice(4)].fx;if(f&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))n++}catch(e){}}
+ if(k.startsWith('trk:')){try{const t=trackOfKey(k);if(t){n+=(t.plugs||[]).filter(e=>e&&!e.off&&e.type&&e.type!=='eq').length;if(t.fx&&(t.fx.flt||t.fx.dly||t.fx.rev))n++}}catch(e){}}
+ return n}
+const isByp=k=>!!FS.byp[k];
+function fxToggle(k){
+ if(!fxCount(k)){select(k,true);try{const a=panel&&panel.querySelector('.qfx-add');if(a){a.classList.add('qfx-flash');setTimeout(()=>a.classList.remove('qfx-flash'),1400)}}catch(e){}return}
+ const off=!isByp(k);if(off)FS.byp[k]=1;else delete FS.byp[k];
+ if(k.startsWith('bus:')){try{const i=+k.slice(4),f=GLCTC_BUSES.state().buses[i].fx;f.on=!off;GLCTC_BUSES.set(i,{})}catch(e){}}
+ if(k.startsWith('trk:')){try{window.GLCTC_TRKFX&&GLCTC_TRKFX.byp(k.slice(4),off)}catch(e){}}
+ fsave();rebuild(k);if(sel!==k)sel=k;render();try{paintSelEq()}catch(e){}markStrips()}
 /* how many things are shaping this channel's sound right now */
-function liveCount(k){let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]).length;
+function liveCount(k){if(isByp(k))return 0;let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]).length;
  if(k.startsWith('bus:')){try{const f=GLCTC_BUSES.state().buses[+k.slice(4)].fx;if(f&&f.on&&(f.lc>21||f.hc<19900||f.drv>0||f.glue>0||f.dly>0||f.rev>0))n++}catch(e){}}
- if(k.startsWith('trk:')){try{const t=trackOfKey(k);if(t){n+=(t.plugs||[]).filter(e=>e&&!e.off&&e.type).length;if(t.fx&&t.fx.on&&(t.fx.flt||t.fx.dly||t.fx.rev))n++}}catch(e){}}
+ if(k.startsWith('trk:')){try{const t=trackOfKey(k);if(t){n+=(t.plugs||[]).filter(e=>e&&!e.off&&e.type&&e.type!=='eq').length;if(t.fx&&t.fx.on&&(t.fx.flt||t.fx.dly||t.fx.rev))n++}}catch(e){}}
  return n}
 {const st=document.createElement('style');st.textContent=`
 #qmxDesk .qmx-mods .qmx-eqk,#qmxDesk .qmx-bus .qmx-eqk{display:grid;grid-template-columns:39px 39px;justify-content:center;gap:2px 4px;margin:4px auto 4px;padding:3px 0 2px;border-radius:8px;border:1px solid transparent}
@@ -6806,6 +6823,10 @@ function liveCount(k){let n=chainOf(k).filter(x=>x&&x.on!==false&&FX[x.type]).le
 #qmxDesk .cn-b[data-fxkey].on{background:linear-gradient(#e0193a,#a50d26)!important;color:#fff!important;border-color:#ff5a74!important;box-shadow:0 0 10px #ff2a4c88!important}
 #qmxDesk .cn-b[data-fxkey].open,#qmxDesk .tiny[data-fxkey].open{outline:2px solid #ffd36a;outline-offset:1px}
 #qmxDesk .tiny[data-fxkey].on{background:#c8102e!important;color:#fff!important;border-color:#ff5a74!important}
+#qmxDesk .cn-ch .cn-b[data-fxkey]{white-space:nowrap;letter-spacing:0;font-size:10.5px;padding-left:4px;padding-right:4px}
+#qmxDesk .cn-b[data-fxkey].fxoff{background:#26262c!important;color:#ff8a9c!important;border:1px dashed #ff5a74!important;box-shadow:none!important}
+#qfxPanel .qfx-pwr{min-width:74px;font-weight:900;letter-spacing:.08em}#qfxPanel .qfx-pwr.on{background:linear-gradient(#e0193a,#a50d26);color:#fff;border-color:#ff5a74}
+#qfxPanel.qfx-bypassed .qfx-slot:not(.qfx-tone){opacity:.45}#qfxPanel .qfx-add.qfx-flash{outline:2px solid #ffd36a;box-shadow:0 0 14px #ffd36a}
 #qfxPanel .qfx-eqtag{display:inline-block;margin:0 0 4px 30px;font-size:9px;letter-spacing:.14em;color:#ffd36a}`;document.head.appendChild(st)}
 setInterval(()=>{try{if(!panel)build();else{hookStrips();hookEq();if(!document.activeElement||!panel.contains(document.activeElement)){const k=picker.value;if(k!==sel)render()}}}catch(e){console.warn('channel fx',e)}},800);
 /* Composer uses the existing channel inserts. Never stack a second preset on regeneration. */
@@ -6895,7 +6916,7 @@ function fxRestore(data){
   const out={...newFx(f.type),on:f.on!==false,_composer:!!f._composer};if(f._eq)out._eq=1;
   for(const [k,,lo,hi,step,def] of FX[f.type].p){const v=Number(f.p?.[k]);out.p[k]=Number.isFinite(v)?cl(v,lo,hi):def}return out;
  });
- FS={mods:{},buses:{},master:clean(data.master)};
+ FS={mods:{},buses:{},master:clean(data.master),byp:(data.byp&&typeof data.byp==='object')?{...data.byp}:{}};
  SONG_FX_IDS.forEach(id=>FS.mods[id]=clean(data.mods?.[id]));
  for(let i=0;i<8;i++)FS.buses[i]=clean(data.buses?.[i]);
  fsave();refreshAll();render();window.GLCTC_CHARACTER?.apply();
@@ -7715,7 +7736,7 @@ panel.innerHTML=`<style>
  <button id="gscLoad">Load Composer</button>
  <button id="gscSurprise" title="Random genre, key, tempo and song shape, with every module written in the same key">🎲 SURPRISE ME</button>
 </div>
-<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v104 · SUB-01 IN EVERY SONG</div>
+<div class="gsc-status" id="gscStatus" role="status">READY · BUILD v105 · SUB-01 IN EVERY SONG</div>
 <div class="gsc-status" id="gscFillInfo" style="opacity:.8"></div>
 <div class="gsc-note">GENERATE NEW SONG makes another variation in your selected genre (a genre named in the prompt takes priority). SURPRISE ME also picks the genre and song length. Three or four authentic groove foundations per genre combine with new keys, chord progressions, bass lines, two-bar hooks and a fresh sound palette drawn from every preset bank; intros are kept short so the hook arrives straight away. 30 genres. Songs repeat when they finish. KEY FROM CHAKRA (on) builds every song on the chakra frequency you select and keeps bass and leads in a natural register. Galactic Vox sings (chants, ooh / aah choirs, crew shouts) in the vocal genres - Deep / Tribal House, Happy Hardcore, Liquid, Reggae, Ska, Garage, Meditation - and the Looper adds texture to Lo-Fi, East Coast and Meditation; elsewhere ask for them in the prompt (vocal / chant / loop / texture) or tick them in. To keep the CPU light, no section plays more than five modules at once. Save Composer keeps a favourite exactly as generated. Rows are modules, columns are sections. Pick a pattern (A, B, C…) or — to fade the module out for that section. AI GENERATE sets the single DAW MASTER BPM from the selected genre; an explicit BPM in your prompt overrides the genre default. Changing genre alone does not change tempo. No module has a separate tempo. Generation chooses genre-matched sounds from the original and Soundscape banks. The chosen PRESET is loaded during generation and kept when you press PLAY; LEVEL is that module's mix level. You can edit patterns and levels during playback (future bars only). Keep module loops at 1, 2 or 4 bars so every section lands on a loop start. Export Song renders the current DAW mix to a WAV file.</div>`;
 const ws=byId('wsPanel');

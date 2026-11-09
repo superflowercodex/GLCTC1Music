@@ -4147,6 +4147,17 @@ async function uploadToMasterLibrary() {
        TRACK METADATA
        ================================================= */
 
+    /* frequency, chakra and planet always match the Hz the track is tuned to */
+    {
+      const p0 = currentTuningPlan(), f0 = p0 && GLCTC1_FREQUENCIES.find(x => x.frequency === p0.targetHz);
+      if (f0) {
+        document.getElementById("libraryFrequency").value = f0.frequency;
+        document.getElementById("libraryChakra").value = f0.chakra;
+        document.getElementById("libraryPlanet").value = f0.planet;
+        highlightFrequency(f0.frequency);
+      }
+    }
+
     const title =
       document.getElementById(
         "libraryTrackTitle"
@@ -5381,12 +5392,34 @@ function setStatus(
     return await new Promise((res, rej) => { try { const p = ctx.decodeAudioData(copy, res, rej); if (p && p.then) p.then(res, rej); } catch (e) { rej(e); } });
   }
 
-  /* Which sacred frequency will this track end up with, and how far must its audio move to sit on that grid? */
-  function refreshTune(ch, raw, scanFreq) {
-    const t = ch.find(c => c.k === "tune"); if (!t) return;
+  /* The Hz this track will have after saving: the ticked new frequency, else the saved one, else the scan's. */
+  function finalHz(ch, raw, scanFreq) {
     const fc = ch.find(c => c.k === "freq" && c.on), fcol = colFor("freq", raw);
     let hz = fc ? Number(fc.newV) : (fcol ? Number(raw[fcol]) : NaN);
     if (!GLCTC1_SACRED_HZ.includes(hz)) hz = GLCTC1_SACRED_HZ.includes(Number(scanFreq)) ? Number(scanFreq) : NaN;
+    return hz;
+  }
+  /* Chakra and planet always follow the Hz: add/refresh their changes so all three match after saving. */
+  function syncChakra(ch, raw, scanFreq) {
+    const hz = finalHz(ch, raw, scanFreq);
+    const f = GLCTC1_FREQUENCIES.find(x => x.frequency === hz);
+    const fcol = colFor("freq", raw);
+    /* saved frequency missing / not one of the 7 → store the Hz too */
+    if (f && fcol && !ch.some(c => c.k === "freq") && !same(raw[fcol], hz)) ch.unshift({ k: "freq", label: "FREQUENCY (Hz)", col: fcol, oldV: raw[fcol], newV: hz, on: true, why: "matches the tuning" });
+    for (const k of ["chakra", "planet"]) {
+      const col = colFor(k, raw), i = ch.findIndex(c => c.k === k);
+      const want = f ? f[k] : null;
+      if (!col || !want || same(raw[col], want)) { if (i >= 0) ch.splice(i, 1); continue; }
+      if (i >= 0) { ch[i].newV = want; ch[i].on = true; }
+      else ch.push({ k, label: k.toUpperCase(), col, oldV: raw[col], newV: want, on: true, why: `follows ${hz} Hz` });
+    }
+  }
+
+  /* Which sacred frequency will this track end up with, and how far must its audio move to sit on that grid? */
+  function refreshTune(ch, raw, scanFreq) {
+    syncChakra(ch, raw, scanFreq);
+    const t = ch.find(c => c.k === "tune"); if (!t) return;
+    const hz = finalHz(ch, raw, scanFreq);
     const plan = glctc1TuningPlan(t.tuning, hz);
     t.targetHz = plan.targetHz; t.shift = plan.shift; t.noop = !plan.apply;
     const root = plan.rootName && plan.rootTo ? `root ${plan.rootName} ${plan.rootTo} Hz · ` : "";
@@ -5415,17 +5448,9 @@ function setStatus(
     }
     if (groups.includes("key")) add("key", "KEY", a.key, true);
     if (groups.includes("freq") && a.frequency) {
-      const f = a.frequency, fcol = colFor("freq", r.raw), saved = fcol ? Number(r.raw[fcol]) : NaN;
-      const savedScore = (f.scores || []).find(s => s.frequency === saved), best = (f.scores || [])[0];
-      if (!f.clear) { if (fcol && !blank(r.raw[fcol])) notes.push("Frequency kept — no clear sacred-frequency tone found"); }
-      else if (savedScore && best && savedScore.frequency !== best.frequency && savedScore.score >= best.score * 0.7) notes.push(`Frequency kept — ${saved} Hz is also strongly present`);
-      else {
-        const why = `clear ${f.frequency} Hz tone (${f.confidence}%)`;
-        const sure = f.confidence >= 90;
-        add("freq", "FREQUENCY (Hz)", f.frequency, sure, why + (sure ? "" : " — listen first"));
-        add("chakra", "CHAKRA", f.chakra, sure, why + (sure ? "" : " — listen first"));
-        add("planet", "PLANET", f.planet, sure, why + (sure ? "" : " — listen first"));
-      }
+      const f = a.frequency;
+      /* the frequency found by the scan is the track's new Hz; chakra + planet are kept in step by syncChakra() */
+      add("freq", "FREQUENCY (Hz)", f.frequency, true, `${f.frequency} Hz found (${f.confidence}%)`);
     }
     if (groups.includes("genre") && g.name) {
       const gcol = colFor("genre", r.raw), saved = gcol ? r.raw[gcol] : "";
@@ -5437,8 +5462,8 @@ function setStatus(
       const acol = colFor("audio", r.raw);
       if (!a.tuning.reliable) notes.push("Tuning left as is — the track is silent");
       else if (acol && !blank(r.raw[acol])) ch.push({ k: "tune", label: "TUNING", col: acol, oldV: r.raw[acol], newV: "", on: true, tuning: a.tuning, special: true });
-      refreshTune(ch, r.raw, (a.frequency || {}).frequency);
     }
+    refreshTune(ch, r.raw, (a.frequency || {}).frequency);
     const fz = a.frequency || {};
     const tz = a.tuning || {};
     const scan = { tuneTxt: tz.reliable ? `${tz.rootName ? "root " + tz.rootName + " " + tz.rootHz + " Hz · " : ""}A≈${tz.refHz} Hz (${glctc1FmtCents(tz.cents)})${tz.confidence === "estimate" ? " · estimate" : ""}` : (a.tuning ? "silent" : ""), freqScan: fz.frequency, bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
@@ -5450,7 +5475,7 @@ function setStatus(
   const FIELDS_UI = [
     { k: "bpm", label: "BPM", saved: x => x.r.raw[colFor("bpm", x.r.raw)], scan: x => x.scan && (x.scan.bpmOk ? x.scan.bpm : "no steady beat") },
     { k: "key", label: "KEY", saved: x => x.r.raw[colFor("key", x.r.raw)], scan: x => x.scan && x.scan.key },
-    { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" + (x.scan.fclear ? "" : " (no clear tone)") : "") },
+    { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" : "") },
     { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => x.scan && x.scan.chakra },
     { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => x.scan && x.scan.planet },
     { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre },
@@ -5490,7 +5515,11 @@ function setStatus(
   }
   $("ccBody").addEventListener("change", e => {
     const b = e.target.closest("input[data-i]"); if (!b) return;
-    CC.rows[+b.dataset.i].ch[+b.dataset.j].on = b.checked; render();
+    const x = CC.rows[+b.dataset.i], c = x.ch[+b.dataset.j];
+    c.on = b.checked;
+    /* chakra / planet are locked to the frequency — ticking either one ticks the frequency and vice versa */
+    if (c.k === "chakra" || c.k === "planet") { const fc = x.ch.find(z => z.k === "freq"); if (fc) fc.on = b.checked; }
+    render();
   });
   $("ccBody").addEventListener("click", e => {
     const b = e.target.closest("button[data-listen]"); if (!b) return;

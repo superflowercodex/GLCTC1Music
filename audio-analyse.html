@@ -2594,58 +2594,75 @@ const glctc1WrapCents = c => ((((c + 50) % 100) + 100) % 100) - 50;
 /* where a sacred A4 sits relative to the 440 grid, folded to ±50 cents */
 const glctc1GridCents = hz => glctc1WrapCents(1200 * Math.log2(hz / 440));
 
-/* Measure the song's tuning: average spectrum → tonal peaks → circular mean of
-   each peak's offset from the nearest 440 Hz semitone. Returns cents in −50…+50. */
+/* Measure the song's tuning (its own A4 reference).
+   Reads ~200 short snapshots across the whole track, picks every tonal peak in each one
+   (bass, chords, vocals, leads), notes how far each sits from the nearest 440 Hz semitone,
+   and builds a 1-cent histogram. Real notes pile up at the song's true offset; drums and
+   noise spread out evenly, so the tallest pile is the song's tuning. Every song gets a
+   reading — "strength" says how sure it is. */
 function glctc1DetectTuning(samples, sr) {
   const N = 16384, half = N / 2, res = sr / N;
   const usable = samples.length - N;
-  if (usable <= 0) return { reliable: false, cents: 0, refHz: 440, strength: 0, peaks: 0 };
-  const dur = samples.length / sr;
-  const frames = Math.min(40, Math.max(6, Math.floor(dur / 3)));
-  const spec = new Float64Array(half), win = new Float64Array(N);
+  if (usable <= 0) return { reliable: false, weak: false, cents: 0, refHz: 440, strength: 0, peaks: 0 };
+  const frames = Math.min(220, Math.max(24, Math.floor(samples.length / sr * 1.5)));
+  const win = new Float64Array(N);
   for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
-  const re = new Float64Array(N), im = new Float64Array(N);
+  const re = new Float64Array(N), im = new Float64Array(N), mag = new Float64Array(half);
+  const lo = Math.max(3, Math.ceil(65 / res)), hi = Math.min(half - 3, Math.floor(3000 / res));
+  const hist = new Float64Array(100), devs = [];
+  const tmp = [];
   for (let fr = 0; fr < frames; fr++) {
-    const st = Math.floor(usable * (0.05 + 0.9 * fr / (frames - 1)));
-    for (let i = 0; i < N; i++) { re[i] = (samples[st + i] || 0) * win[i]; im[i] = 0; }
+    const st = Math.floor(usable * (0.03 + 0.94 * fr / (frames - 1)));
+    let e = 0;
+    for (let i = 0; i < N; i++) { const v = samples[st + i] || 0; re[i] = v * win[i]; im[i] = 0; e += v * v; }
+    if (e / N < 1e-7) continue;                               /* silence */
     glctc1FFT(re, im);
-    for (let k = 0; k < half; k++) spec[k] += re[k] * re[k] + im[k] * im[k];
+    for (let k = lo - 2; k <= hi + 2; k++) mag[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+    let fmax = 0; for (let k = lo; k <= hi; k++) if (mag[k] > fmax) fmax = mag[k];
+    const gate = fmax * 0.03;                                 /* within ~30 dB of the loudest note */
+    for (let k = lo; k <= hi; k++) {
+      const v = mag[k];
+      if (v < gate || !(v > mag[k - 1] && v >= mag[k + 1] && v > mag[k - 2] && v >= mag[k + 2])) continue;
+      /* local floor: median of ±12 bins */
+      tmp.length = 0;
+      for (let j = k - 12; j <= k + 12; j++) if (Math.abs(j - k) > 2 && j > 0 && j < half) tmp.push(mag[j]);
+      tmp.sort((p, q) => p - q);
+      const prom = v / (tmp[tmp.length >> 1] || 1e-12);
+      if (prom < 3) continue;
+      const a = Math.log(mag[k - 1] + 1e-12), b = Math.log(v), c = Math.log(mag[k + 1] + 1e-12), den = a - 2 * b + c;
+      const p = den < 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)) : 0;
+      const f = (k + p) * res;
+      if (f < 65 || f > 3000) continue;
+      const dev = glctc1WrapCents(1200 * Math.log2(f / 440));
+      /* low notes span few FFT bins → less precise → lower weight; louder & clearer peaks count more */
+      const w = Math.min(3, Math.log(prom)) * Math.min(1, f / 220) * Math.sqrt(v / fmax);
+      devs.push(dev, w);
+      const bin = Math.floor(dev + 50) % 100;
+      hist[bin] += w;
+    }
   }
-  const lo = Math.max(4, Math.ceil(90 / res)), hi = Math.min(half - 4, Math.floor(4000 / res));
-  const L = k => Math.log(spec[k] + 1e-30);
-  const peaks = [];
-  for (let k = lo; k <= hi; k++) {
-    const v = spec[k];
-    if (!(v > spec[k - 1] && v >= spec[k + 1] && v > spec[k - 2] && v >= spec[k + 2])) continue;
-    /* prominence against the local floor (median of ±24 bins, skipping the peak itself) */
-    const around = [];
-    for (let j = k - 24; j <= k + 24; j++) if (Math.abs(j - k) > 3 && j > 0 && j < half) around.push(spec[j]);
-    around.sort((a, b) => a - b);
-    const floor = around[around.length >> 1] || 1e-30;
-    const prom = v / floor;
-    if (prom < 10) continue;
-    const a = L(k - 1), b = L(k), c = L(k + 1), den = a - 2 * b + c;
-    const p = den !== 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)) : 0;
-    const f = (k + p) * res;
-    const cents = 1200 * Math.log2(f / 440);
-    peaks.push({ dev: glctc1WrapCents(cents), w: Math.log(prom) * (f < 180 ? 0.5 : 1) });
+  const count = devs.length / 2;
+  if (count < 20) return { reliable: false, weak: false, cents: 0, refHz: 440, strength: 0, peaks: count };
+  /* smooth the circular histogram (±4 cents) and find the tallest pile */
+  const sm = new Float64Array(100);
+  for (let i = 0; i < 100; i++) for (let d = -4; d <= 4; d++) sm[i] += hist[(i + d + 100) % 100] * (5 - Math.abs(d));
+  let best = 0; for (let i = 1; i < 100; i++) if (sm[i] > sm[best]) best = i;
+  const mode = best - 50 + 0.5;
+  /* refine: weighted circular mean of the peaks within ±12 cents of the pile */
+  let cs = 0, sn = 0, ws = 0, near = 0;
+  for (let i = 0; i < devs.length; i += 2) {
+    const d = glctc1WrapCents(devs[i] - mode);
+    if (Math.abs(d) <= 12) { const w = devs[i + 1]; cs += w * Math.cos(2 * Math.PI * d / 100); sn += w * Math.sin(2 * Math.PI * d / 100); ws += w; near++; }
   }
-  if (peaks.length < 6) return { reliable: false, cents: 0, refHz: 440, strength: 0, peaks: peaks.length };
-  peaks.sort((x, y) => y.w - x.w);
-  const top = peaks.slice(0, 80);
-  const circ = list => {
-    let cs = 0, sn = 0, ws = 0;
-    for (const q of list) { const ang = 2 * Math.PI * q.dev / 100; cs += q.w * Math.cos(ang); sn += q.w * Math.sin(ang); ws += q.w; }
-    return { mean: Math.atan2(sn, cs) * 100 / (2 * Math.PI), R: Math.hypot(cs, sn) / (ws || 1) };
-  };
-  let m = circ(top);
-  /* reject peaks far from the consensus (inharmonic partials, drums), then re-average */
-  const kept = top.filter(q => Math.abs(glctc1WrapCents(q.dev - m.mean)) <= 22);
-  if (kept.length >= 5) { m = circ(kept); const tight = kept.filter(q => Math.abs(glctc1WrapCents(q.dev - m.mean)) <= 9); if (tight.length >= 5) kept.splice(0, kept.length, ...tight); }
-  if (kept.length >= 5) m = circ(kept);
-  const cents = Math.round(m.mean * 10) / 10;
-  const reliable = m.R >= 0.35 && kept.length >= 5;
-  return { reliable, cents, refHz: Math.round(440 * Math.pow(2, cents / 1200) * 10) / 10, strength: Math.round(m.R * 100), peaks: kept.length };
+  const cents = Math.round(glctc1WrapCents(mode + Math.atan2(sn, cs) * 100 / (2 * Math.PI)) * 10) / 10;
+  /* how much taller is the pile than an even spread? 1 = no tuning visible, 2+ = very clear */
+  let tot = 0; for (let i = 0; i < 100; i++) tot += sm[i];
+  const contrast = sm[best] / (tot / 100 || 1);
+  /* calibrated on dense mixes vs noise: noise piles up to ~2.0, real music reads 3.3+ */
+  const strength = Math.round(Math.max(0, Math.min(100, (contrast - 2) * 40)));
+  const reliable = contrast >= 2.6 && near >= 15;
+  const weak = !reliable && contrast >= 2.2 && near >= 10;
+  return { reliable: reliable || weak, weak, cents, refHz: Math.round(440 * Math.pow(2, cents / 1200) * 10) / 10, strength, peaks: count };
 }
 
 /* Which sacred grid is closest to the song as it is now (smallest move). */
@@ -2659,10 +2676,10 @@ function glctc1NearestSacredHz(cents) {
 function glctc1TuningPlan(tuning, targetHz) {
   targetHz = Number(targetHz);
   if (!GLCTC1_SACRED_HZ.includes(targetHz)) targetHz = tuning && tuning.reliable ? glctc1NearestSacredHz(tuning.cents) : 0;
-  if (!tuning || !tuning.reliable) return { apply: false, targetHz, shift: 0, reason: "no clear musical notes to tune (drums / noise / ambient texture) — left as it is" };
+  if (!tuning || !tuning.reliable) return { apply: false, targetHz, shift: 0, reason: "no pitched notes found at all (noise / silence) — left as it is" };
   const shift = Math.round(glctc1WrapCents(glctc1GridCents(targetHz) - tuning.cents) * 10) / 10;
   const apply = Math.abs(shift) >= 3;
-  return { apply, targetHz, shift, from: tuning.cents, reason: apply ? "" : `already on the ${targetHz} Hz grid` };
+  return { apply, weak: !!tuning.weak, targetHz, shift, from: tuning.cents, reason: apply ? "" : `already on the ${targetHz} Hz grid` };
 }
 const glctc1FmtCents = c => (c > 0 ? "+" : c < 0 ? "−" : "±") + Math.abs(Math.round(c * 10) / 10) + "¢";
 
@@ -3686,8 +3703,8 @@ function displayResults(
     analysis.frequency.planet;
 
   const tu = analysis.tuning || {};
-  document.getElementById("tuningValue").textContent = tu.reliable ? "A ≈ " + tu.refHz + " Hz" : "NO CLEAR NOTES";
-  document.getElementById("tuningConfidence").textContent = tu.reliable ? glctc1FmtCents(tu.cents) + " FROM 440 · " + tu.strength + "% CLEAR" : "DRUMS / NOISE — NOT RE-TUNED";
+  document.getElementById("tuningValue").textContent = tu.reliable ? "A ≈ " + tu.refHz + " Hz" : "—";
+  document.getElementById("tuningConfidence").textContent = tu.reliable ? glctc1FmtCents(tu.cents) + " FROM 440 · " + (tu.weak ? "WEAK READING — LISTEN FIRST" : tu.strength + "% CLEAR") : "NO PITCHED NOTES — NOT RE-TUNED";
 
   highlightFrequency(
     analysis.frequency.frequency
@@ -3716,7 +3733,7 @@ function updateTuningPlanUI() {
   const name = f ? `<b>${p.targetHz} Hz</b> (${f.chakra} · ${f.planet})` : "<b>—</b>";
   if (!p.apply) box.innerHTML = `Target: ${name}. Nothing to change — ${p.reason}.`;
   else if (!on) box.innerHTML = `Target: ${name}. Tuning is <b>switched off</b> — the track will upload exactly as it is.`;
-  else box.innerHTML = `Target: ${name}. The track will be moved <b>${glctc1FmtCents(p.shift)}</b> (${p.shift > 0 ? "up" : "down"}, less than half a semitone) so every note sits on the ${p.targetHz} Hz grid — the same tuning the DAW uses. Length and BPM stay exactly the same. Tap a frequency below to choose a different one.`;
+  else box.innerHTML = `Target: ${name}. The track will be moved <b>${glctc1FmtCents(p.shift)}</b> (${p.shift > 0 ? "up" : "down"}, less than half a semitone) so every note sits on the ${p.targetHz} Hz grid — the same tuning the DAW uses. Length and BPM stay exactly the same.${p.weak ? " <b>Weak reading</b> — this track has few clear notes, so listen to it first and untick if it sounds wrong." : ""} Tap a frequency below to choose a different one.`;
 }
 
 document.getElementById("glctc1TuneOnUpload").addEventListener("change", updateTuningPlanUI);
@@ -3813,7 +3830,7 @@ function populateLibraryFields(
       "Tuning: " +
         (analysis.tuning && analysis.tuning.reliable
           ? "A ≈ " + analysis.tuning.refHz + " Hz (" + glctc1FmtCents(analysis.tuning.cents) + " from 440)"
-          : "no clear notes"),
+          : "no pitched notes"),
       "Duration: " +
         formatDuration(
           analysis.duration
@@ -5301,7 +5318,7 @@ function setStatus(
     const plan = glctc1TuningPlan(t.tuning, hz);
     t.targetHz = plan.targetHz; t.shift = plan.shift; t.noop = !plan.apply;
     t.newV = plan.apply ? `${glctc1FmtCents(plan.shift)} → ${plan.targetHz} Hz grid` : `on the ${plan.targetHz} Hz grid`;
-    t.why = plan.apply ? `re-tunes the audio file to ${plan.targetHz} Hz (length & BPM unchanged)` : "";
+    t.why = plan.apply ? `re-tunes the audio file to ${plan.targetHz} Hz (length & BPM unchanged)` + (plan.weak ? " — weak reading, 🎧 listen first" : "") : "";
   }
 
   function propose(r, a, groups) {
@@ -5345,13 +5362,13 @@ function setStatus(
     }
     if (groups.includes("tune") && a.tuning) {
       const acol = colFor("audio", r.raw);
-      if (!a.tuning.reliable) notes.push("Tuning left as is — no clear musical notes (drums / noise / texture)");
-      else if (acol && !blank(r.raw[acol])) ch.push({ k: "tune", label: "TUNING", col: acol, oldV: r.raw[acol], newV: "", on: true, tuning: a.tuning, special: true });
+      if (!a.tuning.reliable) notes.push("Tuning left as is — no pitched notes found at all");
+      else if (acol && !blank(r.raw[acol])) ch.push({ k: "tune", label: "TUNING", col: acol, oldV: r.raw[acol], newV: "", on: !a.tuning.weak, tuning: a.tuning, special: true });
       refreshTune(ch, r.raw, (a.frequency || {}).frequency);
     }
     const fz = a.frequency || {};
     const tz = a.tuning || {};
-    const scan = { tuneTxt: tz.reliable ? `A≈${tz.refHz} Hz (${glctc1FmtCents(tz.cents)})` : (a.tuning ? "no clear notes" : ""), freqScan: fz.frequency, bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
+    const scan = { tuneTxt: tz.reliable ? `A≈${tz.refHz} Hz (${glctc1FmtCents(tz.cents)})${tz.weak ? " · weak" : ""}` : (a.tuning ? "no pitched notes" : ""), freqScan: fz.frequency, bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
                    genre: g.name, gwhy: g.why, gconf: g.confidence, bpmOk: g.bpmReliable };
     return { ch, notes, scan };
   }
@@ -5364,7 +5381,7 @@ function setStatus(
     { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => x.scan && x.scan.chakra },
     { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => x.scan && x.scan.planet },
     { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre },
-    { k: "tune", label: "TUNING", saved: x => x.scan && x.scan.tuneTxt, scan: x => { const t = x.ch.find(c => c.k === "tune"); return t ? t.newV : (x.scan && x.scan.tuneTxt === "no clear notes" ? "left as is" : ""); } }
+    { k: "tune", label: "TUNING", saved: x => x.scan && x.scan.tuneTxt, scan: x => { const t = x.ch.find(c => c.k === "tune"); return t ? t.newV : (x.scan && x.scan.tuneTxt === "no pitched notes" ? "left as is" : ""); } }
   ];
   const live = c => c.on && !c.noop;
   const real = c => !c.noop;

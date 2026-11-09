@@ -5422,10 +5422,19 @@ function setStatus(
     return await new Promise((res, rej) => { try { const p = ctx.decodeAudioData(copy, res, rej); if (p && p.then) p.then(res, rej); } catch (e) { rej(e); } });
   }
 
-  /* The Hz this track will have after saving: the ticked new frequency, else the saved one, else the scan's. */
+  /* LOCK: a track that has been tuned keeps its Hz for good (read from its audio file name or its notes),
+     so a later scan of the tuned audio can never flip the frequency / chakra / planet again. */
+  function lockOf(raw) {
+    const a = colFor("audio", raw), m = a && String(raw[a] || "").match(/_A(\d{3})grid\.mp3$/i);
+    if (m && GLCTC1_SACRED_HZ.includes(+m[1])) return +m[1];
+    const nc = colFor("notes", raw), all = nc ? [...String(raw[nc] || "").matchAll(/tuned to the (\d{3}) Hz grid/gi)] : [];
+    const v = all.length ? +all[all.length - 1][1] : NaN;
+    return GLCTC1_SACRED_HZ.includes(v) ? v : null;
+  }
+  /* The Hz this track will have after saving: the ticked new frequency, else the locked one, else the saved one, else the scan's. */
   function finalHz(ch, raw, scanFreq) {
-    const fc = ch.find(c => c.k === "freq" && c.on), fcol = colFor("freq", raw);
-    let hz = fc ? Number(fc.newV) : (fcol ? Number(raw[fcol]) : NaN);
+    const fc = ch.find(c => c.k === "freq" && c.on), fcol = colFor("freq", raw), lock = lockOf(raw);
+    let hz = fc ? Number(fc.newV) : lock ? lock : (fcol ? Number(raw[fcol]) : NaN);
     if (!GLCTC1_SACRED_HZ.includes(hz)) hz = GLCTC1_SACRED_HZ.includes(Number(scanFreq)) ? Number(scanFreq) : NaN;
     return hz;
   }
@@ -5476,11 +5485,13 @@ function setStatus(
         else add("bpm", "BPM", n, (g.confidence || 0) >= 60, g.why || "");
       }
     }
-    if (groups.includes("key")) add("key", "KEY", a.key, true);
+    /* a tuned (locked) track keeps the key it was tuned with — re-scanning tuned audio must not flip it */
+    if (groups.includes("key") && !lockOf(r.raw)) add("key", "KEY", a.key, true);
     if (groups.includes("freq") && a.frequency) {
       const f = a.frequency;
       /* the frequency found by the scan is the track's new Hz; chakra + planet are kept in step by syncChakra() */
-      add("freq", "FREQUENCY (Hz)", f.frequency, true, `${f.frequency} Hz found (${f.confidence}%)`);
+      const lock = lockOf(r.raw);
+      add("freq", "FREQUENCY (Hz)", lock || f.frequency, true, lock ? `locked to ${lock} Hz (already tuned)` : `${f.frequency} Hz found (${f.confidence}%)`);
     }
     if (groups.includes("genre") && g.name) {
       const gcol = colFor("genre", r.raw), saved = gcol ? r.raw[gcol] : "";
@@ -5504,10 +5515,10 @@ function setStatus(
   const SHOW = { mode: "all" };
   const FIELDS_UI = [
     { k: "bpm", label: "BPM", saved: x => x.r.raw[colFor("bpm", x.r.raw)], scan: x => x.scan && (x.scan.bpmOk ? x.scan.bpm : "no steady beat") },
-    { k: "key", label: "KEY", saved: x => x.r.raw[colFor("key", x.r.raw)], scan: x => x.scan && x.scan.key },
-    { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" : "") },
-    { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => x.scan && x.scan.chakra },
-    { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => x.scan && x.scan.planet },
+    { k: "key", label: "KEY", saved: x => x.r.raw[colFor("key", x.r.raw)], scan: x => lockOf(x.r.raw) ? "🔒 " + (x.r.raw[colFor("key", x.r.raw)] || "") : x.scan && x.scan.key },
+    { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => { const l = lockOf(x.r.raw); return l ? "🔒 " + l + " Hz (locked)" : x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" : ""); } },
+    { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => { const f = GLCTC1_FREQUENCIES.find(z => z.frequency === lockOf(x.r.raw)); return f ? "🔒 " + f.chakra : x.scan && x.scan.chakra; } },
+    { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => { const f = GLCTC1_FREQUENCIES.find(z => z.frequency === lockOf(x.r.raw)); return f ? "🔒 " + f.planet : x.scan && x.scan.planet; } },
     { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre },
     { k: "tune", label: "TUNING", saved: x => x.scan && x.scan.tuneTxt, scan: x => { const t = x.ch.find(c => c.k === "tune"); return t ? t.newV : (x.scan && x.scan.tuneTxt === "silent" ? "left as is" : ""); } }
   ];
@@ -5604,6 +5615,15 @@ function setStatus(
 
   function loadUndo() { try { return JSON.parse(localStorage.getItem(UNDO_KEY) || "[]"); } catch (e) { return []; } }
   function saveUndo(list) { try { localStorage.setItem(UNDO_KEY, JSON.stringify(list.slice(-5))); } catch (e) {} }
+  /* if the table has the same field twice (e.g. "chakra" and "Chakra"), write the value into every copy */
+  function expandCols(payload, before, raw) {
+    for (const k of Object.keys(COLS)) {
+      const hit = COLS[k].find(c => c in payload); if (!hit) continue;
+      for (const c of COLS[k]) if (c !== hit && raw && Object.prototype.hasOwnProperty.call(raw, c)) {
+        payload[c] = payload[hit]; if (before && !(c in before)) before[c] = raw[c] === undefined ? null : raw[c];
+      }
+    }
+  }
   async function writeRow(id, payload) {
     let res = await supabaseClient.from("master_library").update(payload).eq(LB.keyCol, id).select("*");
     if (res.error && /integer/i.test(res.error.message || "")) {
@@ -5611,8 +5631,11 @@ function setStatus(
       res = await supabaseClient.from("master_library").update(payload).eq(LB.keyCol, id).select("*");
     }
     if (res.error) throw res.error;
-    if (!Array.isArray(res.data) || res.data.length !== 1) throw new Error("Not saved — no row updated (permission?)");
-    return res.data[0];
+    if (!Array.isArray(res.data) || res.data.length !== 1) throw new Error("Not saved — the database updated no row (check update permission / row-level security for master_library)");
+    /* read-back check: every value must really be stored */
+    const row = res.data[0], wrong = Object.keys(payload).filter(c => !same(row[c], payload[c]));
+    if (wrong.length) throw new Error("The database kept the old value for: " + wrong.map(c => `${c} (sent ${payload[c]}, stored ${row[c]})`).join(", "));
+    return row;
   }
 
   $("ccSave").addEventListener("click", () => {
@@ -5643,6 +5666,7 @@ function setStatus(
         if (!ch.length) continue;
         const payload = {}, before = {};
         ch.forEach(c => { payload[c.col] = c.newV; before[c.col] = c.oldV === undefined ? null : c.oldV; });
+        expandCols(payload, before, x.r.raw);
         status(`Saving details ${i + 1}/${list.length}: ${x.r.title}`, "active"); bar(Math.round(100 * (i + 1) / list.length));
         try {
           const saved = await writeRow(x.r.id, payload);
@@ -5680,6 +5704,12 @@ function setStatus(
             payload[ncol] = (blank(old) ? "" : String(old) + "\n") + `[GLCTC1 re-tuned to the ${targetHz} Hz grid: ${glctc1FmtCents(shift)} from A≈${refHz} Hz · ${new Date().toISOString().slice(0, 10)}]`;
             before[ncol] = old === undefined ? null : old;
           }
+          /* lock in the Hz with the tuned audio: frequency, chakra and planet always match the tuning */
+          const fz = GLCTC1_FREQUENCIES.find(f => f.frequency === targetHz);
+          if (fz) for (const [k, v] of [["freq", fz.frequency], ["chakra", fz.chakra], ["planet", fz.planet]]) {
+            const c = colFor(k, x.r.raw); if (c && !same(x.r.raw[c], v)) { payload[c] = v; before[c] = x.r.raw[c] === undefined ? null : x.r.raw[c]; }
+          }
+          expandCols(payload, before, x.r.raw);
           let saved;
           try { saved = await writeRow(x.r.id, payload); }
           catch (e) { try { await supabaseClient.storage.from("tracks").remove([newAudio]); } catch (_) {} throw e; }

@@ -7750,14 +7750,8 @@ function autoCells(secs,genre){
   MODS.forEach(m=>{let v=o[m.k];if(v===undefined){c[m.k].push(-1);return}
    if(v===A)v=a;else if(v===L)v=a?5:0;else if(v==='C')v=a?4:0;else if(v==='E')v=a?0:-1;c[m.k].push(v)});   /* E: vocal chop on every second drop only */
   if(s.kind==='drop')drop++});
- /* v96: SUB-01 plays wherever the bass plays, on the matching pattern (never counts toward the module cap - one sine voice) */
- /* v93 CPU CAP: a section never stacks more than five modules - the lowest-priority
-    layers (Vox, then Looper, then PAD-64) sit out of the densest sections, so the drop never overloads the device. */
- try{const eco=window.GLCTC_PERF&&GLCTC_PERF.mode==='eco',cap=5;   /* v93 CPU: never more than five modules at once - lighter than the original's six */
-  if(cap<8){const pri=/^(ambient|meditation)$/.test(genre)?['go','s101','ws','lee','vox','lp','bl','mine']:/^(techhouse|tribalhouse)$/.test(genre)?['bl','lee','mine','ws','go','vox','s101','lp']:/^(reggae|ska|happyhardcore|deephouse|liquid)$/.test(genre)?['bl','lee','mine','s101','go','vox','ws','lp']:['bl','lee','mine','go','s101','ws','lp','vox'];   /* the layers that define each style win the five slots */
-   secs.forEach((_,i)=>{let on=pri.filter(k=>c[k]&&c[k][i]>=0);while(on.length>cap){const k=on.pop();c[k][i]=-1}})}}catch(e){}
- /* v97: SUB-01 is in every song and every section. It locks to the bass line (and the kick) on the same groove number,
-    and when the bass sits out it holds the chord roots under the pads, stabs and lead. Exempt from the cap (one sine voice). */
+ /* ALL MODULES: a module the genre plan leaves out joins on the drops (and the verses for the Looper), so every module is in every song */
+ MODS.forEach(m=>{if(m.k==='ix'||!c[m.k]||c[m.k].some(v=>v>=0))return;secs.forEach((s,i)=>{if(s.kind==='drop'||(m.k==='lp'&&s.kind==='verse'))c[m.k][i]=0})});
  /* INSTRUMENT DESIGNER row: 0 FULL (every layer) · 1 KEYS (chords, pads, strum, stabs, bass) · 2 PADS · 3 LIFT (pads + arp + rising chords) · -1 out.
     Written per genre the way those records use real instruments: pads open the track, keys carry the verse, the lift
     rises through the build, the whole stack lands on the drop, the break strips back to the pads. */
@@ -7772,6 +7766,14 @@ function autoCells(secs,genre){
   lofi:{intro:1,verse:0,build:1,drop:0,break:2,outro:1},reggae:{intro:1,verse:0,build:1,drop:0,break:2,outro:1},ska:{intro:1,verse:0,build:0,drop:0,break:2,outro:1},
   pop:{intro:1,verse:1,build:3,drop:0,break:2,outro:1},synthwave:D,ambient:{intro:2,verse:0,build:3,drop:0,break:2,outro:2},meditation:{intro:2,verse:2,build:3,drop:0,break:2,outro:2}};
   const P=IXA[genre]||D;c.ix=secs.map(s=>{const v=P[s.kind];return v===undefined?(D[s.kind]??1):v})}
+ /* v96: SUB-01 plays wherever the bass plays, on the matching pattern (never counts toward the module cap - one sine voice) */
+ /* v93 CPU CAP: a section never stacks more than five modules - the lowest-priority
+    layers (Vox, then Looper, then PAD-64) sit out of the densest sections, so the drop never overloads the device. */
+ try{const eco=window.GLCTC_PERF&&GLCTC_PERF.mode==='eco',cap=99;   /* every module plays - the instruments thin their own voices when the device is busy */   /* v93 CPU: never more than five modules at once - lighter than the original's six */
+  if(cap<8){const pri=/^(ambient|meditation)$/.test(genre)?['go','s101','ws','lee','vox','lp','bl','mine']:/^(techhouse|tribalhouse)$/.test(genre)?['bl','lee','mine','ws','go','vox','s101','lp']:/^(reggae|ska|happyhardcore|deephouse|liquid)$/.test(genre)?['bl','lee','mine','s101','go','vox','ws','lp']:['bl','lee','mine','go','s101','ws','lp','vox'];   /* the layers that define each style win the five slots */
+   secs.forEach((_,i)=>{let on=pri.filter(k=>c[k]&&c[k][i]>=0);while(on.length>cap){const k=on.pop();c[k][i]=-1}})}}catch(e){}
+ /* v97: SUB-01 is in every song and every section. It locks to the bass line (and the kick) on the same groove number,
+    and when the bass sits out it holds the chord roots under the pads, stabs and lead. Exempt from the cap (one sine voice). */
  const g=(k,i)=>c[k]&&c[k][i]!=null?c[k][i]:-1;
  c.sub=secs.map((_,i)=>{let v=g('lee',i);if(v<0)v=g('bl',i);if(v>3)v=0;
   if(v<0&&['go','s101','ws','vox','mine','lp'].some(k=>g(k,i)>=0))v=2;return v});
@@ -9218,13 +9220,11 @@ function prepareSong(genreKey,txt,forceFill){
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
  st.len=TPL[len]?len:'full';st.secs=mkSecs(st.len,genreKey);st.cells=autoCells(st.secs,genreKey);st.loop=true;   /* v94: the song repeats when it finishes */
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
- const skip=new Set(g.skip);
+ const skip=new Set();   /* every module is in every song */
  /* v93 CPU: the LOOPER and GALACTIC VOX engines cost CPU for the whole song once started (vox: pitch-shift worklet, vocoder, reverb),
     so - as in the original - they are opt-in: named in the prompt, ticked in the grid, or automatic in FULL CPU mode. */
  const fullCpu=!!(window.GLCTC_PERF&&GLCTC_PERF.mode==='full');
  const VOX_ON=/^(deephouse|tribalhouse|happyhardcore|liquid|reggae|ska|meditation|garage)$/.test(genreKey),LP_ON=/^(lofi|eastcoast|meditation)$/.test(genreKey);   /* v94: sung / chanted genres keep their voice, textured genres their loop */
- if(!fullCpu&&!VOX_ON&&!/vocal|vox|voice|choir|sing|chant|chop/.test(txt))skip.add('vox');
- if(!fullCpu&&!LP_ON&&!/loop|looper|texture|shaker|vinyl|tape/.test(txt))skip.add('lp');
  if(/instrumental|no vocals?|no vox|without vocals?/.test(txt))skip.add('vox');
  if(/no loop|without loop/.test(txt))skip.add('lp');
  if(/no drums|without drums|drumless/.test(txt)){['bl','mine','ws','lp'].forEach(k=>skip.add(k))}
@@ -9790,45 +9790,48 @@ const ENG={
   return{g,srcs:[s],r:Math.max(.03,L.r),lvlAt:()=>pk,end:t+b.duration}},
  epiano(c,L,m,v,t,dest){const p=L.p,f=hz(m),T=3.8*p.decay*Math.pow(2,-(m-60)/30),tau=T/6.9,end=t+T*1.3,srcs=[];
   const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.epiano;g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(pk,t+.003);g.gain.setTargetAtTime(.0001,t+.003,tau);
-  const c1=osc(c,'sine',f,t),m1=osc(c,'sine',f*(p.ratio||1),t),mg=c.createGain();mg.gain.setValueAtTime(f*(.25+p.bark*2.4*v),t);mg.gain.setTargetAtTime(f*.2*p.bark,t+.004,.3);m1.connect(mg);mg.connect(c1.frequency);c1.connect(g);srcs.push(c1,m1);
-  if(p.tine>.02&&f*14<c.sampleRate*.45){const c2=osc(c,'sine',f,t),m2=osc(c,'sine',f*14,t),mg2=c.createGain(),cg=c.createGain();mg2.gain.setValueAtTime(f*p.tine*4*v,t);mg2.gain.setTargetAtTime(0,t+.002,.035);
+  const c1=osc(c,'sine',f,t),m1=osc(c,'sine',f*(p.ratio||1),t),mg=c.createGain();mg.gain.setValueAtTime(f*(.25+p.bark*2.4*v+(LQ?p.tine*.9*v:0)),t);mg.gain.setTargetAtTime(f*.2*p.bark,t+.004,.3);m1.connect(mg);mg.connect(c1.frequency);c1.connect(g);srcs.push(c1,m1);
+  if(p.tine>.02&&!LQ&&f*14<c.sampleRate*.45){const c2=osc(c,'sine',f,t),m2=osc(c,'sine',f*14,t),mg2=c.createGain(),cg=c.createGain();mg2.gain.setValueAtTime(f*p.tine*4*v,t);mg2.gain.setTargetAtTime(0,t+.002,.035);
    cg.gain.setValueAtTime(.32*p.tine,t);cg.gain.setTargetAtTime(.0001,t+.002,.35);m2.connect(mg2);mg2.connect(c2.frequency);c2.connect(cg);cg.connect(g);srcs.push(c2,m2)}
   srcs.forEach(o=>o.stop(end));g.connect(dest);
   return{g,srcs,r:L.r,lvlAt:tt=>tt<t+.003?pk*Math.max(0,tt-t)/.003:pk*Math.exp(-(tt-t-.003)/tau),end}},
  organ(c,L,m,v,t,dest){const p=L.p,f=hz(m),o=c.createOscillator();o.setPeriodicWave(orgWave(c,p.db));o.frequency.value=f/2;tune(o);o.start(t);
   const g=c.createGain(),pk=ENG_LVL.organ*(.85+.15*v),srcs=[o];envADSR(g.gain,t,pk,Math.max(.004,L.a),.05,1);o.connect(g);
   if(+p.perc){const q=osc(c,'sine',f*(+p.perc===2?2:3),t),qg=c.createGain();qg.gain.setValueAtTime(pk*1.5,t);qg.gain.setTargetAtTime(.0001,t+.002,.09);q.connect(qg);qg.connect(g);q.stop(t+1.2);srcs.push(q)}
-  if(p.click>0){const n=c.createBufferSource();n.buffer=noiseBuf(c);const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=1800;const ng=c.createGain();ng.gain.setValueAtTime(pk*p.click*1.3,t);ng.gain.setTargetAtTime(.0001,t+.001,.004);n.connect(hp);hp.connect(ng);ng.connect(g);n.start(t,Math.random()*.5);n.stop(t+.05)}
+  if(p.click>0&&!LQ){const n=c.createBufferSource();n.buffer=noiseBuf(c);const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=1800;const ng=c.createGain();ng.gain.setValueAtTime(pk*p.click*1.3,t);ng.gain.setTargetAtTime(.0001,t+.001,.004);n.connect(hp);hp.connect(ng);ng.connect(g);n.start(t,Math.random()*.5);n.stop(t+.05)}
   g.connect(dest);return{g,srcs,r:Math.max(.02,L.r),lvlAt:tt=>adsrAt(t,tt,pk,Math.max(.004,L.a),.05,1)}},
  strings(c,L,m,v,t,dest,ch){const p=L.p,f=hz(m),fl=c.createBiquadFilter();fl.type='lowpass';fl.Q.value=.6;fl.frequency.value=cl(450+p.bright*(.35+.65*v)*7000*(1+(m-60)/120),200,16000);
   const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.strings,srcs=[];
-  [-1,0,1].forEach((d,i)=>{const o=osc(c,'sawtooth',f,t);o.detune.value=d*p.ens+(Math.random()-.5)*4;vibTo(ch,o);const og=c.createGain();og.gain.value=i===1?.8:1;o.connect(og);og.connect(fl);srcs.push(o)});
-  if(p.oct2>0){const o=osc(c,'sawtooth',f*2,t);o.detune.value=(Math.random()-.5)*8;vibTo(ch,o);const og=c.createGain();og.gain.value=p.oct2*.5;o.connect(og);og.connect(fl);srcs.push(o)}
+  (LQ?[-1,1]:[-1,0,1]).forEach((d,i)=>{const o=osc(c,'sawtooth',f,t);o.detune.value=d*p.ens+(Math.random()-.5)*4;vibTo(ch,o);const og=c.createGain();og.gain.value=i===1?.8:1;o.connect(og);og.connect(fl);srcs.push(o)});
+  if(p.oct2>0&&LQ<2){const o=osc(c,'sawtooth',f*2,t);o.detune.value=(Math.random()-.5)*8;vibTo(ch,o);const og=c.createGain();og.gain.value=p.oct2*.5;o.connect(og);og.connect(fl);srcs.push(o)}
   fl.connect(g);g.connect(dest);envADSR(g.gain,t,pk,L.a,L.d,L.s);return{g,srcs,r:L.r,lvlAt:tt=>adsrAt(t,tt,pk,L.a,L.d,L.s)}},
  brass(c,L,m,v,t,dest){const p=L.p,f=hz(m),fl=c.createBiquadFilter();fl.type='lowpass';fl.Q.value=1.3;const a=Math.max(.01,L.a),pf=cl(600+p.bright*v*5200*(1+(m-60)/100),400,14000);
   fl.frequency.setValueAtTime(220,t);fl.frequency.linearRampToValueAtTime(pf,t+a*1.3+.01);fl.frequency.setTargetAtTime(pf*.62,t+a*1.3+.01,.25);
   const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.brass,srcs=[];
-  [['sawtooth',-6,1],['sawtooth',6,1],['square',0,.35]].forEach(([ty,d,lv])=>{const o=osc(c,ty,f,t);o.detune.setValueAtTime(d-p.scoop*70,t);o.detune.linearRampToValueAtTime(d,t+.06+a*.5);const og=c.createGain();og.gain.value=lv;o.connect(og);og.connect(fl);srcs.push(o)});
+  (LQ?[['sawtooth',-6,1.15],['sawtooth',6,1.15]]:[['sawtooth',-6,1],['sawtooth',6,1],['square',0,.35]]).forEach(([ty,d,lv])=>{const o=osc(c,ty,f,t);o.detune.setValueAtTime(d-p.scoop*70,t);o.detune.linearRampToValueAtTime(d,t+.06+a*.5);const og=c.createGain();og.gain.value=lv;o.connect(og);og.connect(fl);srcs.push(o)});
   fl.connect(g);g.connect(dest);envADSR(g.gain,t,pk,a,L.d,L.s);return{g,srcs,r:L.r,lvlAt:tt=>adsrAt(t,tt,pk,a,L.d,L.s)}},
  choir(c,L,m,v,t,dest,ch){const p=L.p,f=hz(m),fl=c.createBiquadFilter();fl.type='lowpass';fl.Q.value=.5;fl.frequency.value=3600;
   const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.choir,srcs=[];
-  [[-.5,'sawtooth',1],[.5,'sawtooth',1],[0,'triangle',.7]].forEach(([d,ty,lv])=>{const o=osc(c,ty,f,t);o.detune.value=d*p.ens+(Math.random()-.5)*5;vibTo(ch,o);const og=c.createGain();og.gain.value=lv;o.connect(og);og.connect(fl);srcs.push(o)});
-  if(p.breath>0){const n=c.createBufferSource();n.buffer=noiseBuf(c);n.loop=true;const bp=c.createBiquadFilter();bp.type='bandpass';bp.frequency.value=2600;bp.Q.value=.9;const ng=c.createGain();ng.gain.value=p.breath*.9;n.connect(bp);bp.connect(ng);ng.connect(fl);n.start(t,Math.random()*.8);srcs.push(n)}
+  (LQ?[[-.5,'sawtooth',1.2],[.5,'sawtooth',1.2]]:[[-.5,'sawtooth',1],[.5,'sawtooth',1],[0,'triangle',.7]]).forEach(([d,ty,lv])=>{const o=osc(c,ty,f,t);o.detune.value=d*p.ens+(Math.random()-.5)*5;vibTo(ch,o);const og=c.createGain();og.gain.value=lv;o.connect(og);og.connect(fl);srcs.push(o)});
+  if(p.breath>0&&!LQ){const n=c.createBufferSource();n.buffer=noiseBuf(c);n.loop=true;const bp=c.createBiquadFilter();bp.type='bandpass';bp.frequency.value=2600;bp.Q.value=.9;const ng=c.createGain();ng.gain.value=p.breath*.9;n.connect(bp);bp.connect(ng);ng.connect(fl);n.start(t,Math.random()*.8);srcs.push(n)}
   fl.connect(g);g.connect(dest);envADSR(g.gain,t,pk,L.a,L.d,L.s);return{g,srcs,r:L.r,lvlAt:tt=>adsrAt(t,tt,pk,L.a,L.d,L.s)}},
  mallet(c,L,m,v,t,dest){const p=L.p,M=MSETS[p.set]||MSETS.vibes,f=hz(m),reg=Math.pow(2,-(m-60)/36)*p.decay,g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.mallet,srcs=[];let end=t;
   g.gain.setValueAtTime(pk,t);
-  M.r.forEach((r,i)=>{const fr=f*r;if(fr>c.sampleRate*.45)return;const o=osc(c,'sine',fr,t),og=c.createGain(),a=M.a[i]*(i?(.4+p.hard*1.2*v):1),d=M.d[i]*reg;
+  M.r.forEach((r,i)=>{const fr=f*r;if(fr>c.sampleRate*.45||(LQ&&i>=3))return;const o=osc(c,'sine',fr,t),og=c.createGain(),a=M.a[i]*(i?(.4+p.hard*1.2*v):1),d=M.d[i]*reg;
    og.gain.setValueAtTime(0,t);og.gain.linearRampToValueAtTime(a,t+.002);og.gain.setTargetAtTime(.0001,t+.002,d/6.9);o.connect(og);og.connect(g);o.stop(t+d+.05);srcs.push(o);end=Math.max(end,t+d+.05)});
-  if(M.nz>0){const n=c.createBufferSource();n.buffer=noiseBuf(c);const bp=c.createBiquadFilter();bp.type='bandpass';bp.frequency.value=Math.min(12000,f*4);bp.Q.value=1.2;const ng=c.createGain();ng.gain.setValueAtTime(M.nz*(.5+p.hard)*v*2,t);ng.gain.setTargetAtTime(.0001,t+.001,.006);n.connect(bp);bp.connect(ng);ng.connect(g);n.start(t,Math.random()*.5);n.stop(t+.06)}
+  if(M.nz>0&&LQ<2){const n=c.createBufferSource();n.buffer=noiseBuf(c);const bp=c.createBiquadFilter();bp.type='bandpass';bp.frequency.value=Math.min(12000,f*4);bp.Q.value=1.2;const ng=c.createGain();ng.gain.setValueAtTime(M.nz*(.5+p.hard)*v*2,t);ng.gain.setTargetAtTime(.0001,t+.001,.006);n.connect(bp);bp.connect(ng);ng.connect(g);n.start(t,Math.random()*.5);n.stop(t+.06)}
   g.connect(dest);return{g,srcs,r:L.r,lvlAt:()=>pk,end}},
- synth(c,L,m,v,t,dest){const p=L.p,f=hz(m),n=cl(p.voices|0,1,7),fl=c.createBiquadFilter();fl.type='lowpass';fl.Q.value=cl(p.res,.2,18);
+ synth(c,L,m,v,t,dest){const p=L.p,f=hz(m),n0=cl(p.voices|0,1,7),n=Math.min(n0,LQ>=2?2:LQ?3:7),fl=c.createBiquadFilter();fl.type='lowpass';fl.Q.value=cl(p.res,.2,18);
   const kt=Math.pow(2,(m-60)/24),base=cl(p.cut*kt,40,18000),top=cl(base*(1+p.fenv*9*v),40,19000);fl.frequency.setValueAtTime(top,t);fl.frequency.setTargetAtTime(base,t+.002,Math.max(.01,p.fdec/3));
-  const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.synth*1.7/Math.sqrt(n),srcs=[];
-  for(let i=0;i<n;i++){const o=osc(c,p.wave,f,t);o.detune.value=n>1?p.det*(i/(n-1)*2-1):0;o.connect(fl);srcs.push(o)}
+  const g=c.createGain(),pk=velAmp(L,v)*ENG_LVL.synth*1.7/Math.sqrt(n0)*Math.sqrt(n0/n),srcs=[];
+  for(let i=0;i<n;i++){const o=osc(c,p.wave,f,t);o.detune.value=n>1?p.det*(n<n0?1.15:1)*(i/(n-1)*2-1):0;o.connect(fl);srcs.push(o)}
   if(p.sub>0){const o=osc(c,'sine',f/2,t),og=c.createGain();og.gain.value=p.sub*1.4;o.connect(og);og.connect(fl);srcs.push(o)}
   fl.connect(g);g.connect(dest);envADSR(g.gain,t,pk,L.a,L.d,L.s);return{g,srcs,r:L.r,lvlAt:tt=>adsrAt(t,tt,pk,L.a,L.d,L.s)}}
 };
 const SUSTAINED=new Set(['organ','strings','brass','choir','synth']);
+/* LOAD LEVEL 0-2: 0 = IX on its own, full voices · 1 = a song is playing (lighter voices, short tails) · 2 = the studio's CPU meter says busy / ECO mode */
+let LQ=0;function updLQ(){let q=0;try{q=window.__glctcQ?+__glctcQ()||0:0}catch(e){}const song=!!(window.GLCTC_SONG&&GLCTC_SONG.running());LQ=q>=2?2:(song||q>=1)?1:0}
+setInterval(updLQ,500);
 
 /* =====================================================================================================
    LAYER BODIES (per-instrument character: rotary speaker, tremolo, guitar body + amp, formants, string body)
@@ -9886,22 +9889,26 @@ const RT={c:null,M:null,layers:Array(NL).fill(null),voices:Array.from({length:NL
 function ctx(){try{const W=window.GLCTC_WS;if(!W)return null;return W.ac()||(W.ensureBuses&&W.ensureBuses())||null}catch(e){return null}}
 const mg=c=>(c&&c._mg)||c.destination;
 const deskIn=(id,c)=>{try{return (window.WSB?WSB(id,mg(c)):null)||mg(c)}catch(e){return mg(c)}};
+/* CPU: one shared reverb + one tempo delay for the whole studio (the DAW's own sends) - IX no longer runs a second set.
+   Only layers that are ON have an audio chain; the stereo chorus is only built while a layer's WIDTH is turned up. */
 function graph(){const c=ctx();if(!c)return null;if(RT.c===c&&RT.M)return RT;RT.c=c;RT.layers=Array(NL).fill(null);RT.voices=Array.from({length:NL},()=>[]);
- const M={sum:c.createGain(),cho:mkCho(c),comp:c.createDynamicsCompressor(),mk:c.createGain(),vol:c.createGain(),an:c.createAnalyser(),revIn:c.createGain(),conv:c.createConvolver(),revRet:c.createGain(),
-  dlyIn:c.createGain(),dhp:c.createBiquadFilter(),dL:c.createDelay(2),dR:c.createDelay(2),fb:c.createGain(),dmg:c.createChannelMerger(2),dlyRet:c.createGain(),dest:null,irSize:0};
- M.an.fftSize=256;M.comp.attack.value=.02;M.comp.release.value=.25;M.comp.knee.value=8;M.dhp.type='highpass';M.dhp.frequency.value=220;
- M.sum.connect(M.cho.inp);M.cho.out.connect(M.comp);M.comp.connect(M.mk);M.mk.connect(M.vol);M.vol.connect(M.an);
- M.revIn.connect(M.conv);M.conv.connect(M.revRet);M.revRet.connect(M.sum);
- M.dlyIn.connect(M.dhp);M.dhp.connect(M.dL);M.dL.connect(M.dmg,0,0);M.dL.connect(M.dR);M.dR.connect(M.dmg,0,1);M.dR.connect(M.fb);M.fb.connect(M.dL);M.dmg.connect(M.dlyRet);M.dlyRet.connect(M.sum);
- try{GLCTC_CLOCK.syncDelay(M.dL,S.master.div,1.9);GLCTC_CLOCK.syncDelay(M.dR,S.master.div,1.9)}catch(e){M.dL.delayTime.value=M.dR.delayTime.value=.35}
- RT.M=M;relink();applyMaster();for(let i=0;i<NL;i++)layerRT(i);return RT}
+ const M={sum:c.createGain(),cho:null,pre:c.createGain(),comp:c.createDynamicsCompressor(),mk:c.createGain(),vol:c.createGain(),an:c.createAnalyser(),revIn:c.createGain(),dlyIn:c.createGain(),dest:null};
+ M.an.fftSize=256;M.comp.attack.value=.02;M.comp.release.value=.25;M.comp.knee.value=8;
+ M.sum.connect(M.pre);M.pre.connect(M.comp);M.comp.connect(M.mk);M.mk.connect(M.vol);M.vol.connect(M.an);
+ try{if(c._rev)M.revIn.connect(c._rev);if(c._send)M.dlyIn.connect(c._send)}catch(e){}
+ RT.M=M;relink();applyMaster();for(let i=0;i<NL;i++)if(S.layers[i].on)layerRT(i);return RT}
 function relink(){const M=RT.M,c=RT.c;if(!M)return;const d=deskIn('ix',c);if(d!==M.dest){try{M.vol.disconnect()}catch(e){}M.vol.connect(d);M.vol.connect(M.an);M.dest=d}
  RT.layers.forEach((R,i)=>{if(R)routeLayer(i)})}
-function layerRT(i){const c=RT.c;if(!c)return null;let R=RT.layers[i];if(R)return R;const L=S.layers[i];
- R={in:c.createGain(),body:null,eng:null,tone:c.createBiquadFilter(),cho:mkCho(c),vol:c.createGain(),pan:c.createStereoPanner(),gate:c.createGain(),an:c.createAnalyser(),rs:c.createGain(),ds:c.createGain(),dest:null};
+function setCho(R,w,now){const c=RT.c,want=w>.04;if(want&&!R.cho){R.cho=mkCho(c);try{R.tone.disconnect()}catch(e){}R.tone.connect(R.cho.inp);R.cho.out.connect(R.vol)}
+ else if(!want&&R.cho){try{R.tone.disconnect()}catch(e){}try{R.cho.lfo.stop()}catch(e){}try{R.cho.out.disconnect()}catch(e){}R.cho=null;R.tone.connect(R.vol)}if(R.cho)R.cho.set(w,now)}
+function layerRT(i){const c=RT.c;if(!c)return null;let R=RT.layers[i];if(R)return R;
+ R={in:c.createGain(),body:null,eng:null,tone:c.createBiquadFilter(),cho:null,vol:c.createGain(),pan:c.createStereoPanner(),gate:c.createGain(),an:c.createAnalyser(),rs:c.createGain(),ds:c.createGain(),dest:null};
  R.tone.type='lowpass';R.tone.Q.value=.5;R.an.fftSize=256;
- R.tone.connect(R.cho.inp);R.cho.out.connect(R.vol);R.vol.connect(R.pan);R.pan.connect(R.gate);R.gate.connect(R.an);R.gate.connect(R.rs);R.rs.connect(RT.M.revIn);R.gate.connect(R.ds);R.ds.connect(RT.M.dlyIn);
+ R.tone.connect(R.vol);R.vol.connect(R.pan);R.pan.connect(R.gate);R.gate.connect(R.an);R.gate.connect(R.rs);R.rs.connect(RT.M.revIn);R.gate.connect(R.ds);R.ds.connect(RT.M.dlyIn);
  RT.layers[i]=R;rebuildBody(i);routeLayer(i);applyLayer(i);return R}
+/* a layer switched OFF gives its whole chain back (LFOs stopped, nodes released) */
+function dropLayer(i){const R=RT.layers[i];if(!R)return;const c=RT.c;(RT.voices[i]||[]).forEach(v=>{v.r=.02;relVoice(v,c.currentTime)});RT.voices[i]=[];
+ setTimeout(()=>{if(S.layers[i].on&&RT.layers[i]===R)return;try{R.body&&R.body.dispose()}catch(e){}try{R.cho&&R.cho.lfo.stop()}catch(e){}[R.in,R.tone,R.vol,R.pan,R.gate,R.rs,R.ds].forEach(n=>{try{n.disconnect()}catch(e){}});if(RT.layers[i]===R)RT.layers[i]=null},120)}
 function rebuildBody(i){const R=RT.layers[i],c=RT.c;if(!R)return;const L=S.layers[i],eng=SND[L.snd].eng;if(R.body){try{R.in.disconnect()}catch(e){}R.body.dispose()}
  R.body=mkBody(c,eng,L);R.eng=eng;R.in.connect(R.body.inp);R.body.out.connect(R.tone)}
 function routeLayer(i){const R=RT.layers[i],c=RT.c;if(!R)return;const L=S.layers[i];const want=L.out==='main'?RT.M.sum:deskIn('ix'+(i+1),c);
@@ -9909,31 +9916,34 @@ function routeLayer(i){const R=RT.layers[i],c=RT.c;if(!R)return;const L=S.layers
  try{const B=window.GLCTC_BUSES;if(B&&B.setRoute){const k='mod:ix'+(i+1),cur=B.routeOf(k),bi=/^bus/.test(L.out)?+L.out.slice(3):null;if(cur!==bi)B.setRoute(k,bi)}}catch(e){}}
 const anySolo=()=>S.layers.some(L=>L.on&&L.solo);
 let deskGate=1;
-function applyLayer(i,now){const R=RT.layers[i];if(!R)return;const L=S.layers[i],c=RT.c;now=now||c.currentTime;
- R.in.gain.setTargetAtTime((SND[L.snd]&&SND[L.snd].g)||1,now,.02);R.tone.frequency.setTargetAtTime(cl(L.cut||18000,80,20000),now,.03);R.cho.set(L.wid||0,now);if(R.body)R.body.upd(L.p,now);
+function applyLayer(i,now){const L=S.layers[i];if(RT.M&&!L.on){dropLayer(i);return}if(RT.M&&L.on&&!RT.layers[i]){layerRT(i);return}const R=RT.layers[i];if(!R)return;const c=RT.c,m=S.master;now=now||c.currentTime;
+ R.in.gain.setTargetAtTime((SND[L.snd]&&SND[L.snd].g)||1,now,.02);R.tone.frequency.setTargetAtTime(cl(L.cut||18000,80,20000),now,.03);setCho(R,L.wid||0,now);if(R.body)R.body.upd(L.p,now);
  R.vol.gain.setTargetAtTime(L.vol*L.vol*1.15,now,.02);R.pan.pan.setTargetAtTime(cl(L.pan,-1,1),now,.02);
  const aud=L.on&&!L.mute&&(!anySolo()||L.solo)&&(L.out==='main'||deskGate>0);R.gate.gain.setTargetAtTime(aud?1:0,now,.012);
- R.rs.gain.setTargetAtTime(L.rev*.8,now,.02);R.ds.gain.setTargetAtTime(L.dly*.7,now,.02)}
-function applyAll(){if(!RT.M)return;for(let i=0;i<NL;i++){if(RT.layers[i]){rebuildBody(i);routeLayer(i);applyLayer(i)}}applyMaster()}
+ R.rs.gain.setTargetAtTime(L.rev*.6*m.rev,now,.02);R.ds.gain.setTargetAtTime(L.dly*.55*m.dly,now,.02)}
+function applyAll(){if(!RT.M)return;for(let i=0;i<NL;i++){if(RT.layers[i]&&S.layers[i].on){rebuildBody(i);routeLayer(i)}applyLayer(i)}applyMaster()}
 function applyMaster(){const M=RT.M,c=RT.c;if(!M)return;const m=S.master,now=c.currentTime;
- if(Math.abs(M.irSize-m.size)>.05){M.conv.buffer=mkIR(c,m.size);M.irSize=m.size}
- M.revRet.gain.setTargetAtTime(m.rev*.55,now,.03);M.dlyRet.gain.setTargetAtTime(m.dly*.6,now,.03);M.fb.gain.setTargetAtTime(cl(m.fb,0,.85),now,.03);
- try{(GLCTC_CLOCK.delays||[]).forEach(d=>{if(d.n===M.dL||d.n===M.dR)d.m=m.div});GLCTC_CLOCK.syncDelays()}catch(e){}
- M.cho.set(m.cho,now);const g=cl(m.glue,0,1);M.comp.threshold.setTargetAtTime(-4-g*22,now,.05);M.comp.ratio.setTargetAtTime(1.5+g*4,now,.05);M.mk.gain.setTargetAtTime(1+g*.7,now,.05);
- M.vol.gain.setTargetAtTime(m.vol*m.vol*1.1,now,.02)}
+ const want=m.cho>.04;if(want&&!M.cho){M.cho=mkCho(c);try{M.sum.disconnect()}catch(e){}M.sum.connect(M.cho.inp);M.cho.out.connect(M.pre)}else if(!want&&M.cho){try{M.sum.disconnect()}catch(e){}try{M.cho.lfo.stop()}catch(e){}try{M.cho.out.disconnect()}catch(e){}M.cho=null;M.sum.connect(M.pre)}
+ if(M.cho)M.cho.set(m.cho,now);const g=cl(m.glue,0,1);M.comp.threshold.setTargetAtTime(-4-g*22,now,.05);M.comp.ratio.setTargetAtTime(1.5+g*4,now,.05);M.mk.gain.setTargetAtTime(1+g*.7,now,.05);
+ M.vol.gain.setTargetAtTime(m.vol*m.vol*1.1,now,.02);for(let i=0;i<NL;i++)if(RT.layers[i]){const L=S.layers[i],R=RT.layers[i];R.rs.gain.setTargetAtTime(L.rev*.6*m.rev,now,.02);R.ds.gain.setTargetAtTime(L.dly*.55*m.dly,now,.02)}}
 
 /* =====================================================================================================
    VOICES
    ===================================================================================================== */
 const POLY={piano:24,pluck:24,mallet:20,epiano:16,organ:16,strings:12,brass:12,choir:12,synth:10};
+/* who gives way when the voice budget is full: a note that is already fading, then the oldest non-pad note, the pads last */
+function victim(lists,t){let best=null,bs=Infinity;lists.forEach((l,li)=>l.forEach((v,k)=>{const L=S.layers[lists.length===1?-1:li];const fading=v.rel!=null&&v.rel<=t;
+  const sc=(fading?0:(L&&L.part==='pad'?2e6:1e6))+v.t;if(sc<bs){bs=sc;best=[li,k]}}));return best}
 function relVoice(v,tt){if(v.rel!=null&&v.rel<=tt)return;v.rel=tt;const pr=v.g.gain;try{if(pr.cancelAndHoldAtTime)pr.cancelAndHoldAtTime(tt);else{pr.cancelScheduledValues(tt);pr.setValueAtTime(Math.max(.0001,v.lvlAt(tt)),tt)}}catch(e){}
  pr.setTargetAtTime(.0001,tt,Math.max(.006,v.r/4));const end=tt+v.r*1.6+.06;v.srcs.forEach(s=>{try{s.stop(end)}catch(e){}});v.end=Math.min(v.end||Infinity,end)}
 function playNote(i,m,vel,t,dur){const G=graph();if(!G)return null;const L=S.layers[i],R=layerRT(i),c=RT.c,snd=SND[L.snd];if(!R||!snd)return null;
  m=Math.round(m+12*(L.oct||0)+(L.semi||0));if(m<12||m>115)return null;t=Math.max(t||c.currentTime,c.currentTime);
  const list=RT.voices[i];for(let k=list.length-1;k>=0;k--)if(list[k].end<c.currentTime)list.splice(k,1);
- const cap=POLY[snd.eng]||16;while(list.length>=cap){const o=list.shift();const r0=o.r;o.r=.015;relVoice(o,t);o.r=r0}
+ const cap=Math.max(4,Math.round((POLY[snd.eng]||16)*(L.part==='pad'?1:LQ>=2?.45:LQ?.65:1)));while(list.length>=cap){const k=victim([list],t);const o=list.splice(k[1],1)[0];o.rel=null;o.r=.015;relVoice(o,t)}
+ {const budget=LQ>=2?14:LQ?22:48;let tot=0;RT.voices.forEach(l=>{for(let k=l.length-1;k>=0;k--)if(l[k].end<c.currentTime)l.splice(k,1);tot+=l.length});
+  while(tot>=budget){const k=victim(RT.voices,t);if(!k)break;const o=RT.voices[k[0]].splice(k[1],1)[0];o.rel=null;o.r=.02;relVoice(o,t);tot--}}
  let v;try{v=ENG[snd.eng](c,L,m,cl(vel,.02,1),t,R.in,R.body)}catch(e){console.warn('IX voice',e);return null}
- if(!v)return null;v.m=m;v.t=t;if(!v.end)v.end=Infinity;if(L.fine){v.srcs.forEach(s=>{try{s.detune.value+=L.fine}catch(e){}})}
+ if(!v)return null;v.m=m;v.t=t;if(!v.end)v.end=Infinity;if(LQ&&dur!=null&&SUSTAINED.has(snd.eng))v.r=Math.min(v.r,L.part==='pad'?.6:.35);if(L.fine){v.srcs.forEach(s=>{try{s.detune.value+=L.fine}catch(e){}})}
  if(dur!=null)relVoice(v,t+Math.max(.03,dur));list.push(v);
  const s0=v.srcs[0];if(s0)s0.addEventListener('ended',()=>{try{v.g.disconnect()}catch(e){}const k=list.indexOf(v);if(k>=0)list.splice(k,1)},{once:true});
  flash(i,t);return v}
@@ -10019,7 +10029,8 @@ function tick(){if(!running)return;const c=ctx();if(!c)return;const now=c.curren
    if(allow&&!S.layers.some(L=>L.on&&allow.includes(L.part))){if(pat===2){allow=['chords','strum','stabs','arp'];soft=true}else allow=null}
    for(let i=0;i<NL;i++){const L=S.layers[i];if(!L.on||L.part==='keys')continue;if(sec.song&&!L.roles[sec.kind])continue;if(allow&&!allow.includes(L.part))continue;
     const ev=eventsFor(i,step,sec,H,soft);if(!ev)continue;const tEnd=K.timeOfBeat((step+ev.len)/4),dur=Math.max(.03,(tEnd-t0)*(ev.legato?1:(ev.gate||.92)));
-    ev.notes.forEach((m,k)=>playNote(i,m,ev.v*(1+(Math.random()-.5)*.06),t0+sw+(ev.strum?k*ev.strum:0),ev.legato?dur+.02:dur))}
+    if(ev.legato){const pv=padHeld[i];if(pv)pv.forEach(v=>{if(v.rel==null||v.rel>t0){v.r=Math.min(v.r,.3);relVoice(v,t0)}})}
+    const vs=ev.notes.map((m,k)=>playNote(i,m,ev.v*(1+(Math.random()-.5)*.06),t0+sw+(ev.strum?k*ev.strum:0),ev.legato?dur+.02:dur)).filter(Boolean);if(ev.legato)padHeld[i]=vs}
    if(!document.hidden&&ixVis&&(!lastSec||lastSec.idx!==sec.idx||lastSec.song!==sec.song)){const s2=sec;setTimeout(()=>paintNow(s2),Math.max(0,(t0-now)*1000))}
    lastSec=sec}
   step++}}
@@ -10300,9 +10311,8 @@ function renderMix(){const box=$('ixMix');box.innerHTML='';meters.length=0;
  /* IX master + FX returns */
  const M=S.master,st=E('div','ix-st mst');st.style.setProperty('--lc','#f2ca70');const c1=E('div','col');c1.append(E('div','nm','IX MASTER'));
  const fw=E('div','ix-fw'),mt=E('div','ix-mt');mBar=E('i');mt.append(mBar);const dbl=E('div','ix-db2',dbTxt(M.vol));fw.append(fader(()=>M.vol,v=>{M.vol=v;dbl.textContent=dbTxt(v);applyMaster()},save),mt);c1.append(fw,dbl,E('div','ix-mini','→ DESK'));
- const fx=E('div','ix-fxg'),mk=(lab,key,mn,mx,fmt,def,lg,step)=>fx.append(knob({label:lab,min:mn,max:mx,step:step||.01,log:lg,fmt,get:()=>M[key],set:v=>{M[key]=v;applyMaster()},done:save,def}));
- mk('REV LEVEL','rev',0,1.5,pct,.8);mk('REV SIZE','size',.6,7,sec2,2.8,false,.1);mk('DLY LEVEL','dly',0,1.5,pct,.6);mk('DLY FEEDBK','fb',0,.85,pct,.35);
- fx.append(knob({label:'DLY TIME',min:0,max:4,step:1,fmt:v=>['1/16','1/8','1/8.','1/4','1/4.'][v],get:()=>[.25,.5,.75,1,1.5].indexOf(M.div)<0?2:[.25,.5,.75,1,1.5].indexOf(M.div),set:v=>{M.div=[.25,.5,.75,1,1.5][Math.round(v)];applyMaster()},done:save,def:2}));
+ const fx=E('div','ix-fxg');fx.title='REVERB / DELAY scale every layer send into the studio reverb and tempo delay (shared with the whole DAW, so IX adds no extra effect load)';const _f0=0,mk=(lab,key,mn,mx,fmt,def,lg,step)=>fx.append(knob({label:lab,min:mn,max:mx,step:step||.01,log:lg,fmt,get:()=>M[key],set:v=>{M[key]=v;applyMaster()},done:save,def}));
+ mk('REVERB','rev',0,1.5,pct,.8);mk('DELAY','dly',0,1.5,pct,.6);
  mk('ENSEMBLE','cho',0,1,pct,.15);mk('GLUE','glue',0,1,pct,.3);
  st.append(c1,fx);box.append(st)}
 function meterLoop(){let last=0;const buf=new Float32Array(256);const pk=an=>{if(!an)return 0;an.getFloatTimeDomainData(buf);let m=0;for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]);if(v>m)m=v}return m};
@@ -11571,6 +11581,24 @@ setInterval(()=>{try{if(ac()&&(!N||N.c!==ac())){ensure();setDrive(S.drive);setMo
 window.GLCTC_MASTERING={state:()=>({on:S.on,genre:S.genre,drive:S.drive,locked:S.locked,lufs:S.lufs,gr:S.gr,target:TARGET[S.genre]}),set:on=>{S.on=!!on;save();setDrive(S.drive);setMono();paint()},startSong,setDrive,TARGET,DRIVE0};
 })();
 </script>
+
+<!-- ===== GLCTC1 NO HOLD MENU: holding a finger anywhere in the studio never opens the browser menu (Back / Reload / Download / Share…),
+     never starts a text selection and never drags an image. Text boxes still allow typing, selecting and pasting. ===== -->
+<style id="glctc1-nohold-css">
+html,body{-webkit-touch-callout:none!important;-webkit-tap-highlight-color:transparent}
+body,body *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,select,[contenteditable],[contenteditable] *{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+img,svg,a,canvas,video{-webkit-user-drag:none;user-drag:none}
+</style>
+<script id="glctc1-nohold-js">
+(()=>{'use strict';
+ const editable=t=>!!(t&&t.closest&&t.closest('input,textarea,[contenteditable]:not([contenteditable="false"])'));
+ document.addEventListener('contextmenu',e=>{if(!editable(e.target))e.preventDefault()},{capture:true});
+ document.addEventListener('selectstart',e=>{if(!editable(e.target))e.preventDefault()},{capture:true});
+ document.addEventListener('dragstart',e=>{if(!editable(e.target)&&!(e.target&&e.target.closest&&e.target.closest('[draggable="true"]')))e.preventDefault()},{capture:true});
+})();
+</script>
+<!-- ===== END GLCTC1 NO HOLD MENU ===== -->
 </body>
 </html>
 

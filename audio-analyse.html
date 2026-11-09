@@ -14,7 +14,7 @@
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>GLCTC1 AUDIO ANALYSE — Header Match & Confirmed BPM Repair (Breakbeat-aware, v11 BPM manager)</title>
+<title>GLCTC1 AUDIO ANALYSE — Chakra Tuner (DAW tuning engine) · Complete Check</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -1224,7 +1224,7 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 </style>
     <!-- ===== GLCTC1 MASTER LIBRARY — COMPLETE CHECK (admin) ===== -->
     <div class="lb-head">MASTER LIBRARY — COMPLETE CHECK</div>
-    <div class="status">One check for every track: tempo (knows half-time from double-time — reggae, dub, hip hop vs drum &amp; bass / jungle), key, sacred frequency · chakra · planet, and genre. Every difference comes ticked — just untick anything you disagree with (less-certain ones say “listen first”). Nothing is saved until you press SAVE.</div>
+    <div class="status">One check for every track: tempo (knows half-time from double-time — reggae, dub, hip hop vs drum &amp; bass / jungle), key, sacred frequency · chakra · planet, genre, and tuning (re-tunes the audio itself so every note sits on its chakra frequency, the same tuning as the DAW — BPM and length unchanged, old file kept for undo). Every difference comes ticked — just untick anything you disagree with (less-certain ones say “listen first”). Nothing is saved until you press SAVE.</div>
     <div class="lb-bar" id="ccFields" style="flex-wrap:wrap;gap:6px 14px"></div>
     <div class="lb-bar">
       <button id="ccScan" type="button" class="lb-btn lb-main">⚡ RUN COMPLETE CHECK — ALL TRACKS</button>
@@ -1364,6 +1364,12 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
       <div class="result-label">TIME SIGNATURE</div>
       <div id="timeSignatureValue" class="result-value">—</div>
       <div id="timeSignatureConfidence" class="result-confidence">AUTOMATIC ESTIMATE</div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-label">TUNING (A4 REFERENCE)</div>
+      <div id="tuningValue" class="result-value">—</div>
+      <div id="tuningConfidence" class="result-confidence">—</div>
     </div>
 
     <div class="result-card frequency-card">
@@ -1594,6 +1600,19 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 .glctc1-rights b{color:#fff;letter-spacing:.04em}
 .glctc1-rights.need{border-color:#ff5470;box-shadow:0 0 0 3px #ff547044}
 </style>
+<style>
+.glctc1-tune{margin:18px 0 0;padding:14px 16px;border:1px solid #713bd0;border-radius:12px;background:rgba(30,10,60,.45);text-align:left}
+.glctc1-tune label{display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13px;font-weight:800;letter-spacing:1px;color:#e9d5ff}
+.glctc1-tune input{width:20px;height:20px;accent-color:#c178ff;flex:none}
+.glctc1-tune-plan{margin-top:8px;font-size:12px;line-height:1.6;color:#cdbfe6}
+.glctc1-tune-plan b{color:#fff}
+.map-item{cursor:pointer}
+</style>
+<div class="glctc1-tune" id="glctc1TuneBox">
+  <label for="glctc1TuneOnUpload"><input type="checkbox" id="glctc1TuneOnUpload" checked> 🎚 TUNE THIS TRACK TO ITS CHAKRA FREQUENCY ON UPLOAD</label>
+  <div class="glctc1-tune-plan" id="glctc1TunePlan">Analyse the audio to see the tuning plan.</div>
+</div>
+
 <label class="glctc1-rights" id="glctc1RightsBox" for="glctc1RightsConfirm">
   <input type="checkbox" id="glctc1RightsConfirm">
   <span><b>I OWN THE RIGHTS TO THIS TRACK.</b><br>
@@ -2559,6 +2578,167 @@ function glctc1DetectFrequency(samples, sr) {
   return { frequency: best.frequency, chakra: best.chakra, planet: best.planet, confidence, clear, scores: scored.map(s => ({ frequency: s.frequency, score: Math.round(s.score * 100) / 100 })) };
 }
 
+/* =====================================================================
+   GLCTC1 CHAKRA TUNER — ported from the GLCTC1 DAW (GLCTC_TUNING + WSOLA engine)
+   ---------------------------------------------------------------------
+   The DAW sets A4 = the chosen sacred frequency (396 · 417 · 528 · 639 ·
+   741 · 852 · 963 Hz), so every note sits on that frequency's grid.
+   For a finished song we do the same thing with the smallest possible move:
+   1. measure where the song's notes really sit (its own A4 reference),
+   2. shift it by less than half a semitone (±50 cents) so every note lands
+      exactly on the chosen frequency's grid,
+   3. keep the length and BPM identical (time-stretch + resample, like the DAW).
+   ===================================================================== */
+const GLCTC1_SACRED_HZ = [396, 417, 528, 639, 741, 852, 963];
+const glctc1WrapCents = c => ((((c + 50) % 100) + 100) % 100) - 50;
+/* where a sacred A4 sits relative to the 440 grid, folded to ±50 cents */
+const glctc1GridCents = hz => glctc1WrapCents(1200 * Math.log2(hz / 440));
+
+/* Measure the song's tuning: average spectrum → tonal peaks → circular mean of
+   each peak's offset from the nearest 440 Hz semitone. Returns cents in −50…+50. */
+function glctc1DetectTuning(samples, sr) {
+  const N = 16384, half = N / 2, res = sr / N;
+  const usable = samples.length - N;
+  if (usable <= 0) return { reliable: false, cents: 0, refHz: 440, strength: 0, peaks: 0 };
+  const dur = samples.length / sr;
+  const frames = Math.min(40, Math.max(6, Math.floor(dur / 3)));
+  const spec = new Float64Array(half), win = new Float64Array(N);
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let fr = 0; fr < frames; fr++) {
+    const st = Math.floor(usable * (0.05 + 0.9 * fr / (frames - 1)));
+    for (let i = 0; i < N; i++) { re[i] = (samples[st + i] || 0) * win[i]; im[i] = 0; }
+    glctc1FFT(re, im);
+    for (let k = 0; k < half; k++) spec[k] += re[k] * re[k] + im[k] * im[k];
+  }
+  const lo = Math.max(4, Math.ceil(90 / res)), hi = Math.min(half - 4, Math.floor(4000 / res));
+  const L = k => Math.log(spec[k] + 1e-30);
+  const peaks = [];
+  for (let k = lo; k <= hi; k++) {
+    const v = spec[k];
+    if (!(v > spec[k - 1] && v >= spec[k + 1] && v > spec[k - 2] && v >= spec[k + 2])) continue;
+    /* prominence against the local floor (median of ±24 bins, skipping the peak itself) */
+    const around = [];
+    for (let j = k - 24; j <= k + 24; j++) if (Math.abs(j - k) > 3 && j > 0 && j < half) around.push(spec[j]);
+    around.sort((a, b) => a - b);
+    const floor = around[around.length >> 1] || 1e-30;
+    const prom = v / floor;
+    if (prom < 10) continue;
+    const a = L(k - 1), b = L(k), c = L(k + 1), den = a - 2 * b + c;
+    const p = den !== 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)) : 0;
+    const f = (k + p) * res;
+    const cents = 1200 * Math.log2(f / 440);
+    peaks.push({ dev: glctc1WrapCents(cents), w: Math.log(prom) * (f < 180 ? 0.5 : 1) });
+  }
+  if (peaks.length < 6) return { reliable: false, cents: 0, refHz: 440, strength: 0, peaks: peaks.length };
+  peaks.sort((x, y) => y.w - x.w);
+  const top = peaks.slice(0, 80);
+  const circ = list => {
+    let cs = 0, sn = 0, ws = 0;
+    for (const q of list) { const ang = 2 * Math.PI * q.dev / 100; cs += q.w * Math.cos(ang); sn += q.w * Math.sin(ang); ws += q.w; }
+    return { mean: Math.atan2(sn, cs) * 100 / (2 * Math.PI), R: Math.hypot(cs, sn) / (ws || 1) };
+  };
+  let m = circ(top);
+  /* reject peaks far from the consensus (inharmonic partials, drums), then re-average */
+  const kept = top.filter(q => Math.abs(glctc1WrapCents(q.dev - m.mean)) <= 22);
+  if (kept.length >= 5) { m = circ(kept); const tight = kept.filter(q => Math.abs(glctc1WrapCents(q.dev - m.mean)) <= 9); if (tight.length >= 5) kept.splice(0, kept.length, ...tight); }
+  if (kept.length >= 5) m = circ(kept);
+  const cents = Math.round(m.mean * 10) / 10;
+  const reliable = m.R >= 0.35 && kept.length >= 5;
+  return { reliable, cents, refHz: Math.round(440 * Math.pow(2, cents / 1200) * 10) / 10, strength: Math.round(m.R * 100), peaks: kept.length };
+}
+
+/* Which sacred grid is closest to the song as it is now (smallest move). */
+function glctc1NearestSacredHz(cents) {
+  let best = GLCTC1_SACRED_HZ[0], bd = Infinity;
+  for (const hz of GLCTC1_SACRED_HZ) { const d = Math.abs(glctc1WrapCents(glctc1GridCents(hz) - cents)); if (d < bd) { bd = d; best = hz; } }
+  return best;
+}
+
+/* The plan: how many cents to move this song so it sits on targetHz's grid. */
+function glctc1TuningPlan(tuning, targetHz) {
+  targetHz = Number(targetHz);
+  if (!GLCTC1_SACRED_HZ.includes(targetHz)) targetHz = tuning && tuning.reliable ? glctc1NearestSacredHz(tuning.cents) : 0;
+  if (!tuning || !tuning.reliable) return { apply: false, targetHz, shift: 0, reason: "no clear musical notes to tune (drums / noise / ambient texture) — left as it is" };
+  const shift = Math.round(glctc1WrapCents(glctc1GridCents(targetHz) - tuning.cents) * 10) / 10;
+  const apply = Math.abs(shift) >= 3;
+  return { apply, targetHz, shift, from: tuning.cents, reason: apply ? "" : `already on the ${targetHz} Hz grid` };
+}
+const glctc1FmtCents = c => (c > 0 ? "+" : c < 0 ? "−" : "±") + Math.abs(Math.round(c * 10) / 10) + "¢";
+
+/* DAW WSOLA time-stretch (same algorithm as daw.html stretchBuffer) followed by a
+   4-point resample back to the original length → pitch moves by `ratio`, length and BPM stay put. */
+function glctc1PitchShiftChannels(chs, sr, ratio) {
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  ratio = clamp(ratio, 0.5, 2);
+  const n = chs[0].length, chn = chs.length;
+  const D = 4, N = Math.max(1024, Math.round(sr * .0464 / 8) * 8), Hs = N >> 1, Nd = Math.floor(N / D), nd = Math.floor(n / D), dl = Math.round(sr * .012 / D) * D, mono = new Float32Array(nd), mc = Math.min(2, chn);
+  for (let i = 0; i < nd; i++) { let s = 0; for (let c = 0; c < mc; c++) for (let j = 0; j < D; j++) s += chs[c][i * D + j]; mono[i] = s / (D * mc); }
+  const outLen = Math.max(1, Math.round(n * ratio)), Ha = Hs / ratio, out = chs.map(() => new Float32Array(outLen + N)), win = new Float32Array(N);
+  for (let i = 0; i < N; i++) win[i] = .5 - .5 * Math.cos(2 * Math.PI * i / N);
+  let prev = 0;
+  for (let k = 0; ; k++) {
+    const o = k * Hs; if (o >= outLen) break;
+    const nominal = Math.round(k * Ha), maxS = Math.max(0, n - N); let ch;
+    if (k === 0) ch = 0;
+    else {
+      if (nominal >= n) break;
+      const lo = Math.max(0, nominal - dl), hi = Math.min(maxS, nominal + dl), tg = Math.floor((prev + Hs) / D);
+      if (hi < lo || tg + Nd > nd) ch = Math.min(Math.max(0, nominal), maxS);
+      else {
+        let best = -1e30, bc = lo;
+        for (let c = Math.ceil(lo / D) * D; c <= hi; c += D) {
+          const cd = c / D; if (cd + Nd > nd) break;
+          let xy = 0, yy = 1e-9;
+          for (let i = 0; i < Nd; i += 2) { const y = mono[cd + i]; xy += mono[tg + i] * y; yy += y * y; }
+          const sc = xy / Math.sqrt(yy); if (sc > best) { best = sc; bc = c; }
+        }
+        ch = bc;
+      }
+    }
+    const lim = Math.min(N, n - ch);
+    for (let c = 0; c < chn; c++) {
+      const src = chs[c], dst = out[c];
+      if (k === 0) for (let i = 0; i < lim; i++) dst[o + i] += src[ch + i] * (i < Hs ? 1 : win[i]);
+      else for (let i = 0; i < lim; i++) dst[o + i] += src[ch + i] * win[i];
+    }
+    prev = ch;
+  }
+  /* resample stretched audio back to the original length (cubic Hermite — keeps the top end clean) */
+  const r = outLen / n, res = [];
+  for (let c = 0; c < chn; c++) {
+    const s = out[c], d = new Float32Array(n), last = outLen - 1;
+    for (let i = 0; i < n; i++) {
+      const pos = i * r, j = Math.floor(pos), t = pos - j;
+      const y0 = s[Math.max(0, j - 1)], y1 = s[Math.min(last, j)], y2 = s[Math.min(last, j + 1)], y3 = s[Math.min(last, j + 2)];
+      const c1 = .5 * (y2 - y0), c2 = y0 - 2.5 * y1 + 2 * y2 - .5 * y3, c3 = .5 * (y3 - y0) + 1.5 * (y1 - y2);
+      d[i] = ((c3 * t + c2) * t + c1) * t + y1;
+    }
+    res.push(d);
+  }
+  return res;
+}
+
+/* Re-tune a decoded AudioBuffer by `cents` (in a Web Worker so the page stays responsive). */
+function glctc1RetuneBuffer(buffer, cents) {
+  const ratio = Math.pow(2, cents / 1200), sr = buffer.sampleRate;
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i).slice());
+  const wrap = chs => ({ numberOfChannels: chs.length, length: chs[0].length, sampleRate: sr, duration: chs[0].length / sr, getChannelData: i => chs[i] });
+  if (Math.abs(cents) < 0.5) return Promise.resolve(wrap(channels));
+  if (typeof Worker === "undefined") return Promise.resolve(wrap(glctc1PitchShiftChannels(channels, sr, ratio)));
+  return new Promise((resolve, reject) => {
+    const code = glctc1PitchShiftChannels.toString() +
+      "\nself.onmessage=e=>{try{const q=e.data,out=glctc1PitchShiftChannels(q.channels,q.sampleRate,q.ratio);self.postMessage({channels:out},out.map(x=>x.buffer))}catch(err){self.postMessage({error:err.message})}}";
+    const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+    let worker;
+    try { worker = new Worker(url); } catch (e) { URL.revokeObjectURL(url); resolve(wrap(glctc1PitchShiftChannels(channels, sr, ratio))); return; }
+    const done = () => { worker.terminate(); URL.revokeObjectURL(url); };
+    worker.onmessage = e => { done(); if (e.data.error) reject(new Error(e.data.error)); else resolve(wrap(e.data.channels)); };
+    worker.onerror = e => { done(); reject(new Error(e.message || "Re-tuning failed")); };
+    worker.postMessage({ channels, sampleRate: sr, ratio }, channels.map(x => x.buffer));
+  });
+}
+
 function analyseBuffer(
   audioBuffer
 ) {
@@ -2616,7 +2796,9 @@ function analyseBuffer(
     );
   const timeSignature = detectTimeSignature(mono, sampleRate, bpm);
   const frequency = glctc1DetectFrequency(mono, sampleRate);
+  const tuning = glctc1DetectTuning(mono, sampleRate);
   return {
+    tuning,
     bpm,
     rawBpm,
     key,
@@ -3503,11 +3685,56 @@ function displayResults(
   ).textContent =
     analysis.frequency.planet;
 
+  const tu = analysis.tuning || {};
+  document.getElementById("tuningValue").textContent = tu.reliable ? "A ≈ " + tu.refHz + " Hz" : "NO CLEAR NOTES";
+  document.getElementById("tuningConfidence").textContent = tu.reliable ? glctc1FmtCents(tu.cents) + " FROM 440 · " + tu.strength + "% CLEAR" : "DRUMS / NOISE — NOT RE-TUNED";
+
   highlightFrequency(
     analysis.frequency.frequency
   );
 
+  updateTuningPlanUI();
+
 }
+
+/* =====================================================
+   CHAKRA TUNING PLAN (upload)
+   ===================================================== */
+
+function currentTuningPlan() {
+  if (!latestAnalysis) return null;
+  const hz = Number(document.getElementById("libraryFrequency").value) || latestAnalysis.frequency.frequency;
+  return glctc1TuningPlan(latestAnalysis.tuning, hz);
+}
+
+function updateTuningPlanUI() {
+  const box = document.getElementById("glctc1TunePlan");
+  const on = document.getElementById("glctc1TuneOnUpload").checked;
+  const p = currentTuningPlan();
+  if (!p) { box.textContent = "Analyse the audio to see the tuning plan."; return; }
+  const f = GLCTC1_FREQUENCIES.find(x => x.frequency === p.targetHz);
+  const name = f ? `<b>${p.targetHz} Hz</b> (${f.chakra} · ${f.planet})` : "<b>—</b>";
+  if (!p.apply) box.innerHTML = `Target: ${name}. Nothing to change — ${p.reason}.`;
+  else if (!on) box.innerHTML = `Target: ${name}. Tuning is <b>switched off</b> — the track will upload exactly as it is.`;
+  else box.innerHTML = `Target: ${name}. The track will be moved <b>${glctc1FmtCents(p.shift)}</b> (${p.shift > 0 ? "up" : "down"}, less than half a semitone) so every note sits on the ${p.targetHz} Hz grid — the same tuning the DAW uses. Length and BPM stay exactly the same. Tap a frequency below to choose a different one.`;
+}
+
+document.getElementById("glctc1TuneOnUpload").addEventListener("change", updateTuningPlanUI);
+document.getElementById("libraryFrequency").addEventListener("input", () => {
+  const f = GLCTC1_FREQUENCIES.find(x => x.frequency === Number(document.getElementById("libraryFrequency").value));
+  if (f) { document.getElementById("libraryChakra").value = f.chakra; document.getElementById("libraryPlanet").value = f.planet; highlightFrequency(f.frequency); }
+  updateTuningPlanUI();
+});
+document.querySelectorAll(".map-item[data-frequency]").forEach(item => item.addEventListener("click", () => {
+  if (!latestAnalysis) return;
+  const f = GLCTC1_FREQUENCIES.find(x => x.frequency === Number(item.dataset.frequency));
+  if (!f) return;
+  document.getElementById("libraryFrequency").value = f.frequency;
+  document.getElementById("libraryChakra").value = f.chakra;
+  document.getElementById("libraryPlanet").value = f.planet;
+  highlightFrequency(f.frequency);
+  updateTuningPlanUI();
+}));
 
 /* =====================================================
    POPULATE MASTER LIBRARY FIELDS
@@ -3583,6 +3810,10 @@ function populateLibraryFields(
         analysis.frequency.chakra,
       "Planet: " +
         analysis.frequency.planet,
+      "Tuning: " +
+        (analysis.tuning && analysis.tuning.reliable
+          ? "A ≈ " + analysis.tuning.refHz + " Hz (" + glctc1FmtCents(analysis.tuning.cents) + " from 440)"
+          : "no clear notes"),
       "Duration: " +
         formatDuration(
           analysis.duration
@@ -3644,294 +3875,47 @@ function resetLibraryFields() {
    BROWSER-SIDE MP3 CONVERSION
    ===================================================== */
 
-async function convertAudioToMP3(
-  file
-) {
-
-  if (
-    typeof lamejs === "undefined"
-  ) {
-
-    throw new Error(
-      "MP3 encoder could not be loaded. Please refresh the page and try again."
-    );
-
+/* Encode any decoded (or re-tuned) audio buffer to a 320 kbps MP3. */
+async function encodeAudioBufferToMP3(audioBuffer, onProgress) {
+  if (typeof lamejs === "undefined") throw new Error("MP3 encoder could not be loaded. Please refresh the page and try again.");
+  const channels = Math.min(2, audioBuffer.numberOfChannels), sampleRate = audioBuffer.sampleRate;
+  const encoder = new lamejs.Mp3Encoder(channels, sampleRate, 320);
+  const mp3Data = [], block = 1152, total = audioBuffer.length;
+  const left = audioBuffer.getChannelData(0), right = channels === 2 ? audioBuffer.getChannelData(1) : null;
+  const toInt = v => { v = Math.max(-1, Math.min(1, v)); return v < 0 ? v * 32768 : v * 32767; };
+  for (let i = 0; i < total; i += block) {
+    const end = Math.min(i + block, total), L = new Int16Array(end - i), R = right ? new Int16Array(end - i) : null;
+    for (let j = i; j < end; j++) { L[j - i] = toInt(left[j]); if (R) R[j - i] = toInt(right[j]); }
+    const enc = R ? encoder.encodeBuffer(L, R) : encoder.encodeBuffer(L);
+    if (enc.length > 0) mp3Data.push(new Int8Array(enc));
+    if (i % (block * 100) === 0) { if (onProgress) onProgress(Math.round(i / total * 100)); await new Promise(r => setTimeout(r, 0)); }
   }
+  const fin = encoder.flush();
+  if (fin.length > 0) mp3Data.push(new Int8Array(fin));
+  return new Blob(mp3Data, { type: "audio/mpeg" });
+}
 
-  setStatus(
-    "CONVERTING AUDIO TO 320 KBPS MP3 IN YOUR BROWSER...",
-    "active"
-  );
-
-  const arrayBuffer =
-    await file.arrayBuffer();
-
-  const AudioContext =
-    window.AudioContext ||
-    window.webkitAudioContext;
-
-  if (!AudioContext) {
-
-    throw new Error(
-      "Web Audio API is not supported."
-    );
-
-  }
-
-  const audioContext =
-    new AudioContext();
-
+/* Decode the original file, re-tune it to its chakra grid (if asked), then encode to MP3.
+   The original file is only analysed — never uploaded. */
+async function convertAudioToMP3(file, tuneCents) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) throw new Error("Web Audio API is not supported.");
+  setStatus("DECODING AUDIO...", "active");
+  const arrayBuffer = await file.arrayBuffer();
+  const audioContext = new AudioContext();
   try {
-
-    const audioBuffer =
-      await audioContext.decodeAudioData(
-        arrayBuffer.slice(0)
-      );
-
-    const channels =
-      Math.min(
-        2,
-        audioBuffer.numberOfChannels
-      );
-
-    const sampleRate =
-      audioBuffer.sampleRate;
-
-    const encoder =
-      new lamejs.Mp3Encoder(
-        channels,
-        sampleRate,
-        320
-      );
-
-    const mp3Data =
-      [];
-
-    const sampleBlockSize =
-      1152;
-
-    const left =
-      audioBuffer.getChannelData(
-        0
-      );
-
-    const right =
-      channels === 2
-        ? audioBuffer.getChannelData(1)
-        : null;
-
-    const totalSamples =
-      audioBuffer.length;
-
-    for (
-      let i = 0;
-      i < totalSamples;
-      i += sampleBlockSize
-    ) {
-
-      const end =
-        Math.min(
-          i + sampleBlockSize,
-          totalSamples
-        );
-
-      const leftBuffer =
-        new Int16Array(
-          end - i
-        );
-
-      let rightBuffer =
-        null;
-
-      if (channels === 2) {
-
-        rightBuffer =
-          new Int16Array(
-            end - i
-          );
-
-      }
-
-      for (
-        let j = i;
-        j < end;
-        j++
-      ) {
-
-        const localIndex =
-          j - i;
-
-        let leftSample =
-          left[j];
-
-        leftSample =
-          Math.max(
-            -1,
-            Math.min(
-              1,
-              leftSample
-            )
-          );
-
-        leftBuffer[
-          localIndex
-        ] =
-          leftSample < 0
-            ? leftSample * 32768
-            : leftSample * 32767;
-
-        if (
-          channels === 2
-        ) {
-
-          let rightSample =
-            right[j];
-
-          rightSample =
-            Math.max(
-              -1,
-              Math.min(
-                1,
-                rightSample
-              )
-            );
-
-          rightBuffer[
-            localIndex
-          ] =
-            rightSample < 0
-              ? rightSample * 32768
-              : rightSample * 32767;
-
-        }
-
-      }
-
-      const encoded =
-        channels === 2
-          ? encoder.encodeBuffer(
-              leftBuffer,
-              rightBuffer
-            )
-          : encoder.encodeBuffer(
-              leftBuffer
-            );
-
-      if (
-        encoded.length > 0
-      ) {
-
-        mp3Data.push(
-          new Int8Array(
-            encoded
-          )
-        );
-
-      }
-
-      if (
-        i % (
-          sampleBlockSize * 100
-        ) === 0
-      ) {
-
-        const percent =
-          Math.round(
-            (
-              i /
-              totalSamples
-            ) *
-            100
-          );
-
-        setStatus(
-          "CONVERTING AUDIO TO 320 KBPS MP3... " +
-          percent +
-          "%",
-          "active"
-        );
-
-        await new Promise(
-          resolve =>
-            setTimeout(
-              resolve,
-              0
-            )
-        );
-
-      }
-
+    let audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    if (tuneCents && Math.abs(tuneCents) >= 0.5) {
+      setStatus("TUNING TO CHAKRA FREQUENCY (" + glctc1FmtCents(tuneCents) + ") — KEEPING BPM AND LENGTH...", "active");
+      await new Promise(r => setTimeout(r, 30));
+      audioBuffer = await glctc1RetuneBuffer(audioBuffer, tuneCents);
     }
-
-    const finalBuffer =
-      encoder.flush();
-
-    if (
-      finalBuffer.length > 0
-    ) {
-
-      mp3Data.push(
-        new Int8Array(
-          finalBuffer
-        )
-      );
-
-    }
-
-    const mp3Blob =
-      new Blob(
-        mp3Data,
-        {
-          type:"audio/mpeg"
-        }
-      );
-
-    console.log(
-      "GLCTC1 ORIGINAL AUDIO SIZE:",
-      file.size,
-      "bytes"
-    );
-
-    console.log(
-      "GLCTC1 MP3 SIZE:",
-      mp3Blob.size,
-      "bytes"
-    );
-
-    console.log(
-      "GLCTC1 MP3 REDUCTION:",
-      Math.round(
-        (
-          1 -
-          (
-            mp3Blob.size /
-            file.size
-          )
-        ) *
-        100
-      ) +
-      "%"
-    );
-
+    const mp3Blob = await encodeAudioBufferToMP3(audioBuffer, pc => setStatus("CONVERTING AUDIO TO 320 KBPS MP3... " + pc + "%", "active"));
+    console.log("GLCTC1 ORIGINAL AUDIO SIZE:", file.size, "bytes · MP3 SIZE:", mp3Blob.size, "bytes");
     return mp3Blob;
-
   } finally {
-
-    try {
-
-      await audioContext.close();
-
-    } catch (error) {
-
-      console.warn(
-        "GLCTC1 MP3 AudioContext close error:",
-        error
-      );
-
-    }
-
+    try { await audioContext.close(); } catch (error) { console.warn("GLCTC1 MP3 AudioContext close error:", error); }
   }
-
 }
 
 /* =====================================================
@@ -4119,7 +4103,7 @@ async function uploadToMasterLibrary() {
         "libraryCopyright"
       ).value.trim();
 
-    const notes =
+    let notes =
       (document.getElementById(
         "libraryNotes"
       ).value.trim() +
@@ -4159,10 +4143,14 @@ async function uploadToMasterLibrary() {
        ONLY THE UPLOAD COPY IS CONVERTED.
        ================================================= */
 
+    const tunePlan = currentTuningPlan();
+    const doTune = !!(tunePlan && tunePlan.apply && document.getElementById("glctc1TuneOnUpload").checked);
     const mp3Blob =
       await convertAudioToMP3(
-        selectedFile
+        selectedFile,
+        doTune ? tunePlan.shift : 0
       );
+    if (doTune) notes += "\n[GLCTC1 tuned to the " + tunePlan.targetHz + " Hz grid: " + glctc1FmtCents(tunePlan.shift) + " from A≈" + latestAnalysis.tuning.refHz + " Hz]";
 
     if (
       !mp3Blob ||
@@ -4740,11 +4728,17 @@ try{LB.backups=JSON.parse(localStorage.getItem(BACKUP_KEY)||"[]");}catch(e){LB.b
 async function verifyMasterLibraryAdmin(){
   const wasAdmin=isMasterLibraryAdmin;
   try{
-    const {data,error}=await supabaseClient.auth.getUser();
-    if(error) throw error;
-    isMasterLibraryAdmin=!!data?.user && String(data.user.id)===MASTER_LIBRARY_ADMIN_ID;
+    /* Check for a session first: getUser() throws "Auth session missing" when nobody is signed in. */
+    const {data:sess}=await supabaseClient.auth.getSession();
+    let user=null;
+    if(sess?.session){
+      const {data,error}=await supabaseClient.auth.getUser();
+      if(error&&!/session missing/i.test(error.message||""))throw error;
+      user=data?.user||null;
+    }
+    isMasterLibraryAdmin=!!user && String(user.id)===MASTER_LIBRARY_ADMIN_ID;
     adminLibraryTools.hidden=!isMasterLibraryAdmin;
-    libraryAdminNotice.textContent=isMasterLibraryAdmin?"ADMIN ACCESS VERIFIED — MASTER LIBRARY COMPLETE CHECK ENABLED.":"Master Library maintenance tools are restricted to the GLCTC1 administrator.";
+    libraryAdminNotice.textContent=isMasterLibraryAdmin?"ADMIN ACCESS VERIFIED — MASTER LIBRARY COMPLETE CHECK ENABLED.":(user?"Master Library maintenance tools are restricted to the GLCTC1 administrator.":"Sign in as the GLCTC1 administrator to use the Master Library tools.");
     libraryAdminNotice.classList.toggle("success",isMasterLibraryAdmin);
     if(isMasterLibraryAdmin&&!wasAdmin&&!LB.rows.length&&!LB.busy) loadLibrary().catch(()=>{});
   }catch(error){
@@ -5254,13 +5248,15 @@ function setStatus(
   const COLS = {
     bpm: ["BPM", "bpm"], key: ["Key", "key", "KEY"],
     freq: ["frequency_hz", "Frequency (Hz)", "Frequency", "frequency", "Frequency Hz"],
-    chakra: ["chakra", "Chakra"], planet: ["planet", "Planet"], genre: ["genre", "Genre"]
+    chakra: ["chakra", "Chakra"], planet: ["planet", "Planet"], genre: ["genre", "Genre"],
+    audio: ["Master Audio", "master_audio", "masterAudio", "audio_url"], notes: ["Notes", "notes"]
   };
   const GROUPS = [
     { k: "bpm", label: "BPM", on: true },
     { k: "key", label: "KEY", on: true },
     { k: "freq", label: "FREQUENCY · CHAKRA · PLANET", on: true },
-    { k: "genre", label: "GENRE", on: true }
+    { k: "genre", label: "GENRE", on: true },
+    { k: "tune", label: "TUNING · RE-TUNE AUDIO TO ITS CHAKRA", on: true }
   ];
   /* genres in the same family are treated as the same, so artists' own sub-genres are kept */
   const FAMILIES = [
@@ -5294,6 +5290,18 @@ function setStatus(
     if (!ctx || ctx.state === "closed") ctx = new AC();
     const copy = bytes.slice(0);
     return await new Promise((res, rej) => { try { const p = ctx.decodeAudioData(copy, res, rej); if (p && p.then) p.then(res, rej); } catch (e) { rej(e); } });
+  }
+
+  /* Which sacred frequency will this track end up with, and how far must its audio move to sit on that grid? */
+  function refreshTune(ch, raw, scanFreq) {
+    const t = ch.find(c => c.k === "tune"); if (!t) return;
+    const fc = ch.find(c => c.k === "freq" && c.on), fcol = colFor("freq", raw);
+    let hz = fc ? Number(fc.newV) : (fcol ? Number(raw[fcol]) : NaN);
+    if (!GLCTC1_SACRED_HZ.includes(hz)) hz = GLCTC1_SACRED_HZ.includes(Number(scanFreq)) ? Number(scanFreq) : NaN;
+    const plan = glctc1TuningPlan(t.tuning, hz);
+    t.targetHz = plan.targetHz; t.shift = plan.shift; t.noop = !plan.apply;
+    t.newV = plan.apply ? `${glctc1FmtCents(plan.shift)} → ${plan.targetHz} Hz grid` : `on the ${plan.targetHz} Hz grid`;
+    t.why = plan.apply ? `re-tunes the audio file to ${plan.targetHz} Hz (length & BPM unchanged)` : "";
   }
 
   function propose(r, a, groups) {
@@ -5335,8 +5343,15 @@ function setStatus(
       if (!blank(saved) && fs >= 0 && fs === fn) { /* same family — keep the artist's own wording */ }
       else { const sure = (g.confidence || 0) >= 75; add("genre", "GENRE", g.name, sure, (g.why || "") + (sure ? "" : " — less certain, listen first")); }
     }
+    if (groups.includes("tune") && a.tuning) {
+      const acol = colFor("audio", r.raw);
+      if (!a.tuning.reliable) notes.push("Tuning left as is — no clear musical notes (drums / noise / texture)");
+      else if (acol && !blank(r.raw[acol])) ch.push({ k: "tune", label: "TUNING", col: acol, oldV: r.raw[acol], newV: "", on: true, tuning: a.tuning, special: true });
+      refreshTune(ch, r.raw, (a.frequency || {}).frequency);
+    }
     const fz = a.frequency || {};
-    const scan = { bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
+    const tz = a.tuning || {};
+    const scan = { tuneTxt: tz.reliable ? `A≈${tz.refHz} Hz (${glctc1FmtCents(tz.cents)})` : (a.tuning ? "no clear notes" : ""), freqScan: fz.frequency, bpm: a.bpm, key: a.key, freq: fz.frequency, chakra: fz.chakra, planet: fz.planet, fconf: fz.confidence, fclear: fz.clear,
                    genre: g.name, gwhy: g.why, gconf: g.confidence, bpmOk: g.bpmReliable };
     return { ch, notes, scan };
   }
@@ -5348,11 +5363,15 @@ function setStatus(
     { k: "freq", label: "FREQUENCY", saved: x => x.r.raw[colFor("freq", x.r.raw)], scan: x => x.scan && (x.scan.freq ? x.scan.freq + " Hz · " + x.scan.fconf + "%" + (x.scan.fclear ? "" : " (no clear tone)") : "") },
     { k: "chakra", label: "CHAKRA", saved: x => x.r.raw[colFor("chakra", x.r.raw)], scan: x => x.scan && x.scan.chakra },
     { k: "planet", label: "PLANET", saved: x => x.r.raw[colFor("planet", x.r.raw)], scan: x => x.scan && x.scan.planet },
-    { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre }
+    { k: "genre", label: "GENRE", saved: x => x.r.raw[colFor("genre", x.r.raw)], scan: x => x.scan && x.scan.genre },
+    { k: "tune", label: "TUNING", saved: x => x.scan && x.scan.tuneTxt, scan: x => { const t = x.ch.find(c => c.k === "tune"); return t ? t.newV : (x.scan && x.scan.tuneTxt === "no clear notes" ? "left as is" : ""); } }
   ];
+  const live = c => c.on && !c.noop;
+  const real = c => !c.noop;
   function render() {
     const body = $("ccBody");
-    const withCh = CC.rows.filter(x => x.ch.length || x.error);
+    CC.rows.forEach(x => refreshTune(x.ch, x.r.raw, x.scan && x.scan.freqScan));
+    const withCh = CC.rows.filter(x => x.ch.some(real) || x.error);
     const list = SHOW.mode === "all" ? CC.rows : withCh;
     $("ccShowAll").classList.toggle("lb-main", SHOW.mode === "all"); $("ccShowCh").classList.toggle("lb-main", SHOW.mode !== "all");
     $("ccShowCh").textContent = `⚠ ONLY TRACKS WITH CHANGES (${withCh.length})`; $("ccShowAll").textContent = `☰ ALL TRACKS (${CC.rows.length})`;
@@ -5360,7 +5379,7 @@ function setStatus(
     else body.innerHTML = list.map(x => {
       const i = CC.rows.indexOf(x);
       const grid = FIELDS_UI.map(F => {
-        const j = x.ch.findIndex(c => c.k === F.k), c = j >= 0 ? x.ch[j] : null;
+        const j = x.ch.findIndex(c => c.k === F.k), c = j >= 0 && !x.ch[j].noop ? x.ch[j] : null;
         const sv = F.saved(x), sc = x.scan ? F.scan(x) : "";
         const act = c ? `<label style="cursor:pointer;white-space:nowrap"><input type="checkbox" data-i="${i}" data-j="${j}" ${c.on ? "checked" : ""}> change</label>`
                       : (x.scan ? `<span style="color:#42ff9a">✓</span>` : "");
@@ -5372,8 +5391,8 @@ function setStatus(
       return `<tr><td><button type="button" class="lb-btn" data-listen="${i}" title="Listen and tap the tempo" style="padding:6px 9px">🎧</button></td><td>${esc(x.r.title)}<br><small style="color:#9a98a3">${esc(x.r.artist || "")}</small></td>
         <td><table class="cc-grid"><tr><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px 0"></th><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px">SAVED</th><th style="text-align:left;color:#6f6d78;font-weight:600;padding:0 8px 2px">SCAN</th><th></th></tr>${grid}</table>${why}${notes}${x.error ? `<div style="color:#ff5470">${esc(x.error)}</div>` : ""}</td></tr>`;
     }).join("");
-    const nTicked = CC.rows.reduce((t, x) => t + x.ch.filter(c => c.on).length, 0);
-    const nTracks = CC.rows.filter(x => x.ch.some(c => c.on)).length;
+    const nTicked = CC.rows.reduce((t, x) => t + x.ch.filter(live).length, 0);
+    const nTracks = CC.rows.filter(x => x.ch.some(live)).length;
     $("ccSave").disabled = CC.busy || !nTicked;
     $("ccSave").textContent = nTicked ? `💾 SAVE ${nTicked} TICKED CHANGE${nTicked > 1 ? "S" : ""} (${nTracks} TRACK${nTracks > 1 ? "S" : ""})` : "💾 SAVE TICKED CHANGES";
     $("ccUndo").disabled = CC.busy || !loadUndo().length;
@@ -5423,7 +5442,7 @@ function setStatus(
           const buf = await decodeFull(await fetchMasterAudioBytes(String(r.path)));
           await new Promise(z => setTimeout(z, 0));
           const p = propose(r, analyseBuffer(buf), groups);
-          x.ch = p.ch; x.notes = p.notes; x.scan = p.scan; if (p.ch.length) changed++;
+          x.ch = p.ch; x.notes = p.notes; x.scan = p.scan; if (p.ch.some(real)) changed++;
         } catch (e) { x.error = "Could not analyse: " + String(e && e.message ? e.message : e).slice(0, 160); failed++; }
         CC.rows.push(x);
         if (n % 3 === 0) render();
@@ -5447,24 +5466,51 @@ function setStatus(
   }
 
   $("ccSave").addEventListener("click", async () => {
-    const list = CC.rows.filter(x => x.ch.some(c => c.on));
+    CC.rows.forEach(x => refreshTune(x.ch, x.r.raw, x.scan && x.scan.freqScan));
+    const list = CC.rows.filter(x => x.ch.some(live));
     if (!list.length || CC.busy) return;
-    const total = list.reduce((t, x) => t + x.ch.filter(c => c.on).length, 0);
-    if (!confirm(`Save ${total} change${total > 1 ? "s" : ""} across ${list.length} track${list.length > 1 ? "s" : ""} to the Master Library?\n\nYou can undo this with ↩ UNDO LAST SAVE.`)) return;
+    const total = list.reduce((t, x) => t + x.ch.filter(live).length, 0);
+    const nTune = list.filter(x => x.ch.some(c => c.k === "tune" && live(c))).length;
+    if (!confirm(`Save ${total} change${total > 1 ? "s" : ""} across ${list.length} track${list.length > 1 ? "s" : ""} to the Master Library?` + (nTune ? `\n\n${nTune} track${nTune > 1 ? "s" : ""} will have the audio re-tuned to the chakra frequency (about 10–40 seconds each). The old audio files are kept, so undo can switch back.` : "") + `\n\nYou can undo this with ↩ UNDO LAST SAVE.`)) return;
     CC.busy = true; render();
     const batch = { at: new Date().toISOString(), keyCol: LB.keyCol, rows: [] };
     let ok = 0, bad = 0;
     try {
       for (const x of list) {
         const payload = {}, before = {};
-        x.ch.filter(c => c.on).forEach(c => { payload[c.col] = c.newV; before[c.col] = c.oldV === undefined ? null : c.oldV; });
-        status(`Saving ${ok + bad + 1}/${list.length}: ${x.r.title}`, "active");
+        x.ch.filter(c => live(c) && c.k !== "tune").forEach(c => { payload[c.col] = c.newV; before[c.col] = c.oldV === undefined ? null : c.oldV; });
+        const tc = x.ch.find(c => c.k === "tune" && live(c));
+        const step = `${ok + bad + 1}/${list.length}`;
+        status(`Saving ${step}: ${x.r.title}`, "active");
+        let newAudio = null;
         try {
-          const saved = await writeRow(x.r.id, payload);
+          if (tc) {
+            /* download → re-tune (DAW engine) → 320 kbps MP3 → upload as a NEW file; the old file stays for undo */
+            status(`Re-tuning ${step}: ${x.r.title} (${glctc1FmtCents(tc.shift)} → ${tc.targetHz} Hz)…`, "active");
+            const buf = await decodeFull(await fetchMasterAudioBytes(String(x.r.path)));
+            const tuned = await glctc1RetuneBuffer(buf, tc.shift);
+            const blob = await encodeAudioBufferToMP3(tuned, pc => status(`Re-tuning ${step}: ${x.r.title} — encoding MP3 ${pc}%`, "active"));
+            const base = String(x.r.path).split("/").pop().replace(/\.[^.]+$/, "").replace(/^\d{10,}_/, "").replace(/_A\d{3}grid$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "track";
+            const path = `masters/${Date.now()}_${base}_A${tc.targetHz}grid.mp3`;
+            const up = await supabaseClient.storage.from("tracks").upload(path, blob, { upsert: false, contentType: "audio/mpeg" });
+            if (up.error) throw new Error("Tuned audio upload failed: " + up.error.message);
+            newAudio = (up.data && up.data.path) || path;
+            payload[tc.col] = newAudio; before[tc.col] = tc.oldV === undefined ? null : tc.oldV;
+            const ncol = colFor("notes", x.r.raw);
+            if (ncol) {
+              const old = x.r.raw[ncol];
+              payload[ncol] = (blank(old) ? "" : String(old) + "\n") + `[GLCTC1 re-tuned to the ${tc.targetHz} Hz grid: ${glctc1FmtCents(tc.shift)} from A≈${tc.tuning.refHz} Hz · ${new Date().toISOString().slice(0, 10)}]`;
+              before[ncol] = old === undefined ? null : old;
+            }
+          }
+          let saved;
+          try { saved = await writeRow(x.r.id, payload); }
+          catch (e) { if (newAudio) { try { await supabaseClient.storage.from("tracks").remove([newAudio]); } catch (_) {} } throw e; }
+          if (tc) { const ap = saved[tc.col]; if (ap) x.r.path = ap; }
           batch.rows.push({ id: x.r.id, before });
           Object.assign(x.r.raw, saved);
           const b = Number(saved.BPM ?? saved.bpm); if (isFinite(b) && b > 0) x.r.saved = b;
-          x.ch = x.ch.filter(c => !c.on); x.notes.unshift("✔ Saved"); ok++;
+          x.ch = x.ch.filter(c => !live(c)); x.notes.unshift(tc ? "✔ Saved · audio re-tuned" : "✔ Saved"); ok++;
         } catch (e) { x.error = "Save failed: " + String(e && e.message ? e.message : e).slice(0, 160); bad++; }
       }
       if (batch.rows.length) { const u = loadUndo(); u.push(batch); saveUndo(u); }
@@ -5483,7 +5529,7 @@ function setStatus(
         try {
           const res = await supabaseClient.from("master_library").update(row.before).eq(batch.keyCol, row.id).select("*");
           if (res.error) throw res.error;
-          const lr = LB.rows.find(r => String(r.id) === String(row.id)); if (lr && res.data && res.data[0]) Object.assign(lr.raw, res.data[0]);
+          const lr = LB.rows.find(r => String(r.id) === String(row.id)); if (lr && res.data && res.data[0]) { Object.assign(lr.raw, res.data[0]); const ac = colFor("audio", lr.raw); if (ac && res.data[0][ac]) lr.path = res.data[0][ac]; }
           ok++;
         } catch (e) { bad++; console.warn("Undo failed", row.id, e); }
       }

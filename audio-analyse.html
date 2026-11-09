@@ -1256,9 +1256,18 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
         <button id="lbTapReset" type="button" class="lb-btn">RESET</button>
       </div>
     </div>
-    <div class="lb-bar">
-      <button id="ccSave" type="button" class="lb-btn lb-go" disabled>💾 SAVE TICKED CHANGES</button>
-      <button id="ccUndo" type="button" class="lb-btn" disabled>↩ UNDO LAST SAVE</button>
+    <div class="lb-actions" id="ccActions">
+      <div id="ccConfirm" class="lb-confirm" hidden>
+        <span id="ccConfirmText"></span>
+        <button id="ccConfirmYes" type="button" class="lb-btn lb-go">✔ YES, SAVE NOW</button>
+        <button id="ccConfirmNo" type="button" class="lb-btn lb-warn">CANCEL</button>
+      </div>
+      <div class="lb-progress"><div id="ccSaveBar" style="height:100%;width:0;background:linear-gradient(90deg,#22c55e,#9b4dff);transition:width .2s"></div></div>
+      <div id="ccSaveStatus" class="lb-actmsg" style="margin-top:6px"></div>
+      <div class="lb-bar">
+        <button id="ccSave" type="button" class="lb-btn lb-go" disabled>💾 SAVE TICKED CHANGES</button>
+        <button id="ccUndo" type="button" class="lb-btn" disabled>↩ UNDO LAST SAVE</button>
+      </div>
     </div>
   </div>
   <div id="libraryAdminNotice" class="status">Master Library maintenance tools are restricted to the GLCTC1 administrator.</div>
@@ -2756,15 +2765,20 @@ function glctc1TuningPlan(tuning, targetHz) {
 const glctc1FmtCents = c => (c > 0 ? "+" : c < 0 ? "−" : "±") + Math.abs(Math.round(c * 10) / 10) + "¢";
 
 /* DAW WSOLA time-stretch (same algorithm as daw.html stretchBuffer) followed by a
-   4-point resample back to the original length → pitch moves by `ratio`, length and BPM stay put. */
+   4-point resample back to the original length → pitch moves by `ratio`, length and BPM stay put.
+   Memory-lean: the splice points are found once, then each channel is rebuilt on its own,
+   so a phone only holds about one extra copy of the song at a time. */
 function glctc1PitchShiftChannels(chs, sr, ratio) {
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   ratio = clamp(ratio, 0.5, 2);
   const n = chs[0].length, chn = chs.length;
-  const D = 4, N = Math.max(1024, Math.round(sr * .0464 / 8) * 8), Hs = N >> 1, Nd = Math.floor(N / D), nd = Math.floor(n / D), dl = Math.round(sr * .012 / D) * D, mono = new Float32Array(nd), mc = Math.min(2, chn);
+  const D = 4, N = Math.max(1024, Math.round(sr * .0464 / 8) * 8), Hs = N >> 1, Nd = Math.floor(N / D), nd = Math.floor(n / D), dl = Math.round(sr * .012 / D) * D, mc = Math.min(2, chn);
+  let mono = new Float32Array(nd);
   for (let i = 0; i < nd; i++) { let s = 0; for (let c = 0; c < mc; c++) for (let j = 0; j < D; j++) s += chs[c][i * D + j]; mono[i] = s / (D * mc); }
-  const outLen = Math.max(1, Math.round(n * ratio)), Ha = Hs / ratio, out = chs.map(() => new Float32Array(outLen + N)), win = new Float32Array(N);
+  const outLen = Math.max(1, Math.round(n * ratio)), Ha = Hs / ratio, win = new Float32Array(N);
   for (let i = 0; i < N; i++) win[i] = .5 - .5 * Math.cos(2 * Math.PI * i / N);
+  /* pass 1: where each output frame is taken from */
+  const pick = [];
   let prev = 0;
   for (let k = 0; ; k++) {
     const o = k * Hs; if (o >= outLen) break;
@@ -2785,24 +2799,26 @@ function glctc1PitchShiftChannels(chs, sr, ratio) {
         ch = bc;
       }
     }
-    const lim = Math.min(N, n - ch);
-    for (let c = 0; c < chn; c++) {
-      const src = chs[c], dst = out[c];
-      if (k === 0) for (let i = 0; i < lim; i++) dst[o + i] += src[ch + i] * (i < Hs ? 1 : win[i]);
-      else for (let i = 0; i < lim; i++) dst[o + i] += src[ch + i] * win[i];
-    }
-    prev = ch;
+    pick.push(ch); prev = ch;
   }
-  /* resample stretched audio back to the original length (cubic Hermite — keeps the top end clean) */
-  const r = outLen / n, res = [];
+  mono = null;
+  /* pass 2: rebuild + resample one channel at a time (cubic Hermite keeps the top end clean) */
+  const r = outLen / n, res = [], last = outLen - 1;
   for (let c = 0; c < chn; c++) {
-    const s = out[c], d = new Float32Array(n), last = outLen - 1;
+    const src = chs[c], s = new Float32Array(outLen + N);
+    for (let k = 0; k < pick.length; k++) {
+      const o = k * Hs, ch = pick[k], lim = Math.min(N, n - ch);
+      if (k === 0) for (let i = 0; i < lim; i++) s[o + i] += src[ch + i] * (i < Hs ? 1 : win[i]);
+      else for (let i = 0; i < lim; i++) s[o + i] += src[ch + i] * win[i];
+    }
+    const d = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const pos = i * r, j = Math.floor(pos), t = pos - j;
       const y0 = s[Math.max(0, j - 1)], y1 = s[Math.min(last, j)], y2 = s[Math.min(last, j + 1)], y3 = s[Math.min(last, j + 2)];
       const c1 = .5 * (y2 - y0), c2 = y0 - 2.5 * y1 + 2 * y2 - .5 * y3, c3 = .5 * (y3 - y0) + 1.5 * (y1 - y2);
       d[i] = ((c3 * t + c2) * t + c1) * t + y1;
     }
+    chs[c] = null;            /* let the original channel go as soon as it's rebuilt */
     res.push(d);
   }
   return res;
@@ -5344,7 +5360,21 @@ function setStatus(
   const CC = { rows: [], busy: false, stop: false };
   const UNDO_KEY = "glctc1_complete_check_backups_v1";
   const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const status = (m, t) => { const e = $("ccStatus"); e.className = "status" + (t ? " " + t : ""); e.textContent = m; };
+  const status = (m, t) => {
+    const e = $("ccStatus"); e.className = "status" + (t ? " " + t : ""); e.textContent = m;
+    const s2 = $("ccSaveStatus"); if (s2) { s2.textContent = m; s2.style.color = t === "error" ? "#ff8c8c" : t === "success" ? "#6effa3" : "#dfbaff"; }
+  };
+  /* inline yes/no (browser confirm() pop-ups can be blocked on phones and silently count as "Cancel") */
+  let askYes = null;
+  function ask(text, onYes) { $("ccConfirmText").textContent = text; $("ccConfirm").hidden = false; askYes = onYes; $("ccConfirm").scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+  function unask() { $("ccConfirm").hidden = true; askYes = null; }
+  $("ccConfirmNo").addEventListener("click", () => { unask(); status("Cancelled — nothing was saved."); });
+  $("ccConfirmYes").addEventListener("click", () => { const f = askYes; unask(); if (f) f(); });
+  /* keep the phone screen awake while saving (a sleeping phone pauses the page) */
+  let wake = null;
+  async function wakeOn() { try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
+  function wakeOff() { try { if (wake) wake.release(); } catch (e) {} wake = null; }
+  const bar = pc => { const b = $("ccSaveBar"); if (b) b.style.width = pc + "%"; };
   const COLS = {
     bpm: ["BPM", "bpm"], key: ["Key", "key", "KEY"],
     freq: ["frequency_hz", "Frequency (Hz)", "Frequency", "frequency", "Frequency Hz"],
@@ -5512,6 +5542,7 @@ function setStatus(
     $("ccSave").textContent = nTicked ? `💾 SAVE ${nTicked} TICKED CHANGE${nTicked > 1 ? "S" : ""} (${nTracks} TRACK${nTracks > 1 ? "S" : ""})` : "💾 SAVE TICKED CHANGES";
     $("ccUndo").disabled = CC.busy || !loadUndo().length;
     $("ccScan").disabled = CC.busy; $("ccStop").disabled = !CC.busy;
+    $("ccTickAll").disabled = $("ccTickNone").disabled = CC.busy;
   }
   $("ccBody").addEventListener("change", e => {
     const b = e.target.closest("input[data-i]"); if (!b) return;
@@ -5584,63 +5615,98 @@ function setStatus(
     return res.data[0];
   }
 
-  $("ccSave").addEventListener("click", async () => {
+  $("ccSave").addEventListener("click", () => {
+    if (CC.busy) return;
     CC.rows.forEach(x => refreshTune(x.ch, x.r.raw, x.scan && x.scan.freqScan));
     const list = CC.rows.filter(x => x.ch.some(live));
-    if (!list.length || CC.busy) return;
+    if (!list.length) { status("Nothing ticked to save.", "error"); return; }
     const total = list.reduce((t, x) => t + x.ch.filter(live).length, 0);
     const nTune = list.filter(x => x.ch.some(c => c.k === "tune" && live(c))).length;
-    if (!confirm(`Save ${total} change${total > 1 ? "s" : ""} across ${list.length} track${list.length > 1 ? "s" : ""} to the Master Library?` + (nTune ? `\n\n${nTune} track${nTune > 1 ? "s" : ""} will have the audio re-tuned to the chakra frequency (about 10–40 seconds each). The old audio files are kept, so undo can switch back.` : "") + `\n\nYou can undo this with ↩ UNDO LAST SAVE.`)) return;
-    CC.busy = true; render();
+    ask(`Save ${total} change${total > 1 ? "s" : ""} on ${list.length} track${list.length > 1 ? "s" : ""}?` +
+        (nTune ? ` Details save first (a few seconds), then ${nTune} audio file${nTune > 1 ? "s are" : " is"} re-tuned one by one (about 20–60 seconds each on a phone) — keep this page open and the screen on.` : "") +
+        " Undo is available afterwards.", () => doSave(list));
+  });
+
+  async function doSave(list) {
+    CC.busy = true; render(); await wakeOn();
     const batch = { at: new Date().toISOString(), keyCol: LB.keyCol, rows: [] };
-    let ok = 0, bad = 0;
+    const rowFor = id => { let b = batch.rows.find(z => String(z.id) === String(id)); if (!b) { b = { id, before: {} }; batch.rows.push(b); } return b; };
+    const keepUndo = () => { const u = loadUndo(); const i = u.findIndex(z => z.at === batch.at); if (i >= 0) u[i] = batch; else u.push(batch); saveUndo(u); };
+    let okD = 0, badD = 0, okT = 0, badT = 0;
+    /* tuning jobs are fixed now (target + shift), before the details change the saved values */
+    const jobs = list.map(x => ({ x, tc: x.ch.find(c => c.k === "tune" && live(c)) })).filter(j => j.tc).map(j => ({ x: j.x, col: j.tc.col, oldV: j.tc.oldV, shift: j.tc.shift, targetHz: j.tc.targetHz, refHz: j.tc.tuning.refHz }));
     try {
-      for (const x of list) {
+      /* PASS 1 — all the text details (BPM, key, frequency, chakra, planet, genre): fast, saved straight away */
+      for (let i = 0; i < list.length; i++) {
+        const x = list[i];
+        const ch = x.ch.filter(c => live(c) && c.k !== "tune");
+        if (!ch.length) continue;
         const payload = {}, before = {};
-        x.ch.filter(c => live(c) && c.k !== "tune").forEach(c => { payload[c.col] = c.newV; before[c.col] = c.oldV === undefined ? null : c.oldV; });
-        const tc = x.ch.find(c => c.k === "tune" && live(c));
-        const step = `${ok + bad + 1}/${list.length}`;
-        status(`Saving ${step}: ${x.r.title}`, "active");
+        ch.forEach(c => { payload[c.col] = c.newV; before[c.col] = c.oldV === undefined ? null : c.oldV; });
+        status(`Saving details ${i + 1}/${list.length}: ${x.r.title}`, "active"); bar(Math.round(100 * (i + 1) / list.length));
+        try {
+          const saved = await writeRow(x.r.id, payload);
+          Object.assign(rowFor(x.r.id).before, before);
+          Object.assign(x.r.raw, saved);
+          const b = Number(saved.BPM ?? saved.bpm); if (isFinite(b) && b > 0) x.r.saved = b;
+          x.ch = x.ch.filter(c => !(live(c) && c.k !== "tune"));
+          x.notes.unshift("✔ Details saved"); okD++;
+        } catch (e) { x.error = "Save failed: " + String(e && e.message ? e.message : e).slice(0, 160); badD++; }
+      }
+      if (batch.rows.length) keepUndo();
+      render();
+      /* PASS 2 — re-tune the audio, one track at a time; each one is saved as soon as it's done */
+      for (let i = 0; i < jobs.length; i++) {
+        if (CC.stop) break;
+        const { x, col, oldV, shift, targetHz, refHz } = jobs[i];
+        const step = `${i + 1}/${jobs.length}`;
         let newAudio = null;
         try {
-          if (tc) {
-            /* download → re-tune (DAW engine) → 320 kbps MP3 → upload as a NEW file; the old file stays for undo */
-            status(`Re-tuning ${step}: ${x.r.title} (${glctc1FmtCents(tc.shift)} → ${tc.targetHz} Hz)…`, "active");
-            const buf = await decodeFull(await fetchMasterAudioBytes(String(x.r.path)));
-            const tuned = await glctc1RetuneBuffer(buf, tc.shift);
-            const blob = await encodeAudioBufferToMP3(tuned, pc => status(`Re-tuning ${step}: ${x.r.title} — encoding MP3 ${pc}%`, "active"));
-            const base = String(x.r.path).split("/").pop().replace(/\.[^.]+$/, "").replace(/^\d{10,}_/, "").replace(/_A\d{3}grid$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "track";
-            const path = `masters/${Date.now()}_${base}_A${tc.targetHz}grid.mp3`;
-            const up = await supabaseClient.storage.from("tracks").upload(path, blob, { upsert: false, contentType: "audio/mpeg" });
-            if (up.error) throw new Error("Tuned audio upload failed: " + up.error.message);
-            newAudio = (up.data && up.data.path) || path;
-            payload[tc.col] = newAudio; before[tc.col] = tc.oldV === undefined ? null : tc.oldV;
-            const ncol = colFor("notes", x.r.raw);
-            if (ncol) {
-              const old = x.r.raw[ncol];
-              payload[ncol] = (blank(old) ? "" : String(old) + "\n") + `[GLCTC1 re-tuned to the ${tc.targetHz} Hz grid: ${glctc1FmtCents(tc.shift)} from A≈${tc.tuning.refHz} Hz · ${new Date().toISOString().slice(0, 10)}]`;
-              before[ncol] = old === undefined ? null : old;
-            }
+          status(`Re-tuning ${step}: ${x.r.title} — downloading…`, "active"); bar(Math.round(100 * i / jobs.length));
+          let buf = await decodeFull(await fetchMasterAudioBytes(String(x.r.path)));
+          status(`Re-tuning ${step}: ${x.r.title} — moving ${glctc1FmtCents(shift)} to the ${targetHz} Hz grid…`, "active");
+          let tuned = await glctc1RetuneBuffer(buf, shift); buf = null;
+          const blob = await encodeAudioBufferToMP3(tuned, pc => status(`Re-tuning ${step}: ${x.r.title} — making MP3 ${pc}%`, "active")); tuned = null;
+          const base = String(x.r.path).split("/").pop().replace(/\.[^.]+$/, "").replace(/^\d{10,}_/, "").replace(/_A\d{3}grid$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "track";
+          const path = `masters/${Date.now()}_${base}_A${targetHz}grid.mp3`;
+          status(`Re-tuning ${step}: ${x.r.title} — uploading…`, "active");
+          const up = await supabaseClient.storage.from("tracks").upload(path, blob, { upsert: false, contentType: "audio/mpeg" });
+          if (up.error) throw new Error("Tuned audio upload failed: " + up.error.message);
+          newAudio = (up.data && up.data.path) || path;
+          const payload = { [col]: newAudio }, before = { [col]: oldV === undefined ? null : oldV };
+          const ncol = colFor("notes", x.r.raw);
+          if (ncol) {
+            const old = x.r.raw[ncol];
+            payload[ncol] = (blank(old) ? "" : String(old) + "\n") + `[GLCTC1 re-tuned to the ${targetHz} Hz grid: ${glctc1FmtCents(shift)} from A≈${refHz} Hz · ${new Date().toISOString().slice(0, 10)}]`;
+            before[ncol] = old === undefined ? null : old;
           }
           let saved;
           try { saved = await writeRow(x.r.id, payload); }
-          catch (e) { if (newAudio) { try { await supabaseClient.storage.from("tracks").remove([newAudio]); } catch (_) {} } throw e; }
-          if (tc) { const ap = saved[tc.col]; if (ap) x.r.path = ap; }
-          batch.rows.push({ id: x.r.id, before });
-          Object.assign(x.r.raw, saved);
-          const b = Number(saved.BPM ?? saved.bpm); if (isFinite(b) && b > 0) x.r.saved = b;
-          x.ch = x.ch.filter(c => !live(c)); x.notes.unshift(tc ? "✔ Saved · audio re-tuned" : "✔ Saved"); ok++;
-        } catch (e) { x.error = "Save failed: " + String(e && e.message ? e.message : e).slice(0, 160); bad++; }
+          catch (e) { try { await supabaseClient.storage.from("tracks").remove([newAudio]); } catch (_) {} throw e; }
+          const rb = rowFor(x.r.id); for (const k in before) if (!(k in rb.before)) rb.before[k] = before[k];
+          keepUndo();
+          Object.assign(x.r.raw, saved); if (saved[col]) x.r.path = saved[col];
+          x.ch = x.ch.filter(c => c.k !== "tune"); x.notes.unshift(`✔ Audio re-tuned to ${targetHz} Hz`); okT++;
+        } catch (e) { x.error = "Re-tune failed: " + String(e && e.message ? e.message : e).slice(0, 160); badT++; console.warn("GLCTC1 re-tune failed:", x.r.title, e); }
+        bar(Math.round(100 * (i + 1) / jobs.length)); render();
+        await new Promise(z => setTimeout(z, 30));
       }
-      if (batch.rows.length) { const u = loadUndo(); u.push(batch); saveUndo(u); }
-      status(`Saved ${ok} track${ok === 1 ? "" : "s"}${bad ? " · " + bad + " failed (see list)" : ""}.`, bad ? "error" : "success");
-    } finally { CC.busy = false; render(); }
-  });
+      const left = jobs.length - okT - badT;
+      status(`DONE · details saved on ${okD} track${okD === 1 ? "" : "s"}${badD ? ` (${badD} failed)` : ""}` +
+             (jobs.length ? ` · audio re-tuned on ${okT}/${jobs.length}${badT ? ` (${badT} failed — see red notes)` : ""}${left > 0 ? ` · ${left} not done (stopped) — press SAVE again to continue` : ""}` : "") + ".",
+             (badD || badT) ? "error" : "success");
+    } catch (e) {
+      status("Save stopped: " + String(e && e.message ? e.message : e), "error"); console.error("GLCTC1 save error:", e);
+      if (batch.rows.length) keepUndo();
+    } finally { CC.busy = false; CC.stop = false; wakeOff(); render(); }
+  }
 
-  $("ccUndo").addEventListener("click", async () => {
+  $("ccUndo").addEventListener("click", () => {
     const u = loadUndo(); const batch = u[u.length - 1];
     if (!batch || CC.busy) return;
-    if (!confirm(`Undo the save from ${new Date(batch.at).toLocaleString()}? This puts back the previous values for ${batch.rows.length} track${batch.rows.length > 1 ? "s" : ""}.`)) return;
+    ask(`Undo the save from ${new Date(batch.at).toLocaleString()}? This puts back the previous values (and original audio) for ${batch.rows.length} track${batch.rows.length > 1 ? "s" : ""}.`, () => doUndo(u, batch));
+  });
+  async function doUndo(u, batch) {
     CC.busy = true; render();
     let ok = 0, bad = 0;
     try {
@@ -5654,8 +5720,9 @@ function setStatus(
       }
       u.pop(); saveUndo(u);
       status(`Undo complete: ${ok} track${ok === 1 ? "" : "s"} restored${bad ? " · " + bad + " failed" : ""}.`, bad ? "error" : "success");
-    } finally { CC.busy = false; CC.rows = []; render(); }
-  });
+    } catch (e) { status("Undo stopped: " + String(e && e.message ? e.message : e), "error"); }
+    finally { CC.busy = false; CC.rows = []; render(); }
+  }
 
   render();
 })();

@@ -2749,15 +2749,17 @@ function killNow(s){if(!s.vs)return;s.vs.forEach(v=>{try{v.src.stop()}catch(e){}
 function trigger(s,when,vel,o){o=o||{};if(!s.proc)return null;const c=ensureAudio();if(c.state!=='running')c.resume();
  const L=s.L,b=curBuf(s);if(b===s.proc&&!(s.buf&&s.buf.__noTune))retune(s);
  const at=Math.max(c.currentTime+.004,when||0),d=b.duration;let st=clamp(+L.start||0,0,1)*d,en=clamp(+L.end||1,0,1)*d;if(o.full){st=0;en=d}en=Math.max(st+.003,en);
- const rate=Math.pow(2,((+L.pitch||0)+(o.semi||0))/12)*(+L.speed||1),t=s.t;
+ /* keyboard PITCH mode: a time-stretched copy per semitone keeps the length, so only the pitch changes */
+ let semi=o.semi||0,kb=b,kr=1;if(semi&&pitchMode(s)){const ps=pitched(b,semi);if(ps){kb=ps;kr=Math.pow(2,semi/12);semi=0}}
+ const rate=Math.pow(2,((+L.pitch||0)+semi)/12)*(+L.speed||1)*kr,t=s.t;
  if(L.poly===false)kill(s,at);
  if(+L.choke>0)(LP[t.id]||[]).forEach(x=>{if(!x||x===s||!x.L||+x.L.choke!==+L.choke)return;kill(x,at);if(x.v){try{x.v.g.gain.setTargetAtTime(0,at,.004);x.v.src.stop(at+.03)}catch(e){}x.v=null}});
- const ch=chain(s),src=c.createBufferSource(),env=c.createGain();src.buffer=b;src.playbackRate.value=rate;
- const loop=!!o.loop||(L.mode==='gate'&&!!L.hloop&&!o.oneshot);src.loop=loop;if(loop){src.loopStart=st;src.loopEnd=en}
+ const ch=chain(s),src=c.createBufferSource(),env=c.createGain();src.buffer=kb;src.playbackRate.value=rate;
+ const loop=!!o.loop||(L.mode==='gate'&&!!L.hloop&&!o.oneshot);src.loop=loop;if(loop){src.loopStart=st*kr;src.loopEnd=en*kr}
  const pk=Math.max(.0001,vel==null?1:vel),atk=Math.max(.002,+L.atk||0),len=(en-st)/rate;
  env.gain.setValueAtTime(0,at);env.gain.linearRampToValueAtTime(pk,at+atk);src.connect(env);env.connect(ch.g);
- if(loop)src.start(at,st);else{src.start(at,st,en-st);const fs=Math.max(at+atk+.001,at+len-.006);if(fs<at+len){env.gain.setValueAtTime(pk,fs);env.gain.linearRampToValueAtTime(0,at+len)}}
- const v={src,env,at,st,en,rate,loop,pk};(s.vs||(s.vs=new Set())).add(v);
+ if(loop)src.start(at,st*kr);else{src.start(at,st*kr,(en-st)*kr);const fs=Math.max(at+atk+.001,at+len-.006);if(fs<at+len){env.gain.setValueAtTime(pk,fs);env.gain.linearRampToValueAtTime(0,at+len)}}
+ const v={src,env,at,st,en,rate:rate/kr,loop,pk};(s.vs||(s.vs=new Set())).add(v);
  src.onended=()=>{s.vs.delete(v);try{env.disconnect()}catch(e){}padsSoon()};
  if(o.dur!=null)release(s,v,at+o.dur);
  padsSoon();animOn();return v}
@@ -3001,6 +3003,18 @@ function padsPaint(){const t=curT(),l=t?ensure(t):null,has=new Set(l?l.seq.ev.ma
 window.GLCTC_LOOPER_INPUT.loadBuf=(buf,name,i)=>{const t=curT();if(!t){toast('Create a looper track first (＋ CREATE TRACK).');return false}const l=ensure(t);if(i==null||!(i>=0&&i<NP)){i=padState(t,l.sel).buf?nextEmpty(t,l.sel):l.sel;if(i<0)i=l.sel}const s=padState(t,i);pushHist(s);s.L.start=0;s.L.end=1;s.view=null;s.cursor=null;s.L.name=String(name||'Sample').replace(/\.[^.]+$/,'').slice(0,24);if(s.L.mode==='loop'&&buf.duration<2.5)s.L.mode='shot';setBuf(s,buf);l.sel=i;markDirty();ui();return i};
 Object.assign(window.GLCTC_LOOPER_INPUT.mini,{mute:i=>padFlag(i,'mute'),solo:i=>padFlag(i,'solo'),play:i=>padPlay(i),holdDown:i=>padHoldDown(i),holdUp:i=>padHoldUp(i),send:i=>padSend(i),loadTo:i=>padLoad(i),flags:i=>{const t=curT();if(!t)return{};const L=padState(t,i).L;return{mute:!!L.mute,solo:!!L.solo}}});
 
+/* ===== v115 KEYBOARD: PITCH (length stays) or SPEED (tape) ===== */
+const PSC=new WeakMap();let psQ=[],psBusy=false,psSaid=0;
+function pitchMode(s){try{const l=ensure(s.t);return(l.kbp||'pitch')==='pitch'}catch(e){return false}}
+function pitched(b,semi){let m=PSC.get(b);if(!m){m=new Map();PSC.set(b,m)}const v=m.get(semi);if(v&&v.getChannelData)return v;if(!v)psQueue(b,semi,true);if(Date.now()-psSaid>4000){psSaid=Date.now();toast('Preparing pitched notes for this sample… (this note plays tape-style once)')}return null}
+function psQueue(b,semi,front){const m=PSC.get(b)||(PSC.set(b,new Map()),PSC.get(b));if(m.has(semi))return;m.set(semi,'pending');const job={b,semi,m};if(front)psQ.unshift(job);else psQ.push(job);psRun()}
+function psRun(){if(psBusy||!psQ.length)return;if(typeof stretchAsync!=='function'){psQ=[];return}psBusy=true;const j=psQ.shift();stretchAsync(j.b,Math.pow(2,j.semi/12)).then(x=>{j.m.set(j.semi,x)}).catch(()=>{j.m.delete(j.semi)}).finally(()=>{psBusy=false;setTimeout(psRun,0)})}
+function psPrewarm(){const t=curT();if(!t)return;const l=ensure(t);if((l.kbp||'pitch')!=='pitch')return;const s=padState(t,l.sel);if(!s.proc||s.proc.duration>20)return;const b=curBuf(s);[1,-1,2,-2,3,-3,4,-4,5,-5,7,-7,12,-12,6,-6,8,-8,9,-9,10,-10,11,-11,13,14,15,16,17,19,24].forEach(n=>psQueue(b,n,false))}
+setInterval(()=>{if(!psQ.length&&!psBusy)psPrewarm()},2500);
+window.GLCTC_LOOPER_INPUT.kbPitch=v=>{const t=curT();if(!t)return'pitch';const l=ensure(t);if(v){l.kbp=v;markDirty();if(v==='pitch')psPrewarm()}return l.kbp||'pitch'};
+
+window.GLCTC_STRETCH=(b,r)=>typeof stretchAsync==='function'?stretchAsync(b,r):Promise.reject(new Error('no stretch'));
+
 function padsUi(){padsPaint()}
 function padSync(){document.querySelectorAll('[data-lp]').forEach(b=>{const t=getTrack(b.dataset.t),s=t&&t.looper&&t.looper.pads&&LP[t.id]&&LP[t.id][t.looper.sel];b.classList.toggle('on',!!(s&&(b.dataset.lp==='play'?s.v:s.mr)))})}
 window.lpPad=(id,kind)=>{const t=getTrack(id);if(!t)return;const fresh=!t.looper;ensure(t);if(fresh){markDirty();renderAll()}$('lpTrack').value=id;const s=padState(t,t.looper.sel);if(kind==='rec')rec(s);else if(s.proc){if(s.v){stop(s);ui()}else play(s)}else toast('Tap REC first, or load a sample.');ui()};
@@ -3137,7 +3151,7 @@ function sampleBufferFor(index){const v=state&&state.voices[index];if(!v||!v.sam
 function primeSamples(){if(!state)return;state.voices.forEach((v,i)=>{if(v.sampleData)sampleBufferFor(i)})}
 window.__blLoad=(i,f)=>loadSampleFor(i,f);window.__blSample=i=>{const c=sampleCache.get(i);return c&&c.buf};window.__blSel=()=>selectedVoice;async function loadSampleFor(index,file){try{if(file.size>4*1048576)return toast('Sample too large (max 4 MB). Trim it first.');const ab=await file.arrayBuffer(),buf=await decodeSample(ab),v=state.voices[index];v.sampleData=bytesToB64(ab);v.sampleName=file.name;sampleCache.set(index,{data:v.sampleData,buf});save();renderPads();renderVoiceList();renderFxSelection();trigger(index,.9);toast(names[index].name+' ← '+file.name)}catch(e){console.error(e);toast('Could not load that audio file.')}}
 function clearSampleFor(index){const v=state.voices[index];delete v.sampleData;delete v.sampleName;sampleCache.delete(index);save();renderPads();renderVoiceList();renderFxSelection()}
-function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;const ctx=ensureAudio();if(ctx.state==='suspended')ctx.resume();const t=when??(ctx.currentTime+.012);/* v65 de-click: live hits land 12 ms ahead so the attack is never cut */const v=state.voices[index],type=names[index].type;if(v.mute||state.voices.some(x=>x.solo)&&!v.solo)return;const vel=Math.max(.02,Math.min(1,velocity)),tempoRatio=v.keyLock?1:((GLCTC_CLOCK.bpm)/(state.baseBpm||130)),pitch=Math.pow(2,v.pitch/12)*tempoRatio,dur=v.decay;const out=ctx.createGain();out.gain.value=0;const srcs=[];const osc=(freq,wave='sine',end=dur)=>{const o=window.GLCTC_TUNING.attach(ctx.createOscillator()),g=ctx.createGain();o.type=wave;o.frequency.setValueAtTime(Math.max(20,freq*pitch),t);o.connect(g);g.connect(out);o.start(t);o.stop(t+Math.max(.03,end));srcs.push(o);return {o,g}};const noise=(filterType,freq,end,level=1)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=noiseBuffer(ctx);f.type=filterType;f.frequency.setValueAtTime(freq,t);f.Q.value=.7;g.gain.setValueAtTime(Math.max(.0001,vel*level),t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.025,end));s.connect(f);f.connect(g);g.connect(out);s.start(t);s.stop(t+Math.max(.03,end));srcs.push(s);return g};
+function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;const ctx=ensureAudio();if(ctx.state==='suspended')ctx.resume();const t=when??(ctx.currentTime+.005);/* v65 de-click: live hits land 12 ms ahead so the attack is never cut */const v=state.voices[index],type=names[index].type;if(v.mute||state.voices.some(x=>x.solo)&&!v.solo)return;const vel=Math.max(.02,Math.min(1,velocity)),tempoRatio=v.keyLock?1:((GLCTC_CLOCK.bpm)/(state.baseBpm||130)),pitch=Math.pow(2,v.pitch/12)*tempoRatio,dur=v.decay;const out=ctx.createGain();out.gain.value=0;const srcs=[];const osc=(freq,wave='sine',end=dur)=>{const o=window.GLCTC_TUNING.attach(ctx.createOscillator()),g=ctx.createGain();o.type=wave;o.frequency.setValueAtTime(Math.max(20,freq*pitch),t);o.connect(g);g.connect(out);o.start(t);o.stop(t+Math.max(.03,end));srcs.push(o);return {o,g}};const noise=(filterType,freq,end,level=1)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=noiseBuffer(ctx);f.type=filterType;f.frequency.setValueAtTime(freq,t);f.Q.value=.7;g.gain.setValueAtTime(Math.max(.0001,vel*level),t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.025,end));s.connect(f);f.connect(g);g.connect(out);s.start(t);s.stop(t+Math.max(.03,end));srcs.push(s);return g};
  const sb=sampleBufferFor(index);let fadeDur=dur;
  if(sb){const sS=window.GLCTC_TUNING.attach(ctx.createBufferSource()),sG=ctx.createGain(),pr=Math.max(.05,pitch);sS.buffer=sb;sS.playbackRate.value=pr;sG.gain.setValueAtTime(vel,t);sS.connect(sG);sG.connect(out);sS.start(t);fadeDur=sb.duration/pr+.03;srcs.push(sS)}
  else if(type==='kick'){const {o,g}=osc(150,'sine',Math.max(.12,dur));o.frequency.setValueAtTime(Math.max(25,150*pitch),t);o.frequency.exponentialRampToValueAtTime(Math.max(25,43*pitch),t+.085);g.gain.setValueAtTime(vel,t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.12,dur));}
@@ -3275,7 +3289,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
   set(X.lp.frequency,ch.tone<0?Math.max(500,20000*Math.pow(2,ch.tone*4.6)):20000);set(X.shelf.gain,ch.tone*9);set(X.pan.pan,ch.pan);set(X.sendD.gain,ch.delay||0);set(X.sendR.gain,ch.reverb||0);
   return X}
  function voice(v,vel=.8,when){
-  const c=ctx(),t=when??c.currentTime+.012,b=getBus(c),ch=S.channels[v]||{level:1,pan:0,tone:0,delay:0,reverb:0};
+  const c=ctx(),t=when??c.currentTime+.005,b=getBus(c),ch=S.channels[v]||{level:1,pan:0,tone:0,delay:0,reverb:0};
   const out=c.createGain(),ck=c.createGain(),X=chStrip(c,b,v,ch);
   out.gain.value=Math.max(0,S.level*ch.level*vel);
   out.connect(ck);ck.connect(X.in);
@@ -12741,17 +12755,54 @@ const now=()=>{try{return ensureAudio().currentTime}catch(e){return 0}};
 const padNames=sel=>[...document.querySelectorAll(sel)].map(b=>(b.querySelector('b,strong,span')||b).textContent.trim().split(/\s*\n\s*/)[0].slice(0,6));
 const drumLabel=(api,sel)=>m=>{const A=window[api];if(!A||!A.voices)return'';const n=A.voices();if(!n||m<36)return'';const names=padNames(sel);return names[(m-36)%n]||String((m-36)%n+1)};
 
+
+/* ===== v116 DRUM KEYBOARDS: pitch the selected drum sound (PITCH keeps the length, SPEED is tape-style) or play the kit ===== */
+const DRUMKB={bl:{api:'GLCTC_80LA8_INPUT',names:['KICK','SNARE','CLAP','CL HAT','OP HAT','LO TOM','MID TOM','RIM','COWBELL','CONGA','PERC 1','PERC 2'],pads:'#blPads .bl-pad',user:i=>window.__blSample&&__blSample(i)},
+ mine:{api:'GLCTC_DIVINE09_INPUT',names:['KICK','SNARE','CLAP','CL HAT','OP HAT','LO TOM','MID TOM','HI TOM','RIM','RIDE','CRASH','SAMPLE 1','SAMPLE 2','SAMPLE 3','SAMPLE 4'],pads:'#mine909Panel .mine909-pad',user:i=>{try{const s=window.__d09Samples&&__d09Samples()[i-11];return s&&s.buf}catch(e){return null}}}};
+const dst=(id,k,v)=>{const key='glctc1.drumkb.'+id+'.'+k;try{if(v===undefined)return localStorage.getItem(key);localStorage.setItem(key,String(v))}catch(e){return null}};
+const DS={};Object.keys(DRUMKB).forEach(id=>DS[id]={mode:dst(id,'mode')||'pitch',kp:dst(id,'kp')||'pitch',pv:+(dst(id,'pv')||0)});
+const STC=new WeakMap();let stQ=[],stBusy=false;
+function stretched(b,semi){let m=STC.get(b);if(!m){m=new Map();STC.set(b,m)}const v=m.get(semi);if(v&&v.getChannelData)return v;if(!v){m.set(semi,'pending');stQ.unshift({b,semi,m});stRun()}return null}
+function stRun(){if(stBusy||!stQ.length||!window.GLCTC_STRETCH)return;stBusy=true;const j=stQ.shift();GLCTC_STRETCH(j.b,Math.pow(2,j.semi/12)).then(x=>j.m.set(j.semi,x)).catch(()=>j.m.delete(j.semi)).finally(()=>{stBusy=false;setTimeout(stRun,0)})}
+function prewarmDrum(id){const S=DS[id];if(S.mode!=='pitch'||S.kp!=='pitch')return;const b=DRUMKB[id].user(S.pv);if(!b||b.duration>12)return;[1,-1,2,-2,3,-3,4,-4,5,-5,7,-7,12,-12,6,-6,8,-8,9,-9,10,-10,11,-11].forEach(n=>{const m=STC.get(b);if(!(m&&m.has(n))){(STC.get(b)||(STC.set(b,new Map()),STC.get(b))).set(n,'pending');stQ.push({b,semi:n,m:STC.get(b)})}});stRun()}
+/* run fn while every oscillator / filter / buffer player it creates is scaled by r (and user samples swapped for stretched copies) */
+function scaled(r,swap,fn){const pd=Object.getOwnPropertyDescriptor(AudioParam.prototype,'value'),bd=Object.getOwnPropertyDescriptor(AudioBufferSourceNode.prototype,'buffer');
+ const wrapP=p=>{if(!p||p.__sc)return;p.__sc=1;['setValueAtTime','linearRampToValueAtTime','exponentialRampToValueAtTime','setTargetAtTime'].forEach(k=>{const o=p[k];p[k]=function(v,...a){return o.call(p,v*r,...a)}});const sc=p.setValueCurveAtTime;p.setValueCurveAtTime=function(arr,...a){return sc.call(p,Float32Array.from(arr,x=>x*r),...a)};Object.defineProperty(p,'value',{get(){return pd.get.call(p)},set(v){pd.set.call(p,v*r)},configurable:true});try{pd.set.call(p,pd.get.call(p)*r)}catch(e){}};
+ const fix={createOscillator:n=>wrapP(n.frequency),createBiquadFilter:n=>wrapP(n.frequency),createBufferSource:n=>{wrapP(n.playbackRate);if(swap)Object.defineProperty(n,'buffer',{get(){return bd.get.call(n)},set(b){bd.set.call(n,(b&&swap(b))||b)},configurable:true})}};
+ const undo=[],P=(window.BaseAudioContext||window.AudioContext).prototype,ctxs=new Set();try{const c=GLCTC_WS.ac();if(c)ctxs.add(c)}catch(e){}
+ Object.keys(fix).forEach(name=>{const tgts=[P];ctxs.forEach(c=>{if(Object.prototype.hasOwnProperty.call(c,name))tgts.push(c)});tgts.forEach(t=>{const o=t[name];t[name]=function(){const n=o.apply(this,arguments);try{fix[name](n)}catch(e){}return n};undo.push(()=>{t[name]=o})})});
+ try{fn()}finally{undo.reverse().forEach(u=>u())}}
+function drumKey(id,on,k,m,v){const D=DRUMKB[id],S=DS[id],A=window[D.api];if(!A||!on)return;const t=undefined;/* each drum engine schedules on its own clock */
+ if(S.mode==='kit'){A.trigger(Math.max(0,m-36)%A.voices(),v,t);return}
+ const semi=m-60,r=Math.pow(2,semi/12),ub=D.user(S.pv);let swap=null;
+ if(S.kp==='pitch'&&ub&&semi){const st=stretched(ub,semi);if(st)swap=b=>b===ub?st:null}
+ if(!semi){A.trigger(S.pv,v,t);return}scaled(r,swap,()=>A.trigger(S.pv,v,t))}
+function drumBar(id){const D=DRUMKB[id],S=DS[id],mk=(t,fn,title)=>{const b=document.createElement('button');b.type='button';b.className='on';b.title=title||'';b.onclick=()=>{fn();paint()};return b};
+ const bm=mk('',()=>{S.mode=S.mode==='pitch'?'kit':'pitch';dst(id,'mode',S.mode);prewarmDrum(id);KB[id]&&KB[id].paint()},'PITCH SOUND: the selected drum sound across the keys (C4 = original) · DRUM KIT: each key plays the next drum sound');
+ const pl=mk('◀',()=>{S.pv=(S.pv+D.names.length-1)%D.names.length;dst(id,'pv',S.pv);prewarmDrum(id)},'Previous sound'),nm=document.createElement('span');nm.className='gkb-lbl';nm.style.minWidth='64px';const pr=mk('▶',()=>{S.pv=(S.pv+1)%D.names.length;dst(id,'pv',S.pv);prewarmDrum(id)},'Next sound');pl.className=pr.className='';
+ const bk=mk('',()=>{S.kp=S.kp==='pitch'?'speed':'pitch';dst(id,'kp',S.kp);prewarmDrum(id)},'PITCH: the length stays the same · SPEED: tape-style (loaded samples get shorter as they go higher)');
+ const paint=S.paint=()=>{bm.textContent=S.mode==='pitch'?'KEYS: PITCH SOUND':'KEYS: DRUM KIT';nm.textContent=D.names[S.pv]||'';[pl,nm,pr,bk].forEach(e=>e.style.display=S.mode==='pitch'?'':'none');bk.textContent=S.kp==='pitch'?'KEYS CHANGE: PITCH':'KEYS CHANGE: SPEED'};paint();
+ /* tapping a pad in the module picks the sound the keyboard plays */
+ document.addEventListener('pointerdown',e=>{const p=e.target.closest&&e.target.closest(D.pads);if(!p)return;const i=[...document.querySelectorAll(D.pads)].indexOf(p);if(i>=0&&i<D.names.length){S.pv=i;dst(id,'pv',i);paint();prewarmDrum(id)}},true);
+ return[bm,pl,nm,pr,bk]}
+window.GLCTC_DRUMKB={key:(id,m,v)=>drumKey(id,true,'',m,v==null?.85:v),
+ mode:(id,v)=>{const S=DS[id];if(v){S.mode=v;dst(id,'mode',v);S.paint&&S.paint();prewarmDrum(id)}return S.mode},
+ kp:(id,v)=>{const S=DS[id];if(v){S.kp=v;dst(id,'kp',v);S.paint&&S.paint();prewarmDrum(id)}return S.kp},
+ sel:(id,i)=>{const S=DS[id];if(i!=null&&i>=0&&i<DRUMKB[id].names.length){S.pv=i;dst(id,'pv',i);S.paint&&S.paint();prewarmDrum(id)}return S.pv},
+ name:id=>DRUMKB[id].names[DS[id].pv]||''};
+setInterval(()=>{if(!stQ.length&&!stBusy){prewarmDrum('bl');prewarmDrum('mine')}},3000);
+
 /* ---------- per-module wiring ---------- */
 const M={
- lp(){const body=q('#looperPanel .lpbody');if(!body||!$('lpWave'))return;const kbm=document.createElement('button');kbm.type='button';kbm.className='on';kbm.title='What the keyboard pitches: the selected pad, or every loaded pad together';const kbp=()=>{const v=window.GLCTC_LOOPER_INPUT?.kbMode?.()||'sel';kbm.textContent=v==='all'?'KEYS: ALL PADS':'KEYS: SELECTED PAD'};kbm.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(!I||!I.kbMode)return;I.kbMode(I.kbMode()==='all'?'sel':'all');kbp()};setTimeout(kbp,500);
-  const K=KB.lp||make({id:'lp',oct:3,qwerty:1,noDigits:1,extra:[kbm],title:'KEYBOARD · PITCHES THE SAMPLE',hint:'C4 = original pitch · each key plays the sample at that pitch · follows the pad mode (one-shot / hold / loop) · SEQ REC records it',
+ lp(){const body=q('#looperPanel .lpbody');if(!body||!$('lpWave'))return;const kbm=document.createElement('button');kbm.type='button';kbm.className='on';kbm.title='What the keyboard pitches: the selected pad, or every loaded pad together';const kbp=()=>{const v=window.GLCTC_LOOPER_INPUT?.kbMode?.()||'sel';kbm.textContent=v==='all'?'KEYS: ALL PADS':'KEYS: SELECTED PAD'};kbm.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(!I||!I.kbMode)return;I.kbMode(I.kbMode()==='all'?'sel':'all');kbp()};setTimeout(kbp,500);const kpm=document.createElement('button');kpm.type='button';kpm.className='on';kpm.title='PITCH: keys change the pitch only, the length stays the same · SPEED: tape-style, pitch and speed change together';const kpp=()=>{const v=window.GLCTC_LOOPER_INPUT?.kbPitch?.()||'pitch';kpm.textContent=v==='pitch'?'KEYS CHANGE: PITCH':'KEYS CHANGE: SPEED'};kpm.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(!I||!I.kbPitch)return;I.kbPitch(I.kbPitch()==='pitch'?'speed':'pitch');kpp()};setTimeout(kpp,500);
+  const K=KB.lp||make({id:'lp',oct:3,qwerty:1,noDigits:1,extra:[kbm,kpm],title:'KEYBOARD · PITCHES THE SAMPLE',hint:'C4 = original pitch · PITCH keeps the length, SPEED is tape-style · follows the pad mode · SEQ REC records it',
    on:(k,m,v)=>window.GLCTC_LOOPER_INPUT?.key?.(true,k,m,v),off:(k,m)=>window.GLCTC_LOOPER_INPUT?.key?.(false,k,m),label:m=>m===60?'ROOT':''});
   top(body,[$('lpWave').closest('.lp-sec'),$('lpRec')&&$('lpRec').closest('.controls-row')]);bottom(body,[$('lpFull')&&$('lpFull').closest('.lp-sec'),$('lpPads'),K.root])},
- bl(){const P=$('beatLabPanel'),body=q('#beatLabPanel .bl-body');if(!P||!body)return;const K=KB.bl||make({id:'bl',oct:2,qwerty:1,title:'KEYBOARD · PLAYS THE DRUM SOUNDS',hint:'From C2 each key plays the next drum sound (they repeat up the keyboard) · touch lower for harder hits',
-   on:(k,m,v)=>{const A=window.GLCTC_80LA8_INPUT;if(A)A.trigger(Math.max(0,m-36)%A.voices(),v,now()+.005)},off:()=>{},label:drumLabel('GLCTC_80LA8_INPUT','#blPads .bl-pad')});
+ bl(){const P=$('beatLabPanel'),body=q('#beatLabPanel .bl-body');if(!P||!body)return;const K=KB.bl||make({id:'bl',oct:3,qwerty:1,extra:drumBar('bl'),title:'KEYBOARD · 80LA8',hint:'PITCH SOUND: the selected sound across the keys, C4 = original (tap a pad to pick it) · DRUM KIT: each key plays the next sound',
+   on:(k,m,v)=>drumKey('bl',true,k,m,v),off:()=>{},label:m=>DS.bl.mode==='kit'?drumLabel('GLCTC_80LA8_INPUT','#blPads .bl-pad')(m):(m===60?'ROOT':'')});
   top(P,[q('#beatLabPanel>.bl-head'),q('#beatLabPanel>.bl-toolbar')]);bottom(body,[$('blPads')&&$('blPads').closest('.bl-section'),K.root])},
- mine(){const P=$('mine909Panel'),body=q('#mine909Panel .mine909-body');if(!P||!body)return;const K=KB.mine||make({id:'mine',oct:2,qwerty:1,title:'KEYBOARD · PLAYS THE DRUM SOUNDS',hint:'From C2 each key plays the next drum sound (they repeat up the keyboard) · touch lower for harder hits',
-   on:(k,m,v)=>{const A=window.GLCTC_DIVINE09_INPUT;if(A)A.trigger(Math.max(0,m-36)%A.voices(),v,now()+.005)},off:()=>{},label:drumLabel('GLCTC_DIVINE09_INPUT','#mine909Pads .mine909-pad')});
+ mine(){const P=$('mine909Panel'),body=q('#mine909Panel .mine909-body');if(!P||!body)return;const K=KB.mine||make({id:'mine',oct:3,qwerty:1,extra:drumBar('mine'),title:'KEYBOARD · DIVINE09',hint:'PITCH SOUND: the selected sound across the keys, C4 = original (tap a pad to pick it) · DRUM KIT: each key plays the next sound',
+   on:(k,m,v)=>drumKey('mine',true,k,m,v),off:()=>{},label:m=>DS.mine.mode==='kit'?drumLabel('GLCTC_DIVINE09_INPUT','#mine909Panel .mine909-pad')(m):(m===60?'ROOT':'')});
   top(P,[q('#mine909Panel>.mine909-head'),q('#mine909Panel>.mine909-toolbar')]);bottom(body,[q('#mine909Panel .mine909-padwrap'),K.root])},
  sub(){const app=$('subApp');if(!app||!$('subPads'))return;const K=KB.sub||make({id:'sub',oct:1,qwerty:1,title:'KEYBOARD · SUB BASS',
    on:(k,m,v)=>window.GLCTC_SUB?.keyOn(k,m,v),off:k=>window.GLCTC_SUB?.keyOff(k)});
@@ -12912,7 +12963,8 @@ const M=[
  pages:[{t:'PATT',vis:'grid'},{t:'SOUND',k:[D('beatLabPanel','LEVEL','LVL'),D('beatLabPanel','PAN','PAN'),D('beatLabPanel','PITCH','PIT'),D('beatLabPanel','DECAY','DEC')]},{t:'TONE',k:[D('beatLabPanel','TONE / FILTER','TONE'),D('beatLabPanel','OVERDRIVE','OD'),D('beatLabPanel','DELAY SEND','DLY'),D('beatLabPanel','REVERB SEND','RVB')]},
   {t:'GROOVE',k:[R('blSwing','SWG',{fmt:v=>Math.round(v*100)+'%'}),R('blVelocity','VEL',{fmt:v=>Math.round(v*100)+'%'})],b:[SC('blPattern','PAT'),PB('blRandom','RND'),PB('blFill','FILL'),PB('blClear','CLR')]}],
  pre:PRE.lib('bl','gpcPreset_bl'),
- pads:{n:12,name:i=>BL_N[i],has:()=>true,hit:(i,d,v)=>{if(d)try{GLCTC_80LA8_INPUT.trigger(i,v)}catch(e){}},sel:i=>{const b=document.querySelectorAll('#beatLabPanel .bl-voice-list .bl-voice')[i];if(b)b.click()}},
+ pads:{n:12,name:i=>BL_N[i],has:()=>true,hit:(i,d,v)=>{if(d)try{GLCTC_80LA8_INPUT.trigger(i,v)}catch(e){}},sel:i=>{try{GLCTC_DRUMKB.sel('bl',i)}catch(e){}const b=document.querySelectorAll('#beatLabPanel .bl-voice-list .bl-voice')[i];if(b)b.click()}},
+ keys:{on:(k,m,v)=>{try{GLCTC_DRUMKB.key('bl',m,v)}catch(e){}},off:()=>{},root:60,drum:'bl'},oct:3,
  seq:drumSeq({names:()=>BL_N,len:()=>{try{const s=GLCTC_80LA8_INPUT.state();return s.patterns[s.activePattern].steps[0].length}catch(e){return 16}},on:(v,i)=>{try{const s=GLCTC_80LA8_INPUT.state();return!!s.patterns[s.activePattern].steps[v][i].on}catch(e){return false}},
   tog:(v,i,force)=>{try{const s=GLCTC_80LA8_INPUT.state(),pt=s.patterns[s.activePattern],on=force||!pt.steps[v][i].on;pt.steps[v][i]={on,velocity:.85};const P=GLCTC_80LA8_PATTERNS;P.set(P.get())}catch(e){}}})},
 {id:'mine',t:'D09',n:'DIVINE09 DRUMS',c:'#ff8a2a',hub:'mine',
@@ -12920,7 +12972,8 @@ const M=[
   {t:'FX',k:[R('d09Bit','BIT',{fmt:v=>Math.round(v*100)+'%'}),R('d09Filter','FLT',{fmt:v=>Math.round(v*100)+'%'}),R('mine909Swing','SWG',{fmt:v=>Math.round(v*100)+'%'})],b:[SC('d09Kit','KIT')]},
   {t:'GROOVE',b:[SC('mine909Pattern','PAT'),PB('mine909Random','RND'),PB('d09Euclid','EUCL'),PB('d09Double','×2'),PB('d09Half','½'),PB('mine909Clear','CLR')]}],
  pre:PRE.lib('mine','gpcPreset_mine'),
- pads:{n:15,name:i=>D9_N[i],has:()=>true,hit:(i,d,v)=>{if(d)try{GLCTC_DIVINE09_INPUT.trigger(i,v)}catch(e){}}},
+ pads:{n:15,name:i=>D9_N[i],has:()=>true,hit:(i,d,v)=>{if(d)try{GLCTC_DIVINE09_INPUT.trigger(i,v)}catch(e){}},sel:i=>{try{GLCTC_DRUMKB.sel('mine',i)}catch(e){}}},
+ keys:{on:(k,m,v)=>{try{GLCTC_DRUMKB.key('mine',m,v)}catch(e){}},off:()=>{},root:60,drum:'mine'},oct:3,
  seq:drumSeq({names:()=>D9_N,len:()=>{try{return Math.max(1,GLCTC_DIVINE09_PATTERNS.get().bars)*16}catch(e){return 16}},on:(v,i)=>{try{const P=GLCTC_DIVINE09_PATTERNS.get();return!!P.patterns[GLCTC_DIVINE09_INPUT.state().active][v][i].on}catch(e){return false}},
   tog:(v,i,force)=>{try{const P=GLCTC_DIVINE09_PATTERNS.get(),a=GLCTC_DIVINE09_INPUT.state().active,s=P.patterns[a][v][i];s.on=force||!s.on;if(s.on)s.velocity=s.velocity||.85;GLCTC_DIVINE09_PATTERNS.set(P)}catch(e){}}})},
 {id:'ws',t:'P64',n:'PAD-64',c:'#ffd36a',hub:'ws',
@@ -13181,7 +13234,11 @@ function drawThumb(cv,buf){const r=cv.getBoundingClientRect(),W=cv.width=Math.ma
 
 /* ---------- keys: 2 octaves, glissando, several fingers, velocity by depth, HOLD ---------- */
 function buildKeys(c,inn){const m=c.m,wrap=E('div','pc-kb'),bar=E('div','pc-kbb'),dn=B('','OCT −'),lbl=E('span'),up=B('','OCT +'),hold=B('hold','HOLD');bar.append(dn,lbl,up,E('span',null,''),hold);
- if(m.keys.mode){const mb=B('hold on','');const pm=()=>{const v=(window.GLCTC_LOOPER_INPUT&&GLCTC_LOOPER_INPUT.kbMode&&GLCTC_LOOPER_INPUT.kbMode())||'sel';mb.textContent=v==='all'?'ALL PADS':'SELECTED';mb.title='The keyboard pitches the selected pad, or every loaded pad together'};mb.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(I&&I.kbMode)I.kbMode(I.kbMode()==='all'?'sel':'all');pm()};pm();bar.append(mb)}const kb=E('div','pc-keys');wrap.append(bar,kb);inn.append(wrap);
+ if(m.keys.mode){const mb=B('hold on','');const pm=()=>{const v=(window.GLCTC_LOOPER_INPUT&&GLCTC_LOOPER_INPUT.kbMode&&GLCTC_LOOPER_INPUT.kbMode())||'sel';mb.textContent=v==='all'?'ALL PADS':'SELECTED';mb.title='The keyboard pitches the selected pad, or every loaded pad together'};mb.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(I&&I.kbMode)I.kbMode(I.kbMode()==='all'?'sel':'all');pm()};pm();bar.append(mb);
+  const pb=B('hold on','');const pp=()=>{const v=(window.GLCTC_LOOPER_INPUT&&GLCTC_LOOPER_INPUT.kbPitch&&GLCTC_LOOPER_INPUT.kbPitch())||'pitch';pb.textContent=v==='pitch'?'PITCH':'SPEED';pb.title='PITCH: keys change pitch only · SPEED: tape-style'};pb.onclick=()=>{const I=window.GLCTC_LOOPER_INPUT;if(I&&I.kbPitch)I.kbPitch(I.kbPitch()==='pitch'?'speed':'pitch');pp()};pp();bar.append(pb)}if(m.keys.drum){const id=m.keys.drum,K=()=>window.GLCTC_DRUMKB,mb=B('hold on',''),pb=B('hold on','');
+  const pm=()=>{const D=K();if(!D)return;const md=D.mode(id);mb.textContent=md==='kit'?'KIT':D.name(id);mb.title='Tap: the keys pitch the selected sound (tap a pad to pick it) or play the whole kit';pb.textContent=D.kp(id)==='pitch'?'PITCH':'SPEED';pb.style.display=md==='kit'?'none':'';pb.title='PITCH: the length stays the same · SPEED: tape-style'};
+  mb.onclick=()=>{const D=K();if(D)D.mode(id,D.mode(id)==='kit'?'pitch':'kit');pm()};pb.onclick=()=>{const D=K();if(D)D.kp(id,D.kp(id)==='pitch'?'speed':'pitch');pm()};pm();setInterval(pm,700);bar.append(mb,pb)}
+ const kb=E('div','pc-keys');wrap.append(bar,kb);inn.append(wrap);
  const latched=new Map(),ptr=new Map();let SEQ=0;
  const rel=p=>{p.k.classList.remove('down');p.k.classList.remove('lat');try{m.keys.off(p.key,p.m)}catch(e){}};
  const press=(pid,k,y,glide)=>{const mm=+k.dataset.m,r=k.getBoundingClientRect(),v=cl(.3+.7*(y-r.top)/r.height,.15,1),key='p2-'+m.id+'-'+(++SEQ);wake();try{m.keys.on(key,mm,v,glide)}catch(e){}k.classList.add('down');ptr.set(pid,{k,m:mm,key});c.last=mm;if(m.seq&&c.lane)c.lane.textContent=m.seq.lane(c);
@@ -13385,6 +13442,23 @@ function decorate(){try{
 }catch(e){console.warn('send decorate',e)}}
 function boot(){decorate();setInterval(decorate,1500)}
 if(document.readyState==='complete')setTimeout(boot,800);else window.addEventListener('load',()=>setTimeout(boot,800));
+})();
+</script>
+<script id="glctc1-v117-fastpads">
+/* ===== v117 FAST PADS: pads that only fired on click now fire on finger-down; global touch & audio tuning ===== */
+(function(){
+ const SEL='.mine909-pad,.glctc-perf-pad,.cn-live-pad';
+ let last=null,lastT=0;
+ addEventListener('pointerdown',e=>{if(e.button>0||!e.isPrimary)return;const el=e.target.closest&&e.target.closest(SEL);if(!el||el.disabled)return;last=el;lastT=performance.now();try{el.click()}catch(_){}},true);
+ /* swallow the slow native click that follows, so a hit never plays twice */
+ addEventListener('click',e=>{if(!e.isTrusted||!last)return;const el=e.target.closest&&e.target.closest(SEL);if(el===last&&performance.now()-lastT<1500){e.stopImmediatePropagation();e.preventDefault();last=null}},true);
+ /* wake every audio engine on the first touch so the first hit is not lost to a suspended context */
+ const wake=()=>{(window.__glctcCtxs||[]).forEach(c=>{try{if(c.state==='suspended')c.resume()}catch(_){}})};
+ ['pointerdown','keydown','touchstart'].forEach(t=>addEventListener(t,wake,{capture:true,passive:true}));
+ const st=document.createElement('style');st.textContent=`
+ .bl-pad,.mine909-pad,.sb-pad,.vx-pad,.qmx-pad,.ix-pad,.lpad .lpt,.glctc-perf-pad,.cn-live-pad,.gkb-keys,.gkb-keys *,#glctcPocket2 .pc-pads button,#glctcPocket2 .pc-keys{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+ .bl-pad,.mine909-pad,.sb-pad,.vx-pad,.qmx-pad,.ix-pad,.lpad .lpt,.glctc-perf-pad,.gkb-w,.gkb-b{transition:none!important}`;
+ document.head.appendChild(st);
 })();
 </script>
 

@@ -5131,6 +5131,7 @@ if (masterLibraryEditorModule) {
     <button id="glctc1PlaylistBackup" type="button" title="Save all playlists to a file">⬇ BACKUP</button>
     <button id="glctc1PlaylistRestore" type="button" title="Load playlists from a backup file">⬆ RESTORE</button>
     <input id="glctc1PlaylistRestoreFile" type="file" accept=".json,application/json" style="display:none">
+    <button id="glctc1ShareAlbum" type="button" class="glctc1-share-album" title="Pick an album from the Master Library and share it as a link">📤 SHARE ALBUM</button>
     <div id="glctc1PlSyncStatus" class="glctc1-pl-sync">☁ Checking sync…</div>
   </div>
 
@@ -19251,7 +19252,7 @@ html, body { overscroll-behavior-x: none; }
   function openSheet(track, shareUrl, opts) {
     closeSheet();
     var title = opts.title || field(track, "title", "Track Title") || "GLCTC1 Track";
-    var artist = opts.playlist ? "Playlist" : field(track, "artist", "Artist");
+    var artist = opts.playlist ? (opts.kind || "Playlist") : field(track, "artist", "Artist");
     var line = opts.playlist ? "🎧 " + title : "🎧 " + (artist ? artist + " — " : "") + title;
     var text = line + "\n" + shareUrl;
     var canNative = !!(navigator.share && navigator.canShare);
@@ -19422,6 +19423,7 @@ html, body { overscroll-behavior-x: none; }
 .glctc1-remix-button:disabled{opacity:.55;cursor:not-allowed}
 .glctc1-playlist-tools{position:relative;z-index:1;display:grid;grid-template-columns:1fr auto auto;gap:8px;margin:0 0 12px}
 .glctc1-playlist-tools button{min-height:44px;padding:8px 12px;border-radius:12px;border:1px solid #ec4899;background:rgba(236,72,153,.12);color:#fff;font-weight:700;letter-spacing:.04em;cursor:pointer}
+.glctc1-playlist-tools .glctc1-share-album{grid-column:1 / -1}
 .glctc1-playlist-tools .glctc1-pl-sync{grid-column:1 / -1;font-size:.72rem;opacity:.75;letter-spacing:.05em}
 @media (max-width:560px){.glctc1-playlist-tools{grid-template-columns:1fr 1fr}#glctc1CreateAlbumPlaylist{grid-column:1 / -1}}
 #glctc1AlbumPicker{position:fixed;inset:0;z-index:100000;display:none;background:rgba(3,6,20,.72)}
@@ -19522,6 +19524,30 @@ html, body { overscroll-behavior-x: none; }
     try { await glctc1PlayPlaylistIndex(0); } catch (e) { console.warn("album play", e); }
   }
 
+  /* ---------------- SHARE ALBUM ----------------
+     Builds the same ?playlist= link the Share Playlist button makes, so the
+     existing shared-link loader opens it as a temporary playlist that plays
+     straight away and never touches the visitor's own playlists. */
+  async function shareAlbum(album) {
+    var ids = album.tracks.map(function (t) {
+      return t.id || t.id_cat_no || t["ID Cat No"];
+    }).filter(Boolean);
+    if (!ids.length) { toast("This album has no shareable tracks."); return; }
+    var coverTrack = album.tracks.find(function (t) { return f(t, "cover_art", "Cover Art"); }) || album.tracks[0];
+    var payload = { name: album.name, artwork: album.cover || "", tracks: ids };
+    var encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    var url = window.location.origin + window.location.pathname + "?playlist=" + encodeURIComponent(encoded);
+    closePicker();
+    if (typeof window.glctc1ShareTrackMedia === "function") {
+      await window.glctc1ShareTrackMedia(coverTrack || {}, url, { playlist: true, title: album.name, kind: "Album" });
+    } else if (navigator.share) {
+      navigator.share({ title: album.name, text: "💿 " + album.name, url: url }).catch(function () {});
+    } else {
+      try { await navigator.clipboard.writeText(url); toast("🔗 Album link copied."); } catch (e) { toast(url, 8000); }
+    }
+  }
+
+  var pickerMode = "playlist";
   var picker, panel, listEl, searchEl, albumsCache = [];
   function renderAlbumList() {
     var q = (searchEl.value || "").trim().toLowerCase();
@@ -19540,7 +19566,7 @@ html, body { overscroll-behavior-x: none; }
       var sub = document.createElement("div"); sub.className = "ap-sub";
       sub.textContent = (a.artist ? a.artist + " · " : "") + a.tracks.length + " track" + (a.tracks.length === 1 ? "" : "s");
       tx.appendChild(n); tx.appendChild(sub); b.appendChild(art); b.appendChild(tx);
-      b.addEventListener("click", function () { makeAlbumPlaylist(a); });
+      b.addEventListener("click", function () { if (pickerMode === "share") shareAlbum(a); else makeAlbumPlaylist(a); });
       listEl.appendChild(b);
       if (a.cover) coverUrl(a.cover).then(function (u) { if (u) { art.textContent = ""; art.style.backgroundImage = 'url("' + u + '")'; } });
     });
@@ -19557,8 +19583,11 @@ html, body { overscroll-behavior-x: none; }
     searchEl.addEventListener("input", renderAlbumList);
     pinCentre(panel, 0.5, 0.5, 460, 0.86);
   }
-  function openPicker() {
+  function openPicker(mode) {
     ensurePicker();
+    pickerMode = mode === "share" ? "share" : "playlist";
+    var ttl = picker.querySelector(".ap-head span");
+    if (ttl) ttl.textContent = pickerMode === "share" ? "📤 SHARE AN ALBUM" : "💿 CHOOSE AN ALBUM";
     albumsCache = buildAlbums(); searchEl.value = "";
     picker.style.display = "block";
     pinCentre(panel, 0.5, 0.5, 460, 0.86);
@@ -19662,14 +19691,15 @@ html, body { overscroll-behavior-x: none; }
   }
 
   function wire() {
-    var a = $("glctc1CreateAlbumPlaylist"); if (a) a.addEventListener("click", openPicker);
+    var a = $("glctc1CreateAlbumPlaylist"); if (a) a.addEventListener("click", function () { openPicker("playlist"); });
+    var sa = $("glctc1ShareAlbum"); if (sa) sa.addEventListener("click", function () { openPicker("share"); });
     var b = $("glctc1PlaylistBackup"); if (b) b.addEventListener("click", backup);
     var r = $("glctc1PlaylistRestore"), fi = $("glctc1PlaylistRestoreFile");
     if (r && fi) {
       r.addEventListener("click", function () { fi.value = ""; fi.click(); });
       fi.addEventListener("change", function () { if (fi.files && fi.files[0]) restoreFile(fi.files[0]); });
     }
-    window.glctc1MakeAlbumPlaylist = makeAlbumPlaylist; window.glctc1BuildAlbums = buildAlbums;
+    window.glctc1MakeAlbumPlaylist = makeAlbumPlaylist; window.glctc1ShareAlbum = shareAlbum; window.glctc1BuildAlbums = buildAlbums;
     initSync();
     try { supabaseClient.auth.onAuthStateChange(function (ev) { if (ev === "SIGNED_IN" && !ready) setTimeout(initSync, 300); }); } catch (e) {}
   }

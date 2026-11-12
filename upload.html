@@ -19240,6 +19240,58 @@ html, body { overscroll-behavior-x: none; }
     return ok;
   }
 
+  /* Copy link + cover: puts the link AND the cover picture on the clipboard.
+     Pastes as picture + title + link in Mail, Notes, Docs, Word etc.; chat apps that
+     only take text get "title + link". Falls back to a plain link copy. */
+  var coverCache = {};
+  async function coverDataUri(track) {
+    var path = field(track, "cover_art", "Cover Art");
+    if (!path) {
+      var im = document.getElementById("glctc1PlaylistArtwork");
+      if (im && im.complete && im.naturalWidth > 0 && isUrl(im.currentSrc || "")) path = im.currentSrc;
+    }
+    if (!path) return "";
+    if (coverCache[path] !== undefined) return coverCache[path];
+    var out = "";
+    try {
+      var url = await resolve(path);
+      if (url) {
+        var blob = await download(url, 15 * 1024 * 1024, 20000);
+        var bmp = await createImageBitmap(blob);
+        var sc = Math.min(1, 600 / Math.max(bmp.width, bmp.height));
+        var cv = document.createElement("canvas");
+        cv.width = Math.round(bmp.width * sc); cv.height = Math.round(bmp.height * sc);
+        cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+        out = cv.toDataURL("image/jpeg", 0.85);
+      }
+    } catch (e) { console.log("GLCTC1 copy: cover not attached:", e && e.message); }
+    coverCache[path] = out;
+    return out;
+  }
+  function escHtml(v) { return String(v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  async function copyWithCover(track, url, line, title, artist) {
+    var res = { ok: false, cover: false };
+    try {
+      if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+        var uriP = coverDataUri(track);
+        var htmlP = uriP.then(function (uri) {
+          res.cover = !!uri;
+          var h = (uri ? '<a href="' + escHtml(url) + '"><img src="' + uri + '" alt="' + escHtml(title) + '" width="300"></a><br>' : "") +
+            '<b>' + escHtml(title) + '</b>' + (artist ? '<br>' + escHtml(artist) : "") +
+            '<br><a href="' + escHtml(url) + '">' + escHtml(url) + '</a>';
+          return new Blob([h], { type: "text/html" });
+        });
+        await navigator.clipboard.write([new ClipboardItem({
+          "text/plain": new Blob([line + "\n" + url], { type: "text/plain" }),
+          "text/html": htmlP
+        })]);
+        res.ok = true; return res;
+      }
+    } catch (e) { console.log("GLCTC1 rich copy failed:", e && e.message); res.cover = false; }
+    res.ok = await copyLink(url);
+    return res;
+  }
+
   var sheet = null, escHandler = null;
   function closeSheet() {
     if (!sheet) return;
@@ -19287,7 +19339,7 @@ html, body { overscroll-behavior-x: none; }
     var bSong  = opts.playlist ? null : mk("🎵 Song + cover image", "Preparing…", true);
     var bCover = mk("🖼 Cover image + link", "Preparing…", !!opts.playlist);
     var bLink  = mk("🔗 Share link", "Opens your share menu — it has Copy in it");
-    var bCopy  = mk("📋 Copy link", shareUrl.replace(/^https?:\/\//, ""));
+    var bCopy  = mk("📋 Copy link + cover", shareUrl.replace(/^https?:\/\//, ""));
 
     panel.appendChild(head); panel.appendChild(status);
     [bSong, bCover, bLink, bCopy].forEach(function (b) { if (b) panel.appendChild(b); });
@@ -19303,9 +19355,9 @@ html, body { overscroll-behavior-x: none; }
 
     // --- always available ---
     bCopy.addEventListener("click", async function () {
-      var ok = await copyLink(shareUrl);
-      toast(ok ? "Link copied" : "Couldn't copy the link", 2500);
-      if (ok) closeSheet();
+      var r = await copyWithCover(track, shareUrl, line, title, artist);
+      toast(r.ok ? (r.cover ? "Link + cover copied" : "Link copied") : "Couldn't copy the link", 2500);
+      if (r.ok) closeSheet();
     });
 
     function shareLinkOnly() {
@@ -19997,6 +20049,7 @@ html, body { overscroll-behavior-x: none; }
 #gsp .acts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 #gsp .ib.play{color:#05140c;background:linear-gradient(180deg,#5dffa8,#17c46a);border-color:#8fffc5}
 #gsp .ib.back{margin-bottom:4px}
+#gsp .backbar{position:sticky;top:0;z-index:5;padding:6px 0;background:linear-gradient(#0e1431 70%,transparent)}
 #gsp .row{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}#gsp .row .ib{padding:0 8px;white-space:nowrap}#gsp .row.r2{margin-top:8px}#gsp .pills .plays{align-self:center;margin-left:4px}
 #gsp .ib.dka{color:#9cf0ff;border-color:#2b6f8a}#gsp .ib.dkb{color:#ffb3fb;border-color:#7a2f86}
 #gsp .li{padding:0;gap:6px;padding-right:8px}
@@ -20147,9 +20200,10 @@ function sync(){
  var bpm=t?f(t,"bpm","BPM"):"",ky=t?f(t,"key","Key"):"";if(bpm)pills.append(mk("span","pill",bpm+" BPM"));if(ky)pills.append(mk("span","pill",ky));
  var gn=t?f(t,"genre","Genre"):"";if(gn)pills.append(mk("span","pill",gn.toUpperCase()));pills.append(plays);
  bFav.disabled=bRmx.disabled=bMore.disabled=bDA.disabled=bDB.disabled=bShr.disabled=!t;
- ownArt(t);mirrorCounter();mini();media();markLib();
+ ownArt(t);mirrorCounter();mini();media();markLib();markRows();
  if(panes.next.classList.contains("on"))renderNext();
 }
+function markRows(){var k=CUR?keyOf(CUR):"";["browse","top"].forEach(function(id){var p=panes[id];if(!p)return;p.querySelectorAll(".li[data-k]").forEach(function(r){var on=!!k&&r.dataset.k===k;r.classList.toggle("cur",on);var n=r.querySelector(".n");if(n)n.textContent=on?"▶":(n.dataset.n||"")})})}
 function markLib(){var t=CUR;var A=t?artistOf(t).toLowerCase():"",T=t?titleOf(t).toLowerCase():"";document.querySelectorAll("#libraryTable tbody tr.library-row").forEach(function(r){var c=r.cells;var on=!!t&&c&&c.length>6&&c[5].textContent.trim().toLowerCase()===A&&c[6].textContent.trim().toLowerCase()===T;r.classList.toggle("gsp-cur",on)})}
 function counterP(){try{return window.GLCTC1PlayCounter.players.glctc1PlaylistAudio}catch(e){return null}}
 function mirrorCounter(){var p=counterP();if(!p)return;if(p.badge)plays.textContent=p.badge.textContent;
@@ -20225,7 +20279,7 @@ function groups(all,fn){var m={};all.forEach(function(t){var k=fn(t);if(!k)retur
 function albumsOf(all){return groups(all,function(t){return f(t,"album","Album")})}
 function artistsOf(all){return groups(all,function(t){return artistOf(t)!=="Unknown Artist"?artistOf(t):""})}
 function genresOf(all){return groups(all,function(t){var g=f(t,"genre","Genre");return g?g.toUpperCase():""})}
-function go(view,key){BR.view=view;BR.key=key||"";renderBrowse();var p=panes.browse;if(p.getBoundingClientRect().top<0)p.scrollIntoView({behavior:"smooth",block:"start"})}
+function go(view,key){key=key||"";if(view==="home"){BR.hist=[]}else if(view!==BR.view||key!==BR.key){(BR.hist=BR.hist||[]).push({view:BR.view,key:BR.key})}BR.view=view;BR.key=key;renderBrowse();var p=panes.browse;if(p.getBoundingClientRect().top<0)p.scrollIntoView({behavior:"smooth",block:"start"})}
 function playCtx(name,list,i){playList(name,list,i||0)}
 function trackList(list,name,limit){var box=mk("div","list"),n=limit||list.length;
  list.slice(0,n).forEach(function(t,i){box.append(trackLine(t,i+1,!!CUR&&keyOf(CUR)===keyOf(t),function(){playCtx(name,list,i)},f(t,"bpm","BPM")?f(t,"bpm","BPM")+" BPM":""))});
@@ -20247,7 +20301,7 @@ function renderBrowse(){var p=panes.browse;if(!p)return;var all=lib();if(tbl&&tb
  var t0;inp.addEventListener("input",function(){clearTimeout(t0);t0=setTimeout(function(){BR.q=inp.value;if(BR.q.trim()){BR.view="search"}else if(BR.view==="search"){BR.view="home"}var keep=inp.selectionStart;renderBrowse();var ni=p.querySelector(".srch input");if(ni){ni.focus();try{ni.setSelectionRange(keep,keep)}catch(e){}}},200)});
  var body=mk("div");p.append(body);
  if(!all.length){body.append(mk("div","empty","The Master Library is loading…"));return}
- if(BR.view!=="home"&&BR.view!=="search"&&BR.view!=="table"){var back=mk("button","ib back","‹ BROWSE");back.type="button";back.onclick=function(){go("home")};body.append(back)}
+ if(BR.view!=="home"&&BR.view!=="search"&&BR.view!=="table"){var hh=BR.hist||[],pv=hh.length?hh[hh.length-1]:null;var back=mk("button","ib back","‹ BACK"+(pv&&pv.view!=="home"?"":" TO BROWSE"));back.type="button";back.onclick=function(){var h=BR.hist||[];var x=h.pop();if(x&&x.view!=="home"){BR.view=x.view;BR.key=x.key;renderBrowse();var q=panes.browse;if(q.getBoundingClientRect().top<0)q.scrollIntoView({behavior:"smooth",block:"start"})}else{go("home")}};var bw=mk("div","backbar");bw.append(back);body.append(bw)}
  var want=[];
  if(BR.view==="search"){var q=BR.q.trim().toLowerCase(),words=q.split(/\s+/);
   var res=all.filter(function(t){var c=chakraOf(t);var hay=[titleOf(t),artistOf(t),f(t,"album","Album"),f(t,"genre","Genre"),f(t,"bpm","BPM")&&f(t,"bpm","BPM")+" bpm",f(t,"key","Key"),hzOf(t)?Math.round(hzOf(t))+" hz":"",c?c.n:"",f(t,"planet","Planet"),f(t,"id_cat_no","ID Cat No")].join(" · ").toLowerCase();return words.every(function(w){return hay.indexOf(w)>=0})}).sort(natural);
@@ -20285,11 +20339,11 @@ function sheetAddMany(list,name){head(null);sh.firstChild.textContent=name;sh.ch
  var x=mk("button","back","CLOSE");x.type="button";x.onclick=closeSheet;sh.append(x);sheet.classList.add("on")}
 
 /* ---------- UP NEXT ---------- */
-function trackLine(t,n,cur,onTap,right){var w=mk("div","li"+(cur?" cur":""));var c=chakraOf(t);
+function trackLine(t,n,cur,onTap,right){var w=mk("div","li"+(cur?" cur":""));w.dataset.k=keyOf(t);var c=chakraOf(t);
  var main=mk("button","lm");main.type="button";main.title="Play";
  var dot=mk("span","dot");if(c){dot.style.background=c.c;dot.style.boxShadow="0 0 8px "+c.c}
  var tx=mk("span","tx");tx.append(mk("span","a",titleOf(t)),mk("span","b",artistOf(t)+(hzOf(t)?" · "+Math.round(hzOf(t))+" Hz":"")+(c?" · "+c.n:"")));
- main.append(mk("span","n",cur?"▶":String(n)),dot,tx);if(right)main.append(mk("span","r",right));main.onclick=onTap;w.append(main);
+ var nn=mk("span","n",cur?"▶":String(n));nn.dataset.n=String(n);main.append(nn,dot,tx);if(right)main.append(mk("span","r",right));main.onclick=onTap;w.append(main);
  var A=mk("button","rb da","A"),B=mk("button","rb db","B"),M=mk("button","rb","⋯");A.title="Load to Deck A";B.title="Load to Deck B";M.title="More";
  A.onclick=function(){loadDeck("A",t)};B.onclick=function(){loadDeck("B",t)};M.onclick=function(){sheetFor(t)};w.append(A,B,M);return w}
 function renderNext(){var p=panes.next;p.replaceChildren();var pl=plist();

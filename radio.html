@@ -971,6 +971,16 @@ body{background:radial-gradient(ellipse at 70% -15%,#17253b 0,transparent 40%),r
 #musicTVScreen.tv-theatre .tv-copy small{font-size:9px;line-height:1.15;margin-top:3px}
 #musicTVScreen.tv-theatre .tv-progress{height:2px;margin-top:6px}
 </style>
+<style id="glctc1-perf-css">
+/* GLCTC1 PERF: these infinite animations (text-shadow / background-position / box-shadow glow)
+   repaint on the CPU every frame. Freeze them while Music TV is on air so the TV gets the CPU. */
+html.glctc-tv-on .glctc1-shop-ad,
+html.glctc-tv-on .glctc1-shop-logo,
+html.glctc-tv-on .brandbar .brand,
+html.glctc-tv-on #glctc1Header .gu-brand,
+html.glctc-tv-on #glctc1Shop,
+html.glctc-tv-on #glctc1Shop .gs-l{animation-play-state:paused!important}
+</style>
 </head>
 
 <body>
@@ -4402,9 +4412,16 @@ function updateRadioStationClock(){
      REAL RADIO PROGRESS
   */
 
+  if(document.hidden)
+    return;
+
   const progress =
-    document.querySelector(
-      ".bar i"
+    updateRadioStationClock._bar ||
+    (
+      updateRadioStationClock._bar =
+        document.querySelector(
+          ".bar i"
+        )
     );
 
 
@@ -4426,8 +4443,21 @@ function updateRadioStationClock(){
       );
 
 
-    progress.style.width =
-      `${percent}%`;
+    const widthText =
+      `${percent.toFixed(1)}%`;
+
+    if(
+      updateRadioStationClock._w !==
+      widthText
+    ){
+
+      updateRadioStationClock._w =
+        widthText;
+
+      progress.style.width =
+        widthText;
+
+    }
 
   }
 
@@ -4447,8 +4477,11 @@ function updateRadioStationClock(){
 
   if(timeDisplay){
 
-    timeDisplay.textContent =
+    const timeText =
       `${formatRadioTime(position)} / ${formatRadioTime(radioStationDuration)}`;
+
+    if(timeDisplay.textContent !== timeText)
+      timeDisplay.textContent = timeText;
 
   }
 
@@ -7705,7 +7738,7 @@ $('cueOutputBtn').onclick=async()=>{
 };
 if(!cueSupported()){$('cueOutputNotice').textContent='Separate headphone output is not supported by this browser. Use a browser with an audio-output picker.';$('cueOutputBtn').disabled=true;}
 // Keep cue taps connected when the live performer changes; no station writes here.
-setInterval(()=>{if(cueBus)updateCueRouting();},250);
+setInterval(()=>{if(cueBus)updateCueRouting();},500);
 
 /* =====================================================
    AUTH
@@ -7812,30 +7845,45 @@ window.GLCTC_MUSIC_TV_FEED=()=>({userId:currentUser?.id||null,track:currentTrack
  currentTime:audio.currentTime||0,duration:audio.duration||0,url:audio.currentSrc||audio.src,
  playing:!audio.paused&&!audio.ended&&audio.readyState>=2});
 (()=>{
- const screen=document.querySelector('.tv-screen'),frame=document.getElementById('musicTVFrame');
- if('IntersectionObserver' in window)new IntersectionObserver(entries=>{window.GLCTC_MUSIC_TV_VISIBLE=entries[0].isIntersecting;},{rootMargin:'100px'}).observe(screen);
- let oldTrack=null;
+ const root=document.documentElement,screen=document.querySelector('.tv-screen'),frame=document.getElementById('musicTVFrame');
+ const E={title:document.getElementById('tvTitle'),artist:document.getElementById('tvArtist'),details:document.getElementById('tvDetails'),tag:document.getElementById('tvTag'),state:document.getElementById('tvState'),progress:document.getElementById('tvProgress'),ident:document.getElementById('tvIdent')};
+ const setText=(e,v)=>{if(e.textContent!==v)e.textContent=v;};
+ let inView=true,lastVis=null;
+ // TV counts as visible only while on screen AND the tab is in the foreground.
+ // video.html reads window.GLCTC_MUSIC_TV_VISIBLE; it is also broadcast to the frame.
+ function pushVis(){
+  const v=inView&&!document.hidden;
+  window.GLCTC_MUSIC_TV_VISIBLE=v;
+  if(v!==lastVis){lastVis=v;try{frame.contentWindow&&frame.contentWindow.postMessage({type:'glctc-tv-visibility',visible:v},'*');}catch(e){}}
+ }
+ if('IntersectionObserver' in window)new IntersectionObserver(entries=>{inView=entries[0].isIntersecting;pushVis();},{rootMargin:'100px'}).observe(screen);
+ let oldSig=null,oldWidth='',oldReady=null,oldIdentHidden=null;
  function refreshTV(){
+  if(document.hidden)return;
   const f=window.GLCTC_MUSIC_TV_FEED(),t=f.track;
-  const signature=JSON.stringify(t ? [t.id,t.title,t.artist,t.album,t.genre,t.bpm,t.key] : []);
-  if(signature!==oldTrack){oldTrack=signature;
-   document.getElementById('tvTitle').textContent=t?.title||'TUNE INTO RADIO SPACE';
-   document.getElementById('tvArtist').textContent=t?.artist||'Your next track starts here';
-   document.getElementById('tvDetails').textContent=t ? [t.album,t.genre,t.bpm ? t.bpm+' BPM' : '',t.key].filter(Boolean).join(' · ')||'RADIO SPACE • GLCTC1' : 'AUTOMATIC MUSIC VIDEO';
-   document.getElementById('tvTag').textContent=t ? 'NOW SHOWING / RADIO SPACE' : 'RADIO SPACE / MUSIC TELEVISION';
+  const sig=t?[t.id,t.title,t.artist,t.album,t.genre,t.bpm,t.key].join('\u0001'):'';
+  if(sig!==oldSig){oldSig=sig;
+   setText(E.title,t?.title||'TUNE INTO RADIO SPACE');
+   setText(E.artist,t?.artist||'Your next track starts here');
+   setText(E.details,t ? [t.album,t.genre,t.bpm ? t.bpm+' BPM' : '',t.key].filter(Boolean).join(' · ')||'RADIO SPACE • GLCTC1' : 'AUTOMATIC MUSIC VIDEO');
+   setText(E.tag,t ? 'NOW SHOWING / RADIO SPACE' : 'RADIO SPACE / MUSIC TELEVISION');
   }
-  const label=!t ? 'STANDBY' : f.playing ? 'ON AIR' : audio.error ? 'OFFLINE' : audio.paused ? 'PAUSED' : 'BUFFERING';
-  document.getElementById('tvState').textContent=label;
-  document.getElementById('tvProgress').style.width=(Number.isFinite(f.duration)&&f.duration>0 ? Math.min(100,Math.max(0,f.currentTime/f.duration*100)) : 0)+'%';
-  screen.classList.toggle('tv-ready',!!window.GLCTC_MUSIC_TV_READY);
-  document.getElementById('tvIdent').hidden=!!t&&!!window.GLCTC_MUSIC_TV_READY;
+  setText(E.state,!t ? 'STANDBY' : f.playing ? 'ON AIR' : audio.error ? 'OFFLINE' : audio.paused ? 'PAUSED' : 'BUFFERING');
+  const w=(Number.isFinite(f.duration)&&f.duration>0 ? Math.min(100,Math.max(0,f.currentTime/f.duration*100)) : 0).toFixed(1)+'%';
+  if(w!==oldWidth){oldWidth=w;E.progress.style.width=w;}
+  const ready=!!window.GLCTC_MUSIC_TV_READY;
+  if(ready!==oldReady){oldReady=ready;screen.classList.toggle('tv-ready',ready);}
+  const identHidden=!!t&&ready;
+  if(identHidden!==oldIdentHidden){oldIdentHidden=identHidden;E.ident.hidden=identHidden;}
+  root.classList.toggle('glctc-tv-on',!!(f.playing&&ready&&window.GLCTC_MUSIC_TV_VISIBLE));
  }
  const videoURL=new URL('video.html',location.href);
  videoURL.searchParams.set('radio_tv','1');videoURL.searchParams.set('v',String(Date.now()));
  window.GLCTC_MUSIC_TV_READY=false;
  frame.src=videoURL.href;
  setTimeout(()=>{if(!window.GLCTC_MUSIC_TV_READY){document.getElementById('tvIdent').textContent='MUSIC TV UNAVAILABLE — PLACE video.html BESIDE radio.html';}},20000);
- setInterval(refreshTV,250);refreshTV();
+ document.addEventListener('visibilitychange',()=>{pushVis();refreshTV();});
+ setInterval(refreshTV,500);pushVis();refreshTV();
 })();
 </script>
 
@@ -7861,6 +7909,149 @@ window.GLCTC_MUSIC_TV_FEED=()=>({userId:currentUser?.id||null,track:currentTrack
  update();
 })();
 
+</script>
+
+<!-- GLCTC1 RADIO — LOCK-SCREEN / NOTIFICATION MEDIA CONTROLS (Media Session API), same approach as Upload.
+     Shows cover art, title, artist and play / pause / previous / next on the lock screen, notification
+     shade, watch and car/Bluetooth controls, and keeps the Web Audio graph alive while the screen is off.
+     Transport follows the existing permissions: DJ (admin) controls the station, listeners follow it. -->
+<script>
+(function () {
+  "use strict";
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}   // iOS: keep playing when locked / silent switch on
+
+  var radio = document.getElementById("radioAudio");
+  if (!radio) return;
+  var hasMS = ("mediaSession" in navigator) && typeof MediaMetadata !== "undefined";
+  var ms = hasMS ? navigator.mediaSession : null;
+
+  // ---------- keep the audio graph running while locked ----------
+  function wake() {
+    try {
+      if (!radio.paused && typeof audioCtx !== "undefined" && audioCtx && audioCtx.state !== "running") {
+        audioCtx.resume().catch(function () {});
+      }
+    } catch (e) {}
+  }
+  var hooked = null;
+  function hook() {
+    try {
+      if (typeof audioCtx !== "undefined" && audioCtx && hooked !== audioCtx) {
+        hooked = audioCtx;
+        audioCtx.addEventListener("statechange", wake);
+      }
+    } catch (e) {}
+  }
+  ["play", "playing", "pause", "waiting", "stalled"].forEach(function (ev) {
+    radio.addEventListener(ev, function () { hook(); wake(); });
+  });
+  window.addEventListener("pageshow", wake);
+  window.addEventListener("focus", wake);
+  setInterval(function () { if (!radio.paused) { hook(); wake(); } }, 4000);
+
+  if (!hasMS) { document.addEventListener("visibilitychange", wake); return; }
+
+  // ---------- cover art ----------
+  var fallbackUrl = "";
+  try {
+    var c = document.createElement("canvas"); c.width = c.height = 512;
+    var g = c.getContext("2d");
+    var bg = g.createLinearGradient(0, 0, 512, 512);
+    bg.addColorStop(0, "#0a0e22"); bg.addColorStop(1, "#2a0a3a");
+    g.fillStyle = bg; g.fillRect(0, 0, 512, 512);
+    g.strokeStyle = "#00ffff"; g.lineWidth = 10;
+    g.beginPath(); g.arc(256, 256, 170, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = "#ff9bda"; g.font = "bold 120px sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("GLC", 256, 256);
+    fallbackUrl = c.toDataURL("image/png");
+  } catch (e) {}
+
+  var artCache = {};
+  async function resolveArt(track) {
+    var v = String((track && track.cover_art) || "").trim();
+    if (!v) return "";
+    var hit = artCache[v];
+    if (hit && Date.now() - hit.t < 6 * 3600 * 1000) return hit.url;
+    try {
+      var url = await signedPath(v);
+      if (url) { artCache[v] = { url: url, t: Date.now() }; return url; }
+    } catch (e) {}
+    return "";
+  }
+  function artList(url) {
+    url = url || fallbackUrl;
+    if (!url) return [];
+    return [{ src: url, sizes: "512x512" }, { src: url, sizes: "256x256" }, { src: url, sizes: "128x128" }];
+  }
+
+  // ---------- metadata ----------
+  var ver = 0, lastKey = "";
+  async function publish(force) {
+    var t = (typeof currentTrack !== "undefined") ? currentTrack : null;
+    var title = (t && t.title) || "GLCTC1 RADIO";
+    var artist = (t && t.artist) || "GLCTC1 MUSIC";
+    var album = (t && t.album) || "Radio Space";
+    var key = [title, artist, album, t && t.cover_art].join("\u0001");
+    if (!force && key === lastKey) return;
+    lastKey = key;
+    var my = ++ver;
+    function set(art) {
+      try { ms.metadata = new MediaMetadata({ title: title, artist: artist, album: album, artwork: art }); } catch (e) {}
+    }
+    set(artList(""));
+    var url = await resolveArt(t);
+    if (my !== ver || !url) return;
+    set(artList(url));
+  }
+
+  // ---------- progress (display only: the station clock owns the position) ----------
+  function pushPosition() {
+    if (!ms.setPositionState) return;
+    var d = radio.duration;
+    if (!isFinite(d) || d <= 0) return;
+    try { ms.setPositionState({ duration: d, playbackRate: radio.playbackRate || 1, position: Math.min(Math.max(radio.currentTime || 0, 0), d) }); } catch (e) {}
+  }
+
+  // ---------- buttons ----------
+  function act(name, fn) { try { ms.setActionHandler(name, fn); } catch (e) {} }
+  function press(id) { var b = document.getElementById(id); if (b && !b.disabled) b.click(); }
+  function admin() { return typeof isAdmin !== "undefined" && isAdmin; }
+
+  act("play", function () {
+    if (admin()) { if (radio.paused) press("playBtn"); }
+    else radio.play().catch(function () {});
+  });
+  act("pause", function () { if (admin() && !radio.paused) press("playBtn"); });
+  act("previoustrack", function () { if (admin()) press("prevBtn"); });
+  act("nexttrack", function () { if (admin()) press("nextBtn"); });
+  // seekbackward / seekforward / seekto deliberately NOT registered (shared station clock;
+  // Android would also show them in place of previous / next).
+
+  // ---------- follow the player ----------
+  radio.addEventListener("play", function () { ms.playbackState = "playing"; publish(); pushPosition(); });
+  radio.addEventListener("playing", function () { ms.playbackState = "playing"; pushPosition(); });
+  radio.addEventListener("pause", function () { if (!radio.ended) ms.playbackState = "paused"; });
+  radio.addEventListener("loadedmetadata", function () { publish(); pushPosition(); });
+  radio.addEventListener("durationchange", pushPosition);
+  radio.addEventListener("seeked", pushPosition);
+  var last = 0;
+  radio.addEventListener("timeupdate", function () {
+    var n = Date.now(); if (n - last > 5000) { last = n; pushPosition(); }
+  });
+
+  var mo = new MutationObserver(function () { publish(); });
+  ["trackTitle", "trackArtist"].forEach(function (id) {
+    var e = document.getElementById(id);
+    if (e) mo.observe(e, { childList: true, characterData: true, subtree: true });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    wake();
+    if (!document.hidden) publish(true);
+  });
+
+  publish(true);
+})();
 </script>
 </body>
 </html>

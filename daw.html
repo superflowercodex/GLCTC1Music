@@ -138,6 +138,9 @@ window.GLCTC_TUNING=(()=>{
  function render(){document.querySelectorAll('[data-chakra-hz]').forEach(b=>{const on=+b.dataset.chakraHz===hz;b.setAttribute('aria-pressed',String(on));b.classList.toggle('selected',on)});const e=document.getElementById('chakraStatus');if(e)e.textContent='A4 = '+hz+' Hz · shared module tuning';}
  const api={get hz(){return hz},ratio:()=>hz/440,
  attach(node){if(!node?.detune||node.__chakraTuned)return node;node.__chakraTuned=true;const c=node.context;let b=buses.get(c);if(!b){b=c.createConstantSource();b.offset.value=1200*Math.log2(hz/440);b.start();buses.set(c,b)}b.connect(node.detune);node.addEventListener('ended',()=>{try{b.disconnect(node.detune)}catch(e){}},{once:true});return node},
+ /* v126 KEY LIFT: shift every tuned voice by some cents at an exact audio time (final-chorus modulation); unlift() returns to the reference */
+ lift(cents,t){for(const [c,b] of buses){if(c.state==='closed')continue;const at=Math.max(t||0,c.currentTime),base=1200*Math.log2(hz/440);b.offset.cancelScheduledValues(at);b.offset.setValueAtTime(base+cents,at)}},
+ unlift(){for(const [c,b] of buses){if(c.state==='closed')continue;const t=c.currentTime;b.offset.cancelScheduledValues(t);b.offset.setTargetAtTime(1200*Math.log2(hz/440),t,.01)}},
  set(value,dirty=true){value=Number(value);if(!values.includes(value))return false;if(hz===value){if(typeof project!=='undefined'&&project)project.tuningHz=hz;render();return true}hz=value;for(const [c,b] of buses){if(c.state==='closed'){buses.delete(c);continue}const t=c.currentTime;b.offset.cancelScheduledValues(t);b.offset.setTargetAtTime(1200*Math.log2(hz/440),t,.015)}if(typeof project!=='undefined'&&project)project.tuningHz=hz;render();window.dispatchEvent(new CustomEvent('glctc-tuning',{detail:hz}));if(dirty&&typeof markDirty==='function')markDirty();return true},render};return api;
 })();
 
@@ -7556,7 +7559,8 @@ function composerRecipe(genre){
     and every drum bus gets glue + crisp tape so the kit punches; meditation / ambient stay clean */
  if(!/^(meditation|ambient)$/.test(genre||'')){const q=R[genre]||R.techno;q.lee=(q.lee||[]).slice();if(!q.lee.some(x=>x&&x.type==='drive'))q.lee.unshift(od(.38,.32,2600));
   q.bl=(q.bl||[]).slice();if(!q.bl.some(x=>x&&x.type==='comp'))q.bl.unshift(comp(-14,3,.004,.1));if(!q.bl.some(x=>x&&(x.type==='tape'||x.type==='drive')))q.bl.push(sat(.18,.3,12000));
-  q.go=(q.go||[]).slice();if(!q.go.some(x=>x&&x.type==='comp'))q.go.unshift(comp(-16,2.5,.006));}
+  q.go=(q.go||[]).slice();if(!q.go.some(x=>x&&x.type==='comp'))q.go.unshift(comp(-16,2.5,.006));
+  q.s101=(q.s101||[]).slice();if(!q.s101.some(x=>x&&x.type==='chorus')&&q.s101.length<3)q.s101.push(chorus(.3,.22,.18));}   /* v126 WIDTH: stab synth spread */
  const out=JSON.parse(JSON.stringify(R[genre]||R.techno));out.sub=[];   /* v96: SUB-01 runs clean - no channel compressor (CPU) */Object.keys(out).forEach(k=>out[k]=out[k].filter(Boolean));
  let dl=0;['go','vox','s101','ws','lp','lee','mine','bl'].forEach(k=>{if(!out[k])return;out[k]=out[k].filter(f=>{if(f.type!=='delay'&&f.type!=='pingpong')return true;return ++dl<=3})});   /* v94 CPU: three channel delays per song at most */
  return out;
@@ -9886,7 +9890,9 @@ const PAT=(()=>{
    return{on,note:on?note:0,accent:on&&i%8===0,velocity:on&&i%8===0?.92:.78}})}
  /* ---------------- VOX: a short sung chop on the chord tones ---------------- */
  function voxPat(){const sc=SC[Gg.scale]||SC.minor,rh=P(F.vox);let j=0;const shape=pick(F.rnd,[[0],[0,4],[4,0],[0,0,4],[0,6]]);
-  return Array.from({length:16},(_,i)=>{const on=rh[i]!=='.';let n=0;if(on){n=cl(semi(sc,hc(i)+shape[j%shape.length]),-12,19);j++}return{on:on?1:0,n,v:.85}})}
+  /* v126 VOCAL HOOK: sings the lead motif, plus call-and-response answers where the lead rests */
+  const mo=(F.motif&&F.motif.length)?F.motif:shape,lr=P((F.leadRh&&F.leadRh[1])||'................');let cnt=0;for(let i=0;i<16;i++)if(rh[i]!=='.')cnt++;
+  return Array.from({length:16},(_,i)=>{let on=rh[i]!=='.';if(!on&&cnt<4&&(i===10||i===14)&&lr[i]==='.'){on=true;cnt++}let n=0;if(on){n=cl(semi(sc,hc(i)+mo[j%mo.length]),-12,19);j++}return{on:on?1:0,n,v:.85}})}
  /* ---------------- PAD-64: hand percussion, world instruments, breakdown pad, build roll ---------------- */
  /* the world / instrument PAD-64 kits (lane → instrument). Their signature sounds sit on lanes 3 and 9–13, so they get real parts here */
  const WS_KITS={
@@ -10029,9 +10035,10 @@ const PAT=(()=>{
   const nv=Gg.gr.length;let variant=Number.isInteger(opts.variant)?((opts.variant%nv)+nv)%nv:Math.floor(r()*nv);
   const old=Gg;Gg=Object.assign({},old,{scale});
   let beatName=null;   /* v121 PRODUCER BEATS: one coherent hand-written beat per song */
-  if(old.beats&&old.beats.length&&!fresh){const nb=old.beats.length,bi=Number.isInteger(opts.variant)?((opts.variant%nb)+nb)%nb:Math.floor(r()*nb),B=old.beats[bi];beatName=B.name;variant=0;
+  if(old.beats&&old.beats.length&&fresh<.9){   /* v126: the producer beats are used at normal novelty (they were skipped whenever NOVELTY was on - i.e. always) */
+  const nb=old.beats.length,bi=Number.isInteger(opts.variant)?((opts.variant%nb)+nb)%nb:Math.floor(r()*nb),B=old.beats[(window.GLCTC_TASTE&&!opts.noTaste)?GLCTC_TASTE.beat(genre,old.beats.map(x=>x.name),bi):bi];beatName=B.name;variant=0;window.__glctcLastBeat={genre,beat:B.name};
    Gg=Object.assign({},Gg,{gr:[B.gr],prog:[B.prog],stab:[B.stab],bass:[B.bass],vox:B.vox?[B.vox]:Gg.vox,bd:B.bd||Gg.bd,bk:B.bk||Gg.bk,pc:B.pc||Gg.pc,lead:Object.assign({},Gg.lead,{rh:[B.lead.rh],m:[B.lead.m]},B.lead.g!=null?{g:B.lead.g}:{})})}
-  if(fresh){try{Gg=freshBlueprint(Gg,r,genre,fresh,scale)}catch(e){console.warn('fresh composer',e);Gg=Object.assign({},old,{scale})}}
+  if(fresh&&!beatName){try{Gg=freshBlueprint(Gg,r,genre,fresh,scale)}catch(e){console.warn('fresh composer',e);Gg=Object.assign({},old,{scale})}}
   /* v93 CPU DENSITY CAP: stab ≤ 4 hits a bar, bass ≤ 8 notes (psytrance keeps its rolling bass), lead ≤ 8 notes a bar */
   const hits=x=>P(x).replace(/\./g,'').length,keep=(arr,ok)=>{const f=arr.filter(ok);return f.length?f:[arr.reduce((a,b)=>(b.flat?hits(b[0])+hits(b[1]):hits(b))<(a.flat?hits(a[0])+hits(a[1]):hits(a))?b:a)]};
   const stabs=keep(Gg.stab,x=>hits(x)<=4),leads=keep(Gg.lead.rh,x=>hits(x[0])<=8&&hits(x[1])<=8),basses=genre==='psytrance'?Gg.bass:keep(Gg.bass,x=>hits(x[0])<=8&&hits(x[1])<=9);
@@ -10595,7 +10602,7 @@ function chooseSongPresets(genre,original){
  const wpick=list=>{const tot=list.reduce((a,x)=>a+x[1],0);let r=Math.random()*tot;for(const x of list){r-=x[1];if(r<=0)return x[0]}return list[0][0]};
  const build=()=>{const o={...original};MODS.forEach(m=>{
   const available=new Set(presetOpts(m).map(x=>x[0])),list=[];
-  const add=(v,w)=>{if(v&&w>0&&available.has(v)&&!list.some(x=>x[0]===v)&&!/big beat/i.test(v)&&!PAL_BAN_ALL.test(v)&&!(!HAND_OK.test(genre)&&/^(bl|mine|ws)$/.test(m.k)&&PAL_BAN.test(v))&&!(/^(reggae|ska)$/.test(genre)&&/^Hip-Hop/.test(v)))list.push([v,w])};
+  const add=(v,w)=>{w*=(window.GLCTC_TASTE&&v?GLCTC_TASTE.w(genre,m.k,v):1);if(v&&w>0&&available.has(v)&&!list.some(x=>x[0]===v)&&!/big beat/i.test(v)&&!PAL_BAN_ALL.test(v)&&!(!HAND_OK.test(genre)&&/^(bl|mine|ws)$/.test(m.k)&&PAL_BAN.test(v))&&!(/^(reggae|ska)$/.test(genre)&&/^Hip-Hop/.test(v)))list.push([v,w])};
   const fx=PAL_FIX[genre]&&PAL_FIX[genre][m.k];if(fx){fx.forEach(([v,w])=>add(v,w));if(list.length){o[m.k]=wpick(list);return}}
   if(m.k==='sub'){(SUB_POOL[genre]||['Pure Sine Sub']).forEach((v,i)=>add(v,i?1:3))}
   else if(m.k==='go'){(GO_EDGE[genre]||[original.go]).forEach((v,i)=>add(v,i?1:2))}
@@ -10870,7 +10877,7 @@ function fitRemix(beats){
  else{let used=0;st.secs=old.map((s,i)=>{const bars=i===old.length-1?totalBars-used:Math.max(1,Math.min(totalBars-used-(old.length-i-1),Math.round(s.bars/total*totalBars)));used+=bars;return {...s,bars}})}
  st.loop=false;byId('gscLoop').checked=false;save();renderGrid();refreshTimeline();
 }
-window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{let n=null;try{n=normSt(JSON.parse(JSON.stringify(d)))}catch(e){}if(!n){console.warn('GLCTC1 composer: project has no readable song - kept the current one');return}if(S||starting)stopSong('SONG STOPPED · PROJECT OPENED');st=n;ixCells();st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null,section:()=>S&&S.cur>=0&&S.secs[S.cur]?{i:S.cur,count:S.secs.length,name:S.secs[S.cur].n,kind:S.secs[S.cur].kind}:null};
+window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{let n=null;try{n=normSt(JSON.parse(JSON.stringify(d)))}catch(e){}if(!n){console.warn('GLCTC1 composer: project has no readable song - kept the current one');return}if(S||starting)stopSong('SONG STOPPED · PROJECT OPENED');st=n;ixCells();st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,timeline:()=>S&&S.starts?{starts:S.starts.slice(),total:S.total,barBeats:S.barBeats,n:S.n,loop:!!st.loop,genre:(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||null,secs:S.secs.map(x=>({n:x.n,kind:x.kind,bars:x.bars}))}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null,section:()=>S&&S.cur>=0&&S.secs[S.cur]?{i:S.cur,count:S.secs.length,name:S.secs[S.cur].n,kind:S.secs[S.cur].kind}:null};
 })();
 </script>
 
@@ -11237,6 +11244,8 @@ Object.assign(MATCH,{westcoast:['G-Funk Lowrider','Rhodes 7ths · high whine lea
  south:['Crunk Brass & Bells','big band brass stabs · bell melody · dark pad · gospel choir']});
 MATCH.westcoast=['West Coast Piano & Strings','grand piano chords · upright piano hits · lush strings on the hook · brass stabs · sax in the break'];
 
+/* v126 WIDTH */
+{let k=0;for(const n in STK){const L=STK[n];if(!Array.isArray(L))continue;L.forEach(l=>{if(!l||l.part==='bass')return;const side=(k++%2?1:-1);if(l.part==='pad'||l.part==='chords'||l.part==='strum')l.pan=Math.max(-.85,Math.min(.85,(Math.abs(l.pan||0)<.2?side*.45:(l.pan||0)*1.6)));else if(l.part==='melody')l.pan=(l.pan||0)*.6})}}
 /* v120 STACKS: more pianos, horns and strings - every reworked / new genre gets a real band, and the older stacks gain a brass or string layer */
 Object.assign(STK,{
  'Jump Up Hoover & Brass':[{s:'Rave Stab',part:'stabs',style:'stab',vol:.5,pan:-.15,rev:.18,dly:.2,roles:['drop','build']},{s:'Horn Section Stab',part:'stabs',style:'stab',vol:.45,pan:.2,rev:.2,roles:['drop']},{s:'Staccato Strings',part:'chords',style:'half',vol:.4,pan:-.25,rev:.25,roles:['build','drop']},{s:'Dark Pad',part:'pad',vol:.38,rev:.45,roles:['intro','break','outro']},{s:'Brass Section',part:'melody',vol:.36,pan:.25,rev:.3,roles:['break']}],
@@ -12700,6 +12709,7 @@ const CH={
  for(const k in CH){const q=CH[k];q.pump=q.pump||{depth:{},rel:.2};q.pump.depth=q.pump.depth||{};const d=SP[k]??.3;q.pump.depth.sub=d;if(q.pump.depth.lee==null&&d>0)q.pump.depth.lee=+(d*.6).toFixed(2)}}
 {/* v122 MIX: boom bap / lo-fi / G-funk never pump; every style gets presence + air so snares and hats cut through */
  ['hiphop','eastcoast','westcoast','lofi'].forEach(k=>{if(CH[k]&&CH[k].pump)CH[k].pump.depth={}});
+ for(const k in CH){const q=CH[k];if(!q||!q.rev||!q.rev.mix||/^(meditation|ambient)$/.test(k))continue;const m=q.rev.mix;if(m.go!=null)m.go=+(m.go*.7).toFixed(3);if(m.ix!=null)m.ix=+Math.min(.35,m.ix*1.3+.03).toFixed(3);if(m.s101!=null)m.s101=+Math.min(.32,m.s101*1.15).toFixed(3);if(m.ws!=null)m.ws=+Math.min(.35,m.ws*1.2).toFixed(3)}   /* v126 DEPTH */
  for(const k in CH){const q=CH[k];if(!q||/^(meditation|ambient)$/.test(k))continue;if(Array.isArray(q.glue)&&q.glue[2]!=null)q.glue[2]=Math.max(q.glue[2],.018);q.pres=+((q.pres||0)+.5).toFixed(2);if(Array.isArray(q.low))q.low=[Math.max(q.low[0]||0,3.5),q.low[1]||60]}   /* v125: punch + weight */
  const BRIGHT={techno:[1,1.5],melodictechno:[1,1.5],house:[1,1.5],techhouse:[1,1.5],tribalhouse:[1,1.5],hardhouse:[1,1],trance:[1,2],psytrance:[1,1.5],happyhardcore:[1,1.5],dnb:[1.5,2],jungle:[1.5,1.5],liquid:[1,2],
   breaks:[1.5,1.5],nuskool:[1.5,1.5],electro:[1,1.5],garage:[1.5,2],dubstep:[1,1],hiphop:[1.5,1.5],eastcoast:[1.5,1],south:[1,1.5],ukhiphop:[1.5,1.5],drill:[1,1.5],trap:[1,2],pop:[1.5,2],synthwave:[1,1.5],ska:[1.5,1.5],
@@ -14361,6 +14371,105 @@ if(document.readyState==='complete')setTimeout(boot,800);else window.addEventLis
 })();
 </script>
 
+<script id="glctc1-v126-epic">
+/* ===== v126 EPIC ENGINE =====
+   Rides on top of the composer's EPIC BUILDS & DROPS (lead-ins, rolls, gaps, crashes) and adds what makes a track feel produced:
+   · NOISE RISER + rising tone through every build, cut on the pre-drop gap
+   · REVERSE CYMBAL swelling into every drop, chorus and breakdown
+   · DOWNLIFTER sweeping down as a breakdown opens
+   · PHRASE VARIATION inside long sections: a small fill every 4 bars, a bigger fill + open hat + bass drop-out every 8
+   · FINAL-CHORUS KEY LIFT: the last drop modulates up (the whole band shifts together on the shared tuning bus)
+   · TASTE MEMORY: thumbs up / down on a song steers which beats and sounds the composer picks next time
+   Everything is synthesised or triggers the existing modules; nothing keeps running between songs. */
+(()=>{'use strict';
+const C=()=>{try{return window.GLCTC_AUDIO?GLCTC_AUDIO():null}catch(e){return null}};
+const running=()=>{try{return !!(window.GLCTC_SONG&&GLCTC_SONG.running())}catch(e){return false}};
+const genre=()=>{try{const t=GLCTC_SONG.timeline();return (t&&t.genre)||(document.getElementById('gscGenre')||{}).value||''}catch(e){return ''}};
+const QUIET=/^(meditation|ambient)$/;
+const LIFT={pop:100,house:100,deephouse:100,garage:100,amapiano:100,afrohouse:100,tribalhouse:100,techhouse:100,liquid:200,dnb:100,trance:200,happyhardcore:200,hardhouse:200,synthwave:200,melodictechno:100,ska:100,jungle:100,breaks:100};
+const FILLSTYLE=g=>/^(techno|house|deephouse|techhouse|tribalhouse|melodictechno|hardhouse|trance|psytrance|happyhardcore|afrohouse|amapiano)$/.test(g)?'clap':
+ /^(hiphop|eastcoast|westcoast|south|lofi|trap|drill|phonk|ukhiphop)$/.test(g)?'hiphop':/^(reggae|ska)$/.test(g)?'toms':'snare';
+let nb=null;
+function noise(c){if(nb&&nb.sampleRate===c.sampleRate)return nb;const n=c.sampleRate*3;nb=c.createBuffer(2,n,c.sampleRate);for(let ch=0;ch<2;ch++){const d=nb.getChannelData(ch);for(let i=0;i<n;i++)d[i]=Math.random()*2-1}return nb}
+const dest=c=>c._mg||c.destination;
+function riser(c,t0,t1,root){if(t1-t0<.4)return;const s=c.createBufferSource();s.buffer=noise(c);s.loop=true;const bp=c.createBiquadFilter(),hp=c.createBiquadFilter(),g=c.createGain();
+ bp.type='bandpass';bp.Q.value=1.6;bp.frequency.setValueAtTime(350,t0);bp.frequency.exponentialRampToValueAtTime(9500,t1);hp.type='highpass';hp.frequency.value=180;
+ g.gain.setValueAtTime(.0001,t0);g.gain.exponentialRampToValueAtTime(.16,t1-.02);g.gain.setValueAtTime(.16,t1-.02);g.gain.linearRampToValueAtTime(0,t1);
+ s.connect(bp);bp.connect(hp);hp.connect(g);g.connect(dest(c));s.start(t0,Math.random()*2);s.stop(t1+.05);
+ const o=c.createOscillator(),lp=c.createBiquadFilter(),og=c.createGain();o.type='sawtooth';const f0=Math.max(80,root||110);o.frequency.setValueAtTime(f0,t0);o.frequency.exponentialRampToValueAtTime(f0*8,t1);
+ lp.type='lowpass';lp.frequency.setValueAtTime(600,t0);lp.frequency.exponentialRampToValueAtTime(7000,t1);og.gain.setValueAtTime(.0001,t0);og.gain.exponentialRampToValueAtTime(.045,t1-.02);og.gain.linearRampToValueAtTime(0,t1);
+ o.connect(lp);lp.connect(og);og.connect(dest(c));o.start(t0);o.stop(t1+.05)}
+function revCym(c,t1,len,amp){const t0=t1-len;if(t0<c.currentTime)return;const s=c.createBufferSource();s.buffer=noise(c);const hp=c.createBiquadFilter(),pk=c.createBiquadFilter(),g=c.createGain();
+ hp.type='highpass';hp.frequency.value=4500;pk.type='peaking';pk.frequency.value=9000;pk.gain.value=4;g.gain.setValueAtTime(.0001,t0);g.gain.exponentialRampToValueAtTime(amp,t1-.004);g.gain.linearRampToValueAtTime(0,t1);
+ s.connect(hp);hp.connect(pk);pk.connect(g);g.connect(dest(c));s.start(t0,Math.random()*2);s.stop(t1+.02)}
+function downlifter(c,t0,len){const s=c.createBufferSource();s.buffer=noise(c);s.loop=true;const bp=c.createBiquadFilter(),g=c.createGain();bp.type='bandpass';bp.Q.value=1.2;
+ bp.frequency.setValueAtTime(8000,t0);bp.frequency.exponentialRampToValueAtTime(250,t0+len);g.gain.setValueAtTime(.12,t0);g.gain.exponentialRampToValueAtTime(.0001,t0+len);
+ s.connect(bp);bp.connect(g);g.connect(dest(c));s.start(t0,Math.random()*2);s.stop(t0+len+.05)}
+const hit=(i,v,t)=>{try{window.GLCTC_80LA8_INPUT&&GLCTC_80LA8_INPUT.trigger(i,v,t)}catch(e){}};
+const hat=(i,v,t)=>{try{window.GLCTC_DIVINE09_INPUT&&GLCTC_DIVINE09_INPUT.trigger(i,v,t)}catch(e){}};
+function fill(K,endBeat,big,style){const T=b=>K.timeOfBeat(b),fast=K.bpm<150;
+ if(style==='clap'){const n=big?(fast?8:4):(fast?4:2),len=big?2:1;for(let i=0;i<n;i++)hit(2,.45+.45*i/n,T(endBeat-len+i*len/n));if(big)hat(4,.8,T(endBeat-.5))}
+ else if(style==='hiphop'){if(big){hit(1,.55,T(endBeat-1));hit(1,.4,T(endBeat-.75));hit(0,.8,T(endBeat-.5));hit(1,.85,T(endBeat-.25))}else{hit(1,.35,T(endBeat-.25));hit(0,.6,T(endBeat-.5))}}
+ else if(style==='toms'){const seq=big?[6,6,5,5]:[6,5],len=big?1:.5;seq.forEach((v,i)=>hit(v,.7,T(endBeat-len+i*len/seq.length)))}
+ else{const n=big?(fast?8:4):(fast?4:2),len=big?2:1;for(let i=0;i<n;i++)hit(i%3===2&&big?5:1,.4+.5*i/n,T(endBeat-len+i*len/n))}
+}
+function bassOut(K,b0,b1){['lee','sub'].forEach(id=>{try{const b=GLCTC_WSBUSFULL(id);if(!b||!b.hp)return;const f=b.hp.frequency,base=Math.min(120,Math.max(18,f.value)),t0=K.timeOfBeat(b0),t1=K.timeOfBeat(b1);
+ f.setValueAtTime(base,t0);f.exponentialRampToValueAtTime(420,t0+.04);f.setValueAtTime(420,t1-.02);f.exponentialRampToValueAtTime(base,t1)}catch(e){}})}
+function rootHz(){let hz=440;try{hz=+GLCTC_TUNING.hz||440}catch(e){}let key=9;try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))key=((+h.key%12)+12)%12}catch(e){}return hz*Math.pow(2,(key-9-12)/12)}
+
+let done=new Set(),lastCycle=-1,lifted=false;
+function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))return;done.add(key);
+ const c=C();if(!c)return;const g=genre();if(QUIET.test(g))return;const sec=T.secs[i],base=cycle*T.total,sb=base+T.starts[i],eb=sb+sec.bars*T.barBeats,nx=T.secs[(i+1)%T.n],nextKind=(i+1<T.n||T.loop)?nx.kind:null;
+ const now=c.currentTime,ts=Math.max(now+.03,K.timeOfBeat(sb)),te=K.timeOfBeat(eb),gapBeat=nextKind==='drop'?1:0;
+ /* builds: riser over the whole build (max 8 bars), ending on the pre-drop gap */
+ if(sec.kind==='build'){const rb=Math.max(sb,eb-8*T.barBeats);riser(c,Math.max(ts,K.timeOfBeat(rb)),K.timeOfBeat(eb-gapBeat),rootHz())}
+ /* reverse cymbal into the next drop / chorus / breakdown */
+ if(nextKind&&/^(drop|break|verse)$/.test(nextKind)&&!(nextKind==='verse'&&sec.kind==='intro'&&i===0)){const len=Math.min(2,T.barBeats/2)*60/K.bpm;revCym(c,te,len,nextKind==='drop'?.24:.14)}
+ /* breakdown opens on a downlifter */
+ if(sec.kind==='break')downlifter(c,ts,Math.min(2*T.barBeats,sec.bars*T.barBeats)*60/K.bpm);
+ /* phrase variation inside long sections (the section-end fill is the composer's own) */
+ if(sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
+  for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats;if(K.timeOfBeat(pb-2)<now+.05)continue;const big=p%8===0;
+   if(sec.kind==='break'&&!big)continue;fill(K,pb,big,st);if(big&&sec.kind!=='break')bassOut(K,pb-1,pb)}}
+ /* final-chorus key lift */
+ const lastDrop=T.secs.map((x,j)=>x.kind==='drop'?j:-1).filter(j=>j>=0).pop(),cents=LIFT[g]||0;
+ if(cents&&lastDrop!=null&&i+1===lastDrop&&T.secs[lastDrop].bars>=8&&T.secs.filter(x=>x.kind==='drop').length>=2){try{GLCTC_TUNING.lift(cents,K.timeOfBeat(eb));lifted=true;
+  const le=eb+T.secs[lastDrop].bars*T.barBeats;GLCTC_TUNING.lift(0,K.timeOfBeat(le))}catch(e){}}
+}
+setInterval(()=>{
+ if(!running()){if(lifted){try{GLCTC_TUNING.unlift()}catch(e){}lifted=false}done.clear();lastCycle=-1;return}
+ let T=null,q=null;try{T=GLCTC_SONG.timeline();q=GLCTC_SONG.section()}catch(e){}if(!T||!q)return;const K=window.GLCTC_CLOCK,c=C();if(!K||!c)return;
+ const beat=K.beatAt(c.currentTime),cycle=T.loop?Math.floor(Math.max(0,beat)/T.total):0;if(cycle!==lastCycle){lastCycle=cycle}
+ scheduleSection(T,K,cycle,q.i);
+ /* look ahead: the next section's riser / lift timing is set the moment it starts, which is fine; nothing else needed */
+},120);
+
+/* ---------------- TASTE MEMORY ---------------- */
+const TK='glctc1.taste';let TS={};try{TS=JSON.parse(localStorage.getItem(TK)||'{}')||{}}catch(e){TS={}}
+const saveT=()=>{try{localStorage.setItem(TK,JSON.stringify(TS))}catch(e){}};
+const fac=s=>s>0?Math.min(5,1+s*1.2):s<0?Math.max(.08,1/(1+(-s)*3)):1;
+window.GLCTC_TASTE={
+ w(g,k,v){const t=TS[g];return t&&t.p&&t.p[k]&&t.p[k][v]!=null?fac(t.p[k][v]):1},
+ beat(g,names,bi){const t=TS[g];if(!t||!t.b)return bi;const ws=names.map(n=>fac(t.b[n]||0));if(ws.every(x=>x===1))return bi;
+  const own=ws[bi]>=1?ws[bi]*1.5:ws[bi];ws[bi]=own;const tot=ws.reduce((a,x)=>a+x,0);let r=Math.random()*tot;for(let i=0;i<ws.length;i++){r-=ws[i];if(r<=0)return i}return bi},
+ rate(v){const g=(document.getElementById('gscGenre')||{}).value;if(!g)return null;const t=TS[g]||(TS[g]={b:{},p:{},n:0});t.n++;
+  const lb=window.__glctcLastBeat;if(lb&&lb.genre===g&&lb.beat)t.b[lb.beat]=(t.b[lb.beat]||0)+v;
+  let pr={};try{pr=GLCTC_SONG.state().presets||{}}catch(e){}['bl','mine','lee','s101','go','vox','ws','sub'].forEach(k=>{const n=pr[k];if(!n)return;t.p[k]=t.p[k]||{};t.p[k][n]=(t.p[k][n]||0)+v});saveT();return{g,n:t.n,beat:lb&&lb.genre===g?lb.beat:null}},
+ reset(g){if(g)delete TS[g];else TS={};saveT()},data:()=>JSON.parse(JSON.stringify(TS))};
+function mkUi(){const sel=document.getElementById('gscGenre');if(!sel){setTimeout(mkUi,600);return}if(document.getElementById('gscTaste'))return;
+ const box=document.createElement('div');box.id='gscTaste';box.style.cssText='grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:6px 10px;margin-top:6px;border:1px solid #3a3350;border-radius:10px;background:#141120;font-size:11px;letter-spacing:.05em;color:#cfc6ff';
+ const lab=document.createElement('span');lab.textContent='RATE THIS SONG';lab.style.fontWeight='600';
+ const btn=(t,v,tip)=>{const b=document.createElement('button');b.type='button';b.textContent=t;b.title=tip;b.style.cssText='font-size:15px;padding:3px 10px;border-radius:8px;border:1px solid #4b4370;background:#1d1830;color:#fff;cursor:pointer';
+  b.onclick=()=>{const r=GLCTC_TASTE.rate(v);msg.textContent=r?((v>0?'Noted - more like this':'Noted - less like this')+(r.beat?' · beat '+r.beat:'')+' · '+r.n+' rating'+(r.n>1?'s':'')+' for this genre'):'Pick a genre first'};return b};
+ const msg=document.createElement('span');msg.style.opacity='.75';msg.textContent='The composer learns your taste: liked beats and sounds come up more, disliked ones fade out.';
+ const rs=document.createElement('button');rs.type='button';rs.textContent='reset';rs.title='Forget ratings for this genre';rs.style.cssText='font-size:10px;padding:2px 8px;border-radius:6px;border:1px solid #4b4370;background:transparent;color:#a99fd6;cursor:pointer';
+ rs.onclick=()=>{GLCTC_TASTE.reset(sel.value);msg.textContent='Ratings cleared for this genre'};
+ box.append(lab,btn('👍',1,'More like this'),btn('👎',-1,'Less like this'),msg,rs);
+ const host=sel.closest('div');(host&&host.parentElement?host.parentElement:sel.parentElement).appendChild(box)}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mkUi,{once:true});else mkUi();
+})();
+
+</script>
 <script id="glctc1-v120-nature">
 /* ===== v120 MEDITATION JOURNEY ENGINE =====
    While a MEDITATION song plays (and, softer, an AMBIENT one) this adds:

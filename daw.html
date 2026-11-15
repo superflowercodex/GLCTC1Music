@@ -3169,20 +3169,23 @@ window.__blLoad=(i,f)=>loadSampleFor(i,f);window.__blSample=i=>{const c=sampleCa
 function clearSampleFor(index){const v=state.voices[index];delete v.sampleData;delete v.sampleName;sampleCache.delete(index);save();renderPads();renderVoiceList();renderFxSelection()}
 /* v120 PRO DRUM ENGINE: pitch-enveloped kick with click + saturation, two-tone snare, 4-burst clap, 808-style metallic hats
    (prerendered band-limited square bank, open hat choked by the closed hat), woody cross-stick, pitch-swept toms / congas, 808 cowbell */
-const blCurves={};function blSat(c,k){const sh=c.createWaveShaper();sh.curve=blCurves[k]||(blCurves[k]=(()=>{const n=2048,a=new Float32Array(n),d=Math.tanh(k);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;a[i]=Math.tanh(k*x)/d}return a})());sh.oversample='2x';return sh}
+const blCurves={};function blSat(c,k){const sh=c.createWaveShaper();sh.curve=blCurves[k]||(blCurves[k]=(()=>{const n=2048,a=new Float32Array(n),d=Math.tanh(k);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;a[i]=Math.tanh(k*x)/d}return a})());sh.oversample='none';return sh}   /* v128 CPU: no oversampling per drum hit (less glitching) */
 const blMetalC={};function blMetal(c){const k=c.sampleRate;if(blMetalC[k])return blMetalC[k];const len=Math.floor(k*2.4),b=c.createBuffer(1,len,k),d=b.getChannelData(0);[205.3,304.4,369.6,522.7,540,800].forEach(f=>{const dt=f/k;let ph=Math.random();const bl=x=>{if(x<dt){x/=dt;return x+x-x*x-1}if(x>1-dt){x=(x-1)/dt;return x*x+x+x+1}return 0};for(let n=0;n<len;n++){let v=ph<.5?1:-1;v+=bl(ph);v-=bl((ph+.5)%1);d[n]+=v*.16;ph+=dt;if(ph>=1)ph-=1}});return blMetalC[k]=b}
 let blOH=null;
+/* v128 IN KEY: the kick's body is tuned to the song's root note (it used to ring at one fixed pitch in every key and clash with the bass) */
+function blSnap(target,lo,hi){try{const H=window.GLCTC_SONG_HARM;if(!H||!Number.isFinite(+H.key))return target;const r0=440*Math.pow(2,((((+H.key)%12)+12)%12-9)/12);let best=target,bd=1e9;[1,1.4983].forEach(m=>{for(let k=-6;k<=4;k++){const f=r0*m*Math.pow(2,k);if(f<lo||f>hi)continue;const d=Math.abs(Math.log(f/target));if(d<bd){bd=d;best=f}}});return best}catch(e){return target}}
+function blKickHz(pitch){try{const H=window.GLCTC_SONG_HARM;if(H&&Number.isFinite(+H.key)){let f=440*Math.pow(2,((((+H.key)%12)+12)%12-9)/12);while(f>=56)f/=2;while(f<38)f*=2;return f}}catch(e){}return Math.max(30,47*pitch)}
 function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;const ctx=ensureAudio();if(ctx.state==='suspended')ctx.resume();const t=Math.max(when??0,ctx.currentTime+GLCTC_LEAD());/* v65 de-click: live hits land 12 ms ahead so the attack is never cut */const v=state.voices[index],type=names[index].type;if(v.mute||state.voices.some(x=>x.solo)&&!v.solo)return;const vel=Math.max(.02,Math.min(1,velocity)),tempoRatio=v.keyLock?1:((GLCTC_CLOCK.bpm)/(state.baseBpm||130)),pitch=Math.pow(2,v.pitch/12)*tempoRatio,dur=v.decay;const out=ctx.createGain();out.gain.value=0;const srcs=[];const osc=(freq,wave='sine',end=dur)=>{const o=window.GLCTC_TUNING.attach(ctx.createOscillator()),g=ctx.createGain();o.type=wave;o.frequency.setValueAtTime(Math.max(20,freq*pitch),t);o.connect(g);g.connect(out);o.start(t);o.stop(t+Math.max(.03,end));srcs.push(o);return {o,g}};const noise=(filterType,freq,end,level=1)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=noiseBuffer(ctx);f.type=filterType;f.frequency.setValueAtTime(freq,t);f.Q.value=.7;g.gain.setValueAtTime(Math.max(.0001,vel*level),t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.025,end));s.connect(f);f.connect(g);g.connect(out);s.start(t);s.stop(t+Math.max(.03,end));srcs.push(s);return g};
  const sb=sampleBufferFor(index);let fadeDur=dur;
  if(sb){const sS=window.GLCTC_TUNING.attach(ctx.createBufferSource()),sG=ctx.createGain(),pr=Math.max(.05,pitch);sS.buffer=sb;sS.playbackRate.value=pr;sG.gain.setValueAtTime(vel,t);sS.connect(sG);sG.connect(out);sS.start(t);fadeDur=sb.duration/pr+.03;srcs.push(sS)}
- else if(type==='kick'){const len=Math.max(.12,dur),f1=Math.max(30,47*pitch),sat=blSat(ctx,1.25);sat.connect(out);
-  const b=osc(f1*5.2,'sine',len+.03);b.g.disconnect();b.g.connect(sat);b.o.frequency.setValueAtTime(f1*5.2,t);b.o.frequency.exponentialRampToValueAtTime(f1*1.9,t+.011);b.o.frequency.exponentialRampToValueAtTime(f1*1.08,t+.06);b.o.frequency.exponentialRampToValueAtTime(f1,t+Math.min(.3,len));
+ else if(type==='kick'){const len=Math.max(.12,dur),f1=blKickHz(pitch),sat=blSat(ctx,1.25);sat.connect(out);
+  const b=osc(f1*5.2,'sine',len+.03);b.g.disconnect();b.g.connect(sat);b.o.frequency.setValueAtTime(f1*5.2,t);b.o.frequency.exponentialRampToValueAtTime(f1*1.9,t+.011);b.o.frequency.exponentialRampToValueAtTime(f1*1.03,t+.04);b.o.frequency.exponentialRampToValueAtTime(f1,t+.085);
   b.g.gain.setValueAtTime(0,t);b.g.gain.linearRampToValueAtTime(vel*.92,t+.0015);b.g.gain.setValueAtTime(vel*.92,t+Math.min(.03,len*.2));b.g.gain.exponentialRampToValueAtTime(.0001,t+len);
-  const h=osc(f1*2.05,'triangle',.1);h.g.disconnect();h.g.connect(sat);h.o.frequency.setValueAtTime(f1*2.05,t);h.o.frequency.exponentialRampToValueAtTime(f1*1.6,t+.05);h.g.gain.setValueAtTime(0,t);h.g.gain.linearRampToValueAtTime(vel*.2,t+.001);h.g.gain.exponentialRampToValueAtTime(.0001,t+.07);
+  const h=osc(f1*2.6,'triangle',.1);h.g.disconnect();h.g.connect(sat);h.o.frequency.setValueAtTime(f1*2.6,t);h.o.frequency.exponentialRampToValueAtTime(f1*2,t+.03);h.g.gain.setValueAtTime(0,t);h.g.gain.linearRampToValueAtTime(vel*.2,t+.001);h.g.gain.exponentialRampToValueAtTime(.0001,t+.07);
   noise('bandpass',3800,.008,.75);noise('highpass',6000,.004,.3)}
  else if(type==='snare'){const len=Math.min(.5,Math.max(.09,dur)),sat=blSat(ctx,1.3);sat.connect(out);
-  const a=osc(205,'triangle',.2);a.g.disconnect();a.g.connect(sat);a.o.frequency.exponentialRampToValueAtTime(Math.max(60,182*pitch),t+.03);a.g.gain.setValueAtTime(0,t);a.g.gain.linearRampToValueAtTime(vel*.6,t+.001);a.g.gain.exponentialRampToValueAtTime(.0001,t+Math.min(.16,len*.7));
-  const b=osc(338,'sine',.12);b.g.disconnect();b.g.connect(sat);b.o.frequency.exponentialRampToValueAtTime(Math.max(80,300*pitch),t+.025);b.g.gain.setValueAtTime(0,t);b.g.gain.linearRampToValueAtTime(vel*.3,t+.001);b.g.gain.exponentialRampToValueAtTime(.0001,t+.08);
+  const sn=blSnap(182*pitch,150,260),a=osc(sn*1.12/pitch,'triangle',.2);a.g.disconnect();a.g.connect(sat);a.o.frequency.exponentialRampToValueAtTime(Math.max(60,sn),t+.03);a.g.gain.setValueAtTime(0,t);a.g.gain.linearRampToValueAtTime(vel*.6,t+.001);a.g.gain.exponentialRampToValueAtTime(.0001,t+Math.min(.16,len*.7));
+  const b=osc(sn*1.68/pitch,'sine',.12);b.g.disconnect();b.g.connect(sat);b.o.frequency.exponentialRampToValueAtTime(Math.max(80,sn*1.5),t+.025);b.g.gain.setValueAtTime(0,t);b.g.gain.linearRampToValueAtTime(vel*.3,t+.001);b.g.gain.exponentialRampToValueAtTime(.0001,t+.08);
   noise('bandpass',2400,len*.85,.78);noise('highpass',5200,len*.6,.62);noise('highpass',9000,.016,.48)}
  else if(type==='clap'){const tail=Math.min(.45,Math.max(.12,dur));[0,.0105,.021,.031].forEach((d,j)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain(),last=j===3,end=last?tail:.011,at=t+d;s.buffer=noiseBuffer(ctx);f.type='bandpass';f.frequency.value=1250+j*60;f.Q.value=1.4;g.gain.setValueAtTime(.0001,t);g.gain.setValueAtTime(vel*(last?1:.82),at);g.gain.exponentialRampToValueAtTime(.0001,at+end);s.connect(f);f.connect(g);g.connect(out);s.start(t,Math.random()*1.4);s.stop(at+end+.03);srcs.push(s)});
   noise('highpass',4200,Math.min(.18,tail),.2)}
@@ -3191,7 +3194,7 @@ function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;
   src.buffer=blMetal(ctx);src.playbackRate.value=Math.max(.5,Math.min(2,pitch));bp.type='bandpass';bp.frequency.value=cl?10500:9000;bp.Q.value=.8;hp.type='highpass';hp.frequency.value=cl?7800:6800;hp.Q.value=.7;
   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vel*(cl?1.1:.9),t+.001);g.gain.exponentialRampToValueAtTime(.0001,t+end);src.connect(bp);bp.connect(hp);hp.connect(g);g.connect(out);src.start(t,Math.random()*.6,end+.05);srcs.push(src);
   noise('highpass',cl?9500:8000,end*.8,cl?.22:.2);fadeDur=Math.max(fadeDur,end);if(!cl)blOH={g,t}}
- else if(type==='toml'||type==='tomm'||type==='conga'){const cg=type==='conga',base=type==='toml'?98:type==='tomm'?148:205,len=Math.min(cg?.45:.9,Math.max(.08,dur));
+ else if(type==='toml'||type==='tomm'||type==='conga'){const cg=type==='conga',raw=type==='toml'?98:type==='tomm'?148:205,base=blSnap(raw*pitch,raw*.8,raw*1.25)/pitch,len=Math.min(cg?.45:.9,Math.max(.08,dur));
   const {o,g}=osc(base*(cg?1.25:1.7),'sine',len+.02);o.frequency.exponentialRampToValueAtTime(Math.max(35,base*pitch),t+(cg?.02:.06));g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel,t+.0015);g.gain.exponentialRampToValueAtTime(.0001,t+len);
   const h=osc(base*(cg?2.45:1.5),cg?'sine':'triangle',len*.5);h.o.frequency.exponentialRampToValueAtTime(Math.max(40,base*(cg?2.3:1.25)*pitch),t+.04);h.g.gain.setValueAtTime(0,t);h.g.gain.linearRampToValueAtTime(vel*(cg?.28:.16),t+.001);h.g.gain.exponentialRampToValueAtTime(.0001,t+len*.45);
   noise('bandpass',cg?2400:1500,cg?.03:.022,cg?.38:.3)}
@@ -3456,7 +3459,7 @@ const PRESETS=[
  ['808 Long Boom',{wave:0,drive:.12,harm:.16,cut:150,a:.002,d:1.4,s:.2,r:.4,glide:.05,penv:5,ptime:.04}],
  ['808 Glide',{wave:0,drive:.16,harm:.18,cut:160,a:.002,d:1.6,s:.4,r:.35,glide:.14,penv:4,ptime:.04}],
  ['Drill Slide 808',{wave:0,drive:.2,harm:.2,cut:170,a:.002,d:1.8,s:.45,r:.4,glide:.18,penv:4,ptime:.05}],
- ['Deep House Round',{wave:0,sub2:.12,drive:.05,harm:.14,cut:140,a:.006,d:.4,s:.9,r:.18,glide:.02,penv:1}],
+ ['Deep House Round',{wave:0,sub2:.12,drive:.05,harm:.14,cut:140,a:.006,d:.4,s:.9,r:.18,glide:.02,penv:0}],
  ['Garage Sub Wobble',{wave:0,drive:.05,harm:.14,cut:130,a:.005,d:.4,s:.95,r:.16,glide:.03,lfoRate:4,lfoDepth:.3,lfoTgt:0}],
  ['Techno Rumble',{wave:0,drive:.14,harm:.12,cut:110,res:1.2,a:.004,d:.35,s:.8,r:.15,penv:2,lfoRate:.3,lfoDepth:.25,lfoTgt:1}],
  ['Trance Offbeat Sub',{wave:0,drive:.05,harm:.14,cut:130,a:.003,d:.22,s:.65,r:.1,penv:2}],
@@ -7552,7 +7555,7 @@ function composerRecipe(genre){
   melodictechno:{bl:[comp(-14,3,.006)],mine:[hpf(320)],lee:[comp(-14,3,.008),wah(900,.35,11,5)],s101:[chorus(.3,.4,.3),dly(7,.4,.18)],go:[pp(7,.42,.2),chorus(.25,.35,.25)],vox:[dly(7,.4,.2)],ws:[comp(-14,3,.005)],lp:[hpf(180)]},
   meditation:{bl:[lpf(4000)],mine:[lpf(5000)],lee:[lpf(500)],s101:[chorus(.2,.5,.45),pp(9,.55,.22)],go:[chorus(.2,.5,.4),pp(9,.55,.22)],vox:[pp(9,.55,.22)],ws:[lpf(6000)],lp:[lpf(4000)]}
  });
- Object.assign(R.westcoast,{lee:[od(.45,.45,3000),comp(-12,4,.006)],s101:[comp(-14,3,.004)],go:[comp(-15,3,.004)]});   /* v125: dry punchy piano, gritty bass */   /* v120b: Moog warmth, clav auto-wah, whine lead in stereo echo */
+ Object.assign(R.westcoast,{bl:[comp(-12,4,.003,.08),sat(.22,.4,14000)],lee:[od(.4,.4,2800),comp(-12,4,.006)],s101:[comp(-14,3,.004),chorus(.3,.25,.2)],go:[comp(-15,3,.004)]});   /* v127: knocking drums, gritty 808, dry piano */   /* v125: dry punchy piano, gritty bass */   /* v120b: Moog warmth, clav auto-wah, whine lead in stereo echo */
  Object.assign(R.ukhiphop,{lee:[od(.3,.4,4000),comp(-14,3,.01)]});
  GLCTC_GFILL(R);
  /* v125 BASS THAT TRANSLATES: every genre's bassline gets harmonic overdrive (parallel mix) so it is heard on phones / laptops,
@@ -8088,9 +8091,9 @@ const L3=(d,a,b,c)=>{d.layers[0]=Object.assign({},d.layers[0],{on:true,oct:0,sem
 const SY=(name,o,fn)=>[name,d=>{Object.assign(d,{lfoAmt:0,glide:0,bitcrush:0,sub:0,noise:0},o);fn&&fn(d)}];
 defs.s101.push(
  SY('Brass · Jump Up Hoover',{wave:'sawtooth',cut:2400,res:4,env:.55,attack:.008,decay:.3,sustain:.35,release:.15,drive:.25,delay:.1,reverb:.12,chorus:.6,glide:.05,level:.62},d=>L3(d,{wave:'sawtooth',detune:-18,level:.6},{wave:'sawtooth',detune:18,level:.55},{on:true,wave:'square',oct:-1,level:.3})),
- SY('Pad · Deep Dub Chord',{wave:'sawtooth',cut:1300,res:3,env:.4,attack:.003,decay:.35,sustain:.1,release:.35,drive:.03,delay:.35,feedback:.5,reverb:.28,chorus:.4,level:.6},d=>L3(d,{wave:'sawtooth',level:.55},{wave:'sawtooth',semi:7,detune:5,level:.45},{on:true,wave:'triangle',oct:1,semi:2,level:.3})),
+ SY('Pad · Deep Dub Chord',{wave:'sawtooth',cut:1300,res:3,env:.4,attack:.003,decay:.35,sustain:.1,release:.35,drive:.03,delay:.35,feedback:.5,reverb:.28,chorus:.4,level:.6},d=>L3(d,{wave:'sawtooth',level:.55},{wave:'sawtooth',semi:7,detune:5,level:.45},{on:true,wave:'triangle',oct:1,semi:0,level:.3})),
  SY('Keys · Amapiano Piano',{wave:'triangle',cut:4600,res:1,env:.4,attack:.001,decay:.7,sustain:.1,release:.45,drive:.03,delay:.12,reverb:.2,chorus:.15,level:.66},d=>L3(d,{wave:'triangle',level:.72},{wave:'sine',oct:1,level:.22},{on:true,wave:'sine',semi:7,level:.25})),
- SY('Phonk · Cowbell Lead',{wave:'square',cut:3200,res:3,env:.35,attack:.001,decay:.16,sustain:0,release:.12,drive:.25,delay:.12,feedback:.3,reverb:.08,chorus:0,level:.6},d=>L3(d,{wave:'square',oct:1,level:.6},{wave:'square',oct:1,semi:7,level:.42}))
+ SY('Phonk · Cowbell Lead',{wave:'square',cut:3200,res:3,env:.35,attack:.001,decay:.16,sustain:0,release:.12,drive:.25,delay:.12,feedback:.3,reverb:.08,chorus:0,level:.6},d=>L3(d,{wave:'square',oct:1,level:.6},{wave:'square',oct:2,level:.3}))   /* v128 in key: octave instead of a parallel fifth */
 );
 })();
 
@@ -8119,6 +8122,15 @@ defs.s101.push(['Keys · G-Funk Piano',d=>{Object.assign(d,{lfoAmt:0,glide:0,bit
 (()=>{const tm=window.__glctcTuneMine;
 defs.mine.push(['Tops · Afro Shaker Bright',d=>{Object.assign(d,{kit:'909',swing:.12});if(tm)tm(d,'clean');d.hat=.95;d.filter=1;d.room=.08;d.drive=.04}]);
 defs.lee.push(['Bass · Afro Deep Pluck',d=>{Object.assign(d,{wave:'triangle',cutoff:360,resonance:3,envMod:.3,decay:.18,drive:.06,sub:.5,level:.62,gate:.5,swing:.12,slideTime:.04,attack:.002});d.fx=Object.assign({},d.fx,{dist:.04,delay:0,feedback:.1,reverb:.02,wet:.05})}]);
+})();
+
+/* v127 GANGSTA WEST COAST SOUNDS */
+(()=>{const A=(d,i,o)=>{if(d.voices&&d.voices[i])Object.assign(d.voices[i],o)};
+defs.bl.push(['Kit · Gangsta Knock',d=>{d.swing=.07;d.voices.forEach(v=>Object.assign(v,{reverb:0,delay:0}));
+ A(d,0,{volume:1.25,decay:.6,tone:4200,pitch:-2,drive:.22});A(d,1,{volume:1.2,decay:.2,tone:15000,pitch:2,drive:.2,reverb:.1});A(d,2,{volume:1.1,decay:.2,tone:13000,reverb:.12});A(d,7,{volume:.5,tone:8000})}]);
+defs.lee.push(['Bass · West Coast 808',d=>{Object.assign(d,{wave:'triangle',cutoff:520,resonance:1,envMod:.1,decay:1.2,drive:.3,sub:1,level:.82,gate:1.1,swing:.07,slideTime:.14,attack:.002});d.fx=Object.assign({},d.fx,{dist:.25,delay:0,feedback:.1,reverb:0,wet:.1})}]);
+defs.s101.push(['Strings · Gangsta Stab',d=>{Object.assign(d,{lfoAmt:0,glide:0,bitcrush:0,sub:0,noise:0,wave:'sawtooth',cut:3000,res:1,env:.35,attack:.005,decay:.35,sustain:.1,release:.3,drive:.02,delay:.05,reverb:.25,chorus:.35,level:.6});
+ d.layers[0]=Object.assign({},d.layers[0],{on:true,oct:0,semi:0,detune:-9,wave:'sawtooth',level:.55});d.layers[1]=Object.assign({},d.layers[1],{on:true,oct:0,semi:0,detune:9,wave:'sawtooth',level:.55});d.layers[2]=Object.assign({},d.layers[2],{on:true,oct:-1,semi:0,detune:0,wave:'sawtooth',level:.3})}]);
 })();
 
 /* ===== v81 WORLD & INSTRUMENT GENRE PACK: one new texture preset per genre for every module =====
@@ -8553,7 +8565,7 @@ panel.innerHTML=`<style>
  <div><label for="gscBpm">AI → MASTER BPM</label><strong id="gscBpm" style="display:block;padding:8px 4px;color:#f2ca70">130</strong><small style="display:block;opacity:.72">AI sets the DAW master; all modules follow</small></div>
  <div><label for="gscKey">AI → KEY / SCALE</label><strong id="gscKey" style="display:block;padding:8px 4px;color:#f2ca70">C MINOR</strong><small style="display:block;opacity:.72">One key shared by every generated pattern</small></div>
  <div><label for="gscLen">LENGTH</label><select id="gscLen"><option value="full">FULL SONG · genre structure · 3–5 min</option><option value="demo">Demo · 36 bars</option><option value="16">16 bars</option><option value="32">32 bars</option><option value="64">64 bars</option><option value="radio">Radio · verse/chorus · 60 bars</option><option value="epic">EPIC · festival · 104 bars</option><option value="club">Club extended · 136 bars</option></select></div>
- <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px"><input id="gscLoop" type="checkbox">LOOP SONG</label></div>
+ <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px"><input id="gscLoop" type="checkbox">LOOP SONG</label><button id="gscShuffle" type="button" title="When a song ends: OFF = stop / loop as set · SAME GENRE = a brand-new song in this genre · ANY GENRE = a new song in a random genre" style="display:block;width:100%;margin:0 0 9px;padding:9px 10px;border-radius:10px;border:2px solid #f2ca70;background:#221b0c;color:#f2ca70;font-weight:800;letter-spacing:.08em;font-size:12px;cursor:pointer">🔀 SHUFFLE · OFF</button></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Off = every module plays straight 16ths, perfectly locked. On = the drums, bass and Galactic One swing together in the genre&#39;s groove."><input id="gscSwing" type="checkbox" checked>SWING GROOVE</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="On = the song's home note is the chakra frequency you selected (A4 = chakra Hz, so the key is A at that tuning) and the bass / leads stay in a natural register. Off = the genre picks its own key."><input id="gscChakraKey" type="checkbox">KEY FROM CHAKRA</label></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Builds rise through a high-pass filter, the last beat drops out, and the drop hits at full weight"><input id="gscEpic" type="checkbox" checked>EPIC BUILDS &amp; DROPS</label></div>
  <div title="Genre sound character on the master: EQ, glue compression, saturation, reverb and tempo delay sends per module, and sidechain pump from the kick. Applies to the Song Composer AND the Master Controller PLAY."><label for="gscChar">✺ SOUND CHARACTER</label><select id="gscChar"><option value="auto">AUTO · follows the genre</option><option value="off">OFF · clean / factory</option></select><label for="gscCharAmt" style="margin:6px 0 2px">INTENSITY <b id="gscCharVal" style="color:#f2ca70">100%</b></label><input id="gscCharAmt" type="range" min="0" max="150" step="5" value="100" style="width:100%;accent-color:#d8ae4e"></div>
@@ -9802,6 +9814,23 @@ const PAT=(()=>{
    ['x.x...x.x.x.....','x.x...x.x.x.x...',[0,4,7,4,0,4,6,4]],['x...x.x...x.x...','x...x.x...x.x.x.',[7,6,4,6,7,6,4,2]],['x.xx..x.x.xx..x.','x.xx..x.........',[4,6,7,6,4,6,4,2]],['x..x..x...x..x..','x..x..x...x.....',[0,2,4,7,4,2,0,2]]][i%6];
   B.lead={rh:[R[0],R[1]],m:R[2],g:.45};B.stab='x.......x.......';B.bass=B.bass.map(x=>x.replace(/\./g,(c,j)=>j%8===0?'r':c))});
  G.westcoast.seventh=0;
+
+ /* v127 WEST COAST = GANGSTA RAP: near-straight groove, hard kick, snare + clap stacked on 2 & 4, crisp 8th hats, long sliding 808s,
+    a cold minor piano riff in octaves (b6 to 5 movement) as the hook and string stabs. Six original beats. */
+ G.westcoast.swing=.07;G.westcoast.scale='minor';G.westcoast.seventh=0;
+ G.westcoast.beats=[
+  {name:'COMPTON',prog:[0,5],gr:{K:'X......X..X.....',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.x.x.',f:{O:'..............x.',S:'....X.......X.XX'}},
+   bass:['R.........r.....','R.........r..o..'],lead:{rh:['x.x.x.x.x.x.x.x.','x.x.x.x.x.x.x.x.'],m:[7,7,5,4,7,7,5,4],g:.4},stab:'x.....x.........',vox:'x...............'},
+  {name:'LONG BEACH',prog:[0,6],gr:{K:'X.....X...X.....',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.xxx.',f:{O:'......x.......x.'}},
+   bass:['R.....r...R.....','R.....r...o.....'],lead:{rh:['x..x..x.x..x..x.','x..x..x.x.......'],m:[0,0,5,4],g:.5},stab:'...x.......x....',vox:'........x.......'},
+  {name:'INGLEWOOD',prog:[5,4],gr:{K:'X..X......X.....',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.x.x.',R:'..........g.....',f:{K:'X..X......X..X..'}},
+   bass:['R.......R.......','R.......o...r...'],lead:{rh:['x...x...x...x...','x...x...x.x.x...'],m:[7,5,4,2],g:1},stab:'x.......x.......',vox:'x...............'},
+  {name:'SOUTH CENTRAL',prog:[0,3],gr:{K:'X......XX.......',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.x.x.',f:{O:'..............x.'}},
+   bass:['R......rR.......','R......rR...o...'],lead:{rh:['x.x.x...x.x.x...','x.x.x...x.x.x.x.'],m:[4,4,5,4,7,5,4,2],g:.4},stab:'..x.......x.....',vox:'x.......x.......'},
+  {name:'MIDNIGHT RIDE',prog:[0,1],gr:{K:'X.........X.x...',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.x.x.',f:{O:'..x...........x.'}},
+   bass:['R...........r...','R.......o...r...'],lead:{rh:['x.......x.......','x.......x...x...'],m:[7,5],g:2},stab:'x.x.....x.x.....',vox:'x...............'},
+  {name:'WATTS',prog:[0,5],gr:{K:'X......X..X..X..',S:'....X.......X...',C:'....X.......X...',H:'x.x.x.x.x.x.x.x.',f:{S:'....X.......X..X'}},
+   bass:['R..r......R.....','R..r......o.....'],lead:{rh:['xx..xx..xx..xx..','xx..xx..x.x.x...'],m:[7,7,4,4,5,5,4,2],g:.3},stab:'x...............',vox:'........x.......'}];
  const ROLE={bl:{K:0,S:1,C:2,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{H:3,O:4,B:9,Z:10}};
  const GLIDE={trap:.55,dubstep:.25,techno:.08,psytrance:0,dnb:.15,drill:.6,south:.45,westcoast:.45,electro:.12,jungle:.32,nuskool:.2,ukhiphop:.15,amapiano:.35,phonk:.55,melodictechno:.05,afrohouse:.05,deephouse:.06};let REG=0;   /* REG: register shift (octaves) that keeps the chakra-tuned song in a natural range */
  let F={g:'techno',H:[0,0]},Gg=G.techno;
@@ -10256,7 +10285,7 @@ function chooseComposerBpm(genreKey,promptText){
  const asked=explicit?Number(explicit[1]||explicit[2]):NaN;
  if(Number.isFinite(asked))return Math.max(30,Math.min(300,Math.round(asked*10)/10));
  /* Genre defaults are applied only when GENERATE is pressed, never just by changing genre. */
- const range=GLCTC_GFILL({amapiano:[110,114],afrohouse:[120,124],phonk:[126,140],melodictechno:[122,126],deephouse:[118,122],techhouse:[124,128],tribalhouse:[124,128],hardhouse:[145,150],happyhardcore:[170,178],jungle:[172,176],liquid:[172,175],nuskool:[130,136],electro:[118,128],westcoast:[88,96],eastcoast:[86,94],south:[70,78],ukhiphop:[138,142],drill:[140,144],reggae:[72,80],ska:[150,165],meditation:[60,68],techno:[126,136],house:[120,126],dnb:[170,176],hiphop:[84,96],ambient:[70,90],pop:[110,124],trance:[136,140],psytrance:[142,148],dubstep:[140,140],garage:[128,134],breaks:[124,136],synthwave:[90,112],trap:[132,150],lofi:[72,88]})[genreKey]||[126,134];
+ const range=GLCTC_GFILL({amapiano:[110,114],afrohouse:[120,124],phonk:[126,140],melodictechno:[122,126],deephouse:[118,122],techhouse:[124,128],tribalhouse:[124,128],hardhouse:[145,150],happyhardcore:[170,178],jungle:[158,158],liquid:[172,175],nuskool:[130,136],electro:[118,128],westcoast:[88,96],eastcoast:[86,94],south:[70,78],ukhiphop:[138,142],drill:[140,144],reggae:[72,80],ska:[150,165],meditation:[60,68],techno:[126,136],house:[120,126],dnb:[158,158],hiphop:[84,96],ambient:[70,90],pop:[110,124],trance:[136,140],psytrance:[142,148],dubstep:[140,140],garage:[128,134],breaks:[124,136],synthwave:[90,112],trap:[132,150],lofi:[72,88]})[genreKey]||[126,134];
  return range[0]+Math.floor(Math.random()*(range[1]-range[0]+1));
 }
 function setMasterBpmFromComposer(value){
@@ -10588,7 +10617,7 @@ Object.assign(GO_EDGE,{jungle:['F|HOOVER LEAD','F|BREAKBEAT HOOVER','F|RAVE STAB
  phonk:['F|TRAP BELLS','F|FM BELL','F|SOUTHERN · DIRTY BELL LEAD'],melodictechno:['F|TRANCE ARP PLUCK','F|DARK ATMOS','F|WARP PAD','F|ARP PLUCK']});
 Object.assign(VOX_EDGE,{jungle:['MEGAPHONE','JUNGLE · RAGGA SHOUT','ROOTS HARMONY'],amapiano:['SOUL OOH','SOUL SISTER','GOSPEL STACK'],afrohouse:['TRIBAL CHANT','AFRO CHANT','OOH CHOIR'],phonk:['TRAP TRIPLE','DEMON','TELEPHONE'],melodictechno:['WHISPER','ANGEL','AAH CHOIR']});
 {const mg=(g,o)=>{PAL_FIX[g]=Object.assign({},PAL_FIX[g],o)};   /* v120b */
- mg('westcoast',{bl:[['Kit · West Coast Punch',5],['Kit · G-Funk Lowrider',1]],mine:[['Tops · West Coast Clean',5]],lee:[['Bass · G-Funk Moog',4],['Bass · G-Funk Synth',1]],s101:[['Keys · G-Funk Piano',5]]});
+ mg('westcoast',{bl:[['Kit · Gangsta Knock',5],['Kit · West Coast Punch',2]],mine:[['Tops · West Coast Clean',5]],lee:[['Bass · West Coast 808',5]],s101:[['Strings · Gangsta Stab',4],['Keys · G-Funk Piano',1]]});
  GO_EDGE.westcoast=['F|GRAND KEYS','F|HOUSE PIANO','F|GRAND KEYS'];VOX_EDGE.westcoast=['SOUL OOH','GOSPEL STACK'];
  mg('eastcoast',{bl:[['Kit · Boom Bap Dusty',3],['Kit · Boom Bap',2]]});
  mg('hiphop',{bl:[['Kit · Boom Bap Dusty',2],['Hip-Hop · Dusty Boom Bap',2]]});
@@ -11237,12 +11266,14 @@ STK['G-Funk Lowrider']=[{s:'Classic Rhodes',part:'chords',style:'ballad',vol:.5,
 
 STK['West Coast Piano & Strings']=[{s:'Concert Grand',part:'chords',style:'stab',vol:.62,pan:-.1,rev:.16},{s:'Upright Piano',part:'stabs',style:'stab',vol:.42,pan:.25,rev:.14,roles:['verse','drop']},
  {s:'Lush Strings',part:'pad',vol:.4,rev:.32,roles:['drop','break','intro']},{s:'Brass Section',part:'stabs',style:'stab',vol:.38,pan:-.2,rev:.18,roles:['drop','build']},{s:'Tenor Sax',part:'melody',vol:.3,pan:.2,rev:.28,dly:.2,roles:['break']}];
-MATCH.westcoast=['West Coast Piano & Strings','grand piano chords · upright piano hits · lush strings on the hook · brass stabs · sax in the break'];
+STK['West Coast Piano & Strings']=[{s:'Concert Grand',part:'chords',style:'stab',vol:.6,pan:-.12,rev:.14},{s:'Staccato Strings',part:'stabs',style:'stab',vol:.45,pan:.35,rev:.18,roles:['verse','drop','build']},{s:'Low Strings',part:'pad',vol:.4,rev:.3,roles:['drop','break','intro']},{s:'Brass Section',part:'stabs',style:'stab',vol:.34,pan:-.3,rev:.16,roles:['drop']}];   /* v127 gangsta band: piano, staccato strings, low strings, brass hits */
+MATCH.westcoast=['West Coast Piano & Strings','grand piano · staccato strings · low strings · brass hits'];
 Object.assign(MATCH,{westcoast:['G-Funk Lowrider','Rhodes 7ths · high whine lead · Solina strings · muted funk guitar · clavinet · synth brass'],
  eastcoast:['Boom Bap Crate','chopped piano stabs · muted trumpet · vibes · horn stabs · strings · jazz guitar'],
  ukhiphop:['Grime Strings & Square','staccato strings · square lead · pizzicato · male choir'],
  south:['Crunk Brass & Bells','big band brass stabs · bell melody · dark pad · gospel choir']});
-MATCH.westcoast=['West Coast Piano & Strings','grand piano chords · upright piano hits · lush strings on the hook · brass stabs · sax in the break'];
+STK['West Coast Piano & Strings']=[{s:'Concert Grand',part:'chords',style:'stab',vol:.6,pan:-.12,rev:.14},{s:'Staccato Strings',part:'stabs',style:'stab',vol:.45,pan:.35,rev:.18,roles:['verse','drop','build']},{s:'Low Strings',part:'pad',vol:.4,rev:.3,roles:['drop','break','intro']},{s:'Brass Section',part:'stabs',style:'stab',vol:.34,pan:-.3,rev:.16,roles:['drop']}];   /* v127 gangsta band: piano, staccato strings, low strings, brass hits */
+MATCH.westcoast=['West Coast Piano & Strings','grand piano · staccato strings · low strings · brass hits'];
 
 /* v126 WIDTH */
 {let k=0;for(const n in STK){const L=STK[n];if(!Array.isArray(L))continue;L.forEach(l=>{if(!l||l.part==='bass')return;const side=(k++%2?1:-1);if(l.part==='pad'||l.part==='chords'||l.part==='strum')l.pan=Math.max(-.85,Math.min(.85,(Math.abs(l.pan||0)<.2?side*.45:(l.pan||0)*1.6)));else if(l.part==='melody')l.pan=(l.pan||0)*.6})}}
@@ -14430,7 +14461,7 @@ function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))ret
  /* phrase variation inside long sections (the section-end fill is the composer's own) */
  if(sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
   for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats;if(K.timeOfBeat(pb-2)<now+.05)continue;const big=p%8===0;
-   if(sec.kind==='break'&&!big)continue;fill(K,pb,big,st);if(big&&sec.kind!=='break')bassOut(K,pb-1,pb)}}
+   if(sec.kind==='break'&&!big)continue;fill(K,pb,big,st)}}   /* v128: no mid-section bass cut (it read as a glitch) */
  /* final-chorus key lift */
  const lastDrop=T.secs.map((x,j)=>x.kind==='drop'?j:-1).filter(j=>j>=0).pop(),cents=LIFT[g]||0;
  if(cents&&lastDrop!=null&&i+1===lastDrop&&T.secs[lastDrop].bars>=8&&T.secs.filter(x=>x.kind==='drop').length>=2){try{GLCTC_TUNING.lift(cents,K.timeOfBeat(eb));lifted=true;
@@ -14469,6 +14500,26 @@ function mkUi(){const sel=document.getElementById('gscGenre');if(!sel){setTimeou
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mkUi,{once:true});else mkUi();
 })();
 
+</script>
+<script id="glctc1-v127-shuffle">
+/* v127 SHUFFLE: when a song finishes, start a brand-new one instead of repeating (same genre, or any genre) */
+(()=>{'use strict';const LS='glctc1.shuffle',MODES=['off','genre','any'],LBL={off:'🔀 SHUFFLE · OFF',genre:'🔀 SHUFFLE · SAME GENRE',any:'🔀 SHUFFLE · ANY GENRE'};
+let mode='off';try{mode=localStorage.getItem(LS)||'off';if(!MODES.includes(mode))mode='off'}catch(e){}
+const $=id=>document.getElementById(id);let busy=false,wasRunning=false,lastBeat=0,total=0,bb=4;
+function paint(){const b=$('gscShuffle');if(!b)return;b.textContent=LBL[mode];const on=mode!=='off';b.style.background=on?'#f2ca70':'#221b0c';b.style.color=on?'#1a1406':'#f2ca70';b.setAttribute('aria-pressed',String(on))}
+function loopOff(){const l=$('gscLoop');if(l&&l.checked){l.checked=false;l.dispatchEvent(new Event('change',{bubbles:true}))}}
+function wire(){const b=$('gscShuffle');if(!b){setTimeout(wire,500);return}b.onclick=()=>{mode=MODES[(MODES.indexOf(mode)+1)%MODES.length];try{localStorage.setItem(LS,mode)}catch(e){}if(mode!=='off')loopOff();paint()};paint();
+ const l=$('gscLoop');if(l)l.addEventListener('change',()=>{if(l.checked&&mode!=='off'){mode='off';try{localStorage.setItem(LS,mode)}catch(e){}paint()}})}
+async function next(){if(busy)return;busy=true;try{const sel=$('gscGenre');if(mode==='any'&&sel){const opts=[...sel.options].map(o=>o.value).filter(v=>v&&!/^(surprise|ambient|meditation)$/.test(v));
+  const cur=sel.value;let g=cur;for(let k=0;k<6&&g===cur;k++)g=opts[Math.floor(Math.random()*opts.length)];sel.value=g;sel.dispatchEvent(new Event('change',{bubbles:true}))}
+ await GLCTC_SONG.generate();loopOff();await new Promise(r=>setTimeout(r,400));try{glctcTimeline.setHead(0)}catch(e){}GLCTC_SONG.play()}catch(e){console.warn('shuffle',e)}finally{setTimeout(()=>{busy=false},1500)}}
+setInterval(()=>{let run=false;try{run=GLCTC_SONG.running()}catch(e){}
+ if(run){try{const T=GLCTC_SONG.timeline();if(T){total=T.total;bb=T.barBeats;lastBeat=GLCTC_CLOCK.beatAt(GLCTC_AUDIO().currentTime)}}catch(e){}if(mode!=='off')loopOff()}
+ else if(wasRunning&&mode!=='off'&&total>0&&lastBeat>=total-2*bb){total=0;next()}
+ wasRunning=run},250);
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',wire,{once:true});else wire();
+window.GLCTC_SHUFFLE={mode:()=>mode,set:m=>{if(MODES.includes(m)){mode=m;try{localStorage.setItem(LS,mode)}catch(e){}if(mode!=='off')loopOff();paint()}}};
+})();
 </script>
 <script id="glctc1-v120-nature">
 /* ===== v120 MEDITATION JOURNEY ENGINE =====

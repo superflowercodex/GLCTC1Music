@@ -103,6 +103,12 @@ window.GLCTC_GLIDE=function(root,sel,on,off){if(!root||root.__glide)return;root.
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GLCTC1 DAW">
+<script>(function(){try{const d=Object.getOwnPropertyDescriptor(ConvolverNode.prototype,'buffer');if(!d||!d.set)return;
+ /* v139 CPU: module-internal reverb impulses longer than 1.8 s are cut to 1.8 s with a smooth fade (the master hall, 2.8 s+, is untouched) -
+    the tail past 1.8 s sits 40 dB down under the mix but cost a quarter of all reverb processing */
+ Object.defineProperty(ConvolverNode.prototype,'buffer',{configurable:true,get:d.get,set(b){try{if(b&&b.duration>1.85&&b.duration<2.8){const sr=b.sampleRate,n=Math.floor(1.8*sr),f=Math.floor(n*.3),o=this.context.createBuffer(b.numberOfChannels,n,sr);
+  for(let ch=0;ch<b.numberOfChannels;ch++){const a=b.getChannelData(ch),z=o.getChannelData(ch);for(let i=0;i<n;i++)z[i]=a[i]*(i<n-f?1:(n-i)/f)}b=o}}catch(e){}d.set.call(this,b)}})}catch(e){}})();
+window.__gate=(function(){const W=new WeakMap();return(src,dst,on)=>{try{let m=W.get(src);if(!m){m=new Map();W.set(src,m)}const was=m.has(dst)?m.get(dst):true;if(on&&!was){src.connect(dst);m.set(dst,true)}else if(!on&&was){src.disconnect(dst);m.set(dst,false)}}catch(e){}}})();</script>
 <script>
 (function(){
  window.__glctcInstall=null;
@@ -3304,7 +3310,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
  function noiseBuffer(c){if(noise&&noise.sampleRate===c.sampleRate)return noise;noise=c.createBuffer(1,c.sampleRate*4,c.sampleRate);const d=noise.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;return noise}
  function getBus(c){if(bus&&bus.context===c)return bus;
   const master=c.createGain(),comp=c.createDynamicsCompressor(),toneFilter=c.createBiquadFilter(),crusher=c.createWaveShaper(),delay=c.createDelay(1.5),fbLP=c.createBiquadFilter(),feedback=c.createGain(),delayWet=c.createGain(),conv=c.createConvolver(),revWet=c.createGain(),shaper=c.createWaveShaper();
-  shaper.oversample='4x';toneFilter.type='lowpass';toneFilter.frequency.value=18000;crusher.curve=new Float32Array(2048).map((_,i)=>i*2/2047-1);master.gain.value=1;
+  shaper.oversample='2x';toneFilter.type='lowpass';toneFilter.frequency.value=18000;crusher.curve=new Float32Array(2048).map((_,i)=>i*2/2047-1);master.gain.value=1;
   comp.threshold.value=-16;comp.knee.value=10;comp.ratio.value=3.5;comp.attack.value=.003;comp.release.value=.14;
   fbLP.type='lowpass';fbLP.frequency.value=3200;
   GLCTC_CLOCK.syncDelay(delay,.75);feedback.gain.value=.3;delayWet.gain.value=.4;delay.connect(fbLP);fbLP.connect(feedback);feedback.connect(delay);delay.connect(delayWet);delayWet.connect(shaper);
@@ -3746,7 +3752,7 @@ window.addEventListener('glctc-tuning',()=>paintSteps());
  function renderSteps(){const root=$l('lee303Steps');root.innerHTML='';current().forEach((st,i)=>{const b=document.createElement('button');b.className='lee303-step'+(st.on?' on':'')+(st.accent?' accent':'')+(st.slide?' slide':'');b.dataset.step=i;b.innerHTML=`<b>${noteName(st.note)}</b><small>${String(i+1).padStart(2,'0')}</small>`;b.onclick=e=>{selected=i;if(e.shiftKey)st.accent=!st.accent;else st.on=!st.on;$l('lee303Note').value=st.note;$l('lee303NoteVal').textContent=noteName(st.note);save();renderSteps()};b.oncontextmenu=e=>{e.preventDefault();selected=i;st.slide=!st.slide;save();renderSteps()};b.onpointerdown=e=>{if(e.pointerType==='touch'&&e.shiftKey){st.accent=!st.accent;save();renderSteps()}};root.append(b)});$l('lee303Steps').querySelectorAll('button').forEach((b,i)=>{if(i%4===0)b.style.borderTopWidth='3px'});}
  const keyNotes=[36,37,38,39,40,41,42,43,44,45,46,47,48];function renderKeys(){const root=$l('lee303Keyboard');root.innerHTML='';keyNotes.forEach(n=>{const b=document.createElement('button');b.className='lee303-key'+([1,3,6,8,10].includes(n%12)?' black':'');b.textContent=noteName(n);b.dataset.n=n;b.ondblclick=()=>{current()[selected].note=n;$l('lee303Note').value=n;$l('lee303NoteVal').textContent=noteName(n);save();renderSteps()};root.append(b)});window.GLCTC_GLIDE&&GLCTC_GLIDE(root,'.lee303-key',(k,e,glide)=>{const n=+k.dataset.n;leeLiveOn(n,'p'+e.pointerId,glide);$l('lee303Status').textContent='LIVE NOTE · '+noteName(n)+(glide?' · SLIDE':'')},(k,e)=>leeLiveOff('p'+e.pointerId,+k.dataset.n))}
  function driveCurve(amount,crush=0){const n=2048,c=new Float32Array(n),k=1+amount*45,levels=Math.pow(2,Math.max(2,16-crush*13));for(let i=0;i<n;i++){const x=i*2/n-1,y=Math.tanh(k*x)/Math.tanh(k);c[i]=Math.round(y*levels)/levels}return c}
- function getFx(ctx,dest){let f=fxCache.get(ctx);if(!f){const input=ctx.createGain(),pre=ctx.createGain(),sh=ctx.createWaveShaper(),filter=ctx.createBiquadFilter(),dry=ctx.createGain(),delay=ctx.createDelay(2),fb=ctx.createGain(),dwet=ctx.createGain(),rev=ctx.createConvolver(),rwet=ctx.createGain(),out=ctx.createGain();input.connect(pre);pre.connect(sh);sh.connect(filter);filter.connect(dry);dry.connect(out);filter.connect(delay);delay.connect(dwet);dwet.connect(out);delay.connect(fb);fb.connect(delay);filter.connect(rev);rev.buffer=makeImpulse(ctx);rev.connect(rwet);rwet.connect(out);out.connect(dest);f={input,pre,sh,filter,dry,delay,fb,dwet,rev,rwet,out};fxCache.set(ctx,f)}f.sh.curve=driveCurve(S.fx.dist,S.fx.bitcrush);f.sh.oversample='4x';f.filter.type=S.filterMode||'lowpass';f.filter.frequency.setTargetAtTime(S.fx.filter,ctx.currentTime,.01);f.filter.Q.value=1+S.resonance*.25;f.delay.delayTime.value=60/(GLCTC_CLOCK.bpm)*.75;f.fb.gain.value=Math.min(.78,S.fx.feedback);f.dwet.gain.value=S.fx.delay*S.fx.wet;f.rwet.gain.value=S.fx.reverb*S.fx.wet;f.out.gain.value=S.level;return f}
+ function getFx(ctx,dest){let f=fxCache.get(ctx);if(!f){const input=ctx.createGain(),pre=ctx.createGain(),sh=ctx.createWaveShaper(),filter=ctx.createBiquadFilter(),dry=ctx.createGain(),delay=ctx.createDelay(2),fb=ctx.createGain(),dwet=ctx.createGain(),rev=ctx.createConvolver(),rwet=ctx.createGain(),out=ctx.createGain();input.connect(pre);pre.connect(sh);sh.connect(filter);filter.connect(dry);dry.connect(out);filter.connect(delay);delay.connect(dwet);dwet.connect(out);delay.connect(fb);fb.connect(delay);filter.connect(rev);rev.buffer=makeImpulse(ctx);rev.connect(rwet);rwet.connect(out);out.connect(dest);f={input,pre,sh,filter,dry,delay,fb,dwet,rev,rwet,out};fxCache.set(ctx,f)}f.sh.curve=driveCurve(S.fx.dist,S.fx.bitcrush);f.sh.oversample='2x';f.filter.type=S.filterMode||'lowpass';f.filter.frequency.setTargetAtTime(S.fx.filter,ctx.currentTime,.01);f.filter.Q.value=1+S.resonance*.25;f.delay.delayTime.value=60/(GLCTC_CLOCK.bpm)*.75;f.fb.gain.value=Math.min(.78,S.fx.feedback);f.dwet.gain.value=S.fx.delay*S.fx.wet;f.rwet.gain.value=S.fx.reverb*S.fx.wet;__gate(f.filter,f.rev,S.fx.reverb*S.fx.wet>.002);f.out.gain.value=S.level;return f}
  function makeImpulse(ctx){const len=Math.floor(ctx.sampleRate*1.8),b=ctx.createBuffer(2,len,ctx.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3)}return b}
  let LEE_LAST=null,LEE_SUB=null,leeLive=null;
  function voice(ctx,n,when,dur,accent,slide,prevFreq,dest){LEE_SUB=null;const freq=440*Math.pow(2,(n-69)/12)*Math.pow(2,S.octave);const out=ctx.createGain();out.gain.setValueAtTime(.0001,when);out.gain.linearRampToValueAtTime((accent?1+S.accent*.8:1)*.75,when+Math.max(.004,S.attack));const envEnd=when+Math.max(dur,S.decay*(accent?.72:1));
@@ -3811,7 +3817,7 @@ window.addEventListener('glctc-tuning',()=>paintSteps());
  let S={wave:'sawtooth',sub:1,noise:0,pulse:.5,cut:4200,res:5,env:0.55,attack:.008,decay:.18,sustain:.58,release:.22,lfoRate:4.5,lfoAmt:0,glide:.025,level:.72,drive:.12,delay:.12,delayTime:.28,feedback:.24,reverb:.12,chorus:.08,bitcrush:0,stutterRate:'1/16',arpRate:'1/8',arpMode:'up',arpOct:1,arpGate:.72,arpSwing:0,arpOn:false,arpLatch:false,hold:false,freeze:false,stutter:false,reverse:false, sample:null,sampleName:'No sample loaded',layers:[{on:true,oct:0,semi:0,detune:0,level:.8,wave:'sawtooth'},{on:true,oct:-1,semi:0,detune:-7,level:.34,wave:'square'},{on:false,oct:1,semi:0,detune:7,level:.25,wave:'triangle'}]};
  let bus=null,streamDest=null,recorder=null,recChunks=[],recording=false,audioStartBeat=0,midiRecording=false,midiTrack=null,midiClip=null,recordStartBeat=0,recordStartMs=0,held=new Map(),pressed=new Map(),arpTimer=null,arpIndex=0,arpLast=null,stutterTimer=null,lastMidi=60,lastVoice=null,lastTap=0,recNotes=new Map(),sampleReverseBuffer=null;
  const blackNotes=[1,3,6,8,10],noteNames=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
- function getBus(){if(bus)return bus;const c=ctx(),input=c.createGain(),filter=c.createBiquadFilter(),shaper=c.createWaveShaper(),crusher=c.createScriptProcessor(512,2,2),crushPost=c.createGain(),dry=c.createGain(),delay=c.createDelay(2),fb=c.createGain(),wet=c.createGain(),rev=c.createConvolver(),revWet=c.createGain(),chorus=c.createDelay(.06),chorusWet=c.createGain(),out=c.createGain();filter.type='lowpass';filter.Q.value=S.res;filter.frequency.value=S.cut;shaper.curve=driveCurve(S.drive);shaper.oversample='4x';delay.delayTime.value=S.delayTime;fb.gain.value=S.feedback;wet.gain.value=S.delay;rev.buffer=makeImpulse(c,2.1,2.2);revWet.gain.value=S.reverb;chorus.delayTime.value=.018;chorusWet.gain.value=S.chorus;input.connect(filter);filter.connect(shaper);shaper.connect(crushPost);crusher.onaudioprocess=e=>{const bits=Math.max(2,Math.round(16-S.bitcrush*13)),step=Math.pow(2,bits);for(let ch=0;ch<e.outputBuffer.numberOfChannels;ch++){const src=e.inputBuffer.getChannelData(Math.min(ch,e.inputBuffer.numberOfChannels-1)),dst=e.outputBuffer.getChannelData(ch);let heldSample=0;const stride=1+Math.round(S.bitcrush*24);for(let i=0;i<dst.length;i++){if(i%stride===0)heldSample=Math.round(src[i]*step)/step;dst[i]=heldSample}}};crushPost.connect(dry);dry.connect(out);crushPost.connect(delay);delay.connect(wet);wet.connect(out);delay.connect(fb);fb.connect(delay);crushPost.connect(rev);rev.connect(revWet);revWet.connect(out);crushPost.connect(chorus);chorus.connect(chorusWet);chorusWet.connect(out);out.connect(WSB('s101',masterGain||c.destination));streamDest=c.createMediaStreamDestination();out.connect(streamDest);bus={input,filter,shaper,crusher,crushPost,crushOn:false,dry,delay,fb,wet,rev,revWet,chorus,chorusWet,out};applyFx();return bus}
+ function getBus(){if(bus)return bus;const c=ctx(),input=c.createGain(),filter=c.createBiquadFilter(),shaper=c.createWaveShaper(),crusher=c.createScriptProcessor(512,2,2),crushPost=c.createGain(),dry=c.createGain(),delay=c.createDelay(2),fb=c.createGain(),wet=c.createGain(),rev=c.createConvolver(),revWet=c.createGain(),chorus=c.createDelay(.06),chorusWet=c.createGain(),out=c.createGain();filter.type='lowpass';filter.Q.value=S.res;filter.frequency.value=S.cut;shaper.curve=driveCurve(S.drive);shaper.oversample='2x';delay.delayTime.value=S.delayTime;fb.gain.value=S.feedback;wet.gain.value=S.delay;rev.buffer=makeImpulse(c,2.1,2.2);revWet.gain.value=S.reverb;chorus.delayTime.value=.018;chorusWet.gain.value=S.chorus;input.connect(filter);filter.connect(shaper);shaper.connect(crushPost);crusher.onaudioprocess=e=>{const bits=Math.max(2,Math.round(16-S.bitcrush*13)),step=Math.pow(2,bits);for(let ch=0;ch<e.outputBuffer.numberOfChannels;ch++){const src=e.inputBuffer.getChannelData(Math.min(ch,e.inputBuffer.numberOfChannels-1)),dst=e.outputBuffer.getChannelData(ch);let heldSample=0;const stride=1+Math.round(S.bitcrush*24);for(let i=0;i<dst.length;i++){if(i%stride===0)heldSample=Math.round(src[i]*step)/step;dst[i]=heldSample}}};crushPost.connect(dry);dry.connect(out);crushPost.connect(delay);delay.connect(wet);wet.connect(out);delay.connect(fb);fb.connect(delay);crushPost.connect(rev);rev.connect(revWet);revWet.connect(out);crushPost.connect(chorus);chorus.connect(chorusWet);chorusWet.connect(out);out.connect(WSB('s101',masterGain||c.destination));streamDest=c.createMediaStreamDestination();out.connect(streamDest);bus={input,filter,shaper,crusher,crushPost,crushOn:false,dry,delay,fb,wet,rev,revWet,chorus,chorusWet,out};applyFx();return bus}
  function makeImpulse(c,seconds,decay){const n=Math.floor(c.sampleRate*seconds),b=c.createBuffer(2,n,c.sampleRate);for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay)}return b}
  function driveCurve(amount){const n=2048,a=new Float32Array(n),k=1+Math.max(0,amount)*38;for(let i=0;i<n;i++){const x=i*2/n-1;a[i]=((1+k)*x)/(1+k*Math.abs(x))}return a}
  function applyFx(){if(!bus)return;
@@ -3824,7 +3830,7 @@ window.addEventListener('glctc-tuning',()=>paintSteps());
   if(route==='full'){bus.shaper.connect(bus.crusher);bus.crusher.connect(bus.crushPost)}else if(route==='light'){bus.shaper.connect(bus.lightCrusher);bus.lightCrusher.connect(bus.crushPost)}else bus.shaper.connect(bus.crushPost);
   bus.crushRoute=route;bus.crushOn=route!=='off';
  }
- bus.filter.frequency.setTargetAtTime(S.cut,ctx().currentTime,.015);bus.filter.Q.setTargetAtTime(S.res,ctx().currentTime,.015);bus.shaper.curve=driveCurve(S.drive);bus.delay.delayTime.setTargetAtTime(S.delayTime,ctx().currentTime,.02);bus.fb.gain.setTargetAtTime(Math.min(.88,S.feedback),ctx().currentTime,.02);bus.wet.gain.setTargetAtTime(S.delay,ctx().currentTime,.02);bus.revWet.gain.setTargetAtTime(S.reverb,ctx().currentTime,.02);bus.chorusWet.gain.setTargetAtTime(S.chorus,ctx().currentTime,.02);bus.dry.gain.value=S.freeze?.06:1;if(S.freeze){bus.fb.gain.setTargetAtTime(.92,ctx().currentTime,.02);bus.wet.gain.setTargetAtTime(.82,ctx().currentTime,.02)}else bus.fb.gain.setTargetAtTime(S.feedback,ctx().currentTime,.02)}
+ bus.filter.frequency.setTargetAtTime(S.cut,ctx().currentTime,.015);bus.filter.Q.setTargetAtTime(S.res,ctx().currentTime,.015);bus.shaper.curve=driveCurve(S.drive);bus.delay.delayTime.setTargetAtTime(S.delayTime,ctx().currentTime,.02);bus.fb.gain.setTargetAtTime(Math.min(.88,S.feedback),ctx().currentTime,.02);bus.wet.gain.setTargetAtTime(S.delay,ctx().currentTime,.02);bus.revWet.gain.setTargetAtTime(S.reverb,ctx().currentTime,.02);__gate(bus.crushPost,bus.rev,S.reverb>.002);bus.chorusWet.gain.setTargetAtTime(S.chorus,ctx().currentTime,.02);bus.dry.gain.value=S.freeze?.06:1;if(S.freeze){bus.fb.gain.setTargetAtTime(.92,ctx().currentTime,.02);bus.wet.gain.setTargetAtTime(.82,ctx().currentTime,.02)}else bus.fb.gain.setTargetAtTime(S.feedback,ctx().currentTime,.02)}
  function control(id,label,min,max,step,value,unit='',fn){const wrap=document.createElement('div');wrap.className='s101-control';const lab=document.createElement('label');const fmt=v=>unit==='%'?Math.round(v*100)+'%':(unit==='Hz'&&v>=1000?(v/1000).toFixed(1)+'k':Math.round(v*100)/100)+unit;lab.innerHTML=`<span>${label}</span><output>${fmt(+value)}</output>`;const input=document.createElement('input');input.type='range';input.min=min;input.max=max;input.step=step;input.value=value;input.oninput=()=>{const v=+input.value;lab.querySelector('output').textContent=unit==='%'?Math.round(v*100)+'%':(unit==='Hz'&&v>=1000?(v/1000).toFixed(1)+'k':Math.round(v*100)/100)+unit;fn(v);};wrap.append(lab,input);return wrap}
  function selectControl(label,options,value,fn){const w=document.createElement('div');w.className='s101-control';const l=document.createElement('label');l.textContent=label;const s=document.createElement('select');s.className='field';options.forEach(o=>s.append(new Option(o[1],o[0])));s.value=value;s.onchange=()=>fn(s.value);w.append(l,s);return w}
  function buildControls(){const main=$s('s101MainControls');main.innerHTML='';main.append(selectControl('OSCILLATOR WAVE',[['sawtooth','Sawtooth'],['square','Square'],['triangle','Triangle'],['sine','Sine']],S.wave,v=>{S.wave=v;saveSettings()}));const defs=[['sub','Sub level',0,1,.01,S.sub,'%'],['noise','Noise',0,.6,.01,S.noise,'%'],['pulse','Pulse width',.1,.9,.01,S.pulse,''],['cut','Filter cutoff',40,16000,10,S.cut,'Hz'],['res','Resonance',.1,18,.1,S.res,''],['env','Filter envelope',0,1,.01,S.env,'%'],['attack','Attack',.001,1,.001,S.attack,'s'],['decay','Decay',.01,2,.01,S.decay,'s'],['sustain','Sustain',0,1,.01,S.sustain,'%'],['release','Release',.01,3,.01,S.release,'s'],['lfoRate','LFO rate',.1,20,.1,S.lfoRate,'Hz'],['lfoAmt','LFO depth',0,1,.01,S.lfoAmt,'%'],['glide','Glide',0,.5,.005,S.glide,'s'],['level','Synth level',0,1,.01,S.level,'%']];defs.forEach(([k,n,lo,hi,st,v,u])=>main.append(control('s101'+k,n,lo,hi,st,v,u,x=>{S[k]=x;if(k==='cut'||k==='res')applyFx();saveSettings()})));
@@ -5731,9 +5737,9 @@ const AM_GAPG={hiphop:{go:4,s101:4,ix:3,vox:3},eastcoast:{go:4,s101:4,ix:3,vox:3
  function amLoopNode(){const lt=amLoop(),c=audioCtx;const b=lt&&c&&c._buses?c._buses[lt.id]:null;return b&&b.head?b.head.gain:null}
  function amLoopTrim(v){AM.lpSet=v;const g=amLoopNode();if(g){try{g.setTargetAtTime(v==null?1:v,audioCtx.currentTime,.05)}catch(e){g.value=v==null?1:v}}}
  function amRestoreLoop(){AM.lpBase=null;amLoopTrim(null);AM.lpSet=null}
- /* v131 */(()=>{const M=Object.keys({house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks'});for(const g of M){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]);o.mine=(o.mine||0)+4.5;o.bl=(o.bl||0)-5;const q=AM_START_G[g]=Object.assign({},AM_START_G[g]);q.mine=(q.mine||0)+4.5;q.bl=(q.bl||0)-5}
+ /* v131 */(()=>{const M=Object.keys({house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks',pop:'909',dubstep:'909'});for(const g of M){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]);o.mine=(o.mine||0)+4.5;o.bl=(o.bl||0)-5;const q=AM_START_G[g]=Object.assign({},AM_START_G[g]);q.mine=(q.mine||0)+4.5;q.bl=(q.bl||0)-5}
  for(const g of ['reggae','ska']){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]);o.bl=(o.bl||0)+2.5;o.lee=(o.lee||0)-2;o.sub=(o.sub||0)-1.5;const q=AM_START_G[g]=Object.assign({},AM_START_G[g]);q.bl=(q.bl||0)+2.5}})();
-/* v132 */(()=>{const T={hiphop:{mine:5},eastcoast:{mine:5},pop:{mine:5,ws:-3},ska:{mine:4,ws:-3},dubstep:{mine:4},amapiano:{mine:6},house:{ws:-3},deephouse:{ws:-3,lee:3},garage:{ws:-3},liquid:{ws:-3},techno:{lee:2},happyhardcore:{lee:2},lofi:{mine:8},reggae:{ix:3,mine:1.5},jungle:{mine:3,ix:-3,lee:2,go:-1},dnb:{mine:2,ix:-2},liquid:{mine:1.5}};for(const g in T){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]);for(const k in T[g]){o[k]=(o[k]||0)+T[g][k];q[k]=(q[k]||0)+T[g][k]}}})();
+/* v132 */(()=>{const T={hiphop:{mine:5},eastcoast:{mine:5},pop:{mine:5,ws:-3},ska:{mine:4,ws:-3},dubstep:{mine:4},amapiano:{mine:9,lee:-3.5,bl:4.5},house:{ws:-3},deephouse:{ws:-3,lee:3},garage:{ws:-3},liquid:{ws:-3},techno:{lee:2},happyhardcore:{lee:2},lofi:{mine:8},reggae:{ix:3,mine:1.5},jungle:{mine:3,ix:-3,lee:2,go:-1},dnb:{mine:2,ix:-2},liquid:{mine:1.5}};for(const g in T){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]);for(const k in T[g]){o[k]=(o[k]||0)+T[g][k];q[k]=(q[k]||0)+T[g][k]}}})();
 function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};const G0=AM_START_G[AM.genre]||{};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=G0[m.id]??AM_START[m.id]??0});AM.master=G0.master??0;   /* v105: every genre starts where its auto mix settles, so the intro is not louder than the drop */AM.locked=false;AM.stable=0;
   AM.hist={};AM.measured=new Set();AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
   if(AM.on){const lt=amLoop();if(lt)amLoopTrim(.4)}
@@ -7058,7 +7064,7 @@ function wire(key,c){
  let w=c._b8s&&c._b8s[key];if(!need&&!w)return;
  const list=chain(c,c===AC()?(c._mg||masterGain):c._b8.dest),src=srcNode(key,c);if(!src)return;
  if(!w||w.src!==src){if(w)w.g.forEach(g=>{try{g.disconnect()}catch(e){}});w=c._b8s[key]={src,g:list.map(B=>{const g=c.createGain();g.gain.value=0;src.connect(g);g.connect(B.in);return g})}}
- const t=c.currentTime;w.g.forEach((g,i)=>{const v=cl(+amt[i]||0,0,1);if(LASTV.get(g)===v)return;LASTV.set(g,v);try{g.gain.setTargetAtTime(v,t,.02)}catch(e){g.gain.value=v}});if(c!==AC())apply(c);
+ const t=c.currentTime;w.g.forEach((g,i)=>{const v=cl(+amt[i]||0,0,1);if(LASTV.get(g)===v)return;LASTV.set(g,v);if(v>0)__gate(w.src,g,true);try{g.gain.setTargetAtTime(v,t,.02)}catch(e){g.gain.value=v}if(!(v>0))setTimeout(()=>{if(!(LASTV.get(g)>0))__gate(w.src,g,false)},150)});if(c!==AC())apply(c);
 }
 function allKeys(){const k=MODIDS.filter(id=>!/^ix\d$/.test(id)||(window.GLCTC_IX&&GLCTC_IX.usesOwn&&GLCTC_IX.usesOwn(id))).map(id=>'mod:'+id);const P=proj();if(P&&P.tracks)P.tracks.forEach(t=>{if(t.type!=='auto'&&!t.looper)k.push('trk:'+t.id)});return k}
 const ROLE_BUS=[[/80la8|divine ?09|90mine|looper|drum|perc|break|beat|kick|snare|hat/i,'DRUMS'],[/sub-?01|\bsub\b/i,'SUB'],[/30lee|bass/i,'BASS'],
@@ -7253,13 +7259,23 @@ const FX={
   make(c){const a=c.createBiquadFilter(),L=lfo(c);L.g.connect(a.detune);return{in:a,out:a,sync:true,stop(){try{L.o.stop()}catch(e){}},set(p){a.type=['lowpass','bandpass','highpass'][p.type|0];st(c,a.frequency,p.f);st(c,a.Q,p.q);L.o.type=WT[p.wave|0];st(c,L.g.gain,p.depth*2400);st(c,L.o.frequency,p.sync?1/divSec(p.div):p.rate)}}}},
  comp:{n:'Compressor',cat:'DYNAMICS',p:[['thr','THRESHOLD',-60,0,.5,-18,fDb],['ratio','RATIO',1,20,.1,4,fRat],['att','ATTACK',.001,.2,.001,.01,fMs],['rel','RELEASE',.02,1,.01,.2,fMs],['mk','MAKE-UP',0,24,.5,0,fDb]],
   make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=6;a.connect(g);return{in:a,out:g,lat:LATC,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;const full=Math.pow(10,(p.thr-p.thr/p.ratio)/20),auto=Math.pow(1/full,.6);st(c,g.gain,Math.pow(10,p.mk/20)/auto)}}}},
+
+ punch:{n:'Drum Punch',cat:'DYNAMICS',p:[['amt','PUNCH',0,1,.01,.5,fPct],['att','ATTACK',.005,.06,.001,.025,fMs]],
+  make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=4;a.connect(g);return{in:a,out:g,lat:LATC,set(p){a.threshold.value=-8-p.amt*18;a.ratio.value=2+p.amt*3;a.attack.value=p.att;a.release.value=.07;st(c,g.gain,Math.pow(10,(p.amt*3)/20))}}}},
+ pcomp:{n:'Parallel Compressor',cat:'DYNAMICS',p:[['thr','THRESHOLD',-60,0,.5,-30,fDb],['ratio','RATIO',1,20,.1,6,fRat],['att','ATTACK',.001,.2,.001,.003,fMs],['rel','RELEASE',.02,1,.01,.12,fMs],['mix','BLEND',0,1,.01,.35,fPct]],
+  make(c){const m=mixer(c),a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=3;m.in.connect(a);a.connect(g);g.connect(m.wet);const lat=alignDry(c,m,LATC());
+   return{in:m.in,out:m.out,lat,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;st(c,g.gain,Math.pow(10,(-p.thr*(1-1/p.ratio)*.42)/20));m.mix(p.mix)}}}},
+ exciter:{n:'Harmonic Exciter',cat:'DISTORTION',p:[['f','FREQ',600,12000,10,5000,fHz],['drv','HARMONICS',0,1,.01,.3,fPct],['mix','MIX',0,1,.01,.15,fPct]],
+  make(c){const m=mixer(c),h1=c.createBiquadFilter(),pre=c.createGain(),sh=c.createWaveShaper(),h2=c.createBiquadFilter(),post=c.createGain();h1.type='highpass';h2.type='highpass';sh.oversample='2x';sh.curve=curveTanh(1);
+   m.in.connect(h1);h1.connect(pre);pre.connect(sh);sh.connect(h2);h2.connect(post);post.connect(m.wet);const lat=alignDry(c,m,'2x');
+   return{in:m.in,out:m.out,lat,set(p){st(c,h1.frequency,p.f);st(c,h2.frequency,p.f);const g=Math.pow(10,p.drv*24/20);st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,.85));m.mix(p.mix)}}}},
  lim:{n:'Limiter',cat:'DYNAMICS',p:[['ceil','CEILING',-18,0,.1,-1,fDb],['rel','RELEASE',.01,.6,.01,.08,fMs],['gain','INPUT GAIN',0,18,.5,0,fDb]],
   make(c){const i=c.createGain(),a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=0;a.ratio.value=20;a.attack.value=.001;i.connect(a);a.connect(g);return{in:i,out:g,lat:LATC,set(p){st(c,i.gain,Math.pow(10,p.gain/20));a.threshold.value=p.ceil;a.release.value=p.rel;const full=Math.pow(10,(p.ceil-p.ceil/20)/20);st(c,g.gain,1/Math.pow(1/full,.6))}}}},
  drive:{n:'Overdrive',cat:'DISTORTION',p:[['drv','DRIVE',0,1,.01,.4,fPct],['tone','TONE',500,16000,10,6000,fHz],['mix','MIX',0,1,.01,1,fPct]],
   make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='2x';sh.curve=curveTanh(1);l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);const lat=alignDry(c,m,'2x');
    return{in:m.in,out:m.out,lat,set(p){const g=Math.pow(10,p.drv*30/20);st(c,pre.gain,g);st(c,post.gain,1/Math.pow(g,.9));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
  dist:{n:'Distortion / Fuzz',cat:'DISTORTION',p:[['drv','AMOUNT',0,1,.01,.5,fPct],['tone','TONE',500,16000,10,5000,fHz],['mix','MIX',0,1,.01,1,fPct]],
-  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='4x';l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);let k0=-1;const lat=alignDry(c,m,'4x');
+  make(c){const m=mixer(c),pre=c.createGain(),sh=c.createWaveShaper(),l=c.createBiquadFilter(),post=c.createGain();sh.oversample='2x';l.type='lowpass';m.in.connect(pre);pre.connect(sh);sh.connect(l);l.connect(post);post.connect(m.wet);let k0=-1;const lat=alignDry(c,m,'4x');
    return{in:m.in,out:m.out,lat,set(p){const k=1+p.drv*40;if(Math.abs(k-k0)>.1){sh.curve=curveHard(k);k0=k}st(c,pre.gain,1);st(c,post.gain,.65/Math.pow(k,.5));st(c,l.frequency,p.tone);m.mix(p.mix)}}}},
  crush:{n:'Bit Crusher',cat:'DISTORTION',p:[['bits','BITS',1,16,1,8,v=>v+'-bit'],['hold','DOWNSAMPLE',1,40,1,4,v=>'÷'+v],['mix','MIX',0,1,.01,1,fPct]],
   make(c){const m=mixer(c),sh=c.createWaveShaper();m.in.connect(sh);let w=null;if(crushReady(c)){try{w=new AudioWorkletNode(c,'glctc-crush',{outputChannelCount:[2]});sh.connect(w);w.connect(m.wet)}catch(e){w=null}}if(!w)sh.connect(m.wet);let b0=-1;
@@ -7609,16 +7625,13 @@ function composerRecipe(genre){
  {const g=genre||'',soft=/^(meditation|ambient)$/.test(g),lo=g==='lofi',has=(a,t)=>a.some(x=>x&&x.type===t);
   const pre=(k,f)=>{out[k]=out[k]||[];if(!has(out[k],f.type))out[k].unshift(f)},post=(k,f)=>{out[k]=out[k]||[];if(!has(out[k],f.type))out[k].push(f)};
   if(!soft){
-   pre('bl',{type:'peq',p:{f1:60,g1:2.5,q1:1.1,f2:4800,g2:lo?1:3.5,q2:.8}});
    post('mine',{type:'eq3',p:{low:-6,mid:-1,mf:900,high:lo?0:3}});
-   pre('lee',hpf(30));post('lee',comp(-18,4,.004,.12));
-   pre('s101',hpf(170));post('s101',{type:'width',p:{w:1.45,bass:200}});
-   pre('go',hpf(140));post('go',{type:'eq3',p:{low:-3,mid:0,mf:1000,high:2.5}});
-   pre('vox',hpf(110));pre('ws',hpf(140));
-  }
-  if({house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks'}[g]){out.mine=(out.mine||[]).filter(f=>f&&f.type!=='hpf'&&f.type!=='eq3'&&f.type!=='peq');out.mine.unshift({type:'peq',p:{f1:58,g1:2,q1:1.1,f2:5200,g2:2.5,q2:.8}});if(!has(out.mine,'comp'))out.mine.push(comp(-14,3,.008,.1))}   /* v131 */
+   post('lee',comp(-18,4,.004,.12));
+   post('s101',{type:'width',p:{w:1.45,bass:200}});
+  }   /* v139: low-cuts live on the channel strips, EQ / width on the group buses */
+  if({house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks',pop:'909',dubstep:'909'}[g]){out.mine=(out.mine||[]).filter(f=>f&&f.type!=='hpf'&&f.type!=='eq3'&&f.type!=='peq');if(!has(out.mine,'comp'))out.mine.push(comp(-14,3,.008,.1))}   /* v131 */
   if(g==='reggae'){out.mine=(out.mine||[]).filter(f=>f&&f.type!=='lpf')}
-  out.ix=[hpf(soft?55:/^(trap|drill|south|phonk|ukhiphop)$/.test(g)?135:95),{type:'peq',p:{f1:320,g1:-2.5,q1:1,f2:3200,g2:soft?.5:2,q2:.9}},comp(-20,2.5,.015,.2),{type:'width',p:{w:1.35,bass:180}}];
+  out.ix=[comp(-20,2.5,.015,.2)];   /* v139: EQ + width on the INSTRUMENTS bus */
   Object.keys(out).forEach(k=>{if(out[k].length>8)out[k]=out[k].slice(0,8)});}
  return out;
 }
@@ -7628,7 +7641,9 @@ function composerFX(genre,on=true){
     (no extra nodes, zero CPU). The 808 styles keep a full-range 30LEE; the SUB strip cuts sub-sonic rumble at 26 Hz. */
  try{const nw=!/^(trap|drill|south|westcoast|eastcoast|hiphop|ukhiphop|lofi|reggae|ska|meditation|ambient|phonk|amapiano)$/.test(genre||'');
   const L=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('lee'),S=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('sub');
-  if(L&&L.hp)L.hp.frequency.setTargetAtTime(on&&nw?52:32,L.c.currentTime,.05);if(S&&S.hp)S.hp.frequency.setTargetAtTime(on?26:18,S.c.currentTime,.05)}catch(e){}
+  if(L&&L.hp)L.hp.frequency.setTargetAtTime(on&&nw?52:32,L.c.currentTime,.05);if(S&&S.hp)S.hp.frequency.setTargetAtTime(on?26:18,S.c.currentTime,.05);
+  const soft=/^(meditation|ambient)$/.test(genre||''),HP={s101:170,go:140,vox:110,ws:140,ix:soft?55:/^(trap|drill|south|phonk|ukhiphop)$/.test(genre||'')?135:95};   /* v139 strip low-cuts (were FX units) */
+  for(const id in HP){const X=GLCTC_WSBUSFULL(id);if(X&&X.hp)X.hp.frequency.setTargetAtTime(on?HP[id]:(MIXHPF[id]||20),X.c.currentTime,.05)}}catch(e){}
  SONG_FX_IDS.forEach(id=>{
   const key='mod:'+id,ch=chainOf(key,true),manual=ch.filter(f=>!f._composer);
   const auto=on?recipe[id].filter(f=>!manual.some(m=>!m._eq&&m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
@@ -7656,19 +7671,27 @@ function composerBuses(genre,on){
  const hard=/^(techno|techhouse|hardhouse|happyhardcore|psytrance|dnb|jungle|dubstep|breaks|nuskool|electro|trap|drill|south|ukhiphop|phonk|melodictechno)$/.test(g);
  const e808=/^(trap|drill|south|phonk)$/.test(g);   /* v107: the 30LEE IS the 808 here - SUB-01 sits under it, nothing on the low end is driven */
  const peq=(f1,g1,q1,f2,g2,q2)=>({type:'peq',p:{f1,g1,q1,f2,g2,q2}});
+ const MACHBUS={house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks',pop:'909',dubstep:'909'};const comp=(thr,ratio,att,rel)=>({type:'comp',p:{thr,ratio,att,rel,mk:0}});
+ /* v139 STEM BUS MASTERING: each group bus is mastered for its genre - the drum bus gets kick weight, box cut, snap, a punch
+    stage, New-York parallel compression and a touch of air; bass gets harmonics so it reads on small speakers; synths, instruments
+    and vocals get presence, control and width; the drum bus level is set per genre so every style hits as hard as deep house. */
+ const KF={'909':55,'808':48,jungle:62,breaks:65,linn:58}[MACHBUS[g]]||(boom?62:58);
+ const DV={amapiano:1.12,synthwave:1.1,breaks:1.15,pop:1.12,reggae:1.18,ska:1.1,happyhardcore:1.1,dubstep:1.1,hardhouse:1.08,nuskool:1.08,techhouse:1.06,trance:1.06,lofi:.95}[g]||1;
+ const PU=soft?0:/^(lofi|reggae|ska|liquid)$/.test(g)?.3:hard?.55:.45,PM=soft?0:/^(lofi|liquid)$/.test(g)?.15:hard?.28:.22;
+ const fx=(type,p)=>({type,p});
  const plan=[
-  {i:0,name:'DRUMS',ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19000,drv:e808?.03:hard?.14:.06,glue:soft?.3:hard?.6:.5,dly:0,rev:0},
-   ins:[peq(380,-2,1.1,5200,dark?0:1.5,.7)]},
+  {i:0,name:'DRUMS',vol:DV,ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
+   ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,e808?.5:1.5,1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?0:1.5,.7),fx('punch',{amt:PU,att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:PM}),fx('exciter',{f:7500,drv:.28,mix:dark?.05:.12})]},
   {i:1,name:'SUB',ids:['sub'],vol:e808?.6:g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
    ins:[{type:'util',p:{gain:0,pan:0,mono:1,inv:0}}]},
-  {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:11000,drv:e808?0:hard?.12:.05,glue:e808?.3:.45,dly:0,rev:0},
-   ins:[peq(260,-2,1,1100,1.5,.9)]},
+  {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:12000,drv:e808?0:hard?.1:.04,glue:e808?.3:.45,dly:0,rev:0},
+   ins:[peq(260,-2,1,1100,1.5,.9),comp(-18,3,.01,.15),fx('exciter',{f:soft?1200:850,drv:.3,mix:soft?.06:e808?.22:.14})]},
   {i:3,name:'SYNTHS',ids:['s101','go'],fx:{on:true,lc:140,hc:19500,drv:0,glue:.35,dly:0,rev:0},
-   ins:[peq(420,-2,1,3200,dark?.5:1.5,.8),{type:'width',p:{w:soft?1.3:1.15,bass:180}}]},
-  {i:4,name:'INSTRUMENTS',ids:['ws','ix'],fx:{on:true,lc:100,hc:18500,drv:0,glue:.3,dly:0,rev:0},
-   ins:[peq(320,-1.5,1,6000,dark?0:1.5,.7)]},
-  {i:5,name:'VOCALS',ids:['vox'],fx:{on:true,lc:170,hc:16500,drv:0,glue:.5,dly:0,rev:0},
-   ins:[peq(300,-2,1,3500,2,.8)]},
+   ins:[peq(420,-2,1,3200,dark?.5:1.5,.8),comp(-16,2,.02,.2),{type:'width',p:{w:soft?1.3:1.2,bass:200}}]},
+  {i:4,name:'INSTRUMENTS',ids:['ws','ix'],fx:{on:true,lc:100,hc:19000,drv:0,glue:.3,dly:0,rev:0},
+   ins:[peq(320,-1.5,1,6000,dark?0:1.5,.7),comp(-18,2,.02,.25),{type:'width',p:{w:soft?1.35:1.2,bass:180}}]},
+  {i:5,name:'VOCALS',ids:['vox'],fx:{on:true,lc:170,hc:17500,drv:0,glue:.5,dly:0,rev:0},
+   ins:[peq(300,-2,1,3500,2,.8),comp(-20,3,.005,.15),fx('exciter',{f:5000,drv:.25,mix:.14})]},
   {i:6,free:true},{i:7,free:true}];
  const clearIns=i=>{const ch=chainOf('bus:'+i,true),keep=ch.filter(f=>!f._composer);ch.splice(0,ch.length,...keep);persist('bus:'+i);rebuild('bus:'+i)};
  plan.forEach(P=>{if(!mine(P.i))return;
@@ -8118,7 +8141,7 @@ defs.bl.push(
  BL('Kit · Jump Up',.02,d=>{ALL(d,{drive:.08,reverb:0,delay:0});A(d,0,{volume:1.15,decay:.32,tone:9500,drive:.3,pitch:0});A(d,1,{volume:1.1,decay:.2,tone:12500,pitch:2,drive:.22,reverb:.06});A(d,2,{volume:.8,decay:.18,tone:11000,reverb:.1});A(d,7,{volume:.6,tone:9000});A(d,5,{volume:.6,decay:.3});A(d,6,{volume:.55,decay:.26})}),
  BL('Kit · Deep Velvet',.2,d=>{ALL(d,{drive:0});A(d,0,{volume:1,decay:.42,tone:3800,pitch:-1});A(d,1,{volume:.6,decay:.18,tone:7000,reverb:.2});A(d,2,{volume:.7,decay:.3,tone:7500,reverb:.28,delay:.1});A(d,7,{volume:.55,decay:.06,tone:6500,reverb:.18,delay:.12});A(d,9,{volume:.45,reverb:.15});A(d,5,{volume:.5,reverb:.2});A(d,6,{volume:.45,reverb:.2})}),
  BL('Kit · Roots One Drop',.3,d=>{ALL(d,{drive:0});A(d,0,{volume:1.4,decay:.42,tone:9000,pitch:0,drive:.08});A(d,1,{volume:.9,decay:.13,tone:9000,pitch:4,reverb:.28,delay:.1});A(d,7,{volume:1,decay:.07,tone:6000,reverb:.3,delay:.2});A(d,2,{volume:.25});A(d,5,{volume:.7,decay:.45,pitch:2,reverb:.3});A(d,6,{volume:.65,decay:.38,pitch:2,reverb:.3});A(d,9,{volume:.5,reverb:.2})}),
- BL('Kit · Amapiano Log',.18,d=>{ALL(d,{drive:0});A(d,0,{volume:.95,decay:.5,tone:3000,pitch:-3});A(d,1,{volume:.6,decay:.18,tone:8000,reverb:.15});A(d,2,{volume:.75,decay:.25,reverb:.2});A(d,7,{volume:.8,decay:.05,tone:9000,delay:.15});A(d,9,{volume:.55});A(d,10,{volume:.5});A(d,5,{volume:.55});A(d,6,{volume:.5})}),
+ BL('Kit · Amapiano Log',.18,d=>{ALL(d,{drive:0});A(d,0,{volume:1.15,decay:.42,tone:9000,pitch:0,drive:.06});A(d,1,{volume:1,decay:.16,tone:12000,reverb:.08});A(d,2,{volume:1.1,decay:.22,reverb:.1});A(d,7,{volume:1.05,decay:.05,tone:12000,delay:.12});A(d,9,{volume:.55});A(d,10,{volume:.5});A(d,5,{volume:.55});A(d,6,{volume:.5})}),
  BL('Kit · Afro House',.12,d=>{A(d,0,{volume:1.05,decay:.38,tone:5000,drive:.08});A(d,2,{volume:.8,reverb:.2});A(d,5,{volume:.55,decay:.32,pitch:1,reverb:.18,pan:-.25});A(d,6,{volume:.5,decay:.26,pitch:3,reverb:.16,pan:.25});A(d,7,{volume:.7,pan:.15});A(d,9,{volume:.65,pan:-.2})}),
  BL('Kit · Phonk',0,d=>{A(d,0,{volume:1.15,decay:.9,tone:3500,drive:.35,pitch:-3});A(d,1,{volume:1.05,decay:.2,tone:10000,drive:.25});A(d,2,{volume:1,decay:.22,reverb:.1,drive:.2});A(d,8,{volume:.7,decay:.3,tone:9000});A(d,7,{volume:.6})}),
  BL('Kit · Melodic Techno',.03,d=>{A(d,0,{volume:1.12,decay:.36,tone:6000,drive:.15,pitch:-1});A(d,2,{volume:.85,decay:.3,reverb:.2});A(d,1,{volume:.6});A(d,7,{volume:.7,delay:.15});A(d,5,{volume:.55});A(d,6,{volume:.5})})
@@ -10121,7 +10144,7 @@ const PAT=(()=>{
    bass:['R..R..R...R..r..','R..R..R...o..r..'],lead:{rh:['x...x.x...x.x...','x...x.x...x.x.x.'],m:[7,7,5,4,7,7,5,7],g:.5},stab:'x.....x...x.....',vox:'x...............'}];
 
  const ROLE={bl:{K:0,S:1,C:2,T:5,U:6,R:7,B:8,G:9,P:10,Q:11},mine:{H:3,O:4,B:9,Z:10}};
- const MACH={house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks'};   /* v131 genre-correct drum machine */
+ const MACH={house:'909',deephouse:'909',techhouse:'909',techno:'909',melodictechno:'909',trance:'909',psytrance:'909',hardhouse:'909',happyhardcore:'909',tribalhouse:'909',garage:'909',afrohouse:'909',westcoast:'808',trap:'808',drill:'808',south:'808',phonk:'808',electro:'808',synthwave:'linn',jungle:'jungle',dnb:'jungle',liquid:'jungle',breaks:'breaks',nuskool:'breaks',pop:'909',dubstep:'909'};   /* v131 genre-correct drum machine */
  const GLIDE={trap:.55,dubstep:.25,techno:.08,psytrance:0,dnb:0,drill:.6,south:.45,westcoast:.45,electro:.12,jungle:0,nuskool:.2,ukhiphop:.15,amapiano:.35,phonk:.55,melodictechno:.05,afrohouse:.05,deephouse:.06};let REG=0;   /* REG: register shift (octaves) that keeps the chakra-tuned song in a natural range */
  let F={g:'techno',H:[0,0]},Gg=G.techno;
  const hc=i=>F.H[(i%16)<8?0:1];
@@ -12686,7 +12709,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
   {k:'pocket',t:'POCKET',s:'Simple, fun phone studio',i:'📱',c:'#4af59b',show:[],go:null,mods:'all',pocket:true},
   {k:'record',t:'RECORD',s:'Capture anything you play',i:'●',c:'#ff4568',show:['console','timeline','mixer'],go:'console',tab:'RECORD',mods:'all'},
   {k:'install',t:'INSTALL APP',s:'Download & install web app',i:'',img:"glctc1-ankh-mark.png",c:'#8c7cff',show:[],go:null,mods:'all',action:'install'},
-  {k:'offline',t:'OFFLINE APP',s:'Download offline web app',i:'',img:"glctc1-ankh-mark.png",c:'#d6dbe6',show:[],go:null,mods:'all',action:'offline'}
+  {k:'offline',t:'OFFLINE APP',s:'Save offline & install app',i:'',img:"glctc1-ankh-mark.png",c:'#d6dbe6',show:[],go:null,mods:'all',action:'offline'}
  ];
  const KEY='glctc1.studioMode';
  const CONTROLLER=['console'];const MIXER_OPEN=new Set(['mix','live']);
@@ -15064,7 +15087,7 @@ window.GLCTC_NATURE={state:()=>({on:ST.on,live,stage,stageName:stage>=0?STAGES[s
 <script>
 /* GLCTC1 WEB APP: INSTALL APP + OFFLINE APP room tiles.
    INSTALL APP  → the browser's own install (home screen / desktop app). Once installed the service worker keeps it working with no internet.
-   OFFLINE APP  → downloads ONE self-contained .html file (icons + guard inlined) you can open from your device with no internet. */
+   OFFLINE APP  → saves the whole app into the browser for offline use, then installs it (no file download). */
 (()=>{'use strict';
  const css=document.createElement('style');css.textContent=`
 #glctcAppModal{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;background:#000a;backdrop-filter:blur(4px);padding:20px}
@@ -15088,55 +15111,63 @@ window.GLCTC_NATURE={state:()=>({on:ST.on,live,stage,stageName:stage>=0?STAGES[s
  const say=m=>{try{toast(m)}catch(e){console.log(m)}};
  const ua=navigator.userAgent||'';
  const isIOS=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
- const isAndroid=/Android/.test(ua);
+ /* Chrome's "Desktop site" on a phone pretends to be Linux desktop: spot it by the touch screen */
+ const desktopSite=!/Android/.test(ua)&&/Linux/.test(ua)&&!/CrOS/.test(ua)&&navigator.maxTouchPoints>0;
+ const isAndroid=/Android/.test(ua)||desktopSite;
  const isFirefox=/Firefox\//.test(ua);
  const isSafari=/Safari\//.test(ua)&&!/Chrome|CriOS|FxiOS|EdgiOS|Edg\//.test(ua);
  const standalone=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: window-controls-overlay)').matches||navigator.standalone===true;
  const local=()=>location.protocol==='file:'||!!window.__glctcOffline;
+ const SITE='<b>'+location.host+'</b>';
+ const waitPrompt=ms=>window.__glctcInstall?Promise.resolve(window.__glctcInstall):new Promise(r=>{const t=setTimeout(()=>r(window.__glctcInstall),ms);addEventListener('glctc-installable',()=>{clearTimeout(t);r(window.__glctcInstall)},{once:true})});
+ async function runPrompt(ev){try{ev.prompt();const r=await ev.userChoice;window.__glctcInstall=null;if(r&&r.outcome==='accepted'){say('Installing GLCTC1 MUSIC… it will appear with your apps');return true}say('Install cancelled · tap INSTALL APP any time');return true}catch(e){return false}}
 
  /* ---------- INSTALL APP ---------- */
  async function install(){
   if(standalone()||window.__glctcInstalled){say('GLCTC1 MUSIC is already installed on this device ✓');return}
-  if(local()){show('INSTALL APP','<p>This is the <b>offline copy</b> running from a file, so the browser can’t install it.</p><p>To install, open the DAW from <b>glctc1.com</b> and press <b>INSTALL APP</b> there. This offline copy keeps working as it is.</p>');return}
-  const ev=window.__glctcInstall;
-  if(ev){try{ev.prompt();const r=await ev.userChoice;window.__glctcInstall=null;say(r&&r.outcome==='accepted'?'Installing GLCTC1 MUSIC…':'Install cancelled · press INSTALL APP any time')}catch(e){steps()}return}
+  if(local()){show('INSTALL APP','<p>This copy is running from a file, so it can’t be installed. Open the DAW on the website and tap <b>INSTALL APP</b> there.</p>');return}
+  const ev=await waitPrompt(1500);
+  if(ev&&await runPrompt(ev))return;
   steps()}
- function steps(){let h;
-  if(isIOS)h='<p>On iPhone / iPad, install from <b>Safari</b>:</p><ol><li>Tap the <b>Share</b> button (square with an arrow ↑).</li><li>Scroll down and tap <b>Add to Home Screen</b>.</li><li>Tap <b>Add</b>. GLCTC1 MUSIC opens full screen from your home screen.</li></ol>'+(isSafari?'':'<p>Using Chrome on iPhone? Recent versions also show <b>Add to Home Screen</b> in the Share menu; if not, open this page in Safari.</p>');
-  else if(isAndroid)h='<ol><li>Tap the browser menu <b>⋮</b> (top right).</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li><li>Confirm. GLCTC1 MUSIC appears with your other apps.</li></ol>';
-  else if(isFirefox)h='<p>Firefox on desktop can’t install web apps. Open this page in <b>Chrome</b> or <b>Edge</b> to install, or use <b>OFFLINE APP</b> to download a copy that runs with no internet.</p>';
-  else if(isSafari)h='<ol><li>In the Safari menu bar choose <b>File → Add to Dock…</b></li><li>Click <b>Add</b>. GLCTC1 MUSIC opens as its own app from the Dock.</li></ol>';
-  else h='<ol><li>Click the <b>install icon</b> at the right end of the address bar (a screen with a ↓ arrow), <b>or</b> open the browser menu <b>⋮</b>.</li><li>Choose <b>Install GLCTC1 MUSIC</b> (Chrome: <b>Cast, save and share → Install page as app</b>; Edge: <b>Apps → Install this site as an app</b>).</li><li>Confirm. It opens in its own window and from your Start menu / Applications.</li></ol><p>If you don’t see the option, reload the page once and try again.</p>';
-  h+='<p>Once installed, the app works <b>without internet</b>. Master Library, cloud saves and sharing still need a connection.</p>';
+ async function siteReady(){try{const m=await fetch('glctc1-manifest.webmanifest',{cache:'no-cache'});if(!m.ok)return 'manifest';const w=await fetch('glctc1-sw.js',{cache:'no-cache'});if(!w.ok)return 'sw';return ''}catch(e){return ''}}
+ async function steps(lead){let h=lead||'';
+  const miss=await siteReady();
+  if(miss){show('INSTALL APP',h+'<p>The app files aren’t on the website yet (<b>'+(miss==='sw'?'glctc1-sw.js':'glctc1-manifest.webmanifest')+'</b> is missing). Upload <b>glctc1-sw.js</b> and <b>glctc1-manifest.webmanifest</b> next to <b>daw.html</b>, wait for GitHub Pages to finish, then reload and try again.</p>','#8c7cff');return}
+  if(isIOS)h+='<p>On iPhone / iPad, install from <b>Safari</b>:</p><ol><li>Tap the <b>Share</b> button (square with an arrow ↑).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>';
+  else if(isAndroid)h+='<ol><li>Tap Chrome’s menu <b>⋮</b> (top right).</li><li>Tap <b>Install app</b> (or <b>Add to Home screen → Install</b>).</li><li>GLCTC1 MUSIC appears with your other apps and opens full screen.</li></ol>'+(desktopSite?'<p>Tip: Chrome’s <b>Desktop site</b> is switched on. If you don’t see <b>Install app</b>, untick <b>Desktop site</b> in the ⋮ menu, reload, and tap <b>INSTALL APP</b> again for the one-tap install.</p>':'');
+  else if(isFirefox)h+='<p>Firefox on a computer can’t install web apps. Open '+SITE+'/daw.html in <b>Chrome</b> or <b>Edge</b> and tap <b>INSTALL APP</b>.</p>';
+  else if(isSafari)h+='<ol><li>In the Safari menu bar choose <b>File → Add to Dock…</b></li><li>Click <b>Add</b>.</li></ol>';
+  else h+='<ol><li>Click the <b>install icon</b> at the right end of the address bar, or open the menu <b>⋮</b>.</li><li>Chrome: <b>Cast, save and share → Install page as app</b>. Edge: <b>Apps → Install this site as an app</b>.</li></ol>';
+  h+='<p>Once installed it works <b>without internet</b>. Master Library, cloud saves and sharing still need a connection.</p>';
   show('INSTALL APP',h,'#8c7cff')}
 
- /* ---------- OFFLINE APP ---------- */
- const toDataURL=blob=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(blob)});
- async function grab(url,asText){try{const r=await fetch(url,{cache:'no-cache'});if(!r.ok)throw 0;return asText?await r.text():await r.blob()}catch(e){try{if(window.caches){const r=await caches.match(url);if(r)return asText?await r.text():await r.blob()}}catch(_){}return null}}
+ /* ---------- OFFLINE APP: save everything for offline, then install ---------- */
+ const ASSETS=()=>[location.href.split('#')[0],'glctc1-icon-192.png','glctc1-icon-512.png','glctc1-ankh-mark.png','glctc1-guard.js','glctc1-manifest.webmanifest','https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'];
+ async function saveOffline(){
+  if(!('serviceWorker' in navigator))return {ok:false,why:'This browser can’t save web apps for offline.'};
+  let reg=await navigator.serviceWorker.getRegistration();
+  if(!reg){try{reg=await navigator.serviceWorker.register('glctc1-sw.js')}catch(e){return {ok:false,why:'missing'}}}
+  const r=await Promise.race([navigator.serviceWorker.ready,new Promise(x=>setTimeout(()=>x(null),8000))]);
+  if(!r||!r.active)return {ok:false,why:'missing'};
+  return new Promise(res=>{const ch=new MessageChannel();const t=setTimeout(()=>res({ok:true,n:0}),20000);ch.port1.onmessage=e=>{clearTimeout(t);res({ok:true,n:(e.data&&e.data.saved)||0})};r.active.postMessage({type:'glctc-cache',urls:ASSETS()},[ch.port2])})}
  async function offline(){
-  if(local()){show('OFFLINE APP','<p>You’re already using the <b>offline app</b> ✓ This file runs with no internet.</p><p>To get the newest version, open the DAW on <b>glctc1.com</b> and press <b>OFFLINE APP</b> again.</p>','#d6dbe6');return}
-  say('Building offline app…');
-  const page=location.href.split('#')[0];
-  let html=await grab(page,true);
-  if(!html||!/<\/html>/i.test(html)){show('OFFLINE APP','<p>Couldn’t read the app file just now. Check your connection, reload the page and try again.</p>','#d6dbe6');return}
-  /* inline the guard script */
-  const guard=await grab('glctc1-guard.js',true);
-  if(guard)html=html.replace('<script src="glctc1-guard.js"><'+'/script>',()=>'<script>/* glctc1-guard.js (inlined for offline) */\n'+guard.replace(/<\/script/gi,'<\\/script')+'\n<'+'/script>');
-  /* inline images so the copy needs no other files */
-  for(const img of ['glctc1-icon-192.png','glctc1-ankh-mark.png']){const b=await grab(img,false);if(b&&b.size){const d=await toDataURL(b);html=html.split('"'+img+'"').join('"'+d+'"')}}
-  /* mark the copy as offline: no manifest, no service worker */
-  html=html.replace('<link rel="manifest" href="glctc1-manifest.webmanifest" id="glctcManifest">','<script>window.__glctcOffline=1<'+'/script>');
-  html=html.replace(/<base\s[^>]*>/i,'');
-  const blob=new Blob([html],{type:'text/html'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='GLCTC1-MUSIC-DAW-offline.html';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
-  const mb=(blob.size/1048576).toFixed(1);
-  let h='<p><b>GLCTC1-MUSIC-DAW-offline.html</b> ('+mb+' MB) is downloading.</p><ol><li>Find it in your <b>Downloads</b>.</li><li>Open it in <b>Chrome, Edge, Firefox or Safari</b> on a computer, or Chrome on Android.</li><li>It runs with <b>no internet</b>: every module, the timeline, recording and WAV export.</li></ol><p>Needs internet: Master Library, cloud saves, sharing and the site links.</p>';
-  if(isIOS)h+='<p><b>iPhone / iPad:</b> iOS can’t run a downloaded HTML file from the Files app. Use <b>INSTALL APP</b> instead; the installed app works offline.</p>';
-  show('OFFLINE APP',h,'#d6dbe6',isIOS?[['INSTALL INSTEAD',()=>{close();install()}]]:[])}
+  if(local()){say('You’re already using the offline copy ✓');return}
+  /* the install prompt must start right away, while the tap still counts */
+  const ev=window.__glctcInstall;let prompted=null;
+  if(ev&&!standalone())prompted=runPrompt(ev);
+  say('Saving GLCTC1 MUSIC for offline…');
+  const s=await saveOffline();
+  if(!s.ok){if(s.why==='missing')return steps();show('OFFLINE APP','<p>'+s.why+'</p>','#d6dbe6');return}
+  if(prompted&&await prompted)return say('✓ Saved for offline');
+  if(standalone()||window.__glctcInstalled)return say('✓ Saved for offline · the app works with no internet');
+  const ev2=await waitPrompt(1500);
+  if(ev2){show('OFFLINE APP','<p>✓ <b>Saved for offline.</b> Now install it so it opens from your home screen with no internet.</p>','#d6dbe6',[['INSTALL NOW',async()=>{close();if(!await runPrompt(ev2))steps()},'primary']]);return}
+  steps('<p>✓ <b>Saved for offline.</b> Now add it to your home screen:</p>')}
 
  window.GLCTC_APP={install,offline,installable:()=>!!window.__glctcInstall,installed:standalone};
 })();
 </script>
+<script>(function(){const raf=window.requestAnimationFrame.bind(window);let flip=false;window.requestAnimationFrame=function(cb){if(window.GLCTC_SONG&&GLCTC_SONG.running&&GLCTC_SONG.running()){return raf(t=>{flip=!flip;if(flip)cb(t);else raf(cb)})}return raf(cb)}})();</script>
 </body>
 </html>
 

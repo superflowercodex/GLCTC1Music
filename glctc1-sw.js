@@ -2,7 +2,7 @@
    Keeps the installed DAW working with no internet.
    Pages: network first (so updates arrive), cached copy when offline.
    Icons / scripts / styles: cache first, refreshed in the background. */
-const CACHE = 'glctc1-daw-v1';
+const CACHE = 'glctc1-daw-v2';
 const CDN = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'];
 
 self.addEventListener('install', e => {
@@ -22,9 +22,11 @@ self.addEventListener('activate', e => {
 self.addEventListener('message', e => {
   const d = e.data || {};
   if (d.type !== 'glctc-cache' || !Array.isArray(d.urls)) return;
+  const port = e.ports && e.ports[0];
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(d.urls.map(u =>
-    fetch(u, { cache: 'no-cache' }).then(r => { if (r.ok) return c.put(u, r) }).catch(() => {})
-  ))));
+    fetch(u, { cache: 'no-cache', mode: u.startsWith(self.location.origin) || !/^https?:/.test(u) ? 'same-origin' : 'cors' })
+      .then(r => { if (r.ok) return c.put(u, r).then(() => 1) }).catch(() => 0)
+  ))).then(res => { if (port) port.postMessage({ saved: res.filter(Boolean).length }) }));
 });
 
 self.addEventListener('fetch', e => {

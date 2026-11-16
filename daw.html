@@ -97,6 +97,27 @@ window.GLCTC_GLIDE=function(root,sel,on,off){if(!root||root.__glide)return;root.
 
 <link rel="icon" type="image/png" sizes="192x192" href="glctc1-icon-192.png">
 <link rel="apple-touch-icon" href="glctc1-icon-192.png">
+<!-- GLCTC1 WEB APP: manifest + service worker make the DAW installable and let it open with no internet once installed -->
+<link rel="manifest" href="glctc1-manifest.webmanifest" id="glctcManifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GLCTC1 DAW">
+<script>
+(function(){
+ window.__glctcInstall=null;
+ addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__glctcInstall=e;try{dispatchEvent(new Event('glctc-installable'))}catch(_){}});
+ addEventListener('appinstalled',function(){window.__glctcInstall=null;window.__glctcInstalled=true;try{toast('GLCTC1 MUSIC installed · open it from your home screen or apps')}catch(_){}});
+ if(!window.__glctcOffline&&'serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
+  addEventListener('load',function(){
+   navigator.serviceWorker.register('glctc1-sw.js').then(function(){return navigator.serviceWorker.ready}).then(function(r){
+    var urls=[location.href.split('#')[0],'glctc1-icon-192.png','glctc1-icon-512.png','glctc1-ankh-mark.png','glctc1-guard.js','glctc1-manifest.webmanifest'];
+    if(r.active)r.active.postMessage({type:'glctc-cache',urls:urls});
+   }).catch(function(e){console.warn('GLCTC1 service worker',e)});
+  });
+ }
+})();
+</script>
 <!-- GLCTC1 GUARD: blocks hate, porn & abuse in every save (swearing allowed). Must load before Supabase. -->
 <script>
 /* v92 WORKER FALLBACK: sandboxed previews (e.g. claudeusercontent.com) refuse blob: Workers with a SecurityError.
@@ -12663,7 +12684,9 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
   {k:'design',t:'INSTRUMENT DESIGN',s:'Layer, stack & mix instruments',i:'♫',c:'#ffb36a',show:['design','console','mixer'],go:'design',mods:['ix'],keys:['ix'],dock:true},
   {k:'video',t:'VIDEO',s:'Visual stage & clips',i:'▶',c:'#ff8a2a',show:['stage','timeline','editor','browser'],go:'stage',mods:[],dock:true},
   {k:'pocket',t:'POCKET',s:'Simple, fun phone studio',i:'📱',c:'#4af59b',show:[],go:null,mods:'all',pocket:true},
-  {k:'record',t:'RECORD',s:'Capture anything you play',i:'●',c:'#ff4568',show:['console','timeline','mixer'],go:'console',tab:'RECORD',mods:'all'}
+  {k:'record',t:'RECORD',s:'Capture anything you play',i:'●',c:'#ff4568',show:['console','timeline','mixer'],go:'console',tab:'RECORD',mods:'all'},
+  {k:'install',t:'INSTALL APP',s:'Download & install web app',i:'⤓',c:'#8c7cff',show:[],go:null,mods:'all',action:'install'},
+  {k:'offline',t:'OFFLINE APP',s:'Download offline web app',i:'✈',c:'#d6dbe6',show:[],go:null,mods:'all',action:'offline'}
  ];
  const KEY='glctc1.studioMode';
  const CONTROLLER=['console'];const MIXER_OPEN=new Set(['mix','live']);
@@ -12721,7 +12744,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
  MODES.forEach(m=>{const b=document.createElement('button');b.type='button';b.className='gm-card';b.style.setProperty('--mc',m.c);b.title=m.t+' · '+m.s;
   b.innerHTML='<span class="gm-ico"></span><span class="gm-t"></span><span class="gm-s"></span><span class="gm-arr">›</span>';
   b.querySelector('.gm-ico').textContent=m.i;b.querySelector('.gm-t').textContent=m.t;b.querySelector('.gm-s').textContent=m.s;
-  b.onclick=()=>{if(m.pocket){if(window.GLCTC_POCKET)GLCTC_POCKET.open();return}apply(m.k,true)};cards[m.k]=b;grid.append(b)});
+  b.onclick=()=>{if(m.action){if(window.GLCTC_APP)GLCTC_APP[m.action]();return}if(m.pocket){if(window.GLCTC_POCKET)GLCTC_POCKET.open();return}apply(m.k,true)};cards[m.k]=b;grid.append(b)});
  wrap.append(head,act,grid);
  let min=false;try{min=localStorage.getItem(KEY+'.min')==='1'}catch(e){}
  const syncMin=()=>{wrap.classList.toggle('gm-min',min);minB.textContent=min?'▼ SHOW ROOMS':'▲ HIDE ROOMS'};
@@ -12743,7 +12766,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
   Object.entries(EXTRA).forEach(([pk,nm])=>{const el=PANELS[pk]&&PANELS[pk]();if(el&&el.classList.contains('gm-hide'))add.push([pk,nm])});
   if(add.length){act.append(Object.assign(document.createElement('span'),{textContent:'  ＋ ADD:',className:'gm-addlab'}));add.forEach(([pk,nm])=>{const b=document.createElement('button');b.type='button';b.className='gm-add';b.textContent='+ '+nm;b.title='Bring '+nm+' into this room';b.onclick=()=>reveal(pk);act.append(b)})}}
  function syncRoom(){const h=H();if(!h)return;const song=!!(window.GLCTC_SONG&&GLCTC_SONG.running());Object.values(h.mods).forEach(m=>{if(!h.inRoom(m)&&m.running&&m.running())h.stopFrom(m.id)});if(!song&&playingNow()&&h.modulesOn!==false){const list=Object.values(h.mods).filter(m=>h.inRoom(m)&&!(m.running&&m.running())&&!h.bypassed(m)&&(!m.can||m.can()));if(list.length)h.prepare().then(c=>{const pt=h.nextLaunchPoint(c);list.forEach(m=>{if(h.inRoom(m)&&!(m.running&&m.running()))h.launch(m,pt.at,pt.step,true,false)})}).catch(e=>console.warn('room join',e))}paintActive()}
- function apply(k,scroll){const m=MODES.find(x=>x.k===k)||MODES[0];
+ function apply(k,scroll){const m=MODES.find(x=>x.k===k&&!x.action)||MODES[0];
   const h=H();if(h)h.room=m.mods==='all'?null:new Set(m.mods.concat(['ws']));
   try{setKeyTargets(m.keys||Object.keys(KEYNAME))}catch(e){}
   applying=true;applyingUntil=performance.now()+400;const show=new Set(m.show);CONTROLLER.forEach(x=>show.add(x));try{ALL.forEach(id=>{if(id==='mixer')return;if(id==='composer'){try{setVisible(PANELS.composer(),m.k==='compose'||m.k==='all'||m.k==='remix',true)}catch(e){}return}try{setVisible(PANELS[id](),m.k==='all'||show.has(id),m.k!=='all')}catch(e){}});try{const mx=PANELS.mixer();if(mx){mx.classList.remove('gm-hide');const tg=mx.querySelector(':scope>.mod-toggle'),open=MIXER_OPEN.has(m.k)||(m.k==='all'&&!mx.classList.contains('mod-collapsed'));if(tg&&mx.classList.contains('mod-collapsed')===open)tg.click()}}catch(e){}}finally{applying=false}
@@ -12781,7 +12804,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
     if(open&&!h.room.has(id)){h.room.add(id);if(playingNow()&&!(window.GLCTC_SONG&&GLCTC_SONG.running()))h.startFrom(id)}
     else if(!open&&h.room.has(id)){h.room.delete(id);h.stopFrom(id);el.classList.add('gm-hide')}paintActive()},0))})}
  window.addEventListener('glctc-room-change',e=>{try{const id=e.detail&&e.detail.id,pk=Object.keys(PANEL_MOD).find(k=>PANEL_MOD[k]===id),el=pk&&PANELS[pk]();if(el){applying=true;applyingUntil=performance.now()+400;try{setVisible(el,true)}finally{applying=false}}}catch(_){}paintActive()});
- window.GLCTC_STUDIO_MODE={set:k=>apply(k,true),modes:MODES.map(m=>m.k),active:()=>{const h=H();return h&&h.room?[...h.room]:'all'},revealEl:el=>{const pk=Object.keys(PANELS).find(k=>PANELS[k]()===el);if(pk)reveal(pk);else el.classList.remove('gm-hide')}};
+ window.GLCTC_STUDIO_MODE={set:k=>apply(k,true),modes:MODES.filter(m=>!m.action).map(m=>m.k),active:()=>{const h=H();return h&&h.room?[...h.room]:'all'},revealEl:el=>{const pk=Object.keys(PANELS).find(k=>PANELS[k]()===el);if(pk)reveal(pk);else el.classList.remove('gm-hide')}};
  function mount(){const nav=q('nav.nav');if(nav)nav.insertAdjacentElement('afterend',wrap);else{const app=q('main.app');if(app)app.insertAdjacentElement('beforebegin',wrap);else document.body.prepend(wrap)}
   layoutUnits();watchToggles();apply('all',false)}
  if(document.readyState==='complete')setTimeout(mount,50);else window.addEventListener('load',()=>setTimeout(mount,50),{once:true});
@@ -15035,6 +15058,82 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 window.GLCTC_NATURE={state:()=>({on:ST.on,live,stage,stageName:stage>=0?STAGES[stage].name:null,root:E?E.root:0,level:ST.level,drone:ST.drone,binaural:ST.binaural}),set:o=>{Object.assign(ST,o||{});save();levels()}};
 })();
 
+</script>
+<script>
+/* GLCTC1 WEB APP: INSTALL APP + OFFLINE APP room tiles.
+   INSTALL APP  → the browser's own install (home screen / desktop app). Once installed the service worker keeps it working with no internet.
+   OFFLINE APP  → downloads ONE self-contained .html file (icons + guard inlined) you can open from your device with no internet. */
+(()=>{'use strict';
+ const css=document.createElement('style');css.textContent=`
+#glctcAppModal{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;background:#000a;backdrop-filter:blur(4px);padding:20px}
+#glctcAppModal.on{display:flex}
+#glctcAppModal .am-box{max-width:520px;width:100%;border:1.5px solid var(--amc,#8c7cff);border-radius:16px;background:linear-gradient(160deg,#16171f,#0b0c11);box-shadow:0 0 30px color-mix(in srgb,var(--amc,#8c7cff) 45%,transparent);color:#f4f1e8;padding:18px 20px;font-family:inherit}
+#glctcAppModal h3{margin:0 0 10px;font-size:15px;letter-spacing:.16em;color:var(--amc,#8c7cff)}
+#glctcAppModal p,#glctcAppModal li{font-size:13px;line-height:1.5;color:#d9d6e0;margin:6px 0}
+#glctcAppModal ol{padding-left:20px;margin:6px 0}
+#glctcAppModal b{color:#fff}
+#glctcAppModal .am-row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+#glctcAppModal button{padding:8px 14px;font-weight:900;letter-spacing:.1em;font-size:11px}`;
+ document.head.append(css);
+ const modal=document.createElement('div');modal.id='glctcAppModal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');
+ const box=document.createElement('div');box.className='am-box';modal.append(box);
+ modal.addEventListener('click',e=>{if(e.target===modal)close()});
+ addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('on'))close()});
+ const mount=()=>{if(!modal.isConnected)document.body.append(modal)};
+ function close(){modal.classList.remove('on')}
+ function show(title,html,color,buttons){mount();box.style.setProperty('--amc',color||'#8c7cff');box.innerHTML='<h3></h3><div class="am-body"></div><div class="am-row"></div>';box.querySelector('h3').textContent=title;box.querySelector('.am-body').innerHTML=html;
+  const row=box.querySelector('.am-row');(buttons||[]).concat([['CLOSE',close]]).forEach(([t,f,cls])=>{const b=document.createElement('button');b.type='button';b.textContent=t;if(cls)b.className=cls;b.onclick=f;row.append(b)});modal.classList.add('on')}
+ const say=m=>{try{toast(m)}catch(e){console.log(m)}};
+ const ua=navigator.userAgent||'';
+ const isIOS=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ const isAndroid=/Android/.test(ua);
+ const isFirefox=/Firefox\//.test(ua);
+ const isSafari=/Safari\//.test(ua)&&!/Chrome|CriOS|FxiOS|EdgiOS|Edg\//.test(ua);
+ const standalone=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: window-controls-overlay)').matches||navigator.standalone===true;
+ const local=()=>location.protocol==='file:'||!!window.__glctcOffline;
+
+ /* ---------- INSTALL APP ---------- */
+ async function install(){
+  if(standalone()||window.__glctcInstalled){say('GLCTC1 MUSIC is already installed on this device ✓');return}
+  if(local()){show('INSTALL APP','<p>This is the <b>offline copy</b> running from a file, so the browser can’t install it.</p><p>To install, open the DAW from <b>glctc1.com</b> and press <b>INSTALL APP</b> there. This offline copy keeps working as it is.</p>');return}
+  const ev=window.__glctcInstall;
+  if(ev){try{ev.prompt();const r=await ev.userChoice;window.__glctcInstall=null;say(r&&r.outcome==='accepted'?'Installing GLCTC1 MUSIC…':'Install cancelled · press INSTALL APP any time')}catch(e){steps()}return}
+  steps()}
+ function steps(){let h;
+  if(isIOS)h='<p>On iPhone / iPad, install from <b>Safari</b>:</p><ol><li>Tap the <b>Share</b> button (square with an arrow ↑).</li><li>Scroll down and tap <b>Add to Home Screen</b>.</li><li>Tap <b>Add</b>. GLCTC1 MUSIC opens full screen from your home screen.</li></ol>'+(isSafari?'':'<p>Using Chrome on iPhone? Recent versions also show <b>Add to Home Screen</b> in the Share menu; if not, open this page in Safari.</p>');
+  else if(isAndroid)h='<ol><li>Tap the browser menu <b>⋮</b> (top right).</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li><li>Confirm. GLCTC1 MUSIC appears with your other apps.</li></ol>';
+  else if(isFirefox)h='<p>Firefox on desktop can’t install web apps. Open this page in <b>Chrome</b> or <b>Edge</b> to install, or use <b>OFFLINE APP</b> to download a copy that runs with no internet.</p>';
+  else if(isSafari)h='<ol><li>In the Safari menu bar choose <b>File → Add to Dock…</b></li><li>Click <b>Add</b>. GLCTC1 MUSIC opens as its own app from the Dock.</li></ol>';
+  else h='<ol><li>Click the <b>install icon</b> at the right end of the address bar (a screen with a ↓ arrow), <b>or</b> open the browser menu <b>⋮</b>.</li><li>Choose <b>Install GLCTC1 MUSIC</b> (Chrome: <b>Cast, save and share → Install page as app</b>; Edge: <b>Apps → Install this site as an app</b>).</li><li>Confirm. It opens in its own window and from your Start menu / Applications.</li></ol><p>If you don’t see the option, reload the page once and try again.</p>';
+  h+='<p>Once installed, the app works <b>without internet</b>. Master Library, cloud saves and sharing still need a connection.</p>';
+  show('INSTALL APP',h,'#8c7cff')}
+
+ /* ---------- OFFLINE APP ---------- */
+ const toDataURL=blob=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(blob)});
+ async function grab(url,asText){try{const r=await fetch(url,{cache:'no-cache'});if(!r.ok)throw 0;return asText?await r.text():await r.blob()}catch(e){try{if(window.caches){const r=await caches.match(url);if(r)return asText?await r.text():await r.blob()}}catch(_){}return null}}
+ async function offline(){
+  if(local()){show('OFFLINE APP','<p>You’re already using the <b>offline app</b> ✓ This file runs with no internet.</p><p>To get the newest version, open the DAW on <b>glctc1.com</b> and press <b>OFFLINE APP</b> again.</p>','#d6dbe6');return}
+  say('Building offline app…');
+  const page=location.href.split('#')[0];
+  let html=await grab(page,true);
+  if(!html||!/<\/html>/i.test(html)){show('OFFLINE APP','<p>Couldn’t read the app file just now. Check your connection, reload the page and try again.</p>','#d6dbe6');return}
+  /* inline the guard script */
+  const guard=await grab('glctc1-guard.js',true);
+  if(guard)html=html.replace('<script src="glctc1-guard.js"><'+'/script>',()=>'<script>/* glctc1-guard.js (inlined for offline) */\n'+guard.replace(/<\/script/gi,'<\\/script')+'\n<'+'/script>');
+  /* inline images so the copy needs no other files */
+  for(const img of ['glctc1-icon-192.png','glctc1-ankh-mark.png']){const b=await grab(img,false);if(b&&b.size){const d=await toDataURL(b);html=html.split('"'+img+'"').join('"'+d+'"')}}
+  /* mark the copy as offline: no manifest, no service worker */
+  html=html.replace('<link rel="manifest" href="glctc1-manifest.webmanifest" id="glctcManifest">','<script>window.__glctcOffline=1<'+'/script>');
+  html=html.replace(/<base\s[^>]*>/i,'');
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='GLCTC1-MUSIC-DAW-offline.html';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+  const mb=(blob.size/1048576).toFixed(1);
+  let h='<p><b>GLCTC1-MUSIC-DAW-offline.html</b> ('+mb+' MB) is downloading.</p><ol><li>Find it in your <b>Downloads</b>.</li><li>Open it in <b>Chrome, Edge, Firefox or Safari</b> on a computer, or Chrome on Android.</li><li>It runs with <b>no internet</b>: every module, the timeline, recording and WAV export.</li></ol><p>Needs internet: Master Library, cloud saves, sharing and the site links.</p>';
+  if(isIOS)h+='<p><b>iPhone / iPad:</b> iOS can’t run a downloaded HTML file from the Files app. Use <b>INSTALL APP</b> instead; the installed app works offline.</p>';
+  show('OFFLINE APP',h,'#d6dbe6',isIOS?[['INSTALL INSTEAD',()=>{close();install()}]]:[])}
+
+ window.GLCTC_APP={install,offline,installable:()=>!!window.__glctcInstall,installed:standalone};
+})();
 </script>
 </body>
 </html>

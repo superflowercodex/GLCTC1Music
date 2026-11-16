@@ -6686,15 +6686,17 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  function swStemStop(){if(swStemSrc){try{swStemSrc.stop()}catch(e){}swStemSrc=null}swStemBox.querySelectorAll('.sw-play').forEach(b=>{b.textContent='▶';b.classList.remove('on')})}
  function swStemPlay(i,btn){const was=btn.classList.contains('on');swStemStop();scStopTake();if(was)return;const c=ensureBuses();c.resume().catch(()=>{});const n=c.createBufferSource();n.buffer=swStems[i];n.connect(c._sat||c.destination);n.onended=()=>{if(swStemSrc===n)swStemStop()};n.start();swStemSrc=n;btn.textContent='■';btn.classList.add('on')}
  const spT=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
+ /* v140: is this stem buffer already playing from a timeline clip? (stops ALL → TIMELINE after a remix from doubling every stem) */
+ function swOnTimeline(b){try{const ids=new Set(project.assets.filter(a=>a.audioBuffer===b).map(a=>a.id));return !!ids.size&&project.tracks.some(t=>t.clips.some(c=>ids.has(c.assetId)))}catch(e){return false}}
  function swRenderStems(base){swStemBox.innerHTML='';if(!swStems)return;
   swStems.forEach((b,i)=>{const SN=swStemNames[i]||('STEM '+(i+1)),nm=base+' · '+SN,play=el('button',{class:'cn-tb sw-play',type:'button',text:'▶',title:'Audition '+SN});play.onclick=()=>swStemPlay(i,play);
    const open=el('button',{class:'sp-name',type:'button',title:'Open '+SN+' in the WAVE editor'},el('b',{text:SN}),el('small',{text:spT(b.duration)+' · '+nm}));
    open.onclick=()=>{swStemStop();cnTake(b,nm);try{consoleTab('WAVE')}catch(e){}const sc=document.querySelector('#wsPanel .cn-screen');if(sc)sc.__noJump?.({behavior:'smooth',block:'start'});swSay('OPENED '+SN+' IN THE WAVE EDITOR · '+swInfo());spSay('OPENED '+SN+' IN THE WAVE EDITOR')};
    swStemBox.append(el('div',{class:'sp-row',style:'--sc:'+STEM_COL[i%4]},open,play,
-    scB('TRACK',()=>{swToTimeline(b,nm);toast(SN+' added to the timeline at the playhead')},'Add as a new timeline track'),
+    scB('TRACK',ev=>{const btn=ev&&ev.currentTarget;if(swOnTimeline(b)&&!(btn&&btn.__again>Date.now())){if(btn)btn.__again=Date.now()+4000;toast(SN+' is already on the timeline · tap TRACK again within 4 s to add a second copy (both copies will play)');return}if(btn)btn.__again=0;swToTimeline(b,nm);toast(SN+' added to the timeline at the playhead')},'Add as a new timeline track'),
     scB('PAD',()=>scSavePad(b,nm),'Save this stem to the keyboard pad chosen above'),
     scB('WAV',()=>swExport(b,nm),'Download using the export format above')))});
-  swStemBox.append(el('div',{class:'sw-stem sw-all'},scB('ALL → TIMELINE',()=>{swStems.forEach((b,i)=>swToTimeline(b,base+' · '+(swStemNames[i]||'STEM '+(i+1))));toast(swStems.length+' stem tracks added at the playhead')},'Add every stem as a timeline track'),scB('■ STOP',swStemStop),scB('CLEAR STEMS',()=>{swStemStop();swStems=null;swRenderStems('');spSay('')})))}
+  swStemBox.append(el('div',{class:'sw-stem sw-all'},scB('ALL → TIMELINE',()=>{let n=0,skip=0;swStems.forEach((b,i)=>{if(swOnTimeline(b)){skip++;return}swToTimeline(b,base+' · '+(swStemNames[i]||'STEM '+(i+1)));n++});toast(n?(n+' stem tracks added at the playhead'+(skip?' · '+skip+' already on the timeline, not doubled':'')):'These stems are already on the timeline · nothing doubled')},'Add every stem as a timeline track (stems already on the timeline are not added twice)'),scB('■ STOP',swStemStop),scB('CLEAR STEMS',()=>{swStemStop();swStems=null;swRenderStems('');spSay('')})))}
  let spT0=0;
  async function swSplit(){try{
    if(swWorker){swWorker.terminate();swWorker=null;swAfterSplit=null;spBar.style.display='none';swSplitB.textContent='✂ SPLIT 4 STEMS';spSay('SPLIT CANCELLED');swSay('STEM SPLIT CANCELLED');return}
@@ -6746,12 +6748,27 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  async function mlOpen(force){mlBox.style.display='';if(force)ML.rows=null;mlRender();try{await mlFetch(force);mlRender();swSay('MASTER LIBRARY · '+ML.rows.length+' TRACKS')}catch(e){mlList.innerHTML='';mlList.append(el('div',{class:'ml-empty',text:'MASTER LIBRARY UNAVAILABLE · '+e.message}));swSay('MASTER LIBRARY UNAVAILABLE')}}
  async function mlLoadMaster(r){try{if(!r.master)throw Error('This track has no master audio');const b=await mlAudio(r.master,'MASTER · '+mlName(r));cnTake(b,mlName(r));swSay('MASTER LOADED · '+(r.bpm?r.bpm+' BPM · ':'')+(r.key?r.key+' · ':'')+swInfo());return b}catch(e){toast(e.message);swSay('LOAD FAILED');return null}}
  async function mlLoadStems(r){try{const list=r.stems.map((p,i)=>[p,i]).filter(x=>x[0]);if(!list.length)throw Error('This track has no stems');const bufs=[];for(const [p,i] of list)bufs.push(await mlAudio(p,'STEM '+(i+1)+' · '+mlName(r)));swStopAll();swStems=bufs;swStemNames=list.map(x=>'STEM '+(x[1]+1));swRenderStems(mlName(r));swSay(bufs.length+' LIBRARY STEMS READY · '+mlName(r));return true}catch(e){toast(e.message);swSay('STEM LOAD FAILED');return false}}
- async function mlRemix(r){try{
+ /* v140 ONE SET OF STEMS: a remix REPLACES the stems of any earlier remix instead of stacking a second copy on top
+    (tapping ★ REMIX again in the Remix Room's library used to lay every stem twice, so the song played double). */
+ const ML_STEM_RE=/ · (STEM \d+|VOCALS|DRUMS|BASS|OTHER)$/;
+ function mlClearRemixStems(base){
+  const old=project.tracks.filter(t=>t.type==='audio'&&(t.remixStem||(base&&t.name.startsWith(base+' · ')&&ML_STEM_RE.test(t.name))));
+  if(!old.length)return 0;const ids=new Set(old.flatMap(t=>t.clips.map(c=>c.assetId)));
+  project.tracks=project.tracks.filter(t=>!old.includes(t));
+  const used=new Set(project.tracks.flatMap(t=>t.clips.map(c=>c.assetId)));
+  project.assets=project.assets.filter(a=>!(ids.has(a.id)&&!used.has(a.id)&&(a.remixStem||a.analyzed)));
+  if(old.some(t=>t.id===selectedTrackId))selectedTrackId=null;return old.length}
+ /* v140 every module plays over a remix, with the genre / key / BPM patterns and sounds the Composer matched */
+ function mlModulesJoin(){try{const h=window.GLCTC_HUB;if(!h||!h.mods)return;h.modulesSuspendedGroup=false;h.modulesOn=true;try{localStorage.setItem('glctc1.modulesOn','1')}catch(e){}try{h.paintModulesBtn&&h.paintModulesBtn()}catch(e){}
+  if(h.room)Object.keys(h.mods).forEach(id=>{try{h.addToRoom?h.addToRoom(id):h.room.add(id)}catch(e){}})}catch(e){console.warn('remix modules',e)}}
+ let mlRemixTok=0;
+ async function mlRemix(r){const tok=++mlRemixTok;try{
    const sourceBpm=Number(r.bpm)>=30&&Number(r.bpm)<=300?Number(r.bpm):GLCTC_CLOCK.bpm;
    r=Object.assign({},r,{bpm:sourceBpm});
    window.GLCTC_TRANSPORT?.stop();window.GLCTC_SONG?.stop(true);swStopAll();
    if(r.bpm&&window.GLCTC_MASTER_SYNC)window.GLCTC_MASTER_SYNC.setBpm(r.bpm);try{if(window.GLCTC_SONG&&GLCTC_SONG.matchTrack)await GLCTC_SONG.matchTrack(r)}catch(e){console.warn('composer match',e)}
-   const toTl=()=>{window.GLCTC_SONG?.stop(true);window.glctcTimeline?.stop(true);{const made=swStems.map((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0,{bpm:sourceBpm,key:r.key}));try{made.forEach(t=>{const k=project.tracks.indexOf(t);if(k>=0){project.tracks.splice(k,1)}});project.tracks.unshift(...made);selectedTrackId=made[0]&&made[0].id;window.GLCTC_SONG?.fitRemix(Math.max(...swStems.map(b=>b.duration*sourceBpm/60)));renderAll();markDirty()}catch(e){console.warn('remix stem order',e)}}swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
+   if(tok!==mlRemixTok)return;mlModulesJoin();
+   const toTl=()=>{if(tok!==mlRemixTok)return;window.GLCTC_SONG?.stop(true);window.glctcTimeline?.stop(true);mlClearRemixStems(mlName(r));{const made=swStems.map((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0,{bpm:sourceBpm,key:r.key}));try{made.forEach(t=>{t.remixStem=true;t.clips.forEach(c=>{const a=project.assets.find(x=>x.id===c.assetId);if(a)a.remixStem=true});const k=project.tracks.indexOf(t);if(k>=0){project.tracks.splice(k,1)}});project.tracks.unshift(...made);selectedTrackId=made[0]&&made[0].id;window.GLCTC_SONG?.fitRemix(Math.max(...swStems.map(b=>b.duration*sourceBpm/60)));renderAll();markDirty()}catch(e){console.warn('remix stem order',e)}}swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
    if(r.stems?.some(Boolean)){if(await mlLoadStems(r))toTl();return}
    const b=await mlLoadMaster(r);if(!b)return;swAfterSplit=()=>{swStemNames=STEM_NAMES.slice();toTl()};swSplit()}catch(e){toast(e.message)}}
  window.GLCTC_ML={remixById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();
@@ -12701,7 +12718,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
   {k:'voice',t:'VOICE EDIT',s:'Sing, tune & shape vocals',i:'♪',c:'#ff7ad9',show:['vox','console','looper','mixer'],go:'vox',mods:['vox'],keys:['vox'],dock:true},
   {k:'mix',t:'MODULE MIX',s:'Every module on the faders',i:'⫶',c:'#4af59b',show:['console','mixer'],go:'console',mods:'all'},
   {k:'live',t:'LIVE',s:'Perform everything live',i:'♛',c:'#b6ff3c',show:['console','looper','actions','mixer'],go:'console',mods:'all'},
-  {k:'remix',t:'REMIX',s:'Master Library & stems',i:'★',c:'#ff8a2a',show:['console','timeline','mixer'],go:'console',tab:'WAVE',lib:true,mods:[]},
+  {k:'remix',t:'REMIX',s:'Master Library & stems',i:'★',c:'#ff8a2a',show:['console','timeline','mixer'],go:'console',tab:'WAVE',lib:true,mods:'all'},
   {k:'sample',t:'SAMPLE LAB',s:'Chop, crush & split stems',i:'✂',c:'#40eaff',show:['console','looper'],go:'console',tab:'WAVE',mods:[]},
   {k:'compose',t:'SONG COMPOSER',s:'One song · every module',i:'✦',c:'#f2ca70',show:['composer','design','console','mixer'],go:'composer',mods:'all',dock:true},
   {k:'design',t:'INSTRUMENT DESIGN',s:'Layer, stack & mix instruments',i:'♫',c:'#ffb36a',show:['design','console','mixer'],go:'design',mods:['ix'],keys:['ix'],dock:true},

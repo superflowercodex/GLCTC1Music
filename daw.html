@@ -2,6 +2,53 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script id="glctc1-v145-engine">
+/* ===== v145 AUDIO ENGINE HOUSEKEEPING (loaded first, before any module builds audio) =====================================
+   1 · NO DC FROM SATURATORS. Many drive / saturation curves were built off-centre, so a silent input came out as a constant
+       offset (up to -42 dBFS of DC on the drum bus). Inaudible, but a node that is never exactly silent is never skipped by
+       the browser: every filter, compressor, delay and reverb after it kept working after STOP. Every curve is re-centred
+       so silence in = silence out.
+   2 · STOP MEANS STOP. Every note / hit / one-shot that is scheduled or still ringing is cut (8 ms fade) when the song or
+       the transport stops - nothing that was queued ahead keeps playing. Long-running LFOs and loops are left alone.
+   3 · LIGHTER REVERBS. Convolution reverb is the heaviest thing in the studio and there is one in almost every module.
+       Impulses are held to 1.4 s in AUTO and 0.9 s in ECO (the phone default), with a smooth fade; FULL keeps them whole.
+   ======================================================================================================================== */
+(()=>{'use strict';
+const OFF=window.OfflineAudioContext||function(){};
+const rt=c=>c&&!(c instanceof OFF);
+/* 1 · re-centred waveshaper curves */
+try{const P=WaveShaperNode.prototype,d=Object.getOwnPropertyDescriptor(P,'curve'),fixed=new WeakMap();
+ if(d&&d.set)Object.defineProperty(P,'curve',{configurable:true,enumerable:d.enumerable,get(){return d.get.call(this)},set(cv){
+  if(cv&&cv.length>1){let f=fixed.get(cv);if(!f){const m=(cv.length-1)/2,a=Math.floor(m),b=Math.ceil(m),mid=(cv[a]+cv[b])/2;
+    if(Math.abs(mid)>1e-7){f=new Float32Array(cv.length);for(let i=0;i<cv.length;i++)f[i]=cv[i]-mid}else f=cv;fixed.set(cv,f)}cv=f}
+  d.set.call(this,cv)}})}catch(e){}
+/* 2 · source registry for STOP */
+const LIVE=new Set();
+for(const S of [window.AudioScheduledSourceNode&&AudioScheduledSourceNode.prototype,window.AudioBufferSourceNode&&AudioBufferSourceNode.prototype]){   /* buffer sources have their own start() */
+ try{if(!S||!Object.prototype.hasOwnProperty.call(S,'start'))continue;const st=S.start,sp=S.stop;
+  S.start=function(when,...a){const r=st.call(this,when,...a);if(rt(this.context)){this.__t0=when||0;if(this instanceof AudioBufferSourceNode&&a.length>1&&a[1]!=null)this.__t1=(when||0)+a[1];LIVE.add(this);this.addEventListener('ended',()=>LIVE.delete(this),{once:true})}return r};
+  if(Object.prototype.hasOwnProperty.call(S,'stop'))S.stop=function(when){this.__t1=when==null?0:when;return sp.call(this,when)}}catch(e){}}
+function killNotes(ctx){const now=ctx?ctx.currentTime:0,cut=[];
+ LIVE.forEach(n=>{const c=n.context;if(ctx&&c!==ctx)return;const t=c.currentTime;
+  const finite=n.__t1!=null||(n instanceof AudioBufferSourceNode&&!n.loop);
+  const queued=(n.__t0||0)>t+.005,shortLived=n.__t1!=null&&n.__t1<t+30;
+  if(!(queued||shortLived||(finite&&n.__t1==null)))return;   /* LFOs and loops that run for good stay */
+  cut.push(n)});
+ cut.forEach(n=>{const t=n.context.currentTime;try{if((n.__t0||0)>t+.005)n.stop(0);   /* queued: never sounds */
+   else if(n.__t1==null||n.__t1>t+1.2)n.stop(t+.015)}catch(e){}LIVE.delete(n)});   /* ringing: long ones cut, short tails finish */
+ return cut.length}
+/* 3 · reverb impulse cap */
+const IRMAX=()=>{let m='auto';try{m=localStorage.getItem('glctc1.cpuMode')||((matchMedia('(pointer:coarse)').matches)?'eco':'auto')}catch(e){}return m==='full'?99:m==='eco'?.9:1.4};   /* ECO (phones) .9 s · AUTO 1.4 s · FULL untouched */
+try{const P=ConvolverNode.prototype,d=Object.getOwnPropertyDescriptor(P,'buffer'),short=new WeakMap();
+ const full=()=>{try{return (window.GLCTC_PERF&&GLCTC_PERF.mode)==='full'||localStorage.getItem('glctc1.cpuMode')==='full'}catch(e){return false}};
+ if(d&&d.set)Object.defineProperty(P,'buffer',{configurable:true,enumerable:d.enumerable,get(){return d.get.call(this)},set(b){
+  const cap=IRMAX();if(b&&rt(this.context)&&!full()&&b.duration>cap+.05){let s=short.get(b);if(!s||s.length!==Math.floor(cap*b.sampleRate)){const n=Math.floor(cap*b.sampleRate),fade=Math.floor(n*.2);
+    s=new AudioBuffer({numberOfChannels:b.numberOfChannels,length:n,sampleRate:b.sampleRate});
+    for(let ch=0;ch<b.numberOfChannels;ch++){const src=b.getChannelData(ch),o=new Float32Array(n);for(let i=0;i<n;i++)o[i]=src[i]*(i<n-fade?1:(n-i)/fade);s.copyToChannel(o,ch)}short.set(b,s)}b=s}
+  d.set.call(this,b)}})}catch(e){}
+window.GLCTC_ENGINE={killNotes,live:()=>LIVE.size};
+})();
+</script>
 <script id="glctc1-v144-at">/* v144 AUDIO-CLOCK RELEASE: voices are released when the AUDIO clock has passed their end, not after a wall-clock timer -
  under CPU load (phones, busy drops) the audio clock runs behind the wall clock and short drums (a tight kick, hats) were cut off before they sounded */
 window.GLCTC_AT=function(c,until,fn,ms){const go=()=>{let left=-1;try{left=c.state==='running'?until-c.currentTime:-1}catch(e){}if(left>-.03){setTimeout(go,Math.max(40,left*1000+80));return}try{fn()}catch(e){}};setTimeout(go,Math.max(0,ms==null?(until-c.currentTime)*1000+80:ms))};</script>
@@ -2567,7 +2614,7 @@ const GLCTC_HUB=window.GLCTC_HUB={mods:{},request:0,modulesOn:true,sharedEpochAt
   finally{window.__glctcMasterStartAt=prevAt;window.__glctcStartStep=prevStep}
  },
  halt(m){m.soloMode=false;GLCTC_CLOCK.cancelSources(m.id);try{m.stop()}catch(err){console.error('GLCTC1 module stop:',m.name,err)}},
- stopAll(){this.request++;Object.values(this.mods).forEach(m=>this.halt(m));try{window.lpStopAll&&window.lpStopAll()}catch(e){}try{window.GALACTIC_VOX&&window.GALACTIC_VOX.stopFile&&window.GALACTIC_VOX.stopFile()}catch(e){}this.playAllActive=false;this.syncPlayAllBtn();},
+ stopAll(){this.request++;Object.values(this.mods).forEach(m=>this.halt(m));try{window.GLCTC_ENGINE&&GLCTC_ENGINE.killNotes(window.GLCTC_WS&&GLCTC_WS.ac())}catch(e){}try{window.lpStopAll&&window.lpStopAll()}catch(e){}try{window.GALACTIC_VOX&&window.GALACTIC_VOX.stopFile&&window.GALACTIC_VOX.stopFile()}catch(e){}this.playAllActive=false;this.syncPlayAllBtn();},
  offToast(){toast('MODULES are OFF · switch MODULES ON to play the modules')},
  paintModulesBtn(){const b=this.el('modulesBtn');if(!b)return;b.textContent=this.modulesOn?'MODULES ON':'MODULES OFF';b.classList.toggle('active',this.modulesOn);b.setAttribute('aria-pressed',String(this.modulesOn));b.title=this.modulesOn?'MODULES ON · the transport starts the modules. Press to switch every module off.':'MODULES OFF · every module is silent and cannot start; ▶ plays the timeline only. Press to switch the modules back on.'},
  master(type,at,beat){
@@ -9171,6 +9218,7 @@ function stopSong(msg,hold){
   if(S){MODS.forEach(m=>{if(m.tr)return;const g=busGain(m);if(g){try{g.cancelScheduledValues(0);g.setValueAtTime(1,S.ctx.currentTime)}catch(e){}}})}
  }catch(e){}
  try{if(h){h.stopAll();h.sharedEpochAt=null;h.sharedBeat=0;h.playAllActive=false}}catch(e){}
+ try{const c0=S&&S.ctx||(window.GLCTC_WS&&GLCTC_WS.ac());if(window.GLCTC_ENGINE)GLCTC_ENGINE.killNotes(c0);if(window.GLCTC_PUNCH)GLCTC_PUNCH.resetDuck()}catch(e){}   /* v145: nothing queued keeps playing after STOP */
  try{window.glctcTimeline&&window.glctcTimeline.halt()}catch(e){}
  try{window.__glctcStartStep=0;window.__glctcMasterStartAt=(S&&S.ctx?S.ctx.currentTime:GLCTC_CLOCK.now())+.06;GLCTC_CLOCK.anchor(window.__glctcMasterStartAt,0)}catch(e){try{GLCTC_CLOCK.clear();GLCTC_CLOCK.ensureAnchor(0)}catch(_){}}
  try{window.glctcTimeline.setHead(hold?holdBeat:0)}catch(e){}
@@ -13872,7 +13920,7 @@ function build(c){
  X.side.connect(X.hp1);X.hp1.connect(X.hp2);
  X.mid.connect(X.mg,0,0);X.mid.connect(X.mg,0,1);X.hp2.connect(X.mg,0,0);X.hp2.connect(X.inv);X.inv.connect(X.mg,0,1);
  X.drive=g(1);X.mg.connect(X.drive);
- X.clipIn=g(.5);X.clip=c.createWaveShaper();X.clip.oversample='4x';{const n=4097,cv=new Float32Array(n),K0=.7,R=.5;for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.clip.curve=cv}X.clipIn.connect(X.clip);   /* v144 PUNCH CLIPPER: drum peaks are rounded off (soft knee at -3 dBFS) before the brick-wall limiter, so kicks and snares hit instead of pumping the whole mix */
+ X.clipIn=g(.5);X.clip=c.createWaveShaper();X.clip.oversample='2x';{const n=4097,cv=new Float32Array(n),K0=.7,R=.5;for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.clip.curve=cv}X.clipIn.connect(X.clip);   /* v144 PUNCH CLIPPER: drum peaks are rounded off (soft knee at -3 dBFS) before the brick-wall limiter, so kicks and snares hit instead of pumping the whole mix */
  try{mOut.disconnect(lim)}catch(e){}mOut.connect(X.in);X.drive.connect(X.clipIn);X.clip.connect(lim);
  /* K-weighted loudness meter on the real output */
  X.k1=c.createBiquadFilter();X.k1.type='highshelf';X.k1.frequency.value=1681;X.k1.gain.value=4;X.k2=c.createBiquadFilter();X.k2.type='highpass';X.k2.frequency.value=38;X.k2.Q.value=.5;
@@ -15029,7 +15077,8 @@ function bassOut(K,b0,b1){['lee','sub'].forEach(id=>{try{const b=GLCTC_WSBUSFULL
  f.setValueAtTime(base,t0);f.exponentialRampToValueAtTime(420,t0+.04);f.setValueAtTime(420,t1-.02);f.exponentialRampToValueAtTime(base,t1)}catch(e){}})}
 function rootHz(){let hz=440;try{hz=+GLCTC_TUNING.hz||440}catch(e){}let key=9;try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))key=((+h.key%12)+12)%12}catch(e){}return hz*Math.pow(2,(key-9-12)/12)}
 
-let done=new Set(),lastCycle=-1,lifted=false;
+let done=new Set(),lastCycle=-1,lifted=false,PEND=[];
+function flushFills(K,c){if(!PEND.length)return;const now=c.currentTime;PEND=PEND.filter(f=>{const t=K.timeOfBeat(f.pb-2);if(t<now+.05)return false;if(t>now+1.5)return true;fill(K,f.pb,f.big,f.st);return false})}
 function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))return;done.add(key);
  const c=C();if(!c)return;const g=genre();if(QUIET.test(g))return;const sec=T.secs[i],base=cycle*T.total,sb=base+T.starts[i],eb=sb+sec.bars*T.barBeats,nx=T.secs[(i+1)%T.n],nextKind=(i+1<T.n||T.loop)?nx.kind:null;
  const now=c.currentTime,ts=Math.max(now+.03,K.timeOfBeat(sb)),te=K.timeOfBeat(eb),gapBeat=nextKind==='drop'?1:0;
@@ -15043,18 +15092,17 @@ function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))ret
  if(sec.kind==='break')downlifter(c,ts,Math.min(2*T.barBeats,sec.bars*T.barBeats)*60/K.bpm);
  /* phrase variation inside long sections (the section-end fill is the composer's own) */
  if(sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
-  for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats;if(K.timeOfBeat(pb-2)<now+.05)continue;const big=p%8===0;
-   if(sec.kind==='break'&&!big)continue;fill(K,pb,big,st)}}   /* v128: no mid-section bass cut (it read as a glitch) */
+   for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats,big=p%8===0;if(sec.kind==='break'&&!big)continue;PEND.push({pb,big,st})}}   /* v145: fills are written ~1.5 s ahead by the tick, not a whole section ahead */
  /* final-chorus key lift */
  const lastDrop=T.secs.map((x,j)=>x.kind==='drop'?j:-1).filter(j=>j>=0).pop(),cents=LIFT[g]||0;
  if(cents&&lastDrop!=null&&i+1===lastDrop&&T.secs[lastDrop].bars>=8&&T.secs.filter(x=>x.kind==='drop').length>=2){try{GLCTC_TUNING.lift(cents,K.timeOfBeat(eb));lifted=true;
   const le=eb+T.secs[lastDrop].bars*T.barBeats;GLCTC_TUNING.lift(0,K.timeOfBeat(le))}catch(e){}}
 }
 setInterval(()=>{
- if(!running()){if(lifted){try{GLCTC_TUNING.unlift()}catch(e){}lifted=false}done.clear();lastCycle=-1;return}
+ if(!running()){if(lifted){try{GLCTC_TUNING.unlift()}catch(e){}lifted=false}done.clear();lastCycle=-1;PEND=[];return}
  let T=null,q=null;try{T=GLCTC_SONG.timeline();q=GLCTC_SONG.section()}catch(e){}if(!T||!q)return;const K=window.GLCTC_CLOCK,c=C();if(!K||!c)return;
  const beat=K.beatAt(c.currentTime),cycle=T.loop?Math.floor(Math.max(0,beat)/T.total):0;if(cycle!==lastCycle){lastCycle=cycle}
- scheduleSection(T,K,cycle,q.i);
+ scheduleSection(T,K,cycle,q.i);flushFills(K,c);
  /* look ahead: the next section's riser / lift timing is set the moment it starts, which is fine; nothing else needed */
 },120);
 

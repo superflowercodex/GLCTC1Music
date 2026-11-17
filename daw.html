@@ -962,7 +962,7 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
   <div class="mixbody"><div id="mixStrips" class="mixstrips"></div>
   <div class="mstrip master"><b>MASTER</b><div class="mrow"><div class="meter"><i id="mtL"></i></div><div class="meter"><i id="mtR"></i></div><input id="masterVol" class="vf" type="range" min="0" max="1" step=".01" value=".8" aria-label="Master volume"></div><button id="mClip" class="clamp" title="Tap to reset">CLIP</button><span class="hint"><span id="mDb">-∞</span> dB · <span id="masterValue">80%</span></span></div>
   <div class="mfxbox"><b>MASTER FX</b><div class="controls-row" style="margin:6px 0"><button id="mfxOn">FX OFF</button><button data-mfx="flt">FILTER</button><button data-mfx="dly">DELAY</button><button data-mfx="rev">REVERB</button></div><label>Filter cutoff <span id="filterValue">100%</span></label><input id="filterCutoff" type="range" min="200" max="18000" value="18000"><label>Delay <span id="delayValue">0%</span></label><input id="delayMix" type="range" min="0" max=".65" step=".01" value=".3"><label>Reverb <span id="reverbValue">30%</span></label><input id="reverbMix" type="range" min="0" max=".8" step=".01" value=".3"></div>
-  <div class="mfxbox"><b>HEADPHONES</b><label>Master headphone volume</label><input id="hpVol" type="range" min="0" max="1" step=".01" value=".8"><label>Headphone output</label><select id="hpDev" class="field"></select><button id="hpMix" style="margin-top:6px;width:100%">Monitor master in HP</button><b style="display:block;margin-top:10px">BOOTH OUT</b><label>Booth volume</label><input id="boothVol" type="range" min="0" max="1" step=".01" value=".8"><label>Booth output</label><select id="boothDev" class="field"></select><button id="outDetect" style="margin-top:6px;width:100%">Detect output devices</button></div></div>
+  <div class="mfxbox"><b>HEADPHONES</b><label>Master headphone volume</label><input id="hpVol" type="range" min="0" max="1" step=".01" value=".8"><label>Headphone output</label><select id="hpDev" class="field"></select><button id="hpMix" style="margin-top:6px;width:100%">Monitor master in HP</button><b style="display:block;margin-top:10px">BOOTH OUT</b><label>Booth volume</label><input id="boothVol" type="range" min="0" max="1" step=".01" value=".8"><label>Booth output</label><select id="boothDev" class="field"></select><button id="outDetect" style="margin-top:6px;width:100%">Detect output devices</button></div><div class="mfxbox" id="bncBox"></div></div>
   <audio id="hpAudio" hidden></audio><audio id="boothAudio" hidden></audio></section>
   <section class="panel looper" id="looperPanel"><div class="panel-title"><span>SAMPLER / LOOPER · 32 PADS</span><span style="display:flex;gap:6px;align-items:center"><select id="lpTrack" class="field" style="width:150px" aria-label="Looper track"></select><button id="lpCreate" class="primary">＋ CREATE TRACK</button><strong id="lpTempo" class="gold">130 BPM</strong></span></div>
   <div class="lpbody">
@@ -6238,7 +6238,7 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
   inMode:t=>t.recIn||'line',
   setIn(t,md){t.recIn=md;if(!REC.on)dropInputs();markDirty()},
   dev:()=>ST.rec.inDev||'',setDev(d){ST.rec.inDev=d;if(!REC.on)dropInputs();save()},
-  rec:()=>recToggle(),on:()=>!!(REC.on||REC.counting),
+  rec:()=>recToggle(),on:()=>!!(REC.on||REC.counting),src:k=>{try{return srcNode(k)}catch(e){return null}},
   armed:()=>ST.rec.src.filter(k=>k.startsWith('in:')||k.startsWith('mod:')).length
  };
  async function ensureMic(){if(REC.mic)return;const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});REC.mic={stream:s,node:audioCtx.createMediaStreamSource(s)}}
@@ -15611,6 +15611,169 @@ setInterval(()=>{const r=running();
  try{listenChannels();listenMaster()}catch(e){}
  if(++tick%6===0)try{steerChannels();steerMaster()}catch(e){}},500);
 window.GLCTC_TONE={snap:()=>{const M=master();if(!M)return null;M.an.getFloatFrequencyData(M.buf);const bw=M.c.sampleRate/M.an.fftSize,n=M.buf.length;const v=CS.map(cf=>{let s=0;for(let i=Math.floor(cf/2**(1/6)/bw);i<Math.min(n,cf*2**(1/6)/bw);i++)s+=Math.pow(10,M.buf[i]/10);return 10*Math.log10(s+1e-20)});return {v:v.map(x=>+x.toFixed(1)),bw,n,fft:M.an.fftSize,sr:M.c.sampleRate}},state:()=>({curve:lastCurve,stale:!!(MG&&MG.c._tb!==MG.f),master:mg.slice(),channels:Object.fromEntries(Object.entries(CH).map(([k,v])=>[k,v.g.slice()]))}),REF,MB,SHAPE,reset:g=>{try{localStorage.removeItem(LK+(g||genre()))}catch(e){}}};
+})();
+</script>
+<script id="glctc1-bounce">
+/* BOUNCE: pick any module, mixer (sequencer) track, bus or the master, solo it, record it in real time to a
+   lossless WAV, then save it to the device or load it into any sample slot (uses the ⇢ SEND SAMPLE picker). */
+(()=>{'use strict';
+const box=document.getElementById('bncBox');if(!box)return;
+let REC=null,LAST=null;
+const say=t=>{try{toast(t)}catch(e){}};
+const E=(tag,props,...kids)=>{const e=document.createElement(tag);if(props)for(const k in props){const v=props[k];if(k==='class')e.className=v;else if(k==='text')e.textContent=v;else if(k.slice(0,2)==='on')e[k]=v;else e.setAttribute(k,v)}kids.forEach(x=>x!=null&&e.append(x));return e};
+const proj=()=>{try{return window.__glctcProject&&__glctcProject()}catch(e){return null}};
+const css=document.createElement('style');css.textContent=`
+#bncBox{border-color:#2fffd0!important;box-shadow:0 0 0 1px #2fffd033,0 0 18px #2fffd022,inset 0 1px 0 #ffffff14!important}
+#bncBox>b{color:#2fffd0!important;letter-spacing:.16em}
+#bncBox label{display:block;margin-top:6px;font-size:10px;color:#9aa0b4;letter-spacing:.06em}
+#bncBox select{width:100%;margin-top:3px}
+#bncBox .bnc-row{display:flex;gap:5px;margin-top:6px}#bncBox .bnc-row>*{flex:1;min-width:0}
+#bncBox .bnc-chk{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:10px;color:#c9cad4;letter-spacing:.05em}
+#bncBox button.bnc-go{width:100%!important;margin-top:9px!important;padding:12px 6px!important;font-weight:900!important;font-size:14px!important;letter-spacing:.16em!important;color:#03140f!important;border:0!important;border-radius:8px!important;cursor:pointer;
+ background:linear-gradient(135deg,#a8fff0,#2fffd0 45%,#00d9ff)!important;box-shadow:0 0 14px #2fffd0aa,0 0 32px #00d9ff66,inset 0 1px 0 #fff8!important;text-shadow:0 1px 0 #fff6!important}
+#bncBox .bnc-go:active{transform:translateY(1px)}
+#bncBox button.bnc-go.on{background:linear-gradient(135deg,#ff8a9a,#ff3b5c)!important;color:#fff!important;text-shadow:none!important;box-shadow:0 0 16px #ff3b5ccc!important;animation:bncP 1s infinite}
+@keyframes bncP{50%{opacity:.75}}
+#bncBox .bnc-bar{height:6px;margin-top:7px;border-radius:3px;background:#0b0c10;border:1px solid #2a2b33;overflow:hidden}
+#bncBox .bnc-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2fffd0,#00d9ff)}
+#bncBox .bnc-st{margin-top:5px;font-size:10px;color:#9aa0b4;min-height:1.3em;word-break:break-word}
+#bncBox .bnc-res{display:none;margin-top:6px;gap:5px}#bncBox .bnc-res.on{display:flex}
+#bncBox .bnc-res button{flex:1;min-width:0;padding:8px 2px!important;font-weight:800!important;font-size:10px!important;border-radius:6px!important;border:1px solid #2fffd0!important;background:#0d1f1b!important;color:#9ffff0!important;cursor:pointer}`;
+document.head.append(css);
+
+/* ---------- UI ---------- */
+const src=E('select',{class:'field','aria-label':'Bounce source'});
+const len=E('select',{class:'field','aria-label':'Bounce length'});
+[['1','1 BAR'],['2','2 BARS'],['4','4 BARS'],['8','8 BARS'],['16','16 BARS'],['32','32 BARS'],['0','MANUAL STOP']].forEach(([v,t])=>len.append(E('option',{value:v,text:t})));
+const start=E('select',{class:'field','aria-label':'What starts'});
+[['all','PLAY ALL'],['mod','MODULE ONLY'],['none','LIVE NOW']].forEach(([v,t])=>start.append(E('option',{value:v,text:t})));
+const soloCb=E('input',{type:'checkbox'}),tailCb=E('input',{type:'checkbox'}),normCb=E('input',{type:'checkbox'});
+const go=E('button',{type:'button',class:'bnc-go',text:'⤓ BOUNCE'});
+const bar=E('div',{class:'bnc-bar'},E('i'));
+const st=E('div',{class:'bnc-st',text:'Pick a channel, then BOUNCE.'});
+const bSave=E('button',{type:'button',text:'⤓ SAVE WAV'}),bSend=E('button',{type:'button',text:'⇢ LOAD TO SLOT'});
+const res=E('div',{class:'bnc-res'},bSave,bSend);
+box.append(E('b',{text:'BOUNCE'}),E('label',{text:'Source (module · mixer track · bus)'}),src,
+ E('div',{class:'bnc-row'},len,start),
+ E('label',{class:'bnc-chk'},soloCb,document.createTextNode('Solo while bouncing')),
+ E('label',{class:'bnc-chk'},tailCb,document.createTextNode('Keep FX tail (+2 s)')),
+ E('label',{class:'bnc-chk'},normCb,document.createTextNode('Normalize to -1 dB')),
+ go,bar,st,res);
+
+const LS='glctc1.bounce.v1';let P={src:'mod:bl',len:'4',start:'all',solo:true,tail:false,norm:true};
+try{Object.assign(P,JSON.parse(localStorage.getItem(LS)||'{}'))}catch(e){}
+const saveP=()=>{try{localStorage.setItem(LS,JSON.stringify(P))}catch(e){}};
+len.value=P.len;start.value=P.start;soloCb.checked=!!P.solo;tailCb.checked=!!P.tail;normCb.checked=!!P.norm;normCb.onchange=()=>{P.norm=normCb.checked;saveP()};
+len.onchange=()=>{P.len=len.value;saveP()};start.onchange=()=>{P.start=start.value;saveP()};
+soloCb.onchange=()=>{P.solo=soloCb.checked;saveP()};tailCb.onchange=()=>{P.tail=tailCb.checked;saveP()};
+src.onchange=()=>{P.src=src.value;saveP();syncStart()};
+
+function sources(){
+ const out=[];
+ try{GLCTC_MODMIX.list().forEach(m=>out.push({g:'MODULES',k:'mod:'+m.id,n:m.name}))}catch(e){}
+ try{(proj()?.tracks||[]).filter(t=>t.type!=='auto'&&!t.looper).forEach(t=>out.push({g:'MIXER TRACKS',k:'trk:'+t.id,n:t.name||'Track'}))}catch(e){}
+ try{(GLCTC_BUSES.state().buses||[]).forEach((b,i)=>out.push({g:'BUSES',k:'bus:'+i,n:b.name||'BUS '+(i+1)}))}catch(e){}
+ out.push({g:'MASTER',k:'master',n:'MASTER MIX'});
+ return out;
+}
+function fill(){
+ if(REC)return;const L=sources(),cur=P.src;src.innerHTML='';const grp={};
+ L.forEach(s=>{const g=grp[s.g]||(grp[s.g]=src.appendChild(E('optgroup',{label:s.g})));g.append(E('option',{value:s.k,text:s.n}))});
+ src.value=L.some(s=>s.k===cur)?cur:(L[0]&&L[0].k)||'';syncStart();
+}
+function syncStart(){const isMod=src.value.startsWith('mod:');start.querySelector('[value=mod]').disabled=!isMod;if(!isMod&&start.value==='mod'){start.value='all';P.start='all'}}
+src.addEventListener('pointerdown',fill);src.addEventListener('focus',fill);fill();setInterval(()=>{if(document.activeElement!==src)fill()},4000);
+const nameOf=k=>{const s=sources().find(x=>x.k===k);return s?s.n:k};
+
+/* ---------- solo snapshot / restore ---------- */
+function soloSnap(){
+ const S={m:{},t:{},b:{}};
+ try{GLCTC_MODMIX.list().forEach(m=>{S.m[m.id]=!!(GLCTC_MODMIX.get(m.id)||{}).solo})}catch(e){}
+ try{proj().tracks.forEach(t=>{S.t[t.id]=!!t.solo})}catch(e){}
+ try{GLCTC_BUSES.state().buses.forEach((b,i)=>{S.b[i]=!!b.solo})}catch(e){}
+ return S;
+}
+function soloApply(S){
+ try{GLCTC_MODMIX.list().forEach(m=>{const g=GLCTC_MODMIX.get(m.id)||{};if(!!g.solo!==!!S.m[m.id])GLCTC_MODMIX.set(m.id,'solo',!!S.m[m.id])})}catch(e){console.warn(e)}
+ try{proj().tracks.forEach(t=>{if(!t.looper&&t.id in S.t)t.solo=!!S.t[t.id]})}catch(e){}
+ try{GLCTC_BUSES.state().buses.forEach((b,i)=>{if(!!b.solo!==!!S.b[i])GLCTC_BUSES.set(i,{solo:!!S.b[i]})})}catch(e){}
+ try{renderAll()}catch(e){}
+}
+function soloOnly(k){
+ const S=soloSnap();Object.keys(S.m).forEach(x=>S.m[x]=false);Object.keys(S.t).forEach(x=>S.t[x]=false);Object.keys(S.b).forEach(x=>S.b[x]=false);
+ if(k.startsWith('mod:'))S.m[k.slice(4)]=true;else if(k.startsWith('trk:'))S.t[k.slice(4)]=true;else if(k.startsWith('bus:'))S.b[+k.slice(4)]=true;else return;
+ soloApply(S);
+}
+
+/* ---------- transport ---------- */
+const isPlaying=()=>{try{if(GLCTC_TRANSPORT.busy())return true}catch(e){}try{if(glctcTimeline.playing())return true}catch(e){}
+ try{return Object.values(GLCTC_HUB.mods||{}).some(m=>m&&m.running&&m.running())}catch(e){return false}};
+const bpb=()=>{try{return typeof beatsPerBar==='function'?beatsPerBar():4}catch(e){return 4}};
+
+/* ---------- capture ---------- */
+function tapNode(k,c){
+ if(k.startsWith('bus:')){const L=(()=>{try{return GLCTC_BUSES.nodes()}catch(e){return null}})();const B=L&&L[+k.slice(4)];return B?B.pan:null}
+ const r=window.GLCTC_DESKREC&&GLCTC_DESKREC.src?GLCTC_DESKREC.src(k):null;return r?r.node:null;
+}
+async function begin(){
+ const k=src.value;if(!k){say('Pick something to bounce.');return}
+ let c;try{c=GLCTC_WS.ensureBuses()}catch(e){try{c=ensureAudio()}catch(_){}}
+ if(!c){say('Audio engine not ready – tap PLAY once, then try again.');return}
+ try{await c.resume()}catch(e){}
+ if(k.startsWith('bus:')){try{GLCTC_BUSES.sync&&GLCTC_BUSES.sync()}catch(e){}}
+ const node=tapNode(k,c);if(!node){say('That channel is not available yet – start it once, then bounce.');return}
+ const bars=+len.value,secs=bars>0?bars*bpb()*60/GLCTC_CLOCK.bpm:0,tail=tailCb.checked?2:0;
+ const R=REC={k,name:nameOf(k),c,node,bars,secs,tail,L:[],Rr:[],n:0,snap:soloSnap(),started:'',t0:0};
+ if(soloCb.checked){soloOnly(k);R.soloed=true}
+ const sp=c.createScriptProcessor(4096,2,2),mute=c.createGain();mute.gain.value=0;
+ sp.channelCount=2;sp.channelCountMode='explicit';sp.channelInterpretation='speakers';
+ sp.onaudioprocess=e=>{if(REC!==R)return;let a=e.inputBuffer.getChannelData(0),b=e.inputBuffer.getChannelData(1);
+  if(R.waitSilence&&R.n===0){let j=-1;for(let i=0;i<a.length;i++)if(Math.abs(a[i])+Math.abs(b[i])>.002){j=i;break}
+   if(j<0)return;j=Math.max(0,j-16);a=a.subarray(j);b=b.subarray(j)}
+  R.L.push(new Float32Array(a));R.Rr.push(new Float32Array(b));R.n+=a.length;
+  if(R.limit&&R.n>=R.limit&&!R.ending){R.ending=true;setTimeout(()=>{if(REC===R)finish(false)},0)}};
+ node.connect(sp);sp.connect(mute);mute.connect(c.destination);R.sp=sp;R.mute=mute;
+ /* start playback: wait for the first sound so the WAV begins exactly on the downbeat */
+ const mode=start.value;
+ if(mode!=='none'&&!isPlaying()){R.waitSilence=true;
+  if(mode==='mod'&&k.startsWith('mod:')){const id=k.slice(4),m=GLCTC_HUB&&GLCTC_HUB.mods&&GLCTC_HUB.mods[id];
+   try{if(id==='lp'){GLCTC_TRANSPORT.play();R.started='all'}else if(m&&m.start){m.start();R.started='mod'}else{GLCTC_TRANSPORT.play();R.started='all'}}catch(e){console.warn(e)}}
+  else{try{GLCTC_TRANSPORT.play();R.started='all'}catch(e){try{GLCTC_HUB.playAll();R.started='hub'}catch(_){}}}
+ }
+ R.limit=secs>0?Math.ceil((secs+tail)*c.sampleRate):0;
+ R.t0=performance.now();go.textContent='■ STOP BOUNCE';go.classList.add('on');res.classList.remove('on');src.disabled=true;
+ st.textContent='BOUNCING '+R.name+(bars?' · '+bars+' bar'+(bars>1?'s':''):' · tap STOP when done')+(R.waitSilence?' · waiting for first sound…':'');
+ R.tick=setInterval(()=>{if(REC!==R)return;const s=R.n/c.sampleRate;bar.firstChild.style.width=(R.limit?Math.min(100,R.n/R.limit*100):(s*10)%100)+'%';
+  if(R.n>0)st.textContent='BOUNCING '+R.name+' · '+s.toFixed(1)+' s'+(R.limit?' / '+((secs+tail)).toFixed(1)+' s':'');
+  if(R.waitSilence&&R.n===0&&performance.now()-R.t0>15000){say('No sound from '+R.name+' – is it playing / not muted?');finish(true)}},100);
+}
+function stopTransport(R){
+ try{if(R.started==='mod'){const m=GLCTC_HUB.mods[R.k.slice(4)];m&&m.stop&&m.stop()}else if(R.started==='all')GLCTC_TRANSPORT.stop();else if(R.started==='hub')GLCTC_HUB.stopAll()}catch(e){console.warn(e)}
+}
+function finish(cancel){
+ const R=REC;if(!R)return;REC=null;clearInterval(R.tick);
+ try{R.node.disconnect(R.sp)}catch(e){}try{R.sp.disconnect();R.mute.disconnect()}catch(e){}R.sp.onaudioprocess=null;
+ stopTransport(R);if(R.soloed)soloApply(R.snap);
+ go.textContent='⤓ BOUNCE';go.classList.remove('on');src.disabled=false;bar.firstChild.style.width='0';
+ if(cancel||!R.n){st.textContent=cancel&&R.waitSilence&&!R.n?'No sound from '+R.name+' – it may be empty or muted here.':'Nothing bounced.';return}
+ const c=R.c,sr=c.sampleRate,want=R.limit?Math.min(R.n,R.limit):R.n,buf=c.createBuffer(2,want,sr),dl=buf.getChannelData(0),dr=buf.getChannelData(1);
+ let o=0;for(let i=0;i<R.L.length&&o<want;i++){const a=R.L[i],b=R.Rr[i],m=Math.min(a.length,want-o);dl.set(a.subarray(0,m),o);dr.set(b.subarray(0,m),o);o+=m}
+ let pk=0;for(let i=0;i<want;i++){const v=Math.max(Math.abs(dl[i]),Math.abs(dr[i]));if(v>pk)pk=v}
+ if(pk<.0005){st.textContent='Bounce was silent – check the channel is playing and not muted.';say('That bounce was silent.');return}
+ let nrm='';if(normCb.checked){const g=Math.pow(10,-1/20)/pk;for(let i=0;i<want;i++){dl[i]*=g;dr[i]*=g}nrm=' · normalized';}
+ /* 5 ms fade-out so the loop end never clicks */
+ const f=Math.min(want,Math.round(sr*.005));for(let i=0;i<f;i++){const g=i/f;dl[want-1-i]*=g;dr[want-1-i]*=g}
+ const bpm=Math.round(GLCTC_CLOCK.bpm);
+ LAST={buf,name:R.name+(R.bars?' '+R.bars+'BAR':'')+' '+bpm+'BPM'};
+ const db=(20*Math.log10(pk)).toFixed(1);
+ st.textContent='✓ '+R.name+' · '+buf.duration.toFixed(2)+' s · peak '+db+' dBFS'+nrm;res.classList.add('on');
+ say('Bounced '+R.name+'. Choose where to save or load it.');
+ try{GLCTC_SEND.open({buf:LAST.buf,name:LAST.name,from:'bounce'})}catch(e){}
+}
+go.onclick=()=>{if(REC)finish(false);else begin()};
+bSave.onclick=()=>{if(!LAST)return;try{const f=GLCTC_SEND.fileOf(LAST.buf,LAST.name),u=URL.createObjectURL(f),a=document.createElement('a');a.href=u;a.download=f.name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(u);a.remove()},3000);say('Saved '+f.name)}catch(e){say('Could not save the WAV.')}};
+bSend.onclick=()=>{if(!LAST)return;try{GLCTC_SEND.open({buf:LAST.buf,name:LAST.name,from:'bounce'})}catch(e){say('Sample slots are not ready yet.')}};
+window.GLCTC_BOUNCE={start:begin,stop:()=>finish(false),last:()=>LAST};
 })();
 </script>
 </body>

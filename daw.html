@@ -3420,7 +3420,7 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
   if(MK&&((S.bitcrush||0)>0||(S.filter??1)<1||S.drive>.2||S.room>.15)){S.bitcrush=0;S.filter=1;S.drive=Math.min(S.drive,.12);S.room=Math.min(S.room,.12);try{updateFx()}catch(e){}}
   const ch=MK&&v<=4?{...ch0,tone:Math.max(0,ch0.tone||0),level:Math.max(v<=2?.9:.6,ch0.level==null?1:ch0.level),delay:v<=2?0:(ch0.delay||0),pan:v<=2?0:(ch0.pan||0)}:ch0;   /* v131 */
   const out=c.createGain(),ck=c.createGain(),X=chStrip(c,b,v,ch);
-  out.gain.value=Math.max(0,S.level*ch.level*vel*(MK&&(v===1||v===2)&&window.GLCTC_PUNCH&&GLCTC_PUNCH.genre()?GLCTC_PUNCH.snr():1));   /* v144: snare / clap lift */
+  out.gain.value=Math.max(0,S.level*ch.level*vel*(window.GLCTC_PUNCH&&GLCTC_PUNCH.genre()?GLCTC_PUNCH.d9(v,MK):1));   /* v144/v146: snare-clap lift, hats-cymbals trim in songs */   /* v144: snare / clap lift */
   out.connect(ck);ck.connect(X.in);
   let endAt=t+.08;
   const kitN=MK&&v<=4?MK:S.kit,chosen=MK&&v<=4?'kit':(S.profiles[v]||'kit'),profile=chosen==='kit'?(kitProfile[kitN]||'909'):chosen;
@@ -5799,6 +5799,8 @@ const AM_GAPG={hiphop:{go:4,s101:4,ix:3,vox:3},eastcoast:{go:4,s101:4,ix:3,vox:3
 (()=>{const L={techno: 2.9, house: 2.4, deephouse: 6.0, melodictechno: 5.9, techhouse: 3.6, tribalhouse: 2.3, hardhouse: 7.0, trance: 8.0, psytrance: 1.5, happyhardcore: 5.8, dnb: 1.5, jungle: 4.7, liquid: 1.5, breaks: 6, nuskool: 4.4, electro: 1.5, garage: 1.5, dubstep: 6.6, hiphop: 1.5, eastcoast: 3.1, westcoast: 1.5, south: 1.5, ukhiphop: 4.2, drill: 1.5, trap: 1.5, phonk: 1.5, lofi: 3.4, amapiano: 1.5, afrohouse: 1.5, reggae: 6.9, ska: 2.1, pop: 1.5, synthwave: 7.5};for(const g in L){const x=L[g],o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]);
  const d={bl:x*.5,mine:x*.5,go:-x*.5,s101:-x*.5,ix:-x*.5,vox:-x*.4,ws:-x*.5,lee:-x*.25};for(const k in d){o[k]=(o[k]||0)+d[k];q[k]=(q[k]||0)+d[k]}}
  AM_MAXUP.bl=Math.max(AM_MAXUP.bl,12);AM_MAXUP.mine=Math.max(AM_MAXUP.mine,17)})();
+/* v146: the music steps back up 2.5 dB under the drums (leads, pads, keys, vocals, instrument designer) - they had dropped to a few % of the mix */
+(()=>{const U={go:2.5,s101:2.5,ix:2.5,vox:2.5,ws:2.5};for(const g in AM_GENRE){if(g==='ambient'||g==='meditation')continue;const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]||{});for(const k in U){o[k]=(o[k]||0)+U[k];q[k]=(q[k]||0)+U[k]}}})();
 function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};const G0=AM_START_G[AM.genre]||{};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=G0[m.id]??AM_START[m.id]??0});AM.master=G0.master??0;   /* v105: every genre starts where its auto mix settles, so the intro is not louder than the drop */AM.locked=false;AM.stable=0;
   AM.hist={};AM.measured=new Set();AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
   if(AM.on){const lt=amLoop();if(lt)amLoopTrim(.4)}
@@ -13917,11 +13919,16 @@ function build(c){
  X.hp1=c.createBiquadFilter();X.hp2=c.createBiquadFilter();[X.hp1,X.hp2].forEach(f=>{f.type='highpass';f.Q.value=.707;f.frequency.value=120});
  X.in.connect(X.sp);X.sp.connect(X.l2m,0);X.sp.connect(X.r2m,1);X.sp.connect(X.l2s,0);X.sp.connect(X.r2s,1);
  X.l2m.connect(X.mid);X.r2m.connect(X.mid);X.l2s.connect(X.side);X.r2s.connect(X.side);
- X.side.connect(X.hp1);X.hp1.connect(X.hp2);
+ X.side.connect(X.hp1);X.hp1.connect(X.hp2);c._side=X.side;
  X.mid.connect(X.mg,0,0);X.mid.connect(X.mg,0,1);X.hp2.connect(X.mg,0,0);X.hp2.connect(X.inv);X.inv.connect(X.mg,0,1);
- X.drive=g(1);X.mg.connect(X.drive);
+ X.drive=g(1);c._tb=X.tb=[0,1,2,3,4,5].map(()=>{const f=c.createBiquadFilter();f.type='peaking';f.gain.value=0;return f});X.mg.connect(X.tb[0]);for(let i=0;i<5;i++)X.tb[i].connect(X.tb[i+1]);X.tb[5].connect(X.drive);   /* v146: tonal-balance EQ (steered by GLCTC_TONE in songs, flat otherwise) */
  X.clipIn=g(.5);X.clip=c.createWaveShaper();X.clip.oversample='2x';{const n=4097,cv=new Float32Array(n),K0=.7,R=.5;for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.clip.curve=cv}X.clipIn.connect(X.clip);   /* v144 PUNCH CLIPPER: drum peaks are rounded off (soft knee at -3 dBFS) before the brick-wall limiter, so kicks and snares hit instead of pumping the whole mix */
- try{mOut.disconnect(lim)}catch(e){}mOut.connect(X.in);X.drive.connect(X.clipIn);X.clip.connect(lim);
+ /* v146 SPLIT CLIP: the kick / bass peaks (below 120 Hz) are rounded off on their own, so the leads, pads, keys and vocals above
+    never get crushed by a kick hitting the clipper (no intermodulation grit on the music) */
+ X.xl=[0,1].map(()=>{const f=c.createBiquadFilter();f.type='lowpass';f.frequency.value=120;f.Q.value=.7071;return f});X.xh=[0,1].map(()=>{const f=c.createBiquadFilter();f.type='highpass';f.frequency.value=120;f.Q.value=.7071;return f});
+ X.loIn=g(.5);X.loClip=c.createWaveShaper();X.loClip.oversample='2x';{const n=4097,cv=new Float32Array(n),K0=.55,R=.4;for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.loClip.curve=cv}X.sum=g(1);
+ X.drive.connect(X.xl[0]);X.xl[0].connect(X.xl[1]);X.xl[1].connect(X.loIn);X.loIn.connect(X.loClip);X.loClip.connect(X.sum);X.drive.connect(X.xh[0]);X.xh[0].connect(X.xh[1]);X.xh[1].connect(X.sum);
+ try{mOut.disconnect(lim)}catch(e){}mOut.connect(X.in);X.sum.connect(X.clipIn);X.clip.connect(lim);
  /* K-weighted loudness meter on the real output */
  X.k1=c.createBiquadFilter();X.k1.type='highshelf';X.k1.frequency.value=1681;X.k1.gain.value=4;X.k2=c.createBiquadFilter();X.k2.type='highpass';X.k2.frequency.value=38;X.k2.Q.value=.5;
  X.ks=c.createChannelSplitter(2);X.aL=c.createAnalyser();X.aR=c.createAnalyser();X.aL.fftSize=X.aR.fftSize=4096;
@@ -13929,7 +13936,8 @@ function build(c){
  return X;
 }
 function ensure(){const c=ac();if(!c)return null;if(!N||N.c!==c)N=build(c);return N}
-function setDrive(d){S.drive=Math.max(-6,Math.min(12,d));const X=ensure();if(!X)return;const v=S.on?dB(S.drive):1;try{X.drive.gain.setTargetAtTime(v,X.c.currentTime,.25)}catch(e){X.drive.gain.value=v}}
+function setDrive(d){S.drive=Math.max(-14,Math.min(12,d));   /* v146: room to turn a hot mix down (was -6) */
+const X=ensure();if(!X)return;const v=S.on?dB(S.drive):1;try{X.drive.gain.setTargetAtTime(v,X.c.currentTime,.25)}catch(e){X.drive.gain.value=v}}
 function setMono(){const X=ensure();if(!X)return;const f=S.on?120:10;X.hp1.frequency.value=f;X.hp2.frequency.value=f}
 function startSong(genre){
  S.genre=genre||S.genre;S.locked=false;S.st=[];S.dst=[];S.ok=0;S.next=25;S.kind=null;S.drop=0;
@@ -15444,8 +15452,10 @@ function shape(v,p,kc){const g=genre();if(!g)return p;const K=KICK[fam(g)];const
  if(v===2){q.cb=Math.max(p.cb||4,4);q.cd=Math.min(p.cd||.24,fam(g)==='soft'?.3:.22);return q}
  return p}
 function bl(len){const g=genre();if(!g)return null;const K=KICK[fam(g)];return{click:.35*K.kc,body:K.kb*.9}}
-function blVoice(i){const g=genre();if(!g||fam(g)==='soft')return 1;return i===1?1.26:i===2?1.2:1}   /* 80LA8 voice 1 = snare, 2 = clap: +2 dB / +1.6 dB in songs */
+function blVoice(i){const g=genre();if(!g)return 1;if((i===3||i===4)&&fam(g)!=='boom')return .74;if(fam(g)==='soft')return 1;return i===1?1.26:i===2?1.2:1}   /* 1 snare, 2 clap up; 3-4 hats -2.6 dB */   /* 80LA8 voice 1 = snare, 2 = clap: +2 dB / +1.6 dB in songs */
 function snr(){const g=genre();return !g||fam(g)==='soft'?1:1.22}
+function d9(v,mk){const g=genre();if(!g)return 1;if((v===3||v===4||v===9||v===10)&&fam(g)!=='boom')return .7;   /* 808 styles keep their hats up front */
+ return mk&&(v===1||v===2)?snr():1}   /* hats / ride / crash -3 dB */
 function blLen(dur){const g=genre();if(!g)return dur;const K=KICK[fam(g)];if(K.len)return Math.min(dur,K.max,Math.max(.12,K.len*beat()));return Math.min(dur,K.max)}
 /* ---- the kick duck: one gain stage inserted into each module bus (between the channel fader and the meters/output) ---- */
 function duckNode(id){const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(id);if(!b||!b.vol||!b.tap)return null;
@@ -15462,7 +15472,111 @@ function duck(t,vel,dur){const g=genre();if(!g)return;const D=DUCK[fam(g)];if(!D
   lastT[id]=t}}
 function resetDuck(){for(const id of ['lee','sub','s101','go','ix']){try{const b=GLCTC_WSBUSFULL(id);if(b&&b._dk){const P=b._dk.gain;P.cancelScheduledValues(0);P.setValueAtTime(1,b.c.currentTime)}}catch(e){}}lastT={}}
 let was=false;setInterval(()=>{const r=running();if(was&&!r)resetDuck();was=r},400);
-window.GLCTC_PUNCH={shape,bl,blLen,blVoice,snr,duck,resetDuck,genre,KICK,DUCK,FAM};
+window.GLCTC_PUNCH={shape,bl,blLen,blVoice,snr,d9,duck,resetDuck,genre,KICK,DUCK,FAM};
+})();
+</script>
+<script id="glctc1-v146-tone">
+/* ===== v146 TONE · every sound, every genre =================================================================================
+   Measured on every genre's drop: the finished masters were scooped and fizzy - the 400 Hz-2 kHz body (where leads, pads,
+   keys and vocals live) sat 3-6 dB under a normal club master, while 4-10 kHz ran 8-15 dB hot (mostly hats and cymbals).
+   Several synths were boxy (most of their energy at 150-450 Hz, under the bass and kick) with little bite.
+   This pass, all while a composer song plays (your own tracks are untouched):
+   · SOUND SHAPING ON EVERY CHANNEL: bass, synths, pads, keys, vocals and the instrument designer each get a small three-band
+     EQ (box cut · presence · air) that listens to the channel and steers it toward the shape of its role - a lead gets bite
+     without harshness, a pad stays warm, a vocal sits forward, the bass keeps its weight but loses the boxiness.
+   · TONAL BALANCE ON THE MASTER: a six-band EQ ahead of the limiter listens to the whole mix and moves it toward the genre's
+     reference curve (club, bass music, hip hop, chill). What it learns is remembered per genre, so the next song starts there.
+   · Hats and cymbals sit 2.5-3 dB lower in songs, so the top end is crisp instead of fizzy; the music layers come up 2.5 dB.
+   · WIDER: the stereo side above 120 Hz is lifted 3 dB in songs (the low end stays mono), so pads and leads open out.
+   · SPLIT CLIP in the mastering stage: kick / bass peaks are clipped on their own below 120 Hz, so the music above stays clean.
+   Cost: three filters per channel, six on the master and two quick spectrum reads a second - no new reverbs or oscillators.
+   ========================================================================================================================== */
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const running=()=>{try{return !!(window.GLCTC_SONG&&GLCTC_SONG.running&&GLCTC_SONG.running())}catch(e){return false}};
+const genre=()=>{try{return (window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||($('gscGenre')||{}).value||''}catch(e){return ''}};
+const ac=()=>{try{return window.GLCTC_WS&&GLCTC_WS.ac()}catch(e){return null}};
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+/* ---------------------------------------------------------------- channel shaping */
+const ROLE={lee:'bass',s101:'lead',go:'lead',ix:'lead',ix1:'lead',ix2:'lead',ix3:'lead',ix4:'lead',ix5:'lead',ix6:'lead',ws:'pad',vox:'vox'};
+/* each role: band targets relative to the channel's 450-1200 Hz body, and how far each filter may move (dB) */
+const SHAPE={
+ lead:{f:[300,2600,9000],q:[.9,.8],t:{box:-1,bite:-5,air:-14},rng:[[-8,0],[-3,5],[-5,3]]},
+ pad: {f:[280,2400,9000],q:[.8,.7],t:{box:1,bite:-8,air:-16},rng:[[-6,0],[-3,4],[-5,2]]},
+ vox: {f:[320,3000,10000],q:[.9,.8],t:{box:-3,bite:-3,air:-12},rng:[[-8,0],[-3,5],[-5,3]]},
+ bass:{f:[260,900,6000],q:[1,.9],t:{box:9,bite:-8,air:-40},rng:[[-6,0],[-2,4],[0,0]]}};
+const CH={};   /* id -> {b,f:[box,bite,air],acc,n,g:[..]} */
+function chain(id){let b=null;try{b=GLCTC_WSBUSFULL(id)}catch(e){}if(!b||!b.hp||!b.vol)return null;
+ const k=CH[id];if(k&&k.b===b)return k;const c=b.c,S=SHAPE[ROLE[id]];
+ const box=c.createBiquadFilter(),bite=c.createBiquadFilter(),air=c.createBiquadFilter();
+ box.type='peaking';box.frequency.value=S.f[0];box.Q.value=S.q[0];box.gain.value=0;
+ bite.type='peaking';bite.frequency.value=S.f[1];bite.Q.value=S.q[1];bite.gain.value=0;
+ air.type='highshelf';air.frequency.value=S.f[2];air.gain.value=0;
+ try{b.hp.disconnect(b.vol)}catch(e){try{b.hp.disconnect()}catch(_){}}b.hp.connect(box);box.connect(bite);bite.connect(air);air.connect(b.vol);
+ return CH[id]={b,f:[box,bite,air],acc:null,n:0,g:[0,0,0]}}
+function bandsOf(an,c){const n=an.frequencyBinCount,buf=new Float32Array(n);an.getFloatFrequencyData(buf);const bw=c.sampleRate/an.fftSize;
+ const sum=(lo,hi)=>{let s=0;for(let i=Math.max(1,Math.floor(lo/bw));i<Math.min(n,Math.ceil(hi/bw));i++)s+=Math.pow(10,buf[i]/10);return s};
+ return [sum(150,450),sum(450,1200),sum(1200,4000),sum(6000,14000)]}
+function listenChannels(){const c=ac();if(!c)return;
+ for(const id in ROLE){const k=chain(id);if(!k)continue;let gate=1;try{gate=k.b.gate.gain.value}catch(e){}if(gate<.5)continue;
+  const v=bandsOf(k.b.an,c);if(v[1]<1e-9)continue;   /* silent channel: nothing to learn */
+  k.acc=k.acc?k.acc.map((x,i)=>x+v[i]):v;k.n++}}
+function steerChannels(){const c=ac();if(!c)return;const t=c.currentTime;
+ for(const id in CH){const k=CH[id];if(!k.acc||k.n<3){k.acc=null;k.n=0;continue}const S=SHAPE[ROLE[id]],D=x=>10*Math.log10(x/k.n+1e-20);
+  const body=D(k.acc[1]),m={box:D(k.acc[0])-body,bite:D(k.acc[2])-body,air:D(k.acc[3])-body};
+  ['box','bite','air'].forEach((name,i)=>{const err=S.t[name]-m[name],r=S.rng[i];k.g[i]=cl(k.g[i]+cl(err*.35,-1.2,1.2),r[0],r[1]);k.f[i].gain.setTargetAtTime(k.g[i],t,.4)});
+  k.acc=null;k.n=0}}
+function flatChannels(){const c=ac();if(!c)return;for(const id in CH){const k=CH[id];k.g=[0,0,0];k.acc=null;k.n=0;k.f.forEach(f=>{try{f.gain.setTargetAtTime(0,c.currentTime,.3)}catch(e){}})}}
+/* ---------------------------------------------------------------- master tonal balance */
+const CS=[40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500];
+/* reference curves: dB per third-octave relative to the 63-125 Hz average */
+const REF={
+ club:{40:-7,50:-4,160:-6,200:-7,250:-8,315:-9,400:-10,500:-11,630:-11.5,800:-12,1000:-12.5,1250:-13,1600:-13.5,2000:-14,2500:-14.5,3150:-15,4000:-16,5000:-17,6300:-18,8000:-19.5,10000:-21,12500:-23},
+ bass:{40:-6,50:-3,160:-7,200:-8,250:-9,315:-10,400:-11,500:-12,630:-12.5,800:-13,1000:-13.5,1250:-14,1600:-14.5,2000:-15,2500:-15.5,3150:-16,4000:-17,5000:-18,6300:-19,8000:-20.5,10000:-22,12500:-24},
+ hip: {40:-5,50:-2,160:-7,200:-8,250:-9,315:-10,400:-11,500:-11.5,630:-12,800:-12.5,1000:-13,1250:-13.5,1600:-14,2000:-14,2500:-14,3150:-14,4000:-14.5,5000:-15,6300:-15.5,8000:-16.5,10000:-18,12500:-20},   /* rolling hats stay crisp */
+ chill:{40:-9,50:-6,160:-5,200:-6,250:-7,315:-8,400:-9,500:-9.5,630:-10,800:-10.5,1000:-11,1250:-11.5,1600:-12,2000:-12.5,2500:-13,3150:-14,4000:-15,5000:-16,6300:-17,8000:-19,10000:-21,12500:-24}};
+const FAMT={dnb:'bass',jungle:'bass',liquid:'bass',breaks:'bass',nuskool:'bass',dubstep:'bass',electro:'bass',garage:'bass',
+ hiphop:'hip',eastcoast:'hip',westcoast:'hip',south:'hip',ukhiphop:'hip',drill:'hip',trap:'hip',phonk:'hip',reggae:'hip',
+ lofi:'chill',ambient:'chill',meditation:'chill',synthwave:'club',pop:'club',ska:'club'};
+const refOf=g=>REF[FAMT[g]||'club'];
+/* the six master bands: which third-octaves each one answers for, and its range (cut, boost) */
+const MB=[{type:'lowshelf',f:70,band:[40,50],rng:[0,0],low:1},   /* deep sub is left to the arrangement */{type:'peaking',f:250,q:.8,band:[160,200,250,315],rng:[-4,3],low:1},
+ {type:'peaking',f:700,q:.8,band:[400,500,630,800,1000],rng:[-3,6]},{type:'peaking',f:1900,q:.8,band:[1250,1600,2000,2500],rng:[-5,5]},
+ {type:'peaking',f:4500,q:.8,band:[3150,4000,5000,6300],rng:[-6,2]},{type:'highshelf',f:9000,band:[8000,10000,12500],rng:[-7,1.5]}];
+const LK='glctc1.tone.';const learned=g=>{try{const v=JSON.parse(localStorage.getItem(LK+g)||'null');return Array.isArray(v)&&v.length===MB.length?v:null}catch(e){return null}};
+let lastCurve=null,MG=null,macc=null,mn=0,mg=MB.map(()=>0),mGenre=null,mTicks=0,loudRef=-99;
+function master(){const c=ac();if(!c||!c._tb)return null;if(MG&&MG.c===c)return MG;
+ c._tb.forEach((f,i)=>{const B=MB[i];f.type=B.type;f.frequency.value=B.f;if(B.q)f.Q.value=B.q;f.gain.value=0});
+ const an=c.createAnalyser();an.fftSize=8192;an.smoothingTimeConstant=0;c._tb[c._tb.length-1].connect(an);
+ return MG={c,f:c._tb,an,buf:new Float32Array(an.frequencyBinCount)}}
+function listenMaster(){const M=master();if(!M)return;const c=M.c;M.an.getFloatFrequencyData(M.buf);const bw=c.sampleRate/M.an.fftSize,n=M.buf.length;
+ const v=CS.map(cf=>{let s=0;for(let i=Math.floor(cf/2**(1/6)/bw);i<Math.min(n,cf*2**(1/6)/bw);i++)s+=Math.pow(10,M.buf[i]/10);return s});
+ const tot=10*Math.log10(v.reduce((a,x)=>a+x,0)+1e-20);if(tot<-70)return;loudRef=Math.max(loudRef-.02,tot);if(tot<loudRef-8)return;   /* learn on the full sections, not on breakdowns */
+ macc=macc?macc.map((x,i)=>x+v[i]):v;mn++}
+function steerMaster(){const M=master();if(!M||!macc||mn<3){macc=null;mn=0;return}const g=genre(),R=Object.assign({63:0,80:0,100:0,125:0},refOf(g)),D=CS.map((c,i)=>10*Math.log10(macc[i]/mn+1e-20));
+ /* compare shapes against the 250 Hz-4 kHz average, so a breakdown without kick or bass does not tilt the whole EQ */
+ const MIDS=CS.filter(f=>f>=250&&f<=4000),avg=a=>a.reduce((x,y)=>x+y,0)/a.length,mRef=avg(MIDS.map(f=>R[f])),mMeas=avg(MIDS.map(f=>D[CS.indexOf(f)])),t=M.c.currentTime;
+ const rel=f=>D[CS.indexOf(f)]-mMeas,tgt=f=>R[f]-mRef,lowsOk=avg([63,80,100,125].map(rel))>=avg([63,80,100,125].map(tgt))-6;
+ lastCurve=CS.map(f=>+rel(f).toFixed(1));
+ /* the body bands (250 Hz-2.5 kHz) are judged against the kick / bass, the top bands against the mids */
+ const bRef=avg([63,80,100,125].map(f=>D[CS.indexOf(f)])),relB=f=>D[CS.indexOf(f)]-bRef,soft=/^(electro|westcoast|south|drill|trap|phonk|reggae)$/.test(g);
+ MB.forEach((B,i)=>{if(B.low&&!lowsOk)return;const body=B.f>=200&&B.f<=2000;if(body&&!lowsOk)return;let e=0,k=0;B.band.forEach(cf=>{if(R[cf]==null)return;e+=body?(R[cf]-relB(cf)):(tgt(cf)-rel(cf));k++});if(!k)return;e/=k;
+  const lo=soft&&B.f>=4000?-1.5:B.rng[0];   /* 808 styles: the hats ride high on purpose */
+  mg[i]=cl(mg[i]+cl(e*.4,-1.2,1.2),lo,B.rng[1]);M.f[i].gain.setTargetAtTime(mg[i],t,.6)});
+ macc=null;mn=0;if(++mTicks%5===0)try{localStorage.setItem(LK+g,JSON.stringify(mg.map(x=>+x.toFixed(2))))}catch(e){}}
+function flatMaster(){width(false);const M=master();mg=MB.map(()=>0);macc=null;mn=0;mGenre=null;loudRef=-99;if(!M)return;M.f.forEach(f=>{try{f.gain.setTargetAtTime(0,M.c.currentTime,.4)}catch(e){}})}
+function width(on){const c=ac();if(!c||!c._side)return;try{c._side.gain.setTargetAtTime(on&&!/^(meditation)$/.test(genre())?1.4:1,c.currentTime,.5)}catch(e){}}
+function startMaster(){width(true);const M=master();if(!M)return;const g=genre();mGenre=g;loudRef=-99;const L=learned(g);mg=L?L.slice():MB.map(()=>0);M.f.forEach((f,i)=>{f.gain.setTargetAtTime(mg[i],M.c.currentTime,.5)})}
+/* ---------------------------------------------------------------- run */
+let was=false,tick=0;
+setInterval(()=>{const r=running();
+ if(r&&!was){startMaster();flatChannels()}
+ if(!r&&was){flatMaster();flatChannels()}
+ was=r;if(!r)return;
+ if(genre()!==mGenre)startMaster();
+ try{listenChannels();listenMaster()}catch(e){}
+ if(++tick%6===0)try{steerChannels();steerMaster()}catch(e){}},500);
+window.GLCTC_TONE={snap:()=>{const M=master();if(!M)return null;M.an.getFloatFrequencyData(M.buf);const bw=M.c.sampleRate/M.an.fftSize,n=M.buf.length;const v=CS.map(cf=>{let s=0;for(let i=Math.floor(cf/2**(1/6)/bw);i<Math.min(n,cf*2**(1/6)/bw);i++)s+=Math.pow(10,M.buf[i]/10);return 10*Math.log10(s+1e-20)});return {v:v.map(x=>+x.toFixed(1)),bw,n,fft:M.an.fftSize,sr:M.c.sampleRate}},state:()=>({curve:lastCurve,stale:!!(MG&&MG.c._tb!==MG.f),master:mg.slice(),channels:Object.fromEntries(Object.entries(CH).map(([k,v])=>[k,v.g.slice()]))}),REF,MB,SHAPE,reset:g=>{try{localStorage.removeItem(LK+(g||genre()))}catch(e){}}};
 })();
 </script>
 </body>

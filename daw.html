@@ -5811,7 +5811,8 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
   const c=audioCtx,N=2048,tgt0=id=>(AM_TARGET[id]||-24)+AM.master+(((AM_GENRE[AM.genre]||{})[id])||0);
   const drumRef=()=>{const b0=tgt0('bl'),h=AM.hist.bl;return h&&h.length>=12?Math.min(b0,amPct(h,.9)):b0};
   const noDrumRel=/^(ambient|meditation)$/.test(AM.genre);
-  const tgt=id=>{const b=tgt0(id),g=AM_GAP[id]==null?null:AM_GAP[id]-(((AM_GAPG[AM.genre]||{})[id])||0);if(g==null||noDrumRel)return b;return Math.max(b-AM_FOLLOW,Math.min(b,drumRef()-g))};
+  const bal=id=>{try{return window.GLCTC_PUNCH&&GLCTC_PUNCH.bal?GLCTC_PUNCH.bal(id):0}catch(e){return 0}};   /* v147: drums-vs-music balance measured on the finished master */
+  const tgt=id=>{const b=tgt0(id),g=AM_GAP[id]==null?null:AM_GAP[id]-(((AM_GAPG[AM.genre]||{})[id])||0);if(g==null||noDrumRel)return b+bal(id);return Math.max(b-AM_FOLLOW,Math.min(b,drumRef()-g))+bal(id)};
   let sk=null;try{const G=window.GLCTC_SONG;if(G&&G.running()&&G.sectionKind)sk=G.sectionKind()}catch(e){}
   const learnMod=!sk||!/^(build|break)$/.test(sk),learnMaster=!sk||/^(drop|verse)$/.test(sk);
   const grab=(a)=>{a.getFloatTimeDomainData(AM.buf);let pk=0;for(let i=0;i<N;i++){const v=Math.abs(AM.buf[i]);if(v>pk)pk=v}const d0=amDb(AM.buf,N);return {d0,d:Math.max(d0,20*Math.log10(pk+1e-9)-14),pk}};
@@ -7409,10 +7410,10 @@ const FX={
   make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=6;a.connect(g);return{in:a,out:g,lat:LATC,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;const full=Math.pow(10,(p.thr-p.thr/p.ratio)/20),auto=Math.pow(1/full,.6);st(c,g.gain,Math.pow(10,p.mk/20)/auto)}}}},
 
  punch:{n:'Drum Punch',cat:'DYNAMICS',p:[['amt','PUNCH',0,1,.01,.5,fPct],['att','ATTACK',.005,.06,.001,.025,fMs]],
-  make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=4;a.connect(g);return{in:a,out:g,lat:LATC,set(p){a.threshold.value=-8-p.amt*18;a.ratio.value=2+p.amt*3;a.attack.value=p.att;a.release.value=.07;st(c,g.gain,Math.pow(10,(p.amt*3)/20))}}}},
+  make(c){const a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=4;a.connect(g);return{in:a,out:g,lat:LATC,set(p){const thr=-8-p.amt*18,r=2+p.amt*3;a.threshold.value=thr;a.ratio.value=r;a.attack.value=p.att;a.release.value=.07;st(c,g.gain,Math.pow(10,(p.amt*3)/20)/Math.pow(10,-.6*thr*(1-1/r)/20))}   /* v147: the browser's automatic make-up (+6-8 dB) is taken back out - it lifted every kick 8 dB over the mix */}}},
  pcomp:{n:'Parallel Compressor',cat:'DYNAMICS',p:[['thr','THRESHOLD',-60,0,.5,-30,fDb],['ratio','RATIO',1,20,.1,6,fRat],['att','ATTACK',.001,.2,.001,.003,fMs],['rel','RELEASE',.02,1,.01,.12,fMs],['mix','BLEND',0,1,.01,.35,fPct]],
   make(c){const m=mixer(c),a=c.createDynamicsCompressor(),g=c.createGain();a.knee.value=3;m.in.connect(a);a.connect(g);g.connect(m.wet);const lat=alignDry(c,m,LATC());
-   return{in:m.in,out:m.out,lat,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;st(c,g.gain,Math.pow(10,(-p.thr*(1-1/p.ratio)*.42)/20));m.mix(p.mix)}}}},
+   return{in:m.in,out:m.out,lat,set(p){a.threshold.value=p.thr;a.ratio.value=p.ratio;a.attack.value=p.att;a.release.value=p.rel;st(c,g.gain,2/Math.pow(10,-.6*p.thr*(1-1/p.ratio)/20));m.mix(p.mix)}   /* v147: wet sits +6 dB at low level instead of ~+27 dB */}}},
  exciter:{n:'Harmonic Exciter',cat:'DISTORTION',p:[['f','FREQ',600,12000,10,5000,fHz],['drv','HARMONICS',0,1,.01,.3,fPct],['mix','MIX',0,1,.01,.15,fPct]],
   make(c){const m=mixer(c),h1=c.createBiquadFilter(),pre=c.createGain(),sh=c.createWaveShaper(),h2=c.createBiquadFilter(),post=c.createGain();h1.type='highpass';h2.type='highpass';sh.oversample='2x';sh.curve=curveTanh(1);
    m.in.connect(h1);h1.connect(pre);pre.connect(sh);sh.connect(h2);h2.connect(post);post.connect(m.wet);const lat=alignDry(c,m,'2x');
@@ -15452,27 +15453,60 @@ function shape(v,p,kc){const g=genre();if(!g)return p;const K=KICK[fam(g)];const
  if(v===2){q.cb=Math.max(p.cb||4,4);q.cd=Math.min(p.cd||.24,fam(g)==='soft'?.3:.22);return q}
  return p}
 function bl(len){const g=genre();if(!g)return null;const K=KICK[fam(g)];return{click:.35*K.kc,body:K.kb*.9}}
-function blVoice(i){const g=genre();if(!g)return 1;if((i===3||i===4)&&fam(g)!=='boom')return .74;if(fam(g)==='soft')return 1;return i===1?1.26:i===2?1.2:1}   /* 1 snare, 2 clap up; 3-4 hats -2.6 dB */   /* 80LA8 voice 1 = snare, 2 = clap: +2 dB / +1.6 dB in songs */
+function blVoice(i){const g=genre();if(!g)return 1;if(i===0)return KICKTRIM;if((i===3||i===4)&&fam(g)!=='boom')return .74;if(fam(g)==='soft')return 1;return i===1?1.26:i===2?1.2:1}   /* 1 snare, 2 clap up; 3-4 hats -2.6 dB */   /* 80LA8 voice 1 = snare, 2 = clap: +2 dB / +1.6 dB in songs */
 function snr(){const g=genre();return !g||fam(g)==='soft'?1:1.22}
-function d9(v,mk){const g=genre();if(!g)return 1;if((v===3||v===4||v===9||v===10)&&fam(g)!=='boom')return .7;   /* 808 styles keep their hats up front */
+function d9(v,mk){const g=genre();if(!g)return 1;if(v===0)return KICKTRIM;if((v===3||v===4||v===9||v===10)&&fam(g)!=='boom')return .7;   /* 808 styles keep their hats up front */
  return mk&&(v===1||v===2)?snr():1}   /* hats / ride / crash -3 dB */
+
+/* ---- v147 MIX BALANCE: drums vs music, measured on the finished master ----------------------------------------------------------
+   Measured on v146: each kick hit came out 9-18 dB louder (ear-weighted, 50 ms) than the music between kicks; a mastered record
+   sits around +5-6. The kick times are known (every kick calls the duck), so the master is read right after each one: the hit =
+   the loudest 50 ms in the 150 ms after the kick, the music = the median of everything away from the kicks. Every 3 s the auto
+   mix moves the music channels up (and the kit a little down) until the genre's target is met; it is remembered per genre. */
+const BAL=(()=>{const TGT={psy:6,rave:6,techno:6,house:5.5,breaks:5.5,boom:6,hip:6,soft:4};const LK='glctc1.mixbal.';
+ const MUS={go:1,s101:1,ix:1,ix1:1,ix2:1,ix3:1,ix4:1,ix5:1,ix6:1,vox:1,ws:1,lee:.6,sub:.4,bl:-.5,mine:-.5};
+ let off=0,g0=null,M=null,kicks=[],blocks=[],lastEnd=0,timer=null,lastSteer=0,last=null;
+ function load(g){try{const v=parseFloat(localStorage.getItem(LK+g));return isFinite(v)?v:2}catch(e){return 2}}
+ function meter(){const c=window.GLCTC_WS&&GLCTC_WS.ac();if(!c||!c._fin)return null;if(M&&M.c===c)return M;
+  const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=38;const hs=c.createBiquadFilter();hs.type='highshelf';hs.frequency.value=1700;hs.gain.value=4;
+  const an=c.createAnalyser();an.fftSize=4096;c._fin.connect(hp);hp.connect(hs);hs.connect(an);return M={c,an,buf:new Float32Array(4096)}}
+ function read(){const m=meter();if(!m)return;const c=m.c,sr=c.sampleRate,end=c.currentTime;m.an.getFloatTimeDomainData(m.buf);
+  const N=m.buf.length,start=end-N/sr,from=Math.max(start,lastEnd),hop=Math.round(sr*.01);
+  for(let i=Math.max(0,Math.round((from-start)*sr));i+hop<=N;i+=hop){let e=0;for(let j=i;j<i+hop;j++)e+=m.buf[j]*m.buf[j];blocks.push([start+(i+hop)/sr,e/hop])}
+  lastEnd=end;const cut=end-6;while(blocks.length&&blocks[0][0]<cut)blocks.shift();while(kicks.length&&kicks[0]<cut)kicks.shift()}
+ function steer(){const g=genre();if(!g||blocks.length<200)return;const now=blocks[blocks.length-1][0];
+  const ks=kicks.filter(t=>t<now-.2&&t>now-5.5);if(ks.length<6)return;   /* breakdowns without a kick teach nothing */
+  const db=x=>10*Math.log10(x+1e-12),T=blocks.map(b=>b[0]),E=blocks.map(b=>b[1]),L=E.map((_,i)=>{let s=0,n=0;for(let j=Math.max(0,i-4);j<=i;j++){s+=E[j];n++}return db(s/n)});
+  const near=t=>ks.some(k=>t>=k-.03&&t<=k+.17),hits=ks.map(k=>{let mx=-200;for(let i=0;i<T.length;i++)if(T[i]>=k&&T[i]<=k+.15&&L[i]>mx)mx=L[i];return mx}).filter(x=>x>-150).sort((a,b)=>a-b),
+   rest=L.filter((x,i)=>T[i]>ks[0]&&T[i]<ks[ks.length-1]+.4&&!near(T[i])).sort((a,b)=>a-b);
+  if(hits.length<5||rest.length<40)return;const ratio=hits[hits.length>>1]-rest[rest.length>>1],err=ratio-TGT[fam(g)];
+  off=Math.max(-4,Math.min(12,off+Math.max(-1.2,Math.min(1.2,err*.45))));last={ratio:+ratio.toFixed(1),off:+off.toFixed(1)};
+  try{localStorage.setItem(LK+g,off.toFixed(2))}catch(e){}}
+ function run(){const g=genre();if(!g){if(timer){clearInterval(timer);timer=null}g0=null;kicks=[];blocks=[];return}
+  if(g!==g0){g0=g;off=load(g);kicks=[];blocks=[];lastEnd=0}
+  if(!timer)timer=setInterval(()=>{if(!genre())return;try{read();const n=performance.now();if(n-lastSteer>3000){lastSteer=n;steer()}}catch(e){}},40)}
+ setInterval(run,500);
+ return{hit:t=>{kicks.push(t)},of:id=>{const g=genre();if(!g||fam(g)==='soft'&&/^(ambient|meditation)$/.test(g))return 0;const k=MUS[id]!=null?MUS[id]:(/^ix\d$/.test(id)?1:0);return off*k},
+  state:()=>({off,last}),reset:g=>{try{localStorage.removeItem(LK+(g||genre()))}catch(e){}}}})();
+const KICKTRIM=.8;   /* v147: kick -2 dB against the rest of the kit */
 function blLen(dur){const g=genre();if(!g)return dur;const K=KICK[fam(g)];if(K.len)return Math.min(dur,K.max,Math.max(.12,K.len*beat()));return Math.min(dur,K.max)}
 /* ---- the kick duck: one gain stage inserted into each module bus (between the channel fader and the meters/output) ---- */
 function duckNode(id){const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(id);if(!b||!b.vol||!b.tap)return null;
  if(b._dk&&b._dk.context===b.c)return b._dk;
  const dk=b.c.createGain();dk.gain.value=1;try{b.vol.disconnect(b.tap)}catch(e){try{b.vol.disconnect()}catch(_){}}b.vol.connect(dk);dk.connect(b.tap);b._dk=dk;return dk}
 let lastT={};
-function duck(t,vel,dur){const g=genre();if(!g)return;const D=DUCK[fam(g)];if(!D||!D.lee&&!D.sub)return;
+function duck(t,vel,dur){const g=genre();if(!g)return;BAL.hit(t);const D=DUCK[fam(g)];if(!D||!D.lee&&!D.sub)return;
  let pumping=false;try{pumping=!!(window.GLCTC_CHARACTER&&GLCTC_CHARACTER.state().pumping)}catch(e){}
  const B=beat(),hold=Math.min(.16,(D.hold||.2)*B),rel=Math.max(.012,B*(D.rel||.12)),v=Math.max(.35,Math.min(1,vel||.9));
  for(const id of ['lee','sub','s101','go','ix']){const d=D[id];if(!d)continue;if(pumping&&id!=='sub')continue;
   if(lastT[id]!=null&&Math.abs(t-lastT[id])<.03)continue;   /* one duck per kick even when two drum machines hit together */
   const n=duckNode(id);if(!n)continue;const P=n.gain,c=n.context;if(t<c.currentTime)continue;
-  try{P.setTargetAtTime(dbg(d*v),Math.max(c.currentTime,t-.004),.004);P.setTargetAtTime(1,t+hold,rel)}catch(e){}
+  try{P.setTargetAtTime(dbg(d*v*.6),Math.max(c.currentTime,t-.004),.004);   /* v147: 60 % duck depth */
+  P.setTargetAtTime(1,t+hold,rel)}catch(e){}
   lastT[id]=t}}
 function resetDuck(){for(const id of ['lee','sub','s101','go','ix']){try{const b=GLCTC_WSBUSFULL(id);if(b&&b._dk){const P=b._dk.gain;P.cancelScheduledValues(0);P.setValueAtTime(1,b.c.currentTime)}}catch(e){}}lastT={}}
 let was=false;setInterval(()=>{const r=running();if(was&&!r)resetDuck();was=r},400);
-window.GLCTC_PUNCH={shape,bl,blLen,blVoice,snr,d9,duck,resetDuck,genre,KICK,DUCK,FAM};
+window.GLCTC_PUNCH={bal:id=>BAL.of(id),BAL,shape,bl,blLen,blVoice,snr,d9,duck,resetDuck,genre,KICK,DUCK,FAM};
 })();
 </script>
 <script id="glctc1-v146-tone">

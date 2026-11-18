@@ -5065,6 +5065,32 @@ TYPES.push(
 ['ROOTS HARMONY',{chVoice:1,chVowel:5,lyrics:'oh jah ah yeah',chAtk:.08,chRel:.9,chVib:.28,chBreath:.1,chSpread:10,chEns:1,chLvl:.85,dlMix:.3,dlDiv:2,dlFb:.45,spMix:.22}],
 ['SKA CREW',{chVoice:4,chVowel:5,lyrics:'hey oi ha hey',chAtk:.01,chRel:.22,chVib:.05,chBreath:.1,chSpread:18,chEns:1,chLvl:.95,fxDrive:.08,dlMix:.12,spMix:.12}]
 );
+/* v137 CHAKRA MANTRAS: one preset per chakra - the bija mantra is sung by the formant choir (vowel, then a closing hum while the key is held).
+   Notes follow the C-D-E-F-G-A-B chakra scale; voice rises from bass at the root to soprano at the crown, space and shimmer open up as you climb. */
+const CHAKRAS=[
+ {n:'ROOT',sk:'MULADHARA',m:'LAM',ly:'lam',hz:396,v:4,col:'#e53935'},
+ {n:'SACRAL',sk:'SVADHISTHANA',m:'VAM',ly:'vam',hz:417,v:4,col:'#fb8c00'},
+ {n:'SOLAR PLEXUS',sk:'MANIPURA',m:'RAM',ly:'ram',hz:528,v:2,col:'#fdd835'},
+ {n:'HEART',sk:'ANAHATA',m:'YAM',ly:'yam',hz:639,v:2,col:'#43a047'},
+ {n:'THROAT',sk:'VISHUDDHA',m:'HAM',ly:'ham',hz:741,v:3,col:'#1e88e5'},
+ {n:'THIRD EYE',sk:'AJNA',m:'OM · AUM',ly:'om aum',hz:852,v:3,col:'#5e35b1'},
+ {n:'CROWN',sk:'SAHASRARA',m:'AH · OM',ly:'ah om',hz:963,v:3,col:'#b04ad8'}
+];
+/* v138 SOLFEGGIO ONLY: each chakra preset is tuned to its Solfeggio frequency (396 417 528 639 741 852 963 Hz), not to a note name.
+   The ROOT KEY sounds at exactly that frequency; the other keys are equal-tempered steps from it. Root and sacral sing as a full choir
+   (with a bass an octave below for grounding), the higher chakras in the voice that suits their register. */
+CHAKRAS.forEach((k,i)=>{k.type='CHAKRA '+(i+1)+' · '+k.n+' · '+k.m+' · '+k.hz+' Hz';
+ TYPES.push([k.type,{chVoice:k.v,chVowel:5,lyrics:k.ly,chAtk:.45+(6-i)*.04,chRel:2.6,chVib:.08+i*.02,chVibRate:4.2,chBreath:.16,chSpread:5,chEns:1,chLvl:.95,
+  kbTarget:1,formant:i<2?-1:0,fxLow:i<2?3:0,fxHigh:-2+i,fxChor:.1,dlMix:.1,dlDiv:0,
+  spMix:.32+i*.04,spSize:i<5?1:2,spPre:.05,spNeb:.25+i*.04,spNebRate:.15,spShim:i<2?0:(i-1)*.08,spGrav:i===0?.25:i===1?.1:0,rvMix:.15}])});
+const chakraOf=t=>CHAKRAS.find(k=>k.type===t)||null;
+/* nothing else running in the song? then the chakra preset sounds at its exact Solfeggio frequency; while a song or another module plays,
+   the voice stays on the song's tuning so it can never be out of tune with the music (in MEDITATION songs the song itself is retuned to the chakra) */
+const songBusy=()=>{try{if(window.GLCTC_SONG&&GLCTC_SONG.running())return true;const m=window.GLCTC_HUB&&GLCTC_HUB.mods;if(m)for(const k in m)if(k!=='vox'&&m[k]&&m[k].running&&m[k].running())return true}catch(e){}return false};
+const tunHz=()=>{try{return +GLCTC_TUNING.hz||440}catch(e){return 440}};
+const songKey=()=>{try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))return((+h.key%12)+12)%12}catch(e){}return 9};
+function solRoot(hz){let n=Math.round(ftom(hz*440/tunHz()));n+=((songKey()-n)%12+18)%12-6;return n}   /* the song's tonic (A when no song) nearest the Solfeggio pitch */
+function solCents(){const k=chakraOf(S.type);if(!k||songBusy())return 0;return 1200*Math.log2(k.hz/(mtof(solRoot(k.hz))*tunHz()/440))}
 /* SOUNDSCAPE EXPANSION: vocal colours; preserve song key and sequence. */
 for(const q of window.GLCTC_SOUNDSCAPES){
  const base=TYPES.find(t=>t[0]===q.voxBase);if(!base)throw Error('Missing vocal base '+q.voxBase);
@@ -5072,7 +5098,15 @@ for(const q of window.GLCTC_SOUNDSCAPES){
  TYPES.push([q.label.toUpperCase()+' · '+q.names[5].toUpperCase(),{...base[1],pitch:0,formant:q.id==='dubstep'?-2:q.id==='psytrance'?-1:0,fxDrive:q.drive*.5,hl1:airy?.18:.1,hl2:airy?.12:0,hl3:0,dlMix:dry?.035:.08,spMix:airy?.25:.08,spShim:airy?.1:0,spRad:0,spNeb:0,fxChor:airy?.12:.06}]);
 }
 
-function applyType(name){const t=TYPES.find(x=>x[0]===name);if(!t)return;TYPE_KEYS.forEach(k=>{if(PD[k])S[k]=PD[k].def});Object.assign(S,t[1]);S.type=name}
+/* v137: a preset now loads completely - every sound parameter goes back to default first (choir, reverb, delay feedback... used to carry over from the
+   last preset), setup controls (input, piano, sampler, output, key/scale) are kept, and the keyboard is switched to the CHOIR so the preset is playable. */
+const TYPE_KEEP=['inGain','gateThr','comp','pnKind','pnBright','pnRel','pnHammer','pnLvl','spOct','spRoot','spLoop','spAtk','spRel','kbTarget','outLvl','width','atKey','atScale'];
+const PRESET_LYRICS=new Set(TYPES.map(t=>t[1].lyrics).filter(Boolean));
+function applyType(name){const t=TYPES.find(x=>x[0]===name);if(!t)return;
+ PIDS.forEach(k=>{if(!TYPE_KEEP.includes(k))S[k]=PD[k].def});
+ const lyr=t[1].lyrics;if(!lyr&&PRESET_LYRICS.has(S.lyrics))S.lyrics=defS().lyrics;
+ if(t[1].kbTarget==null&&S.pnKind!==3&&S.kbTarget===0)S.kbTarget=1;
+ Object.assign(S,t[1]);S.type=name}
 
 /* ---------- audio: worklet pitch shifter ---------- */
 const WL=`class P extends AudioWorkletProcessor{
@@ -5205,7 +5239,8 @@ function applyAll(){
  applyVoc();
  const car=S.vcCar,vo=!!S.vcOn;wire(V.vocal,V.vcIn,vo,'vcv');wire(V.carBus,V.vcCarIn,vo,'vcc');
  V.nzG.gain.setTargetAtTime(car===2?1.4:0,c.currentTime,.03);V.pianoCar.gain.value=car===3?1:0;V.choirCar.gain.value=car===4?1:0;
- V.pianoDirect.gain.value=(vo&&car===3)?0:1;V.choirDirect.gain.value=(vo&&car===4)?0:1;V.synthDirect.gain.value=vo?0:.5;
+ const autoMod=vo&&!liveIn();wire(V.choirBus,V.vcIn,autoMod,'cmod');if(autoMod&&car!==4)V.vocOut.gain.setTargetAtTime(S.vcLvl*(car===2?1.3:1.9),c.currentTime,.03);   /* v138 make-up: a choir-driven vocoder sits at the same level as the other vocal types */
+ V.pianoDirect.gain.value=(vo&&car===3)?0:1;V.choirDirect.gain.value=(vo&&car===4)?0:autoMod?cl(S.dry,0,1)*.35:1;V.synthDirect.gain.value=vo?0:.5;
  // FX
  V.ws.curve=!allFxOn||S.fxDrive<.01?null:driveCurve(S.fxDrive);V.lo.gain.value=S.fxLow;V.hi.gain.value=S.fxHigh;
  V.chW.gain.setTargetAtTime(allFxOn?S.fxChor:0,c.currentTime,.05);V.chD.gain.value=1-S.fxChor*.3;
@@ -5274,17 +5309,17 @@ let sylI=0;const nextSyl=()=>{const t=(S.lyrics||'la').toLowerCase().split(/[\s,
 /* ----- choir (formant synthesis) ----- */
 function choirLayer(type,midi,vel,when,dur,syl,live){
  const c=V.c,t0=Math.max(when,c.currentTime+.003),srcs=[],keep=[],reg=n=>{keep.push(n);return n};
- const out=reg(gn(c,0)),mixS=reg(gn(c,1)),tgt=syl.vowel=(S.chVowel<5?S.chVowel:syl.vowel),f=mtof(midi);
- const ens=Math.max(1,Math.min(Math.round(S.chEns),(window.__glctcQ?.()>=2)?1:ALLV.size>8?1:ALLV.size>4?2:4));
+ const out=reg(gn(c,0)),mixS=reg(gn(c,1)),tgt=syl.vowel=(S.chVowel<5?S.chVowel:syl.vowel),f=mtof(midi+Math.round(S.pitch/12)*12),fsh=Math.pow(2,cl(S.formant,-12,12)*.6/12);
+ const solC=solCents(),ens=Math.max(1,Math.min(Math.round(S.chEns),(window.__glctcQ?.()>=2)?1:ALLV.size>8?1:ALLV.size>4?2:4));
  let vibG=null;if(S.chVib>.01){const l=reg(c.createOscillator());vibG=reg(gn(c,0));l.frequency.value=S.chVibRate;vibG.gain.setValueAtTime(0,t0);vibG.gain.setValueAtTime(0,t0+.25);vibG.gain.linearRampToValueAtTime(S.chVib*32,t0+.9);l.connect(vibG);srcs.push(l)}
- for(let k=0;k<ens;k++){const o=reg(window.GLCTC_TUNING.attach(c.createOscillator()));o.type='sawtooth';o.frequency.value=f;o.detune.value=ens===1?0:(k/(ens-1)*2-1)*S.chSpread;const g=reg(gn(c,.7/Math.sqrt(ens)));o.connect(g);g.connect(mixS);srcs.push(o);if(vibG)vibG.connect(o.detune)}
+ for(let k=0;k<ens;k++){const o=reg(window.GLCTC_TUNING.attach(c.createOscillator()));o.type='sawtooth';o.frequency.value=f;o.detune.value=solC+(ens===1?0:(k/(ens-1)*2-1)*S.chSpread);const g=reg(gn(c,.7/Math.sqrt(ens)));o.connect(g);g.connect(mixS);srcs.push(o);if(vibG)vibG.connect(o.detune)}
  if(S.chBreath>.01){const n=reg(c.createBufferSource());n.buffer=V.noise;n.loop=true;const g=reg(gn(c,S.chBreath*.45));n.connect(g);g.connect(mixS);srcs.push(n)}
- const T=FORM[type],F=T[tgt],S0=T[syl.cons&&/[lmnrwyvbd]/.test(syl.cons[0])?4:tgt],mk=gn(c,4.5);reg(mk);
+ const T0=FORM[type],T=Math.abs(fsh-1)<1e-3?T0:T0.map(r=>[r[0].map(x=>Math.min(9000,x*fsh)),r[1],r[2]]),F=T[tgt],S0=T[syl.cons&&/[lmnrwyvbd]/.test(syl.cons[0])?4:tgt],mk=gn(c,4.5);reg(mk);
  for(let j=0;j<5;j++){const bp=reg(c.createBiquadFilter());bp.type='bandpass';const g=reg(gn(c,Math.pow(10,F[1][j]/20)));
   bp.Q.value=cl(F[0][j]/F[2][j],2,30);
   if(S0!==F&&(syl.cons&&/[lmnrwyvbd]/.test(syl.cons[0]))){bp.frequency.setValueAtTime(S0[0][j],t0);bp.frequency.setTargetAtTime(F[0][j],t0,.04)}else bp.frequency.value=F[0][j];
   mixS.connect(bp);bp.connect(g);g.connect(mk);
-  if(syl.hum&&dur!=null&&dur>.35){const th=t0+dur*.55;bp.frequency.setTargetAtTime(T[4][0][j]*.92,th,.12);g.gain.setTargetAtTime(Math.pow(10,T[4][1][j]/20)*(j>1?.3:1),th,.15)}}   /* v136 mantra hum */
+  if(syl.hum&&(dur==null||dur>.35)){const th=dur!=null?t0+dur*.55:t0+Math.max(.6,S.chAtk+.35);bp.frequency.setTargetAtTime(T[4][0][j]*.92,th,.12);g.gain.setTargetAtTime(Math.pow(10,T[4][1][j]/20)*(j>1?.3:1),th,.15)}}   /* v136 mantra hum */
  mk.connect(out);
  if(syl.cons&&/[stkpfhc]/.test(syl.cons[0])){const n=reg(c.createBufferSource());n.buffer=V.noise;n.loop=true;const hp=reg(c.createBiquadFilter());hp.type='highpass';hp.frequency.value=3500;const g=reg(gn(c,0));g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(.35*vel,t0+.012);g.gain.setTargetAtTime(0,t0+.014,.03);n.connect(hp);hp.connect(g);g.connect(out);srcs.push(n)}
  const peak=cl(vel,.1,1)*.55,R=dur!=null&&window.__glctcQ?.()>=3?Math.min(S.chRel,.25):S.chRel,env=makeEnv(out.gain,t0,S.chAtk,.3,1,peak,R,dur!=null?t0+dur:null);
@@ -5354,7 +5389,8 @@ function padOn(i,vel,live){const p=PADS[i];if(!p.buf||!V)return;const old=padV[i
 function padOff(i){const p=PADS[i],v=padV[i];if(v&&p.mode!==0){v.release();padV[i]=null}}
 async function decodeFile(file){const v=await ensure();return await v.c.decodeAudioData(await file.arrayBuffer())}
 /* ----- dispatch ----- */
-function instOn(target,midi,vel,when,dur,live){const a=[];const _vq=window.__glctcQ?window.__glctcQ():0;if(ALLV.size>[30,20,14,8][_vq]){let n=0,over=ALLV.size-[20,13,9,5][_vq];[...ALLV].filter(v=>!v.dead&&v.start<=V.c.currentTime&&v.gateEnd<=V.c.currentTime).sort((a,b)=>Number(b.released)-Number(a.released)).forEach(v=>{if(n++<over)v.kill()})}if(target===0||target===3)a.push(pianoNote(midi,vel,when,dur,live));if(target===1||target===3)a.push(choirNote(midi,vel,when,dur,live));if(target===2||target===3)a.push(synthNote(midi,vel,when,dur,live));return a}
+const liveIn=()=>!!(micStream||vocSrc);
+function instOn(target,midi,vel,when,dur,live){const a=[];const _vq=window.__glctcQ?window.__glctcQ():0;if(ALLV.size>[30,20,14,8][_vq]){let n=0,over=ALLV.size-[20,13,9,5][_vq];[...ALLV].filter(v=>!v.dead&&v.start<=V.c.currentTime&&v.gateEnd<=V.c.currentTime).sort((a,b)=>Number(b.released)-Number(a.released)).forEach(v=>{if(n++<over)v.kill()})}if(target===0||target===3)a.push(pianoNote(midi,vel,when,dur,live));if(target===1||target===3)a.push(choirNote(midi,vel,when,dur,live));if(target===2||target===3)a.push(synthNote(midi,vel,when,dur,live));if(target===1&&S.vcOn&&!liveIn()){if(S.vcCar<=1)a.push(synthNote(midi,vel,when,dur,live));else if(S.vcCar===3)a.push(pianoNote(midi,vel,when,dur,live))}return a}
 function keyOn(src,midi,vel,when){
  if(held.has(src))return;held.set(src,{midi,vel});lightKey(midi,true);
  ensure().then(()=>{if(!held.has(src))return;let vs;const map=padKeyMap.get(midi);
@@ -5371,16 +5407,16 @@ let micStream=null,micSrc=null,vocBuf=null,vocSrc=null,recorder=null,recChunks=[
 const setStatus=t=>{const e=$('voxStatus');if(e)e.textContent=t};
 async function micToggle(){
  const v=await ensure();
- if(micStream){micStream.getTracks().forEach(t=>t.stop());try{micSrc.disconnect()}catch(e){}micStream=null;$('voxMic').classList.remove('active');$('voxMic').textContent='🎤 MIC OFF';setStatus('MIC OFF');return}
- try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});micSrc=v.c.createMediaStreamSource(micStream);micSrc.connect(v.in);$('voxMic').classList.add('active');$('voxMic').textContent='🎤 MIC LIVE';setStatus('MIC LIVE · USE HEADPHONES TO AVOID FEEDBACK')}
+ if(micStream){micStream.getTracks().forEach(t=>t.stop());try{micSrc.disconnect()}catch(e){}micStream=null;$('voxMic').classList.remove('active');$('voxMic').textContent='🎤 MIC OFF';setStatus('MIC OFF');applyAll();return}
+ try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});micSrc=v.c.createMediaStreamSource(micStream);micSrc.connect(v.in);$('voxMic').classList.add('active');$('voxMic').textContent='🎤 MIC LIVE';applyAll();setStatus('MIC LIVE · USE HEADPHONES TO AVOID FEEDBACK')}
  catch(e){console.warn(e);toast('Microphone blocked or unavailable. Allow mic access in your browser.')}
 }
 async function vocFilePick(files){const f=files&&files[0];if(!f)return;try{vocBuf=await decodeFile(f);$('voxVocName').textContent='🎵 '+f.name.slice(0,26);setStatus('VOCAL FILE LOADED · PRESS ▶ FILE');vocToggle(true)}catch(e){toast('Could not decode that audio file.')}}
 async function vocToggle(forceOn){
  const v=await ensure();if(!vocBuf){toast('Load a vocal or audio file first (LOAD VOCAL FILE or drop one on the module).');return}
- if(vocSrc){try{vocSrc.stop()}catch(e){}try{vocSrc.disconnect()}catch(e){}vocSrc=null;$('voxVocPlay').classList.remove('active');$('voxVocPlay').textContent='▶ FILE';if(forceOn!==true)return}
+ if(vocSrc){try{vocSrc.stop()}catch(e){}try{vocSrc.disconnect()}catch(e){}vocSrc=null;$('voxVocPlay').classList.remove('active');$('voxVocPlay').textContent='▶ FILE';applyAll();if(forceOn!==true)return}
  if(forceOn===false)return;
- vocSrc=v.c.createBufferSource();vocSrc.buffer=vocBuf;vocSrc.loop=true;vocSrc.connect(v.in);vocSrc.start();$('voxVocPlay').classList.add('active');$('voxVocPlay').textContent='■ FILE';
+ vocSrc=v.c.createBufferSource();vocSrc.buffer=vocBuf;vocSrc.loop=true;vocSrc.connect(v.in);vocSrc.start();$('voxVocPlay').classList.add('active');$('voxVocPlay').textContent='■ FILE';applyAll();
 }
 
 /* ---------- sequencer / transport ---------- */
@@ -5476,15 +5512,27 @@ function buildInBar(){
  const inp=el('input');inp.type='file';inp.accept='audio/*';inp.id='voxVocIn';inp.hidden=true;inp.onchange=e=>{vocFilePick(e.target.files);e.target.value=''};b.appendChild(inp);
  b.appendChild(el('span',null,'<span id="voxVocName" style="font-size:10px;color:#a8ddeb"></span>'));
  b.appendChild(el('b',null,'<span style="font-size:10px;color:#79c9dd;letter-spacing:.1em">VOCAL TYPE</span>'));
- const sel=el('select','field');sel.id='voxType';TYPES.forEach(t=>{const o=el('option',null,t[0]);o.value=t[0];sel.appendChild(o)});sel.value=S.type;
- sel.onchange=()=>{applyType(sel.value);repaintAll();rebuildVoc();applyAll();save();setStatus('VOCAL TYPE · '+sel.value)};b.appendChild(sel);paintAdd(sel,()=>{sel.value=S.type});
+ const sel=el('select','field');sel.id='voxType';let og=null;TYPES.forEach(t=>{const o=el('option',null,t[0]);o.value=t[0];if(/^CHAKRA /.test(t[0])){if(!og){og=el('optgroup');og.label='✦ CHAKRA MANTRAS';sel.appendChild(og)}og.appendChild(o)}else sel.appendChild(o)});sel.value=S.type;
+ sel.onchange=e=>{const user=e.isTrusted||document.activeElement===sel;loadType(sel.value,user);if(user)sel.blur()};b.appendChild(sel);paintAdd(sel,()=>{sel.value=S.type});
  b.appendChild(el('span','gold','<span id="voxTuner" style="font-size:11px">— TUNER —</span>'));
+ const cs=el('div','vx-chakras');cs.style.cssText='display:flex;flex-wrap:wrap;gap:6px;flex-basis:100%;align-items:center';cs.appendChild(el('b',null,'<span style="font-size:10px;color:#79c9dd;letter-spacing:.1em">CHAKRA</span>'));
+ CHAKRAS.forEach((k,i)=>{const x=el('button',null,'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+k.col+';box-shadow:0 0 6px '+k.col+';margin-right:5px"></span>'+k.n+' · '+k.m+' · '+k.hz);x.type='button';x.title=k.sk+' · bija '+k.m+' · Solfeggio '+k.hz+' Hz';x.onclick=()=>{loadType(k.type,true);x.blur()};paintAdd(x,()=>{x.classList.toggle('active',S.type===k.type)});cs.appendChild(x)});
+ b.appendChild(cs);
 }
+/* v137/v138 one loader for the dropdown, the chakra buttons and the meditation journey: apply, refresh every control, set the keyboard
+   so the Solfeggio root key is under your hands, and give the computer keys back (only when YOU picked it - the composer never steals the keys) */
+function chakraKeys(){const ck=chakraOf(S.type);if(!ck)return null;const rk=solRoot(ck.hz);S.kbOct=Math.max(1,Math.min(6,Math.floor(rk/12)-1));return{ck,rk}}
+function loadType(name,user){const oct=S.kbOct;applyType(name);sylI=0;const ch=chakraKeys();repaintAll();const li=$('voxLyrics');if(li)li.value=S.lyrics;const os=$('voxKbOct');if(os)os.value=S.kbOct||3;if((S.kbOct||3)!==(oct||3))buildPiano();
+ rebuildVoc();applyAll();save();if(user){window.__glctcKeyOwner='vox';ensure().catch(()=>{})}
+ if(ch){const busy=songBusy();setStatus('CHAKRA · '+ch.ck.n+' ('+ch.ck.sk+') · '+ch.ck.m+' · ROOT KEY '+noteName(ch.rk)+(busy?' · LOCKED TO THE SONG TUNING':' = '+ch.ck.hz+' Hz EXACTLY')+' · HOLD A KEY TO HUM');
+  if(user)[0,12].forEach(d=>{try{window.__voxKbLight&&__voxKbLight(ch.rk+d,true);setTimeout(()=>window.__voxKbLight&&__voxKbLight(ch.rk+d,false),1600)}catch(x){}})}
+ else setStatus('VOCAL TYPE · '+name+' · KEYS PLAY '+PD.kbTarget.opts[S.kbTarget])}
+window.addEventListener('glctc-tuning',()=>{if(!chakraOf(S.type))return;const oct=S.kbOct;chakraKeys();if(S.kbOct!==oct){const os=$('voxKbOct');if(os)os.value=S.kbOct;buildPiano();save()}});
 
 /* ---------- sequencer + keyboard ---------- */
 let gridEls=[],laneDrag=null;
 const keyEls={};
-function lightKey(m,on,seq){const e=keyEls[m];if(e)e.classList.toggle(seq?'seq':'on',on)}
+function lightKey(m,on,seq){const e=keyEls[m];if(e)e.classList.toggle(seq?'seq':'on',on);if(!seq)try{window.__voxKbLight&&__voxKbLight(m,on)}catch(x){}}
 function snapQ(n){const sc=SCALES[Q.scale];let b=n,bd=99;for(let d=-6;d<=6;d++){const m=n+d,pc=((m%12)+12)%12;if(sc.includes(pc)&&Math.abs(d)<bd){bd=Math.abs(d);b=m}}return b}
 function paintStep(i){const c=gridEls[i],s=Q.steps[i];if(!c)return;c.root.classList.toggle('on',!!s.on);c.root.style.display=i<Q.len?'':'none';c.bar.style.height=Math.round(cl((s.n+12)/36,0,1)*100)+'%';c.val.textContent=noteName((Q.oct+1)*12+Q.root+s.n)}
 function paintSeq(){for(let i=0;i<16;i++){if(!Q.steps[i])Q.steps[i]={on:0,n:0,v:.85};paintStep(i)}}
@@ -5515,7 +5563,7 @@ function buildPerf(){
  // keyboard
  const kh=el('div','g2-row');card.appendChild(kh);
  kh.appendChild(el('b',null,'KEYBOARD'));
- const oc=el('label','g2-inl','OCTAVE ');const os=el('select','field');[1,2,3,4,5,6].forEach(v=>{const o=el('option',null,v);o.value=v;os.appendChild(o)});os.value=S.kbOct||3;os.onchange=()=>{S.kbOct=+os.value;buildPiano();save()};oc.appendChild(os);kh.appendChild(oc);
+ const oc=el('label','g2-inl','OCTAVE ');const os=el('select','field');[1,2,3,4,5,6].forEach(v=>{const o=el('option',null,v);o.value=v;os.appendChild(o)});os.id='voxKbOct';os.value=S.kbOct||3;os.onchange=()=>{S.kbOct=+os.value;buildPiano();save();os.blur()};oc.appendChild(os);kh.appendChild(oc);
  kh.appendChild(mkSel(PD.kbTarget,()=>S.kbTarget,v=>{S.kbTarget=v;save()}));
  const mb=(id,t,f)=>{const b=el('button',null,t);b.id=id;b.type='button';b.onclick=f;kh.appendChild(b);return b};
  mb('voxHold','HOLD',()=>{setHold(!sustainOn)});
@@ -5542,7 +5590,7 @@ function buildPiano(){try{window.__voxKbRefresh&&setTimeout(window.__voxKbRefres
  box.addEventListener('dragleave',e=>{box.querySelectorAll('.drop').forEach(x=>x.classList.remove('drop'))});
  box.addEventListener('drop',e=>{e.preventDefault();box.querySelectorAll('.drop').forEach(x=>x.classList.remove('drop'));const k=e.target.closest&&e.target.closest('.pk');const files=[...(e.dataTransfer.files||[])].filter(f=>/audio|\.(wav|mp3|ogg|flac|m4a|aif)/i.test(f.type+f.name));if(k&&files.length)assignKeys(files,+k.dataset.m)});
 }
-window.__VOXKB={on:(id,m,v)=>{selectedMapMidi=m;keyOn(id,m,v)},off:id=>keyOff(id),assign:(f,m)=>assignKeys(f,m),mark:m=>KM.has(m)?KM.get(m).name:padKeyMap.has(m)?'PAD '+(padKeyMap.get(m).pad+1):''};
+window.__VOXKB={oct:()=>S.kbOct||3,on:(id,m,v)=>{selectedMapMidi=m;keyOn(id,m,v)},off:id=>keyOff(id),assign:(f,m)=>assignKeys(f,m),mark:m=>KM.has(m)?KM.get(m).name:padKeyMap.has(m)?'PAD '+(padKeyMap.get(m).pad+1):''};
 async function assignKeys(files,startMidi){
  if(!files.length)return;setStatus('LOADING '+files.length+' SAMPLE(S)…');let m=startMidi,n=0;
  for(const f of files){try{const buf=await decodeFile(f);KM.set(m,{buf,name:f.name});m++;n++}catch(e){console.warn(e)}}
@@ -5675,7 +5723,7 @@ window.GALACTIC_VOX={stopFile:()=>{if(vocSrc)vocToggle(false)},
   set:d=>{d=d||{};if(vocSrc)vocToggle(false);vocBuf=d.voc&&d.voc.buf||null;const vn=$('voxVocName');if(vn&&vocBuf)vn.textContent='🎵 '+String(d.voc.name||'vocal').slice(0,26);
    KM.clear();(d.keys||[]).forEach(k=>{if(k&&k.buf)KM.set(+k.m,{buf:k.buf,name:k.name||''})});
    PADS.forEach(p=>{p.buf=null;p.name=''});(d.pads||[]).forEach(x=>{if(x&&x.buf&&PADS[x.i]){PADS[x.i].buf=x.buf;PADS[x.i].name=x.name||''}});
-   try{paintPads()}catch(e){}try{buildPiano()}catch(e){}}},projectState:()=>clone({S,Q}),restoreProject:d=>{S={...defS(),...clone(d.S)};Q={...mkQ(),...clone(d.Q)};PAINT.length=0;buildInBar();buildPerf();buildPads();buildSound();rebuildVoc();applyAll();save()},patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,len:Q.len,root:Q.root,scale:Q.scale,oct:Q.oct})),set:d=>{if(!d||!Array.isArray(d.steps))return false;Q.steps=Array.from({length:16},(_,i)=>Object.assign({on:0,n:0,v:.85},d.steps[i]||{}));if(d.len)Q.len=d.len;if(d.root!=null)Q.root=d.root;if(d.scale)Q.scale=d.scale;if(d.oct!=null)Q.oct=d.oct;save();try{buildPerf()}catch(e){try{paintSeq()}catch(_){}}return true}},noteAt:(m,v,when,dur)=>{if(!V)return ensure().then(()=>{instOn(Q.target,m,v||.8,Math.max(V.c.currentTime,Number(when)||0),Math.max(.05,dur||.2),true)}).catch(()=>{});instOn(Q.target,m,v||.8,Math.max(V.c.currentTime,Number(when)||0),Math.max(.05,dur||.2),true)},state:()=>S,ensure,prepare:async()=>{await ensure();if(S.pnKind<3){while(pianoBusy)await new Promise(r=>setTimeout(r,10));await renderPiano(S.pnKind)}return V},keyOn,keyOff,padOn,assignKeys,assignPads,PADS,KM,get V(){return V},generate,micToggle,applyType,decodeFile,panic,renderPiano,start,stop,get hasWL(){return hasWL}};
+   try{paintPads()}catch(e){}try{buildPiano()}catch(e){}}},projectState:()=>clone({S,Q}),restoreProject:d=>{S={...defS(),...clone(d.S)};Q={...mkQ(),...clone(d.Q)};PAINT.length=0;buildInBar();buildPerf();buildPads();buildSound();rebuildVoc();applyAll();save()},patterns:{get:()=>JSON.parse(JSON.stringify({steps:Q.steps,len:Q.len,root:Q.root,scale:Q.scale,oct:Q.oct})),set:d=>{if(!d||!Array.isArray(d.steps))return false;Q.steps=Array.from({length:16},(_,i)=>Object.assign({on:0,n:0,v:.85},d.steps[i]||{}));if(d.len)Q.len=d.len;if(d.root!=null)Q.root=d.root;if(d.scale)Q.scale=d.scale;if(d.oct!=null)Q.oct=d.oct;save();try{buildPerf()}catch(e){try{paintSeq()}catch(_){}}return true}},noteAt:(m,v,when,dur)=>{if(!V)return ensure().then(()=>{instOn(Q.target,m,v||.8,Math.max(V.c.currentTime,Number(when)||0),Math.max(.05,dur||.2),true)}).catch(()=>{});instOn(Q.target,m,v||.8,Math.max(V.c.currentTime,Number(when)||0),Math.max(.05,dur||.2),true)},state:()=>S,ensure,prepare:async()=>{await ensure();if(S.pnKind<3){while(pianoBusy)await new Promise(r=>setTimeout(r,10));await renderPiano(S.pnKind)}return V},keyOn,keyOff,padOn,assignKeys,assignPads,PADS,KM,get V(){return V},generate,micToggle,applyType,loadType,CHAKRAS:CHAKRAS.map(k=>({name:k.n,mantra:k.m,hz:k.hz,type:k.type})),decodeFile,panic,renderPiano,start,stop,get hasWL(){return hasWL}};
 })();
 
 
@@ -10588,7 +10636,7 @@ const PAT=(()=>{
    lee:{patterns:bassLee(r,key,bassPair),length:16,swing},
    s101:{steps:s101Pat(),root:48+key+REG,scale:scale==='phrygian'?'phrygian':scale==='major'?'major':scale==='pentatonic'?'pentatonic':scale==='dorian'?'dorian':'minor',len:16},
    go:{pats:goPats(r,key),root:key,scale:scale==='pentatonic'?'minor':scale,swing:Math.min(1,(swing||0)/.62),oct:4+REG/12},
-   vox:{steps:voxPat(),len:16,root:key,scale:scale==='pentatonic'?'minor':scale,oct:4+REG/12},
+   vox:{steps:voxPat(),len:16,root:key,scale:scale==='pentatonic'?'minor pent':scale,oct:4+REG/12},   /* v138: the Vox gets the song's real scale (pentatonic songs were sung over a full minor scale) */
    ws:null};
   {const w=wsPats(r,key,handBL,WS_KITS[opts.wsPreset]||null);pack.ws={pats:w.pats,bars:4,swing,tunes:w.tunes};pack.harm={key,semiT:w.semiT};pack.sub={patterns:subPats(bassPair,SC[scale]||SC.minor),root:24+key+REG,swing};if(WS_KITS[opts.wsPreset])pack.flavour.perc='WORLD KIT'}
   if(beatName){pack.flavour.beat=beatName;pack.flavour.hat='BEAT · '+beatName}
@@ -13877,7 +13925,8 @@ async function save(k,kind){if(busy.has(k))return;busy.add(k);let writable;
 async function importFile(k,kind,file){
  if(file.size>16000000)throw Error('Module files must be smaller than 16 MB');
  const d=JSON.parse(await file.text());if(d.format!=='GLCTC1_MODULE'||d.version!==1||d.module!==k||d.kind!==kind)throw Error('Choose a '+modules[k][1]+' '+kind+' file');
- const before=capture(k,kind);validate(d.data,before);
+ const before=capture(k,kind);if(k==='vox'&&kind!=='pattern'&&d.data&&typeof d.data==='object')['kbOct','pc'].forEach(x=>{if(x in d.data&&!(x in before))before[x]=d.data[x];else if(x in before&&!(x in d.data))d.data[x]=before[x]});   /* v138: keyboard octave / PC-keys are optional in VOX sound files */
+ validate(d.data,before);
  try{apply(k,kind,d.data)}catch(e){try{apply(k,kind,before)}catch(_){}throw e}
  window.GLCTC_WS?.markDirty?.();say(k,'Loaded '+file.name);
 }
@@ -14418,9 +14467,9 @@ const M={
   top(app,[q('#goApp>.g2-head'),q('#goApp>.g2-toolbar')]);bottom(app,[$('goSeqCard'),$('goKeyCard')])},
  vox(){const app=$('voxApp'),keys=$('voxKeys'),hb=$('voxHold');if(!app||!keys||!hb)return;let card=$('voxKbCard');
   if(!card){card=document.createElement('div');card.className='g2-card';card.id='voxKbCard';card.innerHTML='<div class="g2-ct"><span>KEYBOARD · VOCALS &amp; KEY SAMPLES</span><small>DROP AUDIO FILES ON A KEY TO MAP SAMPLES · PINK = KEY HAS A SAMPLE</small></div>'}
-  const K=KB.vox||make({id:'vox',oct:3,title:'KEYBOARD',hint:'Touch lower for harder hits · slide for glissando · drop audio files onto a key to map samples',
+  const K=KB.vox||make({id:'vox',oct:3,octFn:()=>+(window.__VOXKB?.oct?.()??3),title:'KEYBOARD',hint:'Touch lower for harder hits · slide for glissando · drop audio files onto a key to map samples',
    on:(k,m,v)=>window.__VOXKB?.on(k,m,v),off:k=>window.__VOXKB?.off(k),drop:(m,f)=>window.__VOXKB?.assign(f,m),mark:m=>window.__VOXKB?.mark(m)||''});
-  window.__voxKbRefresh=()=>K.paint();const row=hb.closest('.g2-row'),hs=[...document.querySelectorAll('#voxPerf>.g2-hint,#voxKbCard>.g2-hint')].filter(h=>/onto any key/i.test(h.textContent)),hint=hs.find(h=>h.parentNode.id==='voxPerf')||hs[0]||null;
+  window.__voxKbRefresh=()=>{K.sync();K.paint()};window.__voxKbLight=(m,on)=>K.light(m,on);const row=hb.closest('.g2-row'),hs=[...document.querySelectorAll('#voxPerf>.g2-hint,#voxKbCard>.g2-hint')].filter(h=>/onto any key/i.test(h.textContent)),hint=hs.find(h=>h.parentNode.id==='voxPerf')||hs[0]||null;
   card.querySelectorAll(':scope>.g2-row,:scope>.g2-hint,:scope>.g2-piano').forEach(x=>{if(x!==row&&x!==hint&&x!==keys)x.remove()});bottom(card,[hint,row,keys,K.root]);
   top(app,[q('#voxApp>.g2-head'),q('#voxApp>.g2-toolbar')]);bottom(app,[$('voxPerf'),$('voxPads'),card])},
  ws(){const cn=q('#wsApp .cn');if(!cn)return;top(cn,[q('#wsApp .cn>.cn-screen'),q('#wsApp .cn>.ws-bar')]);bottom(cn,[q('#wsApp .cn>.ws-card'),q('#wsApp .cn>.cn-keysec')])}
@@ -15210,7 +15259,7 @@ window.GLCTC_SHUFFLE={mode:()=>mode,set:m=>{if(MODES.includes(m)){mode=m;try{loc
    Each song section is a chakra stage; scenes crossfade over several seconds. Everything is synthesised - no samples, no network. */
 (()=>{'use strict';
 const LS='glctc1.nature';
-const ST=Object.assign({on:true,level:.7,drone:.8,binaural:false},(()=>{try{return JSON.parse(localStorage.getItem(LS)||'{}')}catch(e){return{}}})());
+const ST=Object.assign({on:true,level:.7,drone:.8,tones:.6,binaural:false},(()=>{try{return JSON.parse(localStorage.getItem(LS)||'{}')}catch(e){return{}}})());
 const save=()=>{try{localStorage.setItem(LS,JSON.stringify(ST))}catch(e){}};
 const STAGES=[
  {name:'ROOT · EARTH',col:'#ff526e',hz:396,scene:{stream:.45,wind:.2,forest:.35},harm:[1,2],beat:4},
@@ -15237,7 +15286,7 @@ function chain(...n){for(let i=0;i<n.length-1;i++)n[i].connect(n[i+1]);return n[
 
 function build(c){
  const dest=c._mg||c.destination,out=c.createGain();out.gain.value=0;out.connect(dest);
- const nat=c.createGain(),dr=c.createGain();nat.connect(out);dr.connect(out);
+ const nat=c.createGain(),dr=c.createGain(),tn=c.createGain();nat.connect(out);dr.connect(out);tn.connect(out);tn.gain.value=0;
  const W=noiseBuf(c,'white'),Pk=noiseBuf(c,'pink'),Br=noiseBuf(c,'brown');
  const L={},src=[];
  const lay=k=>{const g=c.createGain();g.gain.value=0;g.connect(nat);L[k]=g;return g};
@@ -15269,9 +15318,9 @@ function build(c){
  const H=HARM.map((h,i)=>{const o=c.createOscillator();o.type='sine';const g=c.createGain();g.gain.value=0;const p=c.createStereoPanner();p.pan.value=h<3?0:(i%2?-.45:.45);o.connect(g);g.connect(p);p.connect(dr);o.start();src.push(o);
   const lo=c.createOscillator(),br=c.createGain();lo.frequency.value=.03+i*.011;br.gain.value=0;lo.connect(br);br.connect(g.gain);lo.start();src.push(lo);return{h,o,g,br}});   /* br.gain = breathing depth */
  const bin={m:c.createChannelMerger(2),l:c.createOscillator(),r:c.createOscillator(),g:c.createGain()};bin.g.gain.value=0;bin.l.connect(bin.m,0,0);bin.r.connect(bin.m,0,1);bin.m.connect(bin.g);bin.g.connect(dr);bin.l.start();bin.r.start();src.push(bin.l,bin.r);
- return{c,out,nat,dr,L,H,bin,src,root:0};
+ return{c,out,nat,dr,tn,L,H,bin,src,root:0,tv:[]};
 }
-function teardown(){if(!E)return;const e=E;E=null;timers.forEach(clearTimeout);timers=[];setTimeout(()=>{e.src.forEach(n=>{try{n.stop()}catch(x){}try{n.disconnect()}catch(x){}});try{e.out.disconnect()}catch(x){}},3500)}
+function teardown(){if(!E)return;const e=E;E=null;timers.forEach(clearTimeout);timers=[];solOff();setTimeout(()=>{(e.tv||[]).forEach(v=>v.stop(e.c.currentTime));e.src.forEach(n=>{try{n.stop()}catch(x){}try{n.disconnect()}catch(x){}});try{e.out.disconnect()}catch(x){}},3500)}
 
 /* ---- one-shot scheduled sounds ---- */
 function drop(){if(!E||!live)return;const c=E.c,t=c.currentTime+.02,lv=E.L.rain.gain.value;if(lv>.02){const n=1+Math.floor(Math.random()*3);for(let k=0;k<n;k++){const s=c.createBufferSource();s.buffer=E.wbuf||(E.wbuf=noiseBuf(c,'white'));const bp=filt(c,'bandpass',2000+Math.random()*5500,4+Math.random()*8),g=c.createGain(),p=c.createStereoPanner();p.pan.value=Math.random()*1.6-.8;const at=t+Math.random()*.08,d=.006+Math.random()*.018;g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(.35+Math.random()*.5,at+.001);g.gain.exponentialRampToValueAtTime(.0001,at+d);s.connect(bp);bp.connect(g);g.connect(p);p.connect(E.L.rain);s.start(at,Math.random()*4,d+.02)}}
@@ -15286,7 +15335,7 @@ function bird(){if(!E||!live)return;const c=E.c,lv=E.L.birds.gain.value;if(lv>.0
  timers.push(setTimeout(bird,1400+Math.random()*4600))}
 
 /* ---- musical state ---- */
-function rootHz(){let hz=440;try{hz=+((window.GLCTC_TUNING&&GLCTC_TUNING.hz)||440)}catch(e){}let key=9;try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))key=((+h.key%12)+12)%12}catch(e){}
+function rootHz(){if(genre()==='meditation'&&solStage>=0){let f=STAGES[solStage].hz;while(f>66)f/=2;while(f<33)f*=2;return f}let hz=440;try{hz=+((window.GLCTC_TUNING&&GLCTC_TUNING.hz)||440)}catch(e){}let key=9;try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))key=((+h.key%12)+12)%12}catch(e){}
  let f=hz*Math.pow(2,(key-9)/12);while(f>66)f/=2;while(f<33)f*=2;return f}
 function stageFor(){let sec=null;try{sec=GLCTC_SONG.section&&GLCTC_SONG.section()}catch(e){}if(!sec)return 0;const n=sec.count||9;
  if(genre()==='meditation'&&n===9)return Math.max(0,Math.min(6,sec.i-1));   /* ARRIVAL + 7 chakras + RETURN */
@@ -15298,10 +15347,43 @@ function setStage(k,fast){if(!E)return;const c=E.c,t=c.currentTime,amb=genre()==
   const base=x.h===1?.36:x.h===2?.2:x.h===3?.07:x.h===4?.05:0,v=amb?base*.5:(base+emph);x.g.gain.setTargetAtTime(v,t,tau);x.br.gain.setTargetAtTime(v*.35,t,tau)});
  const bf=f*4;E.bin.l.frequency.setTargetAtTime(bf,t,1);E.bin.r.frequency.setTargetAtTime(bf+S.beat,t,1);E.bin.g.gain.setTargetAtTime(ST.binaural&&!amb?.05:0,t,1.5);
  paint(S,f)}
-function levels(){if(!E)return;const t=E.c.currentTime;E.nat.gain.setTargetAtTime(ST.level*1.1,t,.4);E.dr.gain.setTargetAtTime(ST.drone*.6,t,.4)}
+function levels(){if(!E)return;const t=E.c.currentTime;E.nat.gain.setTargetAtTime(ST.level*1.1,t,.4);E.dr.gain.setTargetAtTime(ST.drone*.6,t,.4);E.tn.gain.setTargetAtTime(genre()==='meditation'?ST.tones*.5:0,t,.4)}
+/* ---- v138 SOLFEGGIO JOURNEY (meditation songs) ----
+   Each chakra section of a MEDITATION song is retuned so the song's own key note lands EXACTLY on that chakra's Solfeggio frequency
+   (396 417 528 639 741 852 963 Hz, in whichever octave is nearest - never more than half an octave away), through the shared tuning,
+   at the exact section start. Every tuned module, the GALACTIC VOX chant and the sub drone move together, so nothing is ever out of
+   tune, and an added Solfeggio tone (a pure sine at the real frequency, its lower octave and a soft singing-bowl strike every
+   4 bars) sounds the chakra over the music. Your A4 tuning setting is untouched - it comes back the moment the song stops. */
+let solStage=-1,solLifted=false,solSched='',solNext=0;
+const secStage=(i,n)=>n===9?Math.max(0,Math.min(6,i-1)):Math.max(0,Math.min(6,Math.floor(i/Math.max(1,n)*7)));
+function songRootHz(){let hz=440;try{hz=+GLCTC_TUNING.hz||440}catch(e){}let key=9;try{const h=window.GLCTC_SONG_HARM;if(h&&Number.isFinite(+h.key))key=((+h.key%12)+12)%12}catch(e){}return hz*Math.pow(2,(key-9)/12)}
+let solPrevC=null;
+function solCentsFor(k){let c=1200*Math.log2(STAGES[k].hz/songRootHz());if(solPrevC==null){c=((c%1200)+1800)%1200-600}else{c=solPrevC+((((c-solPrevC)%1200)+1800)%1200-600);if(c>750)c-=1200;else if(c<-750)c+=1200}solPrevC=c;return c}   /* nearest step from the last chakra, so the journey climbs instead of jumping about; never more than ~7 semitones from the song's own pitch */
+function toneVoice(c,f,t0,lvl){const o=c.createOscillator(),o2=c.createOscillator(),g=c.createGain(),g2=c.createGain(),lf=c.createOscillator(),lg=c.createGain(),p=c.createStereoPanner();
+ o.type=o2.type='sine';o.frequency.value=f;o2.frequency.value=f/2;g2.gain.value=.55;lf.frequency.value=.07+Math.random()*.04;lg.gain.value=lvl*.25;
+ g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(lvl,t0+4);lf.connect(lg);lg.connect(g.gain);o.connect(g);o2.connect(g2);g2.connect(g);g.connect(p);p.connect(E.tn);
+ [o,o2,lf].forEach(n=>n.start(t0));return{f,stop(t){try{g.gain.cancelScheduledValues(t);g.gain.setValueAtTime(g.gain.value,t);g.gain.setTargetAtTime(0,t,.9)}catch(e){}[o,o2,lf].forEach(n=>{try{n.stop(t+5)}catch(e){}});setTimeout(()=>{try{p.disconnect()}catch(e){}},Math.max(0,(t-c.currentTime)*1000)+6000)}}}
+function bowl(c,f,t0){const g=c.createGain(),p=c.createStereoPanner();p.pan.value=Math.random()*.6-.3;g.connect(p);p.connect(E.tn);
+ [[1,.32,7],[2,.12,4],[3,.05,2.5]].forEach(([h,a,d],j)=>{[-.6,.6].forEach(b=>{const o=c.createOscillator(),og=c.createGain();o.type='sine';o.frequency.value=f*h+(j?b*h:b*.5);og.gain.setValueAtTime(0,t0);og.gain.linearRampToValueAtTime(a,t0+.012);og.gain.exponentialRampToValueAtTime(.0001,t0+d);o.connect(og);og.connect(g);o.start(t0);o.stop(t0+d+.05)})});
+ setTimeout(()=>{try{p.disconnect()}catch(e){}},Math.max(0,(t0-c.currentTime)*1000)+8000)}
+function solApply(k,t){if(!E)return;const c=E.c;t=Math.max(t,c.currentTime+.01);solStage=k;
+ try{GLCTC_TUNING.lift(solCentsFor(k),t);solLifted=true}catch(e){}
+ E.tv.forEach(v=>v.stop(t));E.tv=[toneVoice(c,STAGES[k].hz,t,.16)];solNext=t;bowl(c,STAGES[k].hz,t)}
+function solOff(){solPrevC=null;if(solLifted){try{GLCTC_TUNING.unlift()}catch(e){}solLifted=false}solStage=-1;solSched='';if(E){const t=E.c.currentTime;E.tv.forEach(v=>v.stop(t));E.tv=[]}}
+function solTick(){if(!E||!live||genre()!=='meditation'){if(solLifted||solStage>=0)solOff();return}
+ let T=null,q=null;try{T=GLCTC_SONG.timeline();q=GLCTC_SONG.section()}catch(e){}const K=window.GLCTC_CLOCK,c=E.c;if(!T||!q||!K)return;
+ const n=T.n||q.count||9,now=c.currentTime,beat=K.beatAt(now),cyc=T.loop?Math.floor(Math.max(0,beat)/T.total):0;
+ /* the section playing now (song start / resume): retune at once */
+ const ck=cyc+':'+q.i;if(solSched.indexOf('|'+ck+'|')<0&&solStage!==secStage(q.i,n)){solSched+='|'+ck+'|';solApply(secStage(q.i,n),now)}
+ /* the next section: retune exactly on its first beat */
+ let ni=q.i+1,nc=cyc;if(ni>=n){if(!T.loop)ni=-1;else{ni=0;nc++}}
+ if(ni>=0){const tb=K.timeOfBeat(nc*T.total+T.starts[ni]),key=nc+':'+ni;if(tb-now<.9&&solSched.indexOf('|'+key+'|')<0){solSched+='|'+key+'|';if(solSched.length>400)solSched=solSched.slice(-200);solApply(secStage(ni,n),tb)}}
+ /* singing-bowl strike every 4 bars on the chakra's frequency */
+ if(solStage>=0&&E.tv.length){const bar=4*(T.barBeats||4),nb=Math.ceil((beat+.01)/bar)*bar,tb=K.timeOfBeat(nb);if(tb>solNext+.5&&tb-now<.6){solNext=tb;bowl(c,STAGES[solStage].hz,tb)}}}
+setInterval(()=>{try{solTick()}catch(e){}},120);
 function start(){const c=ac();if(!c)return;if(!E||E.c!==c){if(E)teardown();E=build(c)}live=true;levels();stage=-1;E.out.gain.cancelScheduledValues(c.currentTime);E.out.gain.setTargetAtTime(1,c.currentTime,1.2);
  timers.forEach(clearTimeout);timers=[];mStage=-1;nextChant=0;drop();crackle();bird()}
-function stop(){live=false;if(!E)return;const c=E.c;E.out.gain.cancelScheduledValues(c.currentTime);E.out.gain.setTargetAtTime(0,c.currentTime,.8);teardown();paint(null)}
+function stop(){live=false;solOff();if(!E)return;const c=E.c;E.out.gain.cancelScheduledValues(c.currentTime);E.out.gain.setTargetAtTime(0,c.currentTime,.8);teardown();paint(null)}
 /* v136 BIJA MANTRAS: GALACTIC VOX chants each chakra's seed syllable (LAM VAM RAM YAM HAM OM AH) as a slow choir, every two bars,
    on the song's root and climbing fifths / octaves with the journey - the same harmonic ladder as the drone, so it is always in key */
 const MANTRA=['lam','vam','ram','yam','ham','om','ah'],MLIFT=[0,7,12,12,19,19,24];
@@ -15309,7 +15391,7 @@ let nextChant=0,mStage=-1;
 function chantTick(){if(genre()!=='meditation'||!live)return;const V=window.GALACTIC_VOX,K=window.GLCTC_CLOCK,c=ac();if(!V||!K||!c||!V.state)return;
  let sec=null;try{sec=GLCTC_SONG.section()}catch(e){}if(!sec)return;const n=sec.count||9;if(n===9&&(sec.i<1||sec.i>7))return;
  const k=stage<0?0:stage;
- if(k!==mStage){mStage=k;try{const S0=V.state();if(!/OM CHANT/.test(S0.type||'')&&V.applyType)V.applyType('OM CHANT')}catch(e){}try{const S1=V.state();S1.lyrics=MANTRA[k];S1.chVowel=5}catch(e){}paint(STAGES[k],E&&E.root)}
+ if(k!==mStage){mStage=k;const cp=V.CHAKRAS&&V.CHAKRAS[k];try{if(cp&&V.loadType){if(V.state().type!==cp.type)V.loadType(cp.type,false)}else{const S0=V.state();if(!/OM CHANT/.test(S0.type||'')&&V.applyType)V.applyType('OM CHANT');const S1=V.state();S1.lyrics=MANTRA[k];S1.chVowel=5}}catch(e){}paint(STAGES[k],E&&E.root)}   /* v138: each stage sings its own CHAKRA preset */
  const now=c.currentTime,bars=8;let nb=Math.ceil(K.beatAt(now)/bars)*bars,t=K.timeOfBeat(nb);if(t<=nextChant+.05){nb+=bars;t=K.timeOfBeat(nb)}
  if(t-now>1.2)return;nextChant=t;
  let key=0;try{key=((+GLCTC_SONG_HARM.key%12)+12)%12}catch(e){}let base=48+key;if(base>53)base-=12;
@@ -15321,17 +15403,17 @@ setInterval(()=>{const g=genre(),want=ST.on&&running()&&(g==='meditation'||g==='
 
 /* ---- UI: a strip under the composer's genre selector, shown for Meditation / Ambient ---- */
 let ui=null;
-function paint(S,f){if(!ui)return;const mi=S?STAGES.indexOf(S):-1,mt=(mi>=0&&genre()==='meditation')?' · '+MANTRA[mi].toUpperCase():'';ui.now.textContent=S?('◉ '+S.name+mt+' · '+(f?f.toFixed(1)+' Hz root':'')):'';ui.now.style.color=S?S.col:''}
+function paint(S,f){if(!ui)return;const mi=S?STAGES.indexOf(S):-1,mt=(mi>=0&&genre()==='meditation')?' · '+MANTRA[mi].toUpperCase():'';ui.now.textContent=S?('◉ '+S.name+mt+' · '+((genre()==='meditation'&&solStage>=0)?STAGES[solStage].hz+' Hz SOLFEGGIO':(f?f.toFixed(1)+' Hz root':''))):'';ui.now.style.color=S?S.col:''}
 function mkUi(){const sel=document.getElementById('gscGenre');if(!sel){setTimeout(mkUi,500);return}if(ui)return;
  const box=document.createElement('div');box.id='gscNature';box.style.cssText='grid-column:1/-1;display:none;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:8px 10px;margin-top:6px;border:1px solid #2c4a3a;border-radius:10px;background:linear-gradient(160deg,#0f1d17,#121019);font-size:11px;letter-spacing:.04em;color:#bfe9cf';
  const lab=(t,el)=>{const l=document.createElement('label');l.style.cssText='display:flex;gap:6px;align-items:center;cursor:pointer';l.append(el,document.createTextNode(t));return l};
  const on=document.createElement('input');on.type='checkbox';on.checked=!!ST.on;on.onchange=()=>{ST.on=on.checked;save()};
  const rng=(v,fn)=>{const r=document.createElement('input');r.type='range';r.min=0;r.max=100;r.value=Math.round(v*100);r.style.width='90px';r.oninput=()=>{fn(+r.value/100);save();levels()};return r};
- const nl=rng(ST.level,v=>ST.level=v),dl=rng(ST.drone,v=>ST.drone=v);
+ const nl=rng(ST.level,v=>ST.level=v),dl=rng(ST.drone,v=>ST.drone=v),tl=rng(ST.tones,v=>ST.tones=v);
  const bi=document.createElement('input');bi.type='checkbox';bi.checked=!!ST.binaural;bi.onchange=()=>{ST.binaural=bi.checked;save();if(live&&stage>=0)setStage(stage,false)};
  const now=document.createElement('span');now.style.cssText='font-weight:600;letter-spacing:.08em';
- const tip=document.createElement('span');tip.style.cssText='opacity:.7';tip.textContent='Tip: LENGTH = EPIC or CLUB for the ~17 min journey';
- box.append(lab('🌿 NATURE & HARMONIC JOURNEY',on),lab('NATURE',nl),lab('SUB DRONE',dl),lab('BINAURAL (headphones)',bi),now,tip);
+ const tip=document.createElement('span');tip.style.cssText='opacity:.7';tip.textContent='Meditation: each chakra section is retuned to its Solfeggio frequency · LENGTH = EPIC or CLUB for the ~17 min journey';
+ box.append(lab('🌿 NATURE & HARMONIC JOURNEY',on),lab('NATURE',nl),lab('SUB DRONE',dl),lab('SOLFEGGIO TONES (meditation)',tl),lab('BINAURAL (headphones)',bi),now,tip);
  const host=sel.closest('div');(host&&host.parentElement?host.parentElement:sel.parentElement).appendChild(box);
  ui={box,now};const vis=()=>{const g=sel.value;box.style.display=(g==='meditation'||g==='ambient')?'flex':'none'};sel.addEventListener('change',vis);vis()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mkUi,{once:true});else mkUi();

@@ -7526,7 +7526,7 @@ window.GLCTC_BUSES={align,setRoute,routeOf,autoRouteTracks,routes:()=>S.route,se
    limiter. Track and bus inserts are rendered in the timeline WAV export too.
    ============================================================================================================== */
 (()=>{'use strict';
-const LSFX='glctc1.fx.v1',MAXFX=8;
+const LSFX='glctc1.fx.v1',MAXFX=10;   /* v152: 10 slots, so the 8-unit master chain still leaves room for your own */
 let FS={mods:{},buses:{},master:[]};
 try{const x=JSON.parse(localStorage.getItem(LSFX)||'null');if(x&&typeof x==='object'){FS.mods=x.mods||{};FS.buses=x.buses||{};FS.master=Array.isArray(x.master)?x.master:[];FS.byp=x.byp&&typeof x.byp==='object'?x.byp:{}}}catch(e){}
 if(!FS.byp)FS.byp={};if(!FS.arm||typeof FS.arm!=='object')FS.arm={};for(const k in FS.byp){if(FS.byp[k]&&FS.arm[k]===undefined)FS.arm[k]=false}FS.byp={};   /* v106: FX buttons are plain on / off switches */
@@ -7657,7 +7657,86 @@ const FX={
    const start=p=>{const K=window.GLCTC_CLOCK;let at=c.currentTime+.05;try{if(K&&K.anchored&&K.anchored()&&c===AC2()){const per=DIVS[p.div|0][1];const b=Math.ceil(K.beatAt(at)/per)*per;at=K.timeOfBeat(b)}}catch(e){}o.start(at);started=true};
    return{in:g,out:g,sync:true,stop(){try{o.stop()}catch(e){}},set(p){if(Math.abs(p.duty-d0)>.005){o.setPeriodicWave(pumpWave(c,'gate',p.duty));d0=p.duty}st(c,g.gain,1-p.depth/2);st(c,og.gain,p.depth/2);st(c,o.frequency,1/divSec(p.div));if(!started)start(p)}}}}
 };
-const CATS=['EQ & FILTER','DYNAMICS','DISTORTION','MODULATION','DELAY & REVERB','UTILITY'];
+/* ===== v152 ANALOG MASTERING · the "money no object" chain ===================================================================
+   Eight units modelled on the classic studio chain (behavioural emulations built from Web Audio parts, inspired by the
+   originals - not circuit-level models, and not affiliated with the makers):
+     Converter In (Hapi style) -> Tube Program EQ (EQP-1A style) -> Passive EQ (Massive Passive style)
+     -> Vari-Mu Tube Limiter (Fairchild 670 style) -> Vintage Hall return (Lexicon 224 style, parallel)
+     -> Tube Harmonics (Black Box HG-2 style, parallel) -> 1/2" Tape (Ampex ATR-102 style) -> Converter Out / Capture (Hapi style)
+   Every saturating stage has 12 dB of headroom and unity small-signal gain, so it colours instead of changing the level,
+   and every parallel stage keeps its dry path time-aligned (no comb filtering).
+   ============================================================================================================================ */
+const AH=4;   /* saturator headroom: the curve covers +/-12 dBFS */
+function tubeCurve(drive,asym,n=4096){const a=new Float32Array(n),d=Math.max(.02,drive);let mid=0;
+ const f=u=>{const t=Math.tanh(d*u);return t/d+asym*t*t/d*.5};mid=f(0);
+ for(let i=0;i<n;i++){const u=(i/(n-1)*2-1)*AH;a[i]=(f(u)-mid)/AH}return a}
+function tubeStage(c,os){const pre=c.createGain(),sh=c.createWaveShaper(),post=c.createGain(),dc=c.createBiquadFilter();pre.gain.value=1/AH;post.gain.value=AH;sh.oversample=os||'2x';dc.type='highpass';dc.frequency.value=8;dc.Q.value=.5;pre.connect(sh);sh.connect(post);post.connect(dc);
+ let k0='';return{in:pre,out:dc,set(drive,asym){const k=drive.toFixed(3)+'|'+asym.toFixed(3);if(k!==k0){sh.curve=tubeCurve(drive,asym);k0=k}}}}
+const bqN=(c,type,f,q,g)=>{const b=c.createBiquadFilter();b.type=type;if(f)b.frequency.value=f;if(q!=null)b.Q.value=q;if(g!=null)b.gain.value=g;return b};
+/* equal-sum parallel blend: out = dry*(1-m) + wet*m, the dry path delayed to match the wet path */
+function blend(c,latFn){const n={in:stereo(c.createGain()),dd:c.createDelay(.1),dry:c.createGain(),wet:c.createGain(),out:c.createGain()};n.in.connect(n.dd);n.dd.connect(n.dry);n.dry.connect(n.out);n.wet.connect(n.out);
+ if(window.GLCTC_LAT)GLCTC_LAT.hold(n.dd,latFn);else n.dd.delayTime.value=latFn();n.mix=m=>{m=cl(m,0,1);st(c,n.dry.gain,1-m);st(c,n.wet.gain,m)};return n}
+const wsLat=(c,os)=>()=>window.GLCTC_LAT?GLCTC_LAT.ws(os,c.sampleRate):.003;   /* latency in samples of THIS context */
+/* vintage digital hall impulse: two-band decay (bass multiply / treble damping), darkening tail, 224-style bandwidth */
+function hallIR(c,prog,T,bass,treb){const sr=c.sampleRate,len=Math.max(1,Math.floor(sr*Math.min(6,T*1.25+.15))),b=c.createBuffer(2,len,sr);
+ const Tlo=Math.max(.2,T*bass),Thi=Math.max(.15,T*(1-.55*treb)),split=Math.exp(-2*Math.PI*450/sr);
+ const er=prog===3?[.007,.013,.019,.027,.037,.049]:prog===1?[.004,.009,.015,.022]:prog===2?[]:[.011,.019,.031,.043,.061,.079];
+ const ramp=prog===2?.002:prog===1?.008:prog===3?.012:.022;
+ for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let lo=0,dark=0;
+  for(let i=0;i<len;i++){const t=i/sr,x=Math.random()*2-1;lo=lo*split+x*(1-split);const hi=x-lo;
+   let v=lo*Math.exp(-6.91*t/Tlo)+hi*Math.exp(-6.91*t/Thi);v*=Math.min(1,t/ramp);
+   const k=Math.max(.05,.55*Math.exp(-t*(1+3*treb)/Math.max(.3,T)));dark+=(v-dark)*k;d[i]=dark}
+  er.forEach((tt,j)=>{const i=Math.floor((tt+(ch?.0013*(j+1):0))*sr);if(i<len)d[i]+=(j%2?-1:1)*.5*Math.pow(.8,j)})}
+ return b}
+/* the browser's compressor adds its own make-up gain, and the amount depends on the knee - measure it once per setting in a
+   tiny silent offline render (works the same in every browser), so the limiter is exactly unity below its threshold */
+const MKC={};function compMakeup(thr,knee,ratio,cb){const k=thr+'|'+knee+'|'+ratio;if(MKC[k]!=null){cb(MKC[k]);return}
+ try{const sr=8000,o=new OfflineAudioContext(1,sr/2,sr),s=o.createConstantSource(),d=o.createDynamicsCompressor();s.offset.value=.003;d.threshold.value=thr;d.knee.value=knee;d.ratio.value=ratio;d.attack.value=.003;d.release.value=.1;
+  s.connect(d);d.connect(o.destination);s.start();o.startRendering().then(b=>{const x=b.getChannelData(0),v=Math.abs(x[x.length-16])/.003;if(v>.05&&v<50){MKC[k]=v;cb(v)}}).catch(()=>{})}catch(e){}}
+Object.assign(FX,{
+ hapiin:{n:'Converter In · Hapi style',cat:'ANALOG MASTERING',p:[['trim','INPUT TRIM',-12,12,.1,0,fDb],['sub','SUBSONIC',10,40,1,20,fHz]],
+  make(c){const g=stereo(c.createGain()),a=bqN(c,'highpass',20,-5.33),b=bqN(c,'highpass',20,2.32);g.connect(a);a.connect(b);   /* 4th-order Butterworth subsonic (Web Audio takes high/low-pass Q in dB: -5.33 / +2.32 dB = Q .54 / 1.31) + clean gain staging */
+   return{in:g,out:b,set(p){st(c,g.gain,Math.pow(10,p.trim/20));st(c,a.frequency,p.sub);st(c,b.frequency,p.sub)}}}},
+ pultec:{n:'Tube Program EQ · EQP-1A style',cat:'ANALOG MASTERING',p:[['lf','LOW FREQ',0,3,1,2,null,['20 Hz','30 Hz','60 Hz','100 Hz']],['lb','LOW BOOST',0,10,.1,0,fX],['la','LOW ATTEN',0,10,.1,0,fX],
+   ['hf','HIGH FREQ',0,6,1,5,null,['3 kHz','4 kHz','5 kHz','8 kHz','10 kHz','12 kHz','16 kHz']],['hb','HIGH BOOST',0,10,.1,0,fX],['bw','BANDWIDTH',1,10,.1,6,v=>v<3?'SHARP':v>8?'BROAD':fX(v)],
+   ['af','ATTEN SEL',0,2,1,2,null,['5 kHz','10 kHz','20 kHz']],['ha','HIGH ATTEN',0,10,.1,0,fX],['tube','TUBE',0,1,.01,.25,fPct]],
+  make(c){const lb=bqN(c,'peaking',60,.45,0),la=bqN(c,'lowshelf',150,null,0),hb=bqN(c,'peaking',12000,.7,0),ha=bqN(c,'highshelf',20000,null,0),T=tubeStage(c,'2x');
+   lb.connect(la);la.connect(hb);hb.connect(ha);ha.connect(T.in);   /* passive network first, then the tube make-up amp */
+   return{in:lb,out:T.out,lat:wsLat(c,'2x'),set(p){const LF=[20,30,60,100][p.lf|0],HF=[3000,4000,5000,8000,10000,12000,16000][p.hf|0],AF=[5000,10000,20000][p.af|0];
+    st(c,lb.frequency,LF);st(c,lb.gain,p.lb*1.35);st(c,la.frequency,LF*2.5);st(c,la.gain,-p.la*1.1);   /* boost + atten together = the famous tight, deep low end */
+    st(c,hb.frequency,HF);st(c,hb.Q,3/Math.max(1,p.bw));st(c,hb.gain,p.hb*1.6);st(c,ha.frequency,Math.min(AF,c.sampleRate*.45));st(c,ha.gain,-p.ha*1.6);
+    T.set(.06+p.tube*.55,p.tube*.3)}}}},
+ massive:{n:'Passive EQ · Massive Passive style',cat:'ANALOG MASTERING',p:[['lf','LOW SHELF',22,220,1,60,fHz],['lg','LOW GAIN',-10,10,.1,0,fDb],['lmf','LOW-MID',100,1200,1,300,fHz],['lmg','LOW-MID GAIN',-10,10,.1,0,fDb],
+   ['hmf','HIGH-MID',1000,8000,10,3500,fHz],['hmg','HIGH-MID GAIN',-10,10,.1,0,fDb],['af','AIR SHELF',5000,20000,10,16000,fHz],['ag','AIR GAIN',-10,10,.1,0,fDb],['bw','BANDWIDTH',.3,1.5,.01,.6,fX]],
+  make(c){const a=bqN(c,'lowshelf',60,null,0),b=bqN(c,'peaking',300,.6,0),d=bqN(c,'peaking',3500,.6,0),e=bqN(c,'highshelf',16000,null,0);a.connect(b);b.connect(d);d.connect(e);   /* wide, gentle passive curves */
+   return{in:a,out:e,set(p){st(c,a.frequency,p.lf);st(c,a.gain,p.lg);st(c,b.frequency,p.lmf);st(c,b.gain,p.lmg);st(c,b.Q,p.bw);st(c,d.frequency,p.hmf);st(c,d.gain,p.hmg);st(c,d.Q,p.bw);st(c,e.frequency,Math.min(p.af,c.sampleRate*.45));st(c,e.gain,p.ag)}}}},
+ varimu:{n:'Vari-Mu Tube Limiter · Fairchild 670 style',cat:'ANALOG MASTERING',p:[['thr','THRESHOLD',-40,0,.5,-18,fDb],['tc','TIME CONSTANT',0,3,1,1,null,['TC1 · 0.3 s','TC2 · 0.8 s','TC3 · SLOW','TC4 · SLOWEST']],
+   ['out','OUTPUT',-6,12,.1,0,fDb],['tube','TUBE',0,1,.01,.3,fPct],['mix','MIX',0,1,.01,1,fPct]],
+  make(c){const m=mixer(c),a=c.createDynamicsCompressor(),mk=c.createGain(),T=tubeStage(c,'2x');a.knee.value=24;a.ratio.value=6;   /* very soft knee: the ratio rises with level, like a remote-cutoff tube */
+   m.in.connect(a);a.connect(mk);mk.connect(T.in);T.out.connect(m.wet);const lat=()=>LATC()+wsLat(c,'2x')();alignDry(c,m,lat());let est=0,cur=null;
+   return{in:m.in,out:m.out,lat,meter:a,set(p){const TC=[[.0002,.3],[.0002,.8],[.0004,1],[.0008,1]][p.tc|0];a.threshold.value=p.thr;a.attack.value=TC[0];a.release.value=TC[1];
+    const og=Math.pow(10,p.out/20);cur=p;if(!est){const full=Math.pow(10,(p.thr-p.thr/6)/20);st(c,mk.gain,og/Math.pow(1/full,.6))}compMakeup(p.thr,24,6,v=>{est=v;st(c,mk.gain,Math.pow(10,cur.out/20)/v)});T.set(.08+p.tube*.5,p.tube*.25);m.mix(p.mix)}}}},
+ hall224:{n:'Vintage Hall · Lexicon 224 style',cat:'ANALOG MASTERING',p:[['prog','PROGRAM',0,3,1,0,null,['CONCERT HALL','SMALL HALL','PLATE','CHAMBER']],['dec','DECAY',.4,6,.1,2.2,v=>v.toFixed(1)+'s'],['pre','PRE-DELAY',0,.12,.001,.02,fMs],
+   ['bass','BASS DECAY',.4,1.5,.01,.7,v=>'×'+v.toFixed(2)],['treb','TREBLE DAMP',0,1,.01,.5,fPct],['hp','SEND LOW CUT',80,600,1,220,fHz],['mod','CHORUS',0,1,.01,.4,fPct],['mix','RETURN',0,.5,.005,.08,fPct]],
+  make(c){const m=mixer(c),hp=bqN(c,'highpass',220,-3.01),pd=c.createDelay(.2),cv=c.createConvolver(),lp=bqN(c,'lowpass',9500,-3.01),md=c.createDelay(.05),L=lfo(c,'sine'),wg=c.createGain();
+   md.delayTime.value=.008;L.o.frequency.value=.55;L.g.connect(md.delayTime);m.in.connect(hp);hp.connect(pd);pd.connect(cv);cv.connect(lp);lp.connect(md);md.connect(wg);wg.connect(m.wet);let sig='';   /* parallel return: the low end never goes into the room */
+   return{in:m.in,out:m.out,stop(){try{L.o.stop()}catch(e){}},set(p){const s=(p.prog|0)+'|'+p.dec.toFixed(1)+'|'+p.bass.toFixed(2)+'|'+p.treb.toFixed(2);if(s!==sig){sig=s;cv.buffer=hallIR(c,p.prog|0,p.dec,p.bass,p.treb)}
+    st(c,pd.delayTime,p.pre);st(c,hp.frequency,p.hp);st(c,lp.frequency,(p.prog|0)===2?11000:9000);st(c,L.g.gain,p.mod*.0012);st(c,wg.gain,1.6);m.mix(p.mix)}}}},
+ hg2:{n:'Tube Harmonics · Black Box HG-2 style',cat:'ANALOG MASTERING',p:[['pent','PENTODE',0,1,.01,.3,fPct],['tri','TRIODE',0,1,.01,.3,fPct],['dens','DENSITY',0,1,.01,.2,fPct],['air','AIR',0,1,.01,.3,fPct],['mix','BLEND',0,1,.01,.25,fPct]],
+  make(c){const B=blend(c,wsLat(c,'2x')),T=tubeStage(c,'2x'),air=bqN(c,'highshelf',11000,null,0);B.in.connect(T.in);T.out.connect(air);air.connect(B.wet);   /* parallel tubes: the dry mix stays intact, the harmonics sit on top */
+   return{in:B.in,out:B.out,lat:wsLat(c,'2x'),set(p){T.set(.1+p.pent*1.5+p.dens*.8,p.tri*.7);st(c,air.gain,p.air*6);B.mix(p.mix)}}}},
+ atr:{n:'1/2" Tape · Ampex ATR-102 style',cat:'ANALOG MASTERING',p:[['speed','SPEED',0,1,1,1,null,['15 IPS','30 IPS']],['drv','INPUT',0,1,.01,.3,fPct],['bias','BIAS',0,2,1,1,null,['UNDER','NOMINAL','OVER']],['bump','HEAD BUMP',0,1,.01,.4,fPct],['flut','WOW & FLUTTER',0,1,.01,.05,fPct]],
+  make(c){const T=tubeStage(c,'2x'),bp=bqN(c,'peaking',45,1.2,0),dp=bqN(c,'peaking',110,1.4,0),hs=bqN(c,'highshelf',14000,null,0),lp=bqN(c,'lowpass',20000,-3.01),d=c.createDelay(.05),W=lfo(c),F=lfo(c);
+   d.delayTime.value=.004;W.o.frequency.value=.6;F.o.frequency.value=5.5;W.g.connect(d.delayTime);F.g.connect(d.delayTime);T.out.connect(bp);bp.connect(dp);dp.connect(hs);hs.connect(lp);lp.connect(d);
+   return{in:T.in,out:d,lat:()=>wsLat(c,'2x')()+.004,stop(){[W,F].forEach(x=>{try{x.o.stop()}catch(e){}})},set(p){const s30=(p.speed|0)===1,bias=p.bias|0;
+    T.set((.08+p.drv*1.1)*(bias===0?1.2:bias===2?.9:1),.04);
+    st(c,bp.frequency,s30?45:65);st(c,bp.gain,p.bump*(s30?2.2:3));st(c,dp.frequency,s30?110:160);st(c,dp.gain,-p.bump*(s30?.9:1.2));
+    st(c,hs.frequency,s30?14000:10000);st(c,hs.gain,(s30?-.2:-.7)+(bias===0?.8:bias===2?-1.2:0));lp.frequency.value=s30?c.sampleRate/2:Math.min(20000,c.sampleRate*.48);   /* 30 ips is flat to the top; 15 ips rolls off gently */
+    st(c,W.g.gain,p.flut*.0003);st(c,F.g.gain,p.flut*.00008)}}}},
+ hapiout:{n:'Converter Out / Capture · Hapi style',cat:'ANALOG MASTERING',p:[['trim','OUTPUT TRIM',-12,12,.1,0,fDb]],
+  make(c){const g=stereo(c.createGain()),dc=bqN(c,'highpass',5,.5);g.connect(dc);return{in:g,out:dc,set(p){st(c,g.gain,Math.pow(10,p.trim/20))}}}}   /* clean print stage - record it with BOUNCE > MASTER */
+});
+const CATS=['EQ & FILTER','DYNAMICS','DISTORTION','MODULATION','DELAY & REVERB','UTILITY','ANALOG MASTERING'];
 const defP=type=>{const o={};(FX[type]?FX[type].p:[]).forEach(q=>o[q[0]]=q[5]);return o};
 const newFx=type=>({type,on:true,p:defP(type)});
 
@@ -7988,6 +8067,7 @@ function composerFX(genre,on=true){
   persist(key);rebuild(key);
  });
  try{composerBuses(genre,on)}catch(e){console.warn('composer buses',e)}
+ try{composerMaster(genre,on)}catch(e){console.warn('composer master',e)}   /* v151 */
  render();window.GLCTC_CHARACTER?.apply();
 }
 /* v106 COMPOSER GROUP BUSES: every module is ROUTED (not sent) to its own group bus, and each group gets its own EQ,
@@ -8016,9 +8096,13 @@ function composerBuses(genre,on){
  const DV={amapiano:1.12,synthwave:1.1,breaks:1.15,pop:1.12,reggae:1.18,ska:1.1,happyhardcore:1.1,dubstep:1.1,hardhouse:1.08,nuskool:1.08,techhouse:1.06,trance:1.06,lofi:.95}[g]||1;
  const PU=soft?0:/^(lofi|reggae|ska|liquid)$/.test(g)?.3:hard?.55:.45,PM=soft?0:/^(lofi|liquid)$/.test(g)?.15:hard?.28:.22;
  const fx=(type,p)=>({type,p});
+ /* v151 MEASURED MIX FIX (every genre's drop, stems read at the group-bus outputs): k = kick low-end (dB at the kick's fundamental on
+    the DRUMS bus), k2 = kick trim after the drum-bus compressors, b = SUB + BASS buses, m = SYNTHS / INSTRUMENTS / VOCALS buses. Targets: kick 1-2 dB over the bass in club styles,
+    level with it in bass-led styles, under it in reggae / ska; music 5-7 dB under the drums. 808 styles lose kick boom, never gain bass. */
+ const MIXFIX={"techno":{"k":-2.1,"b":0.0,"m":4.4,"k2":-3.3},"melodictechno":{"k":-1.3,"b":0.0,"m":2.8},"techhouse":{"k":-3.6,"b":0.0,"m":5.5},"hardhouse":{"k":-0.3,"b":0.0,"m":2.3,"k2":-1.4},"trance":{"k":-3.4,"b":0.0,"m":-0.2,"k2":1.5},"psytrance":{"k":-1.8,"b":0.0,"m":2.2,"k2":1.1},"happyhardcore":{"k":-1.7,"b":0.0,"m":0.8},"house":{"k":-2.5,"b":0.0,"m":2.2},"tribalhouse":{"k":-2.4,"b":0.0,"m":-0.5,"k2":-1.0},"garage":{"k":-3.5,"b":0.0,"m":3.3,"k2":-3.1},"pop":{"k":-6.5,"b":0.0,"m":0.8,"k2":-2.1},"synthwave":{"k":-1.7,"b":0.0,"m":1.6},"deephouse":{"k":-0.4,"b":0.0,"m":4.3,"k2":-1.1},"amapiano":{"k":-6.6,"b":0.0,"m":-1.9},"afrohouse":{"k":-6.4,"b":1.9,"m":-1.9},"dnb":{"k":-4.0,"b":0.0,"m":1.0,"k2":1.2},"jungle":{"k":-4.0,"b":0.0,"m":1.1},"liquid":{"k":-2.8,"b":0.0,"m":2.5},"dubstep":{"k":-5.2,"b":0.0,"m":-1.4,"k2":-2.8},"breaks":{"k":-8.2,"b":0.0,"m":0.6},"nuskool":{"k":-4.2,"b":0.0,"m":-2.4},"electro":{"k":-6.9,"b":3.0,"m":0.7,"k2":-2.2},"hiphop":{"k":-5.9,"b":0.0,"m":-0.6,"k2":-2.0},"eastcoast":{"k":-6.0,"b":0.0,"m":0.4,"k2":-2.2},"westcoast":{"k":-7.1,"b":3.4,"m":-1.0,"k2":2.0},"ukhiphop":{"k":-3.7,"b":0.0,"m":1.4},"lofi":{"k":-1.7,"b":0.0,"m":2.2},"trap":{"k":-6.8,"b":0.0,"m":0.6,"k2":-1.5},"drill":{"k":-7.1,"b":0.0,"m":0.0},"south":{"k":-4.4,"b":0.0,"m":1.2},"phonk":{"k":-7.1,"b":0.0,"m":1.4},"reggae":{"k":-7.0,"b":3.5,"m":2.8},"ska":{"k":-6.5,"b":0.0,"m":-1.8,"k2":-5.0}},MF=soft?{k:0,b:0,m:0}:Object.assign({k:0,b:0,m:0},MIXFIX[g]||MIXFIX[(window.GLCTC_GENRE_PARENT||{})[g]]);
  const plan=[
   {i:0,name:'DRUMS',vol:DV,ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
-   ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,e808?.5:1.5,1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?0:1.5,.7),fx('punch',{amt:PU,att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:PM}),fx('exciter',{f:7500,drv:.28,mix:dark?.05:.12})]},
+   ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,+((e808?.5:1.5)+MF.k).toFixed(1),MF.k<-4?.6:MF.k<-1?.8:1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?0:1.5,.7),fx('punch',{amt:PU,att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:PM}),fx('exciter',{f:7500,drv:.28,mix:dark?.05:.12})]},
   {i:1,name:'SUB',ids:['sub'],vol:e808?.6:g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
    ins:[{type:'util',p:{gain:0,pan:0,mono:1,inv:0}}]},
   {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:12000,drv:e808?0:hard?.1:.04,glue:e808?.3:.45,dly:0,rev:0},
@@ -8030,6 +8114,10 @@ function composerBuses(genre,on){
   {i:5,name:'VOCALS',ids:['vox'],fx:{on:true,lc:170,hc:17500,drv:0,glue:.5,dly:0,rev:0},
    ins:[peq(300,-2,1,3500,2,.8),comp(-20,3,.005,.15),fx('exciter',{f:5000,drv:.25,mix:.14})]},
   {i:6,free:true},{i:7,free:true}];
+ {const ut=d=>({type:'util',p:{gain:+d.toFixed(1),pan:0,mono:0,inv:0}});   /* v151 trims (post auto-mix, so nothing chases them) */
+  if(Math.abs(MF.b)>.05){const s=plan[1].ins.find(f=>f.type==='util');if(s)s.p.gain=+MF.b.toFixed(1);else plan[1].ins.push(ut(MF.b));plan[2].ins.push(ut(MF.b))}
+  if(Math.abs(MF.m)>.05)[3,4,5].forEach(i=>plan[i].ins.push(ut(MF.m)));
+  if(Math.abs(MF.k2||0)>.05)plan[0].ins.push(peq(KF,+MF.k2.toFixed(1),.7,120,0,1))}   /* kick trim AFTER the punch compressors (an EQ in front of them is partly undone by the compressor) */
  const clearIns=i=>{const ch=chainOf('bus:'+i,true),keep=ch.filter(f=>!f._composer);ch.splice(0,ch.length,...keep);persist('bus:'+i);rebuild('bus:'+i)};
  plan.forEach(P=>{if(!mine(P.i))return;
   CB_IDS.forEach(id=>{const k='mod:'+id;if(B.routeOf(k)===P.i)B.setRoute(k,null);if((B.sends(k)[P.i]||0)>0)B.setSend(k,P.i,0)});
@@ -8042,6 +8130,47 @@ function composerBuses(genre,on){
  try{const Pj=typeof project!=='undefined'?project:null;if(Pj&&Pj.tracks)Pj.tracks.forEach(t=>{const k='trk:'+t.id;if(t.busAuto&&B.routeOf(k)!=null&&!on){B.setRoute(k,null)}if(!on)delete t.busAuto})}catch(e){}
  try{fsave()}catch(e){}try{B.sync()}catch(e){}
  if(BS.buses.map(b=>b.name).join('|')!==names0)try{B.rebuild&&B.rebuild()}catch(e){}   /* the MUTE / SOLO pads take the new bus names */
+}
+/* v152 DREAM MASTER CHAIN · every composer song loads the full analogue mastering chain on the MASTER channel
+   (CHANNEL FX > MASTER), dialled in for its genre:
+     Converter In -> Tube Program EQ -> Passive EQ -> Vari-Mu Tube Limiter -> Vintage Hall (parallel) -> Tube Harmonics (parallel)
+     -> 1/2" Tape -> Converter Out / Capture
+   Low-end moves are matched so the kick / bass balance measured in v151 is kept. Your own MASTER FX stay in place;
+   only the chain the composer added is swapped when the genre changes. */
+const DREAM_FAM={techno:'club',melodictechno:'club',techhouse:'club',hardhouse:'club',trance:'club',psytrance:'club',happyhardcore:'club',
+ house:'house',deephouse:'house',tribalhouse:'house',afrohouse:'house',amapiano:'house',garage:'house',
+ dnb:'breaks',jungle:'breaks',liquid:'breaks',breaks:'breaks',nuskool:'breaks',electro:'breaks',dubstep:'breaks',
+ trap:'boom',drill:'boom',south:'boom',phonk:'boom',westcoast:'boom',hiphop:'hip',eastcoast:'hip',ukhiphop:'hip',lofi:'hip',
+ reggae:'roots',ska:'roots',pop:'pop',synthwave:'pop',ambient:'air',meditation:'air'};
+const DREAM_BASE={
+ club:  {hapiin:{sub:28},pultec:{lf:2,lb:2,la:2.5,hf:5,hb:1.5,bw:7,af:2,ha:.5,tube:.2},massive:{lmf:300,lmg:-1,hmf:3500,hmg:.5,af:16000,ag:1,bw:.6},varimu:{thr:-15,tc:1,tube:.2},hall224:{prog:0,dec:2.2,mix:.06,bass:.6,treb:.5,hp:250,pre:.025},hg2:{pent:.3,tri:.2,dens:.2,air:.3,mix:.2},atr:{speed:1,drv:.25,bias:1,bump:.35,flut:.03}},
+ house: {hapiin:{sub:27},pultec:{lf:2,lb:2.5,la:2.5,hf:4,hb:1.5,bw:8,af:2,ha:1.5,tube:.3},massive:{lmf:320,lmg:-1,hmf:3000,hmg:.5,af:16000,ag:1.5,bw:.6},varimu:{thr:-16,tc:2,tube:.3},hall224:{prog:0,dec:2,mix:.07,bass:.6,treb:.55,hp:240,pre:.02},hg2:{pent:.2,tri:.35,dens:.2,air:.3,mix:.25},atr:{speed:1,drv:.3,bias:1,bump:.4,flut:.04}},
+ breaks:{hapiin:{sub:30},pultec:{lf:1,lb:1.5,la:2,hf:4,hb:1.5,bw:6,af:2,ha:.5,tube:.25},massive:{lmf:280,lmg:-1,hmf:4500,hmg:1,af:16000,ag:1,bw:.6},varimu:{thr:-15,tc:0,tube:.25},hall224:{prog:1,dec:1.6,mix:.05,bass:.55,treb:.5,hp:280,pre:.015},hg2:{pent:.4,tri:.2,dens:.25,air:.3,mix:.2},atr:{speed:1,drv:.3,bias:1,bump:.3,flut:.03}},
+ boom:  {hapiin:{sub:24},pultec:{lf:1,lb:1.5,la:2.5,hf:5,hb:2.0,bw:7,af:2,ha:1,tube:.2},massive:{lmf:300,lmg:-1.5,hmf:3500,hmg:1,af:16000,ag:1,bw:.6},varimu:{thr:-15,tc:1,tube:.2},hall224:{prog:2,dec:1.4,mix:.04,bass:.5,treb:.5,hp:300,pre:.02},hg2:{pent:.35,tri:.2,dens:.2,air:.35,mix:.2},atr:{speed:1,drv:.2,bias:1,bump:.2,flut:.02}},
+ hip:   {hapiin:{sub:26},pultec:{lf:2,lb:1.5,la:2.5,hf:3,hb:1.5,bw:6,af:2,ha:1,tube:.35},massive:{lmf:350,lmg:-1.5,hmf:3200,hmg:1,af:14000,ag:1,bw:.6},varimu:{thr:-16,tc:2,tube:.35},hall224:{prog:3,dec:1.2,mix:.05,bass:.55,treb:.6,hp:260,pre:.012},hg2:{pent:.2,tri:.45,dens:.25,air:.2,mix:.3},atr:{speed:0,drv:.4,bias:1,bump:.45,flut:.05}},
+ roots: {hapiin:{sub:30},pultec:{lf:2,lb:2.5,la:1.5,hf:2,hb:1,bw:5,af:2,ha:1,tube:.35},massive:{lmf:400,lmg:-1,hmf:2600,hmg:1,af:14000,ag:1,bw:.6},varimu:{thr:-15.5,tc:2,tube:.35},hall224:{prog:2,dec:1.6,mix:.06,bass:.55,treb:.6,hp:250,pre:.02},hg2:{pent:.2,tri:.4,dens:.2,air:.2,mix:.3},atr:{speed:0,drv:.35,bias:1,bump:.45,flut:.06}},
+ pop:   {hapiin:{sub:28},pultec:{lf:2,lb:1.5,la:2,hf:6,hb:2.5,bw:8,af:2,ha:1,tube:.2},massive:{lmf:250,lmg:-1.5,hmf:4000,hmg:.5,af:16000,ag:1.5,bw:.6},varimu:{thr:-13,tc:1,tube:.2},hall224:{prog:2,dec:1.8,mix:.07,bass:.6,treb:.45,hp:250,pre:.025},hg2:{pent:.25,tri:.25,dens:.2,air:.4,mix:.2},atr:{speed:1,drv:.25,bias:1,bump:.35,flut:.03}},
+ air:   {hapiin:{sub:30},pultec:{lf:1,lb:1,la:1,hf:5,hb:1.5,bw:9,af:2,ha:.5,tube:.15},massive:{lmf:300,lmg:-1,hmf:3000,hmg:0,af:16000,ag:1.5,bw:.6},varimu:{thr:-22,tc:3,tube:.15},hall224:{prog:0,dec:4.5,mix:.18,bass:.7,treb:.4,hp:200,pre:.04},hg2:{pent:.1,tri:.25,dens:.1,air:.3,mix:.12},atr:{speed:1,drv:.15,bias:1,bump:.3,flut:.03}}
+};
+const DREAM_TWEAK={
+ trance:{hall224:{dec:3,mix:.08},pultec:{hb:2,hf:6}},melodictechno:{hall224:{dec:2.8,mix:.08}},psytrance:{hall224:{mix:.04,dec:1.6},varimu:{tc:0}},hardhouse:{varimu:{tc:0},hg2:{pent:.4}},
+ deephouse:{pultec:{ha:2.5,hb:1},atr:{bump:.45,drv:.35},varimu:{tc:3}},amapiano:{pultec:{ha:2,hb:1},varimu:{tc:3}},garage:{pultec:{hf:5,hb:2}},
+ liquid:{hall224:{prog:0,dec:2.4,mix:.07},pultec:{hf:6,hb:2}},jungle:{atr:{speed:0,drv:.35},hg2:{tri:.35}},dubstep:{pultec:{lf:1,lb:1,la:3}},electro:{hall224:{prog:2}},
+ drill:{pultec:{la:2.5,lb:1},atr:{bump:.1},hall224:{mix:.035}},trap:{pultec:{hf:6,hb:2}},phonk:{atr:{speed:0,drv:.4},hg2:{tri:.4,mix:.28}},westcoast:{hg2:{tri:.35},atr:{bump:.3}},
+ eastcoast:{pultec:{ha:2.5}},lofi:{pultec:{ha:3,hb:.5},atr:{speed:0,drv:.55,bias:2,bump:.55,flut:.15},hg2:{tri:.5,mix:.35},hall224:{mix:.07,treb:.8}},
+ reggae:{hall224:{prog:2,dec:1.8,mix:.07},pultec:{lb:1.5}},ska:{pultec:{lf:3,lb:0,la:1,hf:3,hb:2},hall224:{prog:1,dec:1.3,mix:.06},atr:{bump:.3}},
+ synthwave:{hall224:{prog:0,dec:2.8,mix:.1},atr:{speed:0,drv:.4},hg2:{tri:.4}},meditation:{hall224:{dec:5.5,mix:.2},varimu:{thr:-24}}
+};
+const DREAM_OUT={hapiout:{trim:1}};   /* the chain trims ~1 dB of sub-sonic energy - the print stage gives it back */
+const DREAM_ORDER=['hapiin','pultec','massive','varimu','hall224','hg2','atr','hapiout'];
+function masterRecipe(genre){const g=String(genre||''),base=DREAM_BASE[DREAM_FAM[g]||DREAM_FAM[(window.GLCTC_GENRE_PARENT||{})[g]]||'club'],tw=DREAM_TWEAK[g]||{};
+ return DREAM_ORDER.map(type=>({type,p:Object.assign({},DREAM_OUT[type]||{},base[type]||{},tw[type]||{})}))}
+function composerMaster(genre,on){
+ const ch=chainOf('master',true),manual=ch.filter(f=>!f._composer);
+ const auto=on?masterRecipe(genre).filter(f=>!manual.some(m=>m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
+ ch.splice(0,ch.length,...manual,...auto.slice(0,Math.max(0,MAXFX-manual.length)));
+ if(on&&auto.length)FS.arm.master=true;
+ persist('master');rebuild('master');
 }
 function fxSnapshot(){return JSON.parse(JSON.stringify(FS))}
 function fxRestore(data){
@@ -13553,7 +13682,8 @@ const CH={
   breaks:[1.5,1.5],nuskool:[1.5,1.5],electro:[1,1.5],garage:[1.5,2],dubstep:[1,1],hiphop:[1.5,1.5],eastcoast:[1.5,1],south:[1,1.5],ukhiphop:[1.5,1.5],drill:[1,1.5],trap:[1,2],pop:[1.5,2],synthwave:[1,1.5],ska:[1.5,1.5],
   deephouse:[1,1],reggae:[1.5,1.5],amapiano:[1,1.5],afrohouse:[1,1.5]};
  for(const k in BRIGHT){const q=CH[k];if(!q)continue;q.pres=+((q.pres||0)+BRIGHT[k][0]).toFixed(2);q.air=+((q.air||0)+BRIGHT[k][1]).toFixed(2)}}
-for(const k in CH){const L=CH[k].low;if(Array.isArray(L)){L[0]=Math.min(6,(+L[0]||0)+2);L[1]=Math.max(70,+L[1]||70)}}   /* v95: +2 dB low shelf up to 70 Hz on every genre */
+for(const k in CH){const L=CH[k].low;if(Array.isArray(L)){L[0]=Math.min(6,(+L[0]||0)+2);L[1]=Math.max(70,+L[1]||70)}}
+for(const k in CH){const L=CH[k].low;if(Array.isArray(L))L[0]=+Math.max(0,L[0]-3.5).toFixed(2)}   /* v151: the +2 dB of v95 (and 1.5 dB more) is taken back - it was making up for the comb-filter loss; measured with the comb gone, every master's low end was ~3 dB heavier than a commercial reference */   /* v95: +2 dB low shelf up to 70 Hz on every genre */
 const GENRES=['techno','house','deephouse','techhouse','tribalhouse','hardhouse','trance','psytrance','happyhardcore','dnb','jungle','liquid','breaks','nuskool','electro','garage','dubstep','eastcoast','westcoast','south','ukhiphop','drill','trap','lofi','reggae','ska','pop','synthwave','ambient','meditation','hiphop','amapiano','afrohouse','phonk','melodictechno'].filter(k=>CH[k]);
 const LS='glctc1.character';
 const CUR={mode:'auto',amt:1,genre:null};
@@ -13600,8 +13730,11 @@ function build(c){
  N.crk=c.createBufferSource();N.crk.buffer=crackleBuffer(c);N.crk.loop=true;N.crkF=c.createBiquadFilter();N.crkF.type='bandpass';N.crkF.frequency.value=2500;N.crkF.Q.value=.6;N.crkG=c.createGain();N.crkG.gain.value=0;
  N.crk.connect(N.crkF);N.crkF.connect(N.crkG);N.crkG.connect(c._mg);try{N.crk.start()}catch(e){}
  /* insert between master volume and the limiter */
- try{c._mg.disconnect(c._limIn||c._lim)}catch(e){}
- c._mg.connect(N.in);N.out.connect(N.lc);N.lc.connect(c._limIn||c._lim);N.in.connect(N.aIn);N.out.connect(N.aOut);
+ /* v151 COMB FIX: the DC blocker (masterGain -> dcb -> master inserts) was left connected beside the character, so the whole mix reached
+    the master twice - once dry, once 3-6 ms late through the character - and comb-filtered (-10 dB holes at 166 / 500 Hz, +3 dB humps
+    between, so the kick and the bass jumped in level from song to song). The character now REPLACES that path and feeds the DC blocker. */
+ try{c._mg.disconnect(c._dcb||c._limIn||c._lim)}catch(e){}
+ c._mg.connect(N.in);N.out.connect(N.lc);N.lc.connect(c._dcb||c._limIn||c._lim);N.in.connect(N.aIn);N.out.connect(N.aOut);
  return N;
 }
 const ramp=(p,v,c)=>{try{p.setTargetAtTime(v,c.currentTime,.06)}catch(e){p.value=v}};
@@ -14110,7 +14243,8 @@ const styleKey=()=>S.style&&S.style!=='auto'?S.style:autoStyle(S.genre);
 const ST_=()=>STYLES[styleKey()]||STYLES.club;
 const tgt=g=>{const t=TARGET[g]??-9,st=ST_();return st.off?Math.max(t+st.off,Math.min(t,-16)):t};
 window.__glctcLimP=()=>{const st=ST_();return{att:st.att,rel:st.rel}};
-const LS='glctc1.mastering.v2';   /* v107: drill / trap / southern targets changed - old learned drives are dropped */
+const LS='glctc1.mastering.v3';   /* v151: drives learned through the comb-filtered master path are dropped */
+{const F={deephouse:-2.3,jungle:-1.0,eastcoast:-3.7,phonk:-3.2,lofi:-4.8,amapiano:-3.6,reggae:-3.7,ska:-2.5,synthwave:-1.9};for(const g in F)if(DRIVE0[g]!=null)DRIVE0[g]=+(DRIVE0[g]+F[g]).toFixed(1)}   /* v151: re-measured starting drives (comb fix, new master chain, new low end) */   /* v107: drill / trap / southern targets changed - old learned drives are dropped */
 const S={on:true,style:'auto',genre:null,drive:3,locked:false,st:[],drop:0,lastAdj:0,learn:{},gr:0,lufs:null};
 try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x){S.on=x.on!==false;if(x.learn&&typeof x.learn==='object')S.learn=x.learn;if(x.style&&(x.style==='auto'||STYLES[x.style]))S.style=x.style}}catch(e){}
 const save=()=>{try{localStorage.setItem(LS,JSON.stringify({on:S.on,learn:S.learn,style:S.style}))}catch(e){}};
@@ -15680,7 +15814,7 @@ const KICK={
  techno:{len:.72,max:.4, kc:1.25,kb:.42,kx:5.5,kt:.019,ks:3},
  house: {len:.7, max:.42,kc:1.15,kb:.38,kx:5,  kt:.021,ks:2.8},
  breaks:{len:.8, max:.3, kc:1.35,kb:.42,kx:5.5,kt:.016,ks:3},
- boom:  {len:null,max:1.6,kc:1.05,kb:.3,kx:null,kt:null,ks:null},
+ boom:  {len:null,max:.5,kc:1.05,kb:.3,kx:null,kt:null,ks:null},   /* v151: 808-style kicks hold .5 s (was 1.6 s) - the long boom sat on top of the 808 bass and made trap / drill / phonk / south / G-funk / electro bottom-heavy */
  hip:   {len:null,max:.7,kc:1.1,kb:.38,kx:null,kt:null,ks:null},
  soft:  {len:null,max:.9,kc:.8, kb:.15,kx:null,kt:null,ks:null}};
 /* duck depth (dB) of each channel under the kick, and how long the duck holds (beats) */
@@ -15715,7 +15849,8 @@ function d9(v,mk){const g=genre();if(!g)return 1;if(v===0)return KICKTRIM;if((v=
 const BAL=(()=>{const TGT={psy:6,rave:6,techno:6,house:5.5,breaks:5.5,boom:6,hip:6,soft:4};const LK='glctc1.mixbal.';
  const MUS={go:1,s101:1,ix:1,ix1:1,ix2:1,ix3:1,ix4:1,ix5:1,ix6:1,vox:1,ws:1,lee:.6,sub:.4,bl:-.5,mine:-.5};
  let off=0,g0=null,M=null,kicks=[],blocks=[],lastEnd=0,timer=null,lastSteer=0,last=null;
- function load(g){try{const v=parseFloat(localStorage.getItem(LK+g));return isFinite(v)?v:2}catch(e){return 2}}
+ function load(g){return 2}   /* v151: held at its factory 2 dB - the per-genre balance is now measured and fixed on the group buses, and a
+    learned value that drifted (up to +12 dB music / +7 dB bass) is what made some songs bass- or kick-heavy */
  function meter(){const c=window.GLCTC_WS&&GLCTC_WS.ac();if(!c||!c._fin)return null;if(M&&M.c===c)return M;
   const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=38;const hs=c.createBiquadFilter();hs.type='highshelf';hs.frequency.value=1700;hs.gain.value=4;
   const an=c.createAnalyser();an.fftSize=4096;c._fin.connect(hp);hp.connect(hs);hs.connect(an);return M={c,an,buf:new Float32Array(4096)}}
@@ -15723,7 +15858,7 @@ const BAL=(()=>{const TGT={psy:6,rave:6,techno:6,house:5.5,breaks:5.5,boom:6,hip
   const N=m.buf.length,start=end-N/sr,from=Math.max(start,lastEnd),hop=Math.round(sr*.01);
   for(let i=Math.max(0,Math.round((from-start)*sr));i+hop<=N;i+=hop){let e=0;for(let j=i;j<i+hop;j++)e+=m.buf[j]*m.buf[j];blocks.push([start+(i+hop)/sr,e/hop])}
   lastEnd=end;const cut=end-6;while(blocks.length&&blocks[0][0]<cut)blocks.shift();while(kicks.length&&kicks[0]<cut)kicks.shift()}
- function steer(){const g=genre();if(!g||blocks.length<200)return;const now=blocks[blocks.length-1][0];
+ function steer(){return;const g=genre();if(!g||blocks.length<200)return;const now=blocks[blocks.length-1][0];
   const ks=kicks.filter(t=>t<now-.2&&t>now-5.5);if(ks.length<6)return;   /* breakdowns without a kick teach nothing */
   const db=x=>10*Math.log10(x+1e-12),T=blocks.map(b=>b[0]),E=blocks.map(b=>b[1]),L=E.map((_,i)=>{let s=0,n=0;for(let j=Math.max(0,i-4);j<=i;j++){s+=E[j];n++}return db(s/n)});
   const near=t=>ks.some(k=>t>=k-.03&&t<=k+.17),hits=ks.map(k=>{let mx=-200;for(let i=0;i<T.length;i++)if(T[i]>=k&&T[i]<=k+.15&&L[i]>mx)mx=L[i];return mx}).filter(x=>x>-150).sort((a,b)=>a-b),

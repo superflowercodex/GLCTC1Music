@@ -9393,6 +9393,27 @@ async function glctc1SetPlaylistArtwork(artwork) {
 }
 
 // =====================================================
+// v59: PLAYBACK LOG — what the phone did when a song ended.
+// Kept on the phone (last 80 lines). To view it: tap the song title
+// in the Playlist Master 3 times quickly, or open the page with ?debug=1
+// =====================================================
+function glctc1Log(msg) {
+  try {
+    const d = new Date();
+    const line =
+      String(d.getHours()).padStart(2, "0") + ":" +
+      String(d.getMinutes()).padStart(2, "0") + ":" +
+      String(d.getSeconds()).padStart(2, "0") + "  " + msg;
+    const log = JSON.parse(localStorage.getItem("glctc1PlayLog") || "[]");
+    log.push(line);
+    while (log.length > 80) log.shift();
+    localStorage.setItem("glctc1PlayLog", JSON.stringify(log));
+    const box = document.getElementById("glctc1LogText");
+    if (box) box.textContent = log.slice().reverse().join("\n");
+  } catch (e) {}
+}
+
+// =====================================================
 // v58: SIGNED AUDIO LINK CACHE
 // The next song's link is fetched while the current one plays, so the
 // switch needs no network wait (that wait killed lock-screen playback).
@@ -14438,7 +14459,15 @@ function glctc1GetNextPlan() {
 async function glctc1AdvanceToNext() {
   const plan = glctc1GetNextPlan();
   glctc1NextPlan = null;
-  if (!plan || !plan.track) return;
+  if (!plan || !plan.track) { glctc1Log("next: nothing to play"); return; }
+
+  try {
+    const path = glctc1AudioPathOf(plan.track);
+    glctc1Log(
+      "next: " + (plan.track.title || plan.track["Track Title"] || "?") +
+      (glctc1NeedsSigning(path) ? (glctc1CachedAudioUrl(path) ? " (link ready)" : " (link NOT ready - waiting on network)") : "")
+    );
+  } catch (e) {}
 
   if (plan.kind === "playlist") {
     await glctc1PlayPlaylistIndex(plan.index);
@@ -14459,6 +14488,11 @@ if (glctc1PlaylistAudio) {
     glctc1GetNextPlan();
   });
 
+  // v59: a new song is loading -> it may switch early again
+  glctc1PlaylistAudio.addEventListener("loadstart", () => {
+    glctc1PlaylistAudio._glctc1EarlyDone = false;
+  });
+
   let glctc1PlanCheckAt = 0;
   let glctc1LastTime = 0;
 
@@ -14475,6 +14509,26 @@ if (glctc1PlaylistAudio) {
       } catch (e) {}
     }
     glctc1LastTime = t;
+
+    // v59: with the screen locked, move to the next song a moment BEFORE
+    // this one ends. The phone then never sees the music stop, so it has
+    // no chance to freeze the page or drop the lock-screen player.
+    // (With the screen on, songs play right to the end as before.)
+    const rate = a.playbackRate || 1;
+    if (
+      document.hidden &&
+      !a.loop &&
+      !a.paused &&
+      glctc1PlaylistAutoPlayOn &&
+      !a._glctc1EarlyDone &&
+      isFinite(d) && d > 5 &&
+      (d - t) / rate < 0.6
+    ) {
+      a._glctc1EarlyDone = true;
+      glctc1Log("early switch (screen off), " + ((d - t) / rate).toFixed(2) + "s left");
+      glctc1AdvanceToNext();
+      return;
+    }
 
     const now = Date.now();
     if (now - glctc1PlanCheckAt > 4000) {
@@ -14501,6 +14555,14 @@ if (glctc1PlaylistAudio) {
 
       // AUTO PLAY IS ALWAYS ON
       if (!glctc1PlaylistAutoPlayOn) return;
+
+      // v59: already moved on just before the end (screen off)
+      if (glctc1PlaylistAudio._glctc1EarlyDone) {
+        glctc1Log("ended — already switched early");
+        return;
+      }
+
+      glctc1Log("ended" + (document.hidden ? " (screen off)" : ""));
 
       // NEXT (shuffle or in order) — starts straight away
       await glctc1AdvanceToNext();
@@ -20108,6 +20170,76 @@ html, body { overscroll-behavior-x: none; }
   <span class="gf-c">© 2026 GLCTC1 MUSIC</span>
 </footer>
 <!-- ===== END GLCTC1 UNIFIED FOOTER ===== -->
+<!-- ===== GLCTC1 v59 PLAYBACK LOG VIEWER — tap the Playlist Master song title 3 times (or add ?debug=1) ===== -->
+<script id="glctc1-v59-log">
+(function () {
+  "use strict";
+  var a = document.getElementById("glctc1PlaylistAudio");
+  if (!a || typeof window.glctc1Log !== "function") return;
+  var L = window.glctc1Log;
+  function name() { var t = window.glctc1MasterTrack; return t ? (t.title || t["Track Title"] || "?") : "?"; }
+
+  /* what kind of phone / browser, once per visit */
+  var standalone = (window.navigator.standalone === true) || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  L("page opened · " + (standalone ? "home-screen app" : "browser tab") + " · " + navigator.userAgent.replace(/\s+/g, " ").slice(0, 160));
+
+  /* did the phone allow each play? */
+  var realPlay = HTMLMediaElement.prototype.play;
+  a.play = function () {
+    var hidden = document.hidden;
+    var p = realPlay.apply(this, arguments);
+    if (p && p.then) {
+      p.then(function () { if (hidden || document.hidden) L("play OK (screen off) · " + name()); })
+       .catch(function (e) { L("play BLOCKED · " + (e && e.name) + " · " + (e && e.message ? e.message.slice(0, 90) : "") + (hidden ? " (screen off)" : "")); });
+    }
+    return p;
+  };
+
+  a.addEventListener("pause", function () { if (!a.ended) L("paused" + (document.hidden ? " (screen off)" : "") + " · " + name()); });
+  a.addEventListener("playing", function () { if (document.hidden) L("playing (screen off) · " + name()); });
+  a.addEventListener("waiting", function () { if (document.hidden) L("buffering (screen off)"); });
+  a.addEventListener("stalled", function () { if (document.hidden) L("download stalled (screen off)"); });
+  a.addEventListener("error", function () { var e = a.error; L("audio ERROR " + (e ? e.code + " " + (e.message || "") : "")); });
+  document.addEventListener("visibilitychange", function () { L(document.hidden ? "screen off / app in background" : "screen on / back in app"); });
+  window.addEventListener("pagehide", function () { L("page hidden by phone"); });
+  window.addEventListener("pageshow", function (e) { if (e.persisted) L("page restored from sleep"); });
+  document.addEventListener("freeze", function () { L("page FROZEN by phone"); });
+  document.addEventListener("resume", function () { L("page resumed after freeze"); });
+
+  /* ---------- viewer ---------- */
+  function open() {
+    var old = document.getElementById("glctc1LogBox"); if (old) { old.remove(); return; }
+    var box = document.createElement("div");
+    box.id = "glctc1LogBox";
+    box.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;max-height:60vh;z-index:2147483000;background:#05020d;color:#d7ffe9;border:2px solid #22c55e;border-radius:12px;box-shadow:0 0 24px rgba(34,197,94,.5);font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column";
+    var bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #1d4d33;font:800 12px system-ui,sans-serif;letter-spacing:.08em";
+    bar.innerHTML = '<span style="flex:1">PLAYBACK LOG (newest first)</span>';
+    function btn(txt, fn) { var b = document.createElement("button"); b.type = "button"; b.textContent = txt; b.style.cssText = "background:#0f2a1c;color:#d7ffe9;border:1px solid #22c55e;border-radius:8px;padding:6px 10px;font:700 12px system-ui,sans-serif"; b.onclick = fn; bar.append(b); return b; }
+    var copyB = btn("COPY", function () {
+      var txt = document.getElementById("glctc1LogText").textContent;
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { copyB.textContent = "COPIED ✓"; }).catch(function () { var r = document.createRange(); r.selectNodeContents(document.getElementById("glctc1LogText")); var s = getSelection(); s.removeAllRanges(); s.addRange(r); copyB.textContent = "SELECTED"; });
+    });
+    btn("CLEAR", function () { try { localStorage.removeItem("glctc1PlayLog"); } catch (e) {} document.getElementById("glctc1LogText").textContent = ""; });
+    btn("✕", function () { box.remove(); });
+    var pre = document.createElement("pre");
+    pre.id = "glctc1LogText";
+    pre.style.cssText = "margin:0;padding:8px 10px;overflow:auto;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text";
+    try { pre.textContent = JSON.parse(localStorage.getItem("glctc1PlayLog") || "[]").reverse().join("\n"); } catch (e) {}
+    box.append(bar, pre);
+    document.body.append(box);
+  }
+  window.glctc1ShowLog = open;
+
+  var title = document.getElementById("glctc1PlaylistTitle"), taps = [];
+  if (title) title.addEventListener("click", function () {
+    var n = Date.now(); taps = taps.filter(function (x) { return n - x < 900; }); taps.push(n);
+    if (taps.length >= 3) { taps = []; open(); }
+  });
+  if (/[?&]debug=1\b/.test(location.search)) setTimeout(open, 800);
+})();
+</script>
+<!-- ===== END GLCTC1 v59 PLAYBACK LOG VIEWER ===== -->
 </body>
 </html>
 

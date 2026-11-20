@@ -9397,13 +9397,22 @@ async function glctc1SetPlaylistArtwork(artwork) {
 // Kept on the phone (last 80 lines). To view it: tap the song title
 // in the Playlist Master 3 times quickly, or open the page with ?debug=1
 // =====================================================
+function glctc1LogTag() {
+  if (!window.glctc1LogTagText) {
+    var app = (window.navigator.standalone === true) ||
+      (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    window.glctc1LogTagText = "[" + (app ? "APP" : "TAB") + "-" + Math.random().toString(36).slice(2, 5) + "] ";
+  }
+  return window.glctc1LogTagText;
+}
+
 function glctc1Log(msg) {
   try {
     const d = new Date();
     const line =
       String(d.getHours()).padStart(2, "0") + ":" +
       String(d.getMinutes()).padStart(2, "0") + ":" +
-      String(d.getSeconds()).padStart(2, "0") + "  " + msg;
+      String(d.getSeconds()).padStart(2, "0") + "  " + glctc1LogTag() + msg;
     const log = JSON.parse(localStorage.getItem("glctc1PlayLog") || "[]");
     log.push(line);
     while (log.length > 80) log.shift();
@@ -14465,6 +14474,10 @@ async function glctc1AdvanceToNext() {
     const path = glctc1AudioPathOf(plan.track);
     glctc1Log(
       "next: " + (plan.track.title || plan.track["Track Title"] || "?") +
+      (plan.kind === "playlist"
+        ? " (track " + (glctc1PlaylistTrackIndex + 1) + " -> " + (plan.index + 1) + " of " + plan.list.tracks.length +
+          (glctc1PlaylistShuffleOn ? ", shuffle" : "") + ")"
+        : " (library)") +
       (glctc1NeedsSigning(path) ? (glctc1CachedAudioUrl(path) ? " (link ready)" : " (link NOT ready - waiting on network)") : "")
     );
   } catch (e) {}
@@ -20181,7 +20194,7 @@ html, body { overscroll-behavior-x: none; }
 
   /* what kind of phone / browser, once per visit */
   var standalone = (window.navigator.standalone === true) || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-  L("page opened · player v62 · " + (standalone ? "home-screen app" : "browser tab") + " · " + navigator.userAgent.replace(/\s+/g, " ").slice(0, 160));
+  L("page opened · player v63 · " + (navigator.userAgentData && navigator.userAgentData.platform ? navigator.userAgentData.platform + (navigator.userAgentData.mobile ? " mobile" : "") + " · " : "") + (standalone ? "home-screen app" : "browser tab") + " · " + navigator.userAgent.replace(/\s+/g, " ").slice(0, 160));
 
   /* did the phone allow each play? */
   var realPlay = HTMLMediaElement.prototype.play;
@@ -20256,7 +20269,11 @@ html, body { overscroll-behavior-x: none; }
 <script id="glctc1-v61-bridge">
 (function () {
   "use strict";
-  if (!/Android/i.test(navigator.userAgent)) return;          /* iPhone is fine without it */
+  /* v63: run everywhere except iPhone / iPad. (Chrome's "Desktop site" mode hides the word
+     "Android", so checking for Android missed your phone.) */
+  var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+              (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  if (isIOS) return;
   var a = document.getElementById("glctc1PlaylistAudio");
   if (!a || typeof window.glctc1AdvanceToNext !== "function") return;
   var L = typeof window.glctc1Log === "function" ? window.glctc1Log : function () {};

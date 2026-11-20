@@ -20240,6 +20240,83 @@ html, body { overscroll-behavior-x: none; }
 })();
 </script>
 <!-- ===== END GLCTC1 v59 PLAYBACK LOG VIEWER ===== -->
+<!-- ===== GLCTC1 v60 ANDROID LOCK-SCREEN BRIDGE =====
+     On Android (Chrome), the lock-screen controls vanish if, for even a moment, nothing is playing.
+     While one song hands over to the next, a silent sound plays underneath, so there is never a
+     moment of "nothing playing" and the controls stay. It stops as soon as the next song is playing. -->
+<script id="glctc1-v60-bridge">
+(function () {
+  "use strict";
+  if (!/Android/i.test(navigator.userAgent)) return;          /* iPhone is fine without it */
+  var a = document.getElementById("glctc1PlaylistAudio");
+  if (!a || typeof window.glctc1AdvanceToNext !== "function") return;
+  var L = typeof window.glctc1Log === "function" ? window.glctc1Log : function () {};
+
+  /* 30 s of near-silence (tiny inaudible dither, so the phone treats it as real sound) */
+  function silentWav(sec) {
+    var rate = 8000, n = rate * sec, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf), i;
+    function s(o, t) { for (var k = 0; k < t.length; k++) v.setUint8(o + k, t.charCodeAt(k)); }
+    s(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); s(8, "WAVE"); s(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    s(36, "data"); v.setUint32(40, n * 2, true);
+    for (i = 0; i < n; i++) v.setInt16(44 + i * 2, (i & 1) ? 1 : -1, true);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+
+  var bridge = document.createElement("audio");
+  bridge.id = "glctc1Bridge";
+  bridge.loop = true;
+  bridge.preload = "auto";
+  bridge.setAttribute("playsinline", "");
+  bridge.src = silentWav(30);
+  bridge.style.display = "none";
+  document.body.appendChild(bridge);
+
+  var offTimer = null, safety = null;
+
+  function on() {
+    clearTimeout(offTimer);
+    clearTimeout(safety);
+    safety = setTimeout(off, 20000);                          /* never left running */
+    if (!bridge.paused) return;
+    try { bridge.currentTime = 0; } catch (e) {}
+    var p = bridge.play();
+    if (p && p.then) p.then(function () { L("bridge on (keeps lock-screen controls)"); })
+                      .catch(function (e) { L("bridge blocked · " + (e && e.name)); });
+  }
+  function off() {
+    clearTimeout(offTimer); clearTimeout(safety);
+    if (!bridge.paused) { bridge.pause(); L("bridge off"); }
+  }
+
+  /* every song change (end of song, early switch, Next / Previous, lock-screen buttons) */
+  var advance = window.glctc1AdvanceToNext;
+  window.glctc1AdvanceToNext = function () {
+    if (!a.paused || document.hidden) on();
+    return advance.apply(this, arguments);
+  };
+  ["glctc1PlaylistNext", "glctc1PlaylistPrev"].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (b) b.addEventListener("click", function () { if (!a.paused) on(); }, true);
+  });
+
+  /* the new song is really playing -> hand the controls back to it */
+  a.addEventListener("playing", function () {
+    if (bridge.paused) return;
+    clearTimeout(offTimer);
+    offTimer = setTimeout(off, 1500);
+  });
+  /* the listener pressed pause (not a song change) -> stop at once */
+  a.addEventListener("pause", function () {
+    setTimeout(function () {
+      if (a.paused && !a.ended && a.readyState >= 2 && !a.seeking && a.networkState !== 2) off();
+    }, 400);
+  });
+  a.addEventListener("error", off);
+})();
+</script>
+<!-- ===== END GLCTC1 v60 ANDROID LOCK-SCREEN BRIDGE ===== -->
 </body>
 </html>
 

@@ -16259,6 +16259,148 @@ go.onclick=()=>{if(REC)finish(false);else begin()};
 window.GLCTC_BOUNCE={start:begin,stop:()=>finish(false),last:()=>LAST,select:keys=>{SEL.clear();(keys||[]).forEach(k=>SEL.add(k));saveP();paint()}};
 })();
 </script>
+<script id="glctc1-log-fns">
+// =====================================================
+// v59: PLAYBACK LOG — what the phone did when a song ended.
+// Kept on the phone (last 80 lines). To view it: tap the song title
+// in the Playlist Master 3 times quickly, or open the page with ?debug=1
+// =====================================================
+function glctc1LogTag() {
+  if (!window.glctc1LogTagText) {
+    var app = (window.navigator.standalone === true) ||
+      (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    window.glctc1LogTagText = "[" + (app ? "APP" : "TAB") + "-" + Math.random().toString(36).slice(2, 5) + "] ";
+  }
+  return window.glctc1LogTagText;
+}
+
+function glctc1Log(msg) {
+  try {
+    const d = new Date();
+    const line =
+      String(d.getHours()).padStart(2, "0") + ":" +
+      String(d.getMinutes()).padStart(2, "0") + ":" +
+      String(d.getSeconds()).padStart(2, "0") + "  " + glctc1LogTag() + msg;
+    const log = JSON.parse(localStorage.getItem("glctc1PlayLog") || "[]");
+    log.push(line);
+    while (log.length > 80) log.shift();
+    localStorage.setItem("glctc1PlayLog", JSON.stringify(log));
+    const box = document.getElementById("glctc1LogText");
+    if (box) box.textContent = log.slice().reverse().join("\n");
+  } catch (e) {}
+}
+
+</script>
+<!-- ===== GLCTC1 DAW LOCK-SCREEN KEEPER v1 =====
+     While the DAW is making sound (timeline, Song Composer or any module), a silent sound plays underneath.
+     That tells the phone this page is playing media, so it keeps it awake with the screen locked
+     (instead of freezing or reloading it) and shows PLAY / PAUSE / STOP on the lock screen.
+     It stops when everything is stopped. -->
+<script id="glctc1-daw-keeper">
+(function () {
+  "use strict";
+  var L = typeof window.glctc1Log === "function" ? function (m) { window.glctc1Log("DAW · " + m); } : function () {};
+  function $(id) { return document.getElementById(id); }
+
+  function hubRunning() {
+    try { var m = window.GLCTC_HUB && GLCTC_HUB.mods; if (m) for (var k in m) { var r = m[k]; if (r && r.running && r.running()) return true; } } catch (e) {}
+    return false;
+  }
+  function timelinePlaying() { try { return !!(window.glctcTimeline && glctcTimeline.playing()); } catch (e) { return false; } }
+  function songPlaying() { try { return !!(window.GLCTC_SONG && (GLCTC_SONG.running() || (GLCTC_SONG.pending && GLCTC_SONG.pending()))); } catch (e) { return false; } }
+  function active() { return timelinePlaying() || songPlaying() || hubRunning(); }
+  function wake() { try { window.__glctcWake && window.__glctcWake(); } catch (e) {} }
+
+  /* ---- silent bridge ---- */
+  function silentWav(sec) {
+    var rate = 8000, n = rate * sec, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf), i;
+    function s(o, t) { for (var k = 0; k < t.length; k++) v.setUint8(o + k, t.charCodeAt(k)); }
+    s(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); s(8, "WAVE"); s(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    s(36, "data"); v.setUint32(40, n * 2, true);
+    for (i = 0; i < n; i++) v.setInt16(44 + i * 2, (i & 1) ? 1 : -1, true);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+  var bridge = document.createElement("audio");
+  bridge.id = "glctc1Bridge"; bridge.loop = true; bridge.preload = "auto";
+  bridge.setAttribute("playsinline", ""); bridge.src = silentWav(30); bridge.style.display = "none";
+  (document.body || document.documentElement).appendChild(bridge);
+
+  var hasMS = ("mediaSession" in navigator) && typeof MediaMetadata !== "undefined";
+  var ms = hasMS ? navigator.mediaSession : null;
+
+  /* cover for the lock screen */
+  var art = "";
+  try {
+    var c = document.createElement("canvas"); c.width = c.height = 512; var g = c.getContext("2d");
+    var bg = g.createLinearGradient(0, 0, 512, 512); bg.addColorStop(0, "#05020d"); bg.addColorStop(1, "#2a0a3a");
+    g.fillStyle = bg; g.fillRect(0, 0, 512, 512);
+    g.strokeStyle = "#38e8ff"; g.lineWidth = 10; g.beginPath(); g.arc(256, 256, 170, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = "#ff9bda"; g.font = "bold 110px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("DAW", 256, 256);
+    art = c.toDataURL("image/png");
+  } catch (e) {}
+
+  var lastMeta = "";
+  function publish() {
+    if (!ms) return;
+    var name = ""; try { name = ($("projectName") && $("projectName").value) || ""; } catch (e) {}
+    var bpm = ""; try { bpm = window.GLCTC_CLOCK && GLCTC_CLOCK.bpm ? Math.round(GLCTC_CLOCK.bpm) + " BPM" : ""; } catch (e) {}
+    var what = timelinePlaying() ? "Timeline" : songPlaying() ? "Song Composer" : hubRunning() ? "Modules" : "Studio";
+    var key = name + "|" + bpm + "|" + what;
+    if (key === lastMeta) return; lastMeta = key;
+    try {
+      ms.metadata = new MediaMetadata({
+        title: name || "GLCTC1 DAW", artist: "GLCTC1 DAW · " + what, album: bpm || "GLCTC1 MUSIC",
+        artwork: art ? [{ src: art, sizes: "512x512" }] : []
+      });
+    } catch (e) {}
+  }
+
+  var wanted = false;
+  function on() {
+    wanted = true;
+    if (!bridge.paused) return;
+    var p = bridge.play();
+    if (p && p.then) p.then(function () { L("bridge on"); }).catch(function (e) { L("bridge blocked · " + (e && e.name)); });
+  }
+  function off() {
+    wanted = false;
+    if (!bridge.paused) { bridge.pause(); L("bridge off"); }
+  }
+  bridge.addEventListener("pause", function () {
+    if (wanted && active()) setTimeout(function () { if (wanted && active() && bridge.paused) on(); }, 300);
+  });
+
+  var was = false;
+  function tick() {
+    var now = active();
+    if (now) { on(); publish(); if (ms) try { ms.playbackState = "playing"; } catch (e) {} wake(); }
+    else if (was || !bridge.paused) { off(); if (ms) try { ms.playbackState = "paused"; } catch (e) {} }
+    if (now !== was) L(now ? "sound started" + (document.hidden ? " (screen off)" : "") : "everything stopped");
+    was = now;
+  }
+  setInterval(tick, 700);
+  ["click", "pointerup", "keyup"].forEach(function (ev) { document.addEventListener(ev, function () { setTimeout(tick, 120); }, true); });
+  document.addEventListener("visibilitychange", function () {
+    L(document.hidden ? "screen off / app in background" : "screen on / back in app");
+    if (active()) wake();
+  });
+
+  /* ---- lock-screen buttons ---- */
+  function act(name, fn) { if (!ms) return; try { ms.setActionHandler(name, fn); } catch (e) {} }
+  function stopEverything() {
+    try { if (timelinePlaying() || songPlaying()) { var b = $("playBtn"); if (b) b.click(); } } catch (e) {}
+    try { if (hubRunning() && window.GLCTC_HUB && GLCTC_HUB.stopAll) GLCTC_HUB.stopAll(); } catch (e) {}
+    setTimeout(tick, 150);
+  }
+  act("play", function () { wake(); if (!active()) { var b = $("playBtn"); if (b) b.click(); } setTimeout(tick, 300); });
+  act("pause", stopEverything);
+  act("stop", function () { stopEverything(); });
+  ["previoustrack", "nexttrack", "seekbackward", "seekforward", "seekto"].forEach(function (n) { act(n, null); });
+})();
+</script>
+<!-- ===== END GLCTC1 DAW LOCK-SCREEN KEEPER v1 ===== -->
 </body>
 </html>
 

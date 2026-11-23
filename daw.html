@@ -1420,6 +1420,8 @@ bleed();document.addEventListener("DOMContentLoaded",bleed);window.addEventListe
 #wsPanel .k37-key.b.on{background:linear-gradient(180deg,#ff6b78,#9c2230);box-shadow:inset 0 -3px 0 #5a0f18,0 0 14px #ff44579a;height:61%}
 #wsPanel .k37-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:7px}
 #wsPanel .k37-row .k37-btn{min-height:40px}
+#wsPanel .cn-livebar .k37-row{grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+#wsPanel .cn-livebar .k37-row .k37-btn{min-height:80px;height:80px;font-size:12px;letter-spacing:.1em;border-radius:8px}
 @media(max-width:0px){#wsPanel .k37-panel{grid-template-columns:1fr}#wsPanel .k37-keys{height:135px}}
 @media(max-width:0px){#wsPanel .k37-chassis{margin:4px 4px 0;padding:0 7px 9px}#wsPanel .k37-body{grid-template-columns:1fr}#wsPanel .k37-wheels{justify-content:center;align-self:stretch}#wsPanel .k37-wheel{height:96px;width:50px}#wsPanel .k37-keys{height:120px}#wsPanel .k37-ring{width:52px;height:52px}#wsPanel .k37-knob{width:42px;height:42px}#wsPanel .k37-knob:before{top:4px;height:13px;transform-origin:50% 17px}}
 
@@ -2567,13 +2569,61 @@ window.plugOffNote=function(off,t,n,at,dur,master){const dest=trackFx(off,t,mast
 // Global MIDI learn: click/tap a control while learn is armed, then move/press a hardware MIDI control.
 let midiAccessRef=null,midiLearnEnabled=false,midiLearnTarget=null,midiTriggering=false,midiDynamicId=0;const midiBindings=(()=>{try{return JSON.parse(localStorage.getItem('glctc1.midiBindings')||'{}')}catch(e){return {}}})();
 function midiLearnUi(){const b=$('midiLearnBtn');if(!b)return;b.textContent=midiLearnEnabled?'🎹 MIDI LEARN ON':'🎹 MIDI LEARN OFF';b.classList.toggle('active',midiLearnEnabled);b.classList.toggle('midi-learning',midiLearnEnabled);status(midiLearnEnabled?(midiLearnTarget?'MIDI LEARN: waiting for hardware input…':'MIDI LEARN: tap a control to assign it'):'Ready · MIDI learn off')}
-function midiTargetEligible(el){if(!el||el.id==='midiLearnBtn'||el.closest('#toast,.modal-backdrop'))return false;if(!el.id)el.id='midiLearnControl'+(++midiDynamicId);if(!el.matches('button,input,select,textarea,[role="slider"]'))return false;if(['file','hidden','submit'].includes((el.type||'').toLowerCase()))return false;return true}
-function armMidiTarget(el){if(!midiLearnEnabled||!midiTargetEligible(el))return false;if(midiLearnTarget)midiLearnTarget.classList.remove('midi-receive');midiLearnTarget=el;midiLearnTarget.classList.add('midi-receive');toast('Waiting for MIDI input for: '+(el.getAttribute('aria-label')||el.title||el.id));status('MIDI LEARN: waiting for '+el.id);return true}
-document.addEventListener('click',e=>{if(!midiLearnEnabled||midiTriggering)return;const el=e.target.closest('button,input,select,textarea,[role="slider"]');if(!el||el.id==='midiLearnBtn')return;if(armMidiTarget(el)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation()}},true);
-function applyMidiBinding(m){const [st,d1,d2]=m.data,cmd=st&240,ch=st&15;for(const [id,b] of Object.entries(midiBindings)){const el=$(id);if(!el)continue;let val=null;if(b.kind==='cc'&&cmd===176&&d1===b.number&&ch===b.channel)val=d2/127;else if(b.kind==='note'&&(cmd===144||cmd===128)&&d1===b.number&&ch===b.channel){if(cmd===144&&d2>0){if(el.matches('button')){midiTriggering=true;try{el.click()}finally{midiTriggering=false}}else if(el.type==='checkbox'){el.checked=!el.checked;el.dispatchEvent(new Event('change',{bubbles:true}))}else if(el.type==='range'||el.type==='number')setMidiValue(el,1)}continue}if(val===null)continue;if(el.type==='range'||el.type==='number')setMidiValue(el,val);else if(el.type==='checkbox'){el.checked=val>=.5;el.dispatchEvent(new Event('change',{bubbles:true}))}else if(el.tagName==='SELECT'){const opts=[...el.options];if(opts.length){el.selectedIndex=Math.min(opts.length-1,Math.round(val*(opts.length-1)));el.dispatchEvent(new Event('change',{bubbles:true}))}}else if(el.matches('button')){if(val>=.5&&!b.down){midiTriggering=true;try{el.click()}finally{midiTriggering=false}}b.down=val>=.5}}}
+/* v201 SHARED PRESS HELPER: some pads only answer a finger press (pointerdown/up), others a click. MIDI and CHAIN both use this so every pad type fires. */
+window.GLCTC_PTR_PADS='.bl-pad,.sb-pad,.sb-w,.sb-b,.lee303-key,.s101-key,.ix-pad,.qmx-pad,.vx-pad,.cn-sqc,.pk,#wsPanel .k37-key,.pad';
+window.glctcPress=function(el,phase){if(!el||!el.isConnected)return;phase=phase||'tap';
+ if(el.matches(window.GLCTC_PTR_PADS)){const r=el.getBoundingClientRect(),ev={bubbles:true,cancelable:true,pointerId:979,pointerType:'mouse',clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0,isPrimary:true};
+  const P=Element.prototype,sp=P.setPointerCapture,rp=P.releasePointerCapture;P.setPointerCapture=function(){};P.releasePointerCapture=function(){};   /* synthetic presses have no real pointer to capture */
+  try{if(phase!=='up')el.dispatchEvent(new PointerEvent('pointerdown',{...ev,buttons:1}));if(phase!=='down')el.dispatchEvent(new PointerEvent('pointerup',{...ev,buttons:0}))}finally{P.setPointerCapture=sp;P.releasePointerCapture=rp}return}
+ if(phase==='up'){if(el.matches('.glctc-perf-pad'))el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:979}));return}   /* releases GATE sample pads */
+ el.click()};
+/* shared value access for every knob / fader / slider type (native ranges and the custom role="slider" knobs) */
+window.glctcCtlSet=function(el,n){n=Math.max(0,Math.min(1,n));
+ if(el.type==='range'||el.type==='number'){setMidiValue(el,n);return true}
+ if(typeof el.chainSet==='function'){const lo=Number(el.chainMin)||0,hi=el.chainMax!==undefined?Number(el.chainMax):1;el.chainSet(lo+n*(hi-lo));try{window.GLCTC_CHAIN_PUSH&&GLCTC_CHAIN_PUSH(el)}catch(e){}return true}
+ if(el.matches('[role="slider"]')){const last=el.__midiLast;el.__midiLast=n;if(last==null)return true;const s=Math.round((n-last)*64);for(let i=0;i<Math.abs(s);i++)el.dispatchEvent(new KeyboardEvent('keydown',{key:s>0?'ArrowUp':'ArrowDown',bubbles:true,cancelable:true}));return true}   /* endless / jog controls: move relative */
+ return false};
+const MIDI_LEARN_SEL='button,input,select,textarea,[role="slider"],.ix-pad,.cn-sqc';
+/* stable addresses so learned controls are found again after a reload, even ones without an id */
+function midiIsGen(id){return /^midi(L_|LearnControl)/.test(id||'')}
+function midiPath(el){const parts=[];let n=el;while(n&&n!==document.body&&n.parentElement){if(n.id&&!midiIsGen(n.id)&&n!==el){parts.unshift('#'+n.id);return parts.join('/')}const p=n.parentElement;parts.unshift(String(Array.prototype.indexOf.call(p.children,n)));n=p}return parts.join('/')}
+function midiFromPath(path){if(!path)return null;const parts=path.split('/');let n=document.body,i=0;if(parts[0]&&parts[0][0]==='#'){n=document.getElementById(parts[0].slice(1));i=1}for(;i<parts.length&&n;i++)n=n.children[+parts[i]];return n||null}
+function midiHash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(36)}
+function midiResolve(id,b){let el=document.getElementById(id);if(el)return el;el=b&&b.path?midiFromPath(b.path):null;if(el&&el.matches&&el.matches(MIDI_LEARN_SEL)){if(!el.id)el.id=id;return el}return null}
+function midiName(el){return el.getAttribute('aria-label')||el.title||(el.textContent||'').trim().slice(0,30)||el.id}
+function midiSave(){try{localStorage.setItem('glctc1.midiBindings',JSON.stringify(midiBindings))}catch(e){}}
+function midiTargetEligible(el){if(!el||el.id==='midiLearnBtn'||el.closest('#toast,.modal-backdrop'))return false;if(!el.matches(MIDI_LEARN_SEL))return false;if(el.tagName==='INPUT'&&['file','hidden','submit'].includes((el.type||'').toLowerCase()))return false;if(!el.id)el.id='midiL_'+midiHash(midiPath(el));return true}
+function armMidiTarget(el){if(!midiLearnEnabled||!midiTargetEligible(el))return false;
+ if(midiLearnTarget===el&&midiBindings[el.id]){delete midiBindings[el.id];midiSave();el.classList.remove('midi-receive','midi-learning');midiLearnTarget=null;toast('MIDI cleared: '+midiName(el));midiLearnUi();return true}   /* tap a waiting control again = clear its MIDI */
+ if(midiLearnTarget)midiLearnTarget.classList.remove('midi-receive');midiLearnTarget=el;midiLearnTarget.classList.add('midi-receive');toast('Waiting for MIDI input for: '+midiName(el)+(midiBindings[el.id]?' · tap it again to clear':''));status('MIDI LEARN: waiting for '+midiName(el));return true}
+/* arm on finger-down too, so pointer-driven pads, keys and knobs can be learned without them playing or moving */
+document.addEventListener('pointerdown',e=>{if(!midiLearnEnabled||midiTriggering||!e.isTrusted)return;const el=e.target.closest&&e.target.closest(MIDI_LEARN_SEL);if(!el||el.id==='midiLearnBtn'||el.closest('#toast,.modal-backdrop,.gpe-back'))return;if(armMidiTarget(el)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();midiLearnSwallow=el}},true);
+let midiLearnSwallow=null;
+document.addEventListener('click',e=>{if(!midiLearnEnabled||midiTriggering)return;const el=e.target.closest(MIDI_LEARN_SEL);if(!el||el.id==='midiLearnBtn'||el.closest('.gpe-back'))return;if(midiLearnSwallow===el){midiLearnSwallow=null;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();return}if(armMidiTarget(el)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation()}},true);
+function applyMidiBinding(m){const [st,d1,d2]=m.data,cmd=st&240,ch=st&15;let hit=false;
+ for(const [id,b] of Object.entries(midiBindings)){
+  const isCC=b.kind==='cc'&&cmd===176&&d1===b.number&&ch===b.channel,isNote=b.kind==='note'&&(cmd===144||cmd===128)&&d1===b.number&&ch===b.channel;
+  if(!isCC&&!isNote)continue;hit=true;const el=midiResolve(id,b);if(!el)continue;
+  midiTriggering=true;
+  try{
+   const isPad=el.matches(window.GLCTC_PTR_PADS)||el.matches('button');
+   if(isNote){const on=cmd===144&&d2>0;
+    if(isPad)glctcPress(el,on?'down':'up');
+    else if(on){if(el.type==='checkbox'){el.checked=!el.checked;el.dispatchEvent(new Event('change',{bubbles:true}))}else glctcCtlSet(el,glctcCtlGet(el)>.5?0:1)}
+    continue}
+   const val=d2/127;
+   if(isPad){const dn=val>=.5;if(dn!==!!b.down){glctcPress(el,dn?'down':'up')}b.down=dn}
+   else if(el.type==='checkbox'){el.checked=val>=.5;el.dispatchEvent(new Event('change',{bubbles:true}))}
+   else if(el.tagName==='SELECT'){const opts=[...el.options];if(opts.length){const ix=Math.min(opts.length-1,Math.round(val*(opts.length-1)));if(el.selectedIndex!==ix){el.selectedIndex=ix;el.dispatchEvent(new Event('change',{bubbles:true}))}}}
+   else glctcCtlSet(el,val);
+  }catch(e){console.warn('MIDI binding failed',id,e)}finally{midiTriggering=false}}
+ return hit}
+window.glctcCtlGet=function(el){try{if(el.type==='range'||el.type==='number'){const lo=Number(el.min||0),hi=Number(el.max||127);return (Number(el.value)-lo)/((hi-lo)||1)}if(typeof el.chainGet==='function'){const lo=Number(el.chainMin)||0,hi=el.chainMax!==undefined?Number(el.chainMax):1;return (Number(el.chainGet())-lo)/((hi-lo)||1)}}catch(e){}return 0};
 function setMidiValue(el,n){const lo=Number(el.min||0),hi=Number(el.max||127),step=Number(el.step||1);let v=lo+Math.max(0,Math.min(1,n))*(hi-lo);if(step>0&&Number.isFinite(step))v=Math.round(v/step)*step;el.value=String(Math.max(lo,Math.min(hi,v)));el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
-function handleMidiLearn(m){if(midiLearnEnabled&&midiLearnTarget){const [st,d1,d2]=m.data,cmd=st&240;if(cmd===176||cmd===144||cmd===128){const kind=cmd===176?'cc':'note';midiBindings[midiLearnTarget.id]={kind,number:d1,channel:st&15};try{localStorage.setItem('glctc1.midiBindings',JSON.stringify(midiBindings))}catch(e){}midiLearnTarget.classList.remove('midi-receive');midiLearnTarget.classList.add('midi-learning');toast('MIDI locked: '+midiLearnTarget.id+' ← '+(kind==='cc'?'CC '+d1:'Note '+d1));midiLearnTarget=null;midiLearnUi();return true}}applyMidiBinding(m);return false}
-$('midiLearnBtn').addEventListener('click',async()=>{midiLearnEnabled=!midiLearnEnabled;if(!midiLearnEnabled){if(midiLearnTarget)midiLearnTarget.classList.remove('midi-receive');midiLearnTarget=null;document.querySelectorAll('.midi-learning').forEach(e=>e.classList.remove('midi-learning'));midiLearnUi();toast('MIDI Learn off. Assignments are saved on this device.');return}midiLearnUi();if(!midiAccessRef)await enableMidi();midiLearnUi()});
+function handleMidiLearn(m){if(midiLearnEnabled&&midiLearnTarget){const [st,d1,d2]=m.data,cmd=st&240;if(cmd===176||cmd===144||cmd===128){const kind=cmd===176?'cc':'note';midiBindings[midiLearnTarget.id]={kind,number:d1,channel:st&15,path:midiPath(midiLearnTarget)};midiSave();midiLearnTarget.classList.remove('midi-receive');midiLearnTarget.classList.add('midi-learning');toast('MIDI locked: '+midiName(midiLearnTarget)+' ← '+(kind==='cc'?'CC '+d1:'Note '+d1));midiLearnTarget=null;midiLearnUi();return true}}return applyMidiBinding(m)}
+$('midiLearnBtn').addEventListener('click',async()=>{midiLearnEnabled=!midiLearnEnabled;if(!midiLearnEnabled){if(midiLearnTarget)midiLearnTarget.classList.remove('midi-receive');midiLearnTarget=null;document.querySelectorAll('.midi-learning').forEach(e=>e.classList.remove('midi-learning'));midiLearnUi();toast('MIDI Learn off. Assignments are saved on this device.');return}Object.entries(midiBindings).forEach(([id,b])=>{const e=midiResolve(id,b);if(e)e.classList.add('midi-learning')});midiLearnUi();if(!midiAccessRef)await enableMidi();midiLearnUi()});
+/* v201: reconnect saved MIDI assignments after a reload (only when the browser already allows MIDI, so no prompt pops up) */
+(async()=>{try{if(!Object.keys(midiBindings).length||!navigator.requestMIDIAccess||!navigator.permissions)return;const p=await navigator.permissions.query({name:'midi'});if(p.state==='granted')setTimeout(()=>{if(!midiAccessRef)enableMidi()},1500)}catch(e){}})();
 // Master transport broadcasts start/stop to modules. Each module can opt out using its PLAY WITH MASTER checkbox.
 function masterModuleEvent(type){const c=ensureAudio(),running=Object.values(GLCTC_HUB.mods).some(m=>m.running?.()),at=type==='play'&&running&&GLCTC_CLOCK.anchored()?GLCTC_HUB.nextLaunchPoint(c).at:c.currentTime+.45;if(type==='play')window.__glctcLastMasterStartAt=at;window.__glctcMasterStartAt=type==='play'?at:null;try{if(window.__glctcModMode){if(type==='play'&&!GLCTC_CLOCK.anchored())GLCTC_CLOCK.anchor(at,playheadBeats);else if(type==='stop'&&!Object.values(GLCTC_HUB.mods).some(m=>m.running&&m.running()))GLCTC_CLOCK.clear()}else GLCTC_HUB.master(type,at,playheadBeats)}catch(err){console.error(err)}window.dispatchEvent(new CustomEvent('glctc-master-'+type,{detail:{beat:playheadBeats,bpm:GLCTC_CLOCK.bpm,audioTime:at,transport:'GLCTC1'}}));window.__glctcMasterStartAt=null}
 window.masterModuleEvent=masterModuleEvent;
@@ -2674,6 +2724,7 @@ const live={},target=()=>{const t=getTrack(selectedTrackId);return t&&t.type==='
 function liveOn(p,v){const tr=target();if(!tr)return;const c=ensureAudio(),w=wamOf(tr);liveOff(p);if(w){wamSend(w,[144,p,Math.round(v*127)],c.currentTime);return}live[p]=pVoice(c,tr,PRE[tr.inst]||BASIC,440*Math.pow(2,(p-69)/12),c.currentTime,v,trackFx(c,tr,masterGain))}
 function liveOff(p){const tr=target(),w=tr&&wamOf(tr);if(w&&audioCtx){wamSend(w,[128,p,0],audioCtx.currentTime);return}if(live[p]){live[p].rel(audioCtx.currentTime);delete live[p]}}
 function onMsg(m){if(handleMidiLearn(m))return;if(window.padMidi&&window.padMidi(m.data))return;if(typeof midiRec!=='undefined'&&midiRec)return;const tr=target(),w=tr&&wamOf(tr);if(w){wamSend(w,[...m.data],audioCtx.currentTime);return}const[st,p,v]=m.data,cmd=st&240;if(cmd===144&&v>0)liveOn(p,v/127);else if(cmd===128||cmd===144)liveOff(p);else if(cmd===176&&p===123)Object.keys(live).forEach(k=>liveOff(+k))}
+window.GLCTC_MIDI_IN=data=>onMsg({data});   /* v201: feed MIDI bytes in from code (virtual controllers, testing) */
 async function enableMidi(){if(!navigator.requestMIDIAccess)return toast('Web MIDI needs Chrome, Edge or Opera (not Safari/iOS).');try{const a=midiAccessRef||await navigator.requestMIDIAccess();midiAccessRef=a;const hook=()=>{const names=[];a.inputs.forEach(i=>{names.push(i.name);if(!i._glctcMidiHook){i.addEventListener('midimessage',onMsg);i._glctcMidiHook=true}});const st=$('plugMidiSt');if(st)st.textContent=names.length?'● '+names.join(', '):'No MIDI devices found – plug one in'};a.onstatechange=hook;hook();$('plugMidi')?.classList.add('active')}catch(e){toast('MIDI access was blocked.')}}
 // WAM
 let host=null;async function wamHost(c){if(host)return host;const u=$('wamSdk').value.trim(),list=u?[u]:['https://cdn.jsdelivr.net/npm/@webaudiomodules/sdk/src/initializeWamHost.js','https://unpkg.com/@webaudiomodules/sdk/src/initializeWamHost.js'];let err;for(const x of list){try{const m=await import(x);host=await (m.default||m.initializeWamHost)(c);return host}catch(e){err=e}}throw err}
@@ -3746,7 +3797,8 @@ function drag(el,k,mode){let y0=0,n0=0,act=false;
  const end=()=>{if(act){act=false;save()}};el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
  el.addEventListener('wheel',e=>{e.preventDefault();const[,,mn,mx,st]=def(k),stepN=Math.max((st/(mx-mn)),.01);setP(k,fromN(k,toN(k,S.p[k])+(e.deltaY<0?1:-1)*Math.max(stepN,.02)))},{passive:false});
  el.addEventListener('keydown',e=>{const d={ArrowUp:1,ArrowRight:1,ArrowDown:-1,ArrowLeft:-1,PageUp:5,PageDown:-5}[e.key];if(!d)return;e.preventDefault();const[,,mn,mx,st]=def(k);setP(k,fromN(k,toN(k,S.p[k])+d*Math.max(st/(mx-mn),.02)))});
- el.addEventListener('dblclick',()=>{const pr=PRESETS.find(x=>x[0]===S.preset);setP(k,pr?pr[1][k]:P0[k])})}   /* double-click: back to the preset value */
+ el.addEventListener('dblclick',()=>{const pr=PRESETS.find(x=>x[0]===S.preset);setP(k,pr?pr[1][k]:P0[k])});   /* double-click: back to the preset value */
+ let svT=0;el.chainGet=()=>toN(k,S.p[k]);el.chainSet=n=>{setP(k,fromN(k,n),true);clearTimeout(svT);svT=setTimeout(save,400)};el.chainMin=0;el.chainMax=1}   /* v201: CHAIN + MIDI access */
 function buildCtl(){const g=$('subCtl');if(!g)return;g.innerHTML='';
  GROUPS.forEach(([title,mode,keys])=>{const box=document.createElement('div');box.className='sb-grp'+(mode==='f'?' env':'');box.innerHTML=`<div class="sb-gt">${title}</div><div class="${mode==='f'?'sb-frow':'sb-kgrid'}"></div>`;const wrap=box.lastChild;
   keys.forEach(k=>{const[,lab]=def(k),el=document.createElement('div');el.tabIndex=0;el.setAttribute('role','slider');el.setAttribute('aria-label',lab);el.dataset.k=k;el.id='subC_'+k;
@@ -6156,7 +6208,7 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
  mkKnobs.trans=mkKnob('TRANSPOSE',-24,24,1,0,v=>{mkTranspose=v;mkStatus.textContent='TRANSPOSE '+(v>0?'+':'')+v+' ST';mkRefreshLcd()},v=>(v>0?'+':'')+Math.round(v),0);
  mkKnobs.bend=mkKnob('BEND RNG',1,12,1,2,v=>{mkBendRange=v;mkStatus.textContent='PITCH WHEEL RANGE ±'+v+' ST';mkRefreshLcd()},v=>'±'+Math.round(v),2);
  /* ---------- wheels ---------- */
- function mkWheel(label,spring,fn){const mark=el('i',{class:'k37-wmark'}),rid=el('div',{class:'k37-wr'}),whl=el('div',{class:'k37-wheel',role:'slider',tabindex:'0','aria-label':label},rid,mark),box=el('div',{class:'k37-wbox'},whl,el('label',{text:label}));let pos=0,raf=0;function paint(){const f=spring?(pos+1)/2:pos;mark.style.top=((1-f)*100).toFixed(1)+'%';rid.style.backgroundPositionY=(-pos*46).toFixed(1)+'px';whl.setAttribute('aria-valuenow',pos.toFixed(2))}function set(p){pos=clampMK(p,spring?-1:0,1);if(spring&&Math.abs(pos)<.035)pos=0;paint();fn(pos)}function fromY(y){const r=whl.getBoundingClientRect(),f=1-clampMK((y-r.top)/Math.max(1,r.height),0,1);set(spring?f*2-1:f)}function home(){cancelAnimationFrame(raf);const step=()=>{pos*=.78;if(Math.abs(pos)<.01)pos=0;paint();fn(pos);if(pos)raf=requestAnimationFrame(step)};raf=requestAnimationFrame(step)}whl.addEventListener('pointerdown',e=>{e.preventDefault();cancelAnimationFrame(raf);whl.focus();try{whl.setPointerCapture(e.pointerId)}catch(_){}fromY(e.clientY);const mv=ev=>fromY(ev.clientY),up=()=>{whl.removeEventListener('pointermove',mv);whl.removeEventListener('pointerup',up);whl.removeEventListener('pointercancel',up);if(spring)home()};whl.addEventListener('pointermove',mv);whl.addEventListener('pointerup',up);whl.addEventListener('pointercancel',up)});whl.addEventListener('wheel',e=>{e.preventDefault();set(pos-Math.sign(e.deltaY)*.05);if(spring){clearTimeout(whl._t);whl._t=setTimeout(home,350)}},{passive:false});whl.addEventListener('keydown',e=>{if(e.key==='ArrowUp'){e.preventDefault();set(pos+.1)}else if(e.key==='ArrowDown'){e.preventDefault();set(pos-.1)}else if(e.key==='Home'){e.preventDefault();set(0)}});paint();return{el:box,set,get:()=>pos}}
+ function mkWheel(label,spring,fn){const mark=el('i',{class:'k37-wmark'}),rid=el('div',{class:'k37-wr'}),whl=el('div',{class:'k37-wheel',role:'slider',tabindex:'0','aria-label':label},rid,mark),box=el('div',{class:'k37-wbox'},whl,el('label',{text:label}));let pos=0,raf=0;function paint(){const f=spring?(pos+1)/2:pos;mark.style.top=((1-f)*100).toFixed(1)+'%';rid.style.backgroundPositionY=(-pos*46).toFixed(1)+'px';whl.setAttribute('aria-valuenow',pos.toFixed(2))}function set(p){pos=clampMK(p,spring?-1:0,1);if(spring&&Math.abs(pos)<.035)pos=0;paint();fn(pos)}function fromY(y){const r=whl.getBoundingClientRect(),f=1-clampMK((y-r.top)/Math.max(1,r.height),0,1);set(spring?f*2-1:f)}function home(){cancelAnimationFrame(raf);const step=()=>{pos*=.78;if(Math.abs(pos)<.01)pos=0;paint();fn(pos);if(pos)raf=requestAnimationFrame(step)};raf=requestAnimationFrame(step)}whl.addEventListener('pointerdown',e=>{e.preventDefault();cancelAnimationFrame(raf);whl.focus();try{whl.setPointerCapture(e.pointerId)}catch(_){}fromY(e.clientY);const mv=ev=>fromY(ev.clientY),up=()=>{whl.removeEventListener('pointermove',mv);whl.removeEventListener('pointerup',up);whl.removeEventListener('pointercancel',up);if(spring)home()};whl.addEventListener('pointermove',mv);whl.addEventListener('pointerup',up);whl.addEventListener('pointercancel',up)});whl.addEventListener('wheel',e=>{e.preventDefault();set(pos-Math.sign(e.deltaY)*.05);if(spring){clearTimeout(whl._t);whl._t=setTimeout(home,350)}},{passive:false});whl.addEventListener('keydown',e=>{if(e.key==='ArrowUp'){e.preventDefault();set(pos+.1)}else if(e.key==='ArrowDown'){e.preventDefault();set(pos-.1)}else if(e.key==='Home'){e.preventDefault();set(0)}});whl.chainGet=()=>pos;whl.chainSet=v=>set(v);whl.chainMin=spring?-1:0;whl.chainMax=1;paint();return{el:box,set,get:()=>pos}}
  const mkPitchW=mkWheel('PITCH',true,p=>applyPitch(p*mkBendRange)),mkModW=mkWheel('MOD',false,applyMod);
  /* ---------- buttons ---------- */
  const kb=(text,cls,fn,title)=>el('button',{class:'k37-btn '+(cls||''),type:'button',text,title:title||text,onclick:fn});
@@ -7334,6 +7386,7 @@ function glctcBeatGrid(mono, sr, hint){
    cap.addEventListener('pointermove',mv);cap.addEventListener('pointerup',up);cap.addEventListener('pointercancel',up)});
   cap.addEventListener('wheel',e=>{e.preventDefault();set(QE[key]-Math.sign(e.deltaY||-e.deltaX)*Math.max(step,span/60)*(e.shiftKey?.25:1))},{passive:false});
   cap.addEventListener('keydown',e=>{const k=e.key;if(k==='ArrowUp'||k==='ArrowRight'){e.preventDefault();set(QE[key]+step*(e.shiftKey?10:1))}else if(k==='ArrowDown'||k==='ArrowLeft'){e.preventDefault();set(QE[key]-step*(e.shiftKey?10:1))}else if(k==='Delete'||k==='Backspace'){e.preventDefault();set(def)}});
+  cap.chainGet=()=>QE[key];cap.chainSet=v=>set(v);cap.chainMin=min;cap.chainMax=max;   /* v201: CHAIN + MIDI access */
   QEK[key]={paint};paint();return w}
  const qeTog=(key,label,title)=>{const b=el('button',{class:'qe-tog',type:'button',title,onclick:()=>{QE[key]=!QE[key];b.classList.toggle('on',QE[key]);if(SC.src){try{scStopTake();if(SC.selB>SC.selA)scStartAt(SC.selA,SC.selB);else scStartAt(0)}catch(_){}}qePaint();swSay(label+(QE[key]?' ON':' OFF')+(key==='loop'?' · PLAY LOOPS THE SELECTION':' · PLAYS AND SAVES BACKWARDS'))}},el('i'),el('span',{text:label}));QEK[key]={btn:b};return b};
  const qeReset=el('button',{class:'qe-tog qe-reset',type:'button',title:'Reset every quick-edit knob',onclick:()=>{Object.assign(QE,QE0);for(const k in QEK){if(QEK[k].paint)QEK[k].paint();if(QEK[k].btn)QEK[k].btn.classList.remove('on')}qeLive();qePaint();swSay('QUICK EDIT RESET · RAW SAMPLE')}},el('span',{text:'RESET'}));
@@ -7406,7 +7459,7 @@ function glctcBeatGrid(mono, sr, hint){
   el('div',{class:'cn-wavepane'},el('div',{class:'cn-glass'},scCanvas),scInfo,scEditor,swTools,el('p',{class:'ws-hint',text:'☁ MASTER LIBRARY browses the GLCTC1 Play Space library: load a master, its stems, or ★ REMIX (sets the master BPM, loads the stems or splits the master, and lays them on the timeline at bar 1). IMPORT also loads audio from your project, keyboard pads or a file. LO-FI and EDIT tools work on the highlighted part (or the whole take) and can be undone. EXPORT saves 16-bit, 24-bit or 32-bit float WAV at any rate. SPLIT 4 STEMS separates vocals, drums, bass and other right here in the browser. Master audio is remembered automatically while the audio engine is running (last 2 minutes). Drag across the live waveform to freeze and select what just played, or press GRAB AUDIO. Drag the selection edges to adjust, then PLAY, TRIM, CUT or SAVE TO PAD. LIVE returns to the scrolling audio. Zoom changes how much recent audio is displayed and grabbed (6–120 seconds). Saved pads restore in this browser; SAVE WAV downloads a copy.'})),
   el('div',{class:'cn-sq'},el('div',{class:'cn-sqbar'},sqPlayB,sqStopB,sqPatS,sqBarS,sqPageBox,sqFollowB,sqRndB,sqClrB),el('div',{class:'cn-glass cn-sqglass'},sqGrid),el('div',{class:'cn-sinfo',text:'TAP A STEP · TAP AGAIN FOR ACCENT · AGAIN TO CLEAR · DRAG ACROSS TO PAINT · TAP A NAME TO HEAR IT · SAME ENGINE AS THE FULL PAD-64 EDITOR BELOW'})),cnRecordPane);
  const det=(title,node,open)=>{const d=el('details',{class:'cn-drawer'});if(open)d.open=true;d.append(el('summary',{text:title}),node);return d};
- const cnMixer=el('div',{class:'cn-mixer'},el('div',{class:'cn-sechead'},el('b',{text:'MIXER'}),el('span',{text:'ARM A CHANNEL TO PLAY IT FROM THE KEYBOARD · ARM SEVERAL TO LAYER · DRAG FADERS AND PANS LIVE'})),el('div',{class:'cn-mixwrap'},cnStrips,cnMaster),mkActions);
+ const cnMixer=el('div',{class:'cn-mixer'},el('div',{class:'cn-sechead'},el('b',{text:'MIXER'}),el('span',{text:'ARM A CHANNEL TO PLAY IT FROM THE KEYBOARD · ARM SEVERAL TO LAYER · DRAG FADERS AND PANS LIVE'})),el('div',{class:'cn-mixwrap'},cnStrips,cnMaster));
  /* v64 GLCTC1 QU · MASTER DESK — one analogue desk: SEQUENCER TRACKS layer above the MODULES layer, one MASTER,
     REC, master FX, headphones and booth. The old separate track mixer panel is retired (its controls live here). */
  window.GLCTC_CN={fader:cnFader,knob:mkKnob};
@@ -7520,9 +7573,9 @@ function glctcBeatGrid(mono, sr, hint){
  const liveBuildBtn=liveBtn('BUILD','', 'Sweep the master filter upward over eight beats',()=>{clearInterval(liveBuildTimer);const bpm=Math.max(30,GLCTC_CLOCK.bpm||130),dur=8*60000/bpm,from=Math.max(200,Number($('filterCutoff')?.value)||600),start=performance.now();try{const fx=mfx();fx.on=true;fx.flt=true;mfxUi();setMaster()}catch(e){}setExistingControl('filterCutoff',from);liveStatus.textContent='BUILD · FILTER RISING';liveBuildTimer=setInterval(()=>{const f=Math.min(1,(performance.now()-start)/dur),v=from+(18000-from)*f;setExistingControl('filterCutoff',v);if(f>=1){clearInterval(liveBuildTimer);liveStatus.textContent='BUILD COMPLETE · DROP READY'}},30)},'cnLiveBuild');
  const liveStutterBtn=liveBtn('STUTTER','', 'Toggle the 30LEE built-in stutter effect',()=>{const b=$('lee303Stutter');if(!b){toast('30LEE stutter control is unavailable.');return}b.click();liveStutterBtn.classList.toggle('on',b.classList.contains('lee-on')||/ON/i.test(b.textContent));liveStatus.textContent='STUTTER · '+(liveStutterBtn.classList.contains('on')?'ON':'OFF')},'cnLiveStutter');
  const liveActions=el('div',{class:'cn-live-actions'},armAllBtn,disarmAllBtn,liveRecordBtn,livePlayBtn,liveStopBtn,liveDeleteBtn,chainButton,clearChainBtn,liveDropBtn,liveBuildBtn,liveStutterBtn);
- const livePanel=el('div',{class:'cn-livebar'},el('div',{class:'cn-livehead'},el('span',{text:'LIVE PERFORMANCE · MODULE ARM / RECORD / CHAIN'}),el('span',{text:MODS.length+' MODULES'})),liveArms,liveActions,liveStatus);
- const chainPadSelector='.bl-pad,.mine909-pad,.mine909-step,.bl-step,.lee303-key,.lee303-step,.s101-key,.s101-pattern-step,.cn-sqc,#wsPanel .k37-key,.pk,.vx-pad,.pad,[role="button"].pad';
- const chainPointerPadSelector='.bl-pad,.cn-sqc,#wsPanel .k37-key,.pk,.vx-pad,.pad';
+ const livePanel=el('div',{class:'cn-livebar'},el('div',{class:'cn-livehead'},el('span',{text:'LIVE PERFORMANCE · MODULE ARM / RECORD / CHAIN'}),el('span',{text:MODS.length+' MODULES'})),liveArms,liveActions,mkActions,liveStatus);
+ const chainPadSelector='.bl-pad,.mine909-pad,.mine909-step,.bl-step,.lee303-key,.lee303-step,.s101-key,.s101-pattern-step,.cn-sqc,#wsPanel .k37-key,.pk,.vx-pad,.pad,[role="button"].pad,.sb-pad,.sb-step,.sb-w,.sb-b,.ix-pad,.qmx-pad,.glctc-perf-pad,.ws-step';
+ const chainPointerPadSelector=window.GLCTC_PTR_PADS;   /* v201: one shared list of finger-press pads */
  const chainCandidate=t=>t&&t.closest?t.closest('input[type="range"],[role="slider"],.cn-fader,.gk-dial,.g2-whtrack,'+chainPadSelector):null;
  const chainIsPad=t=>!!(t&&t.matches&&t.matches(chainPadSelector));
  const chainGet=t=>{if(!t)return NaN;if(typeof t.chainGet==='function')return Number(t.chainGet());if(t.matches&&t.matches('input[type="range"]'))return Number(t.value);if(t.getAttribute&&t.getAttribute('aria-valuenow')!==null)return Number(t.getAttribute('aria-valuenow'));return NaN};
@@ -7533,6 +7586,7 @@ function glctcBeatGrid(mono, sr, hint){
  document.addEventListener('pointerdown',e=>{if(chainState.mode!=='select')return;const t=chainCandidate(e.target);if(!t)return;e.preventDefault();e.stopImmediatePropagation();chainSelectTarget(t)},true);
  function chainFirePad(t){
   if(!t||!chainIsPad(t))return;
+  if(window.glctcPress){glctcPress(t,'tap');return}
   if(t.matches(chainPointerPadSelector)){
    try{const r=t.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,pid=991; t.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:pid,pointerType:'mouse',clientX:x,clientY:y,button:0,buttons:1}));t.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,pointerId:pid,pointerType:'mouse',clientX:x,clientY:y,button:0,buttons:0}))}catch(err){t.click()}
   }else t.click();
@@ -7540,8 +7594,9 @@ function glctcBeatGrid(mono, sr, hint){
  function chainTriggerLinked(src){if(chainState.mode!=='active'||chainState.syncing||!chainState.targets.includes(src)||!chainIsPad(src))return;chainState.syncing=true;try{chainState.targets.filter(t=>t!==src&&chainIsPad(t)).forEach(chainFirePad)}finally{chainState.syncing=false}}
  /* Pointer-driven pads (e.g. 80LA8 and PAD-64) prevent native click, so link them on pointerdown bubbling. */
  document.addEventListener('pointerdown',e=>{if(chainState.mode!=='active'||chainState.syncing)return;const src=chainCandidate(e.target);if(src&&chainPointerPadSelector&&src.matches(chainPointerPadSelector))chainTriggerLinked(src)},false);
- document.addEventListener('click',e=>{if(chainState.mode!=='active'||chainState.syncing)return;const src=chainCandidate(e.target);if(src&&chainIsPad(src))chainTriggerLinked(src)},true);
+ document.addEventListener('click',e=>{if(chainState.mode!=='active'||chainState.syncing)return;const src=chainCandidate(e.target);if(src&&chainIsPad(src)&&!src.matches(chainPointerPadSelector))chainTriggerLinked(src)},true);   /* finger-press pads already linked on pointerdown */
  function chainPropagate(src){if(chainState.mode!=='active'||chainState.syncing||!chainState.targets.includes(src)||chainIsPad(src))return;const v=chainGet(src),lo=chainMin(src),hi=chainMax(src);if(!Number.isFinite(v)||!(hi>lo))return;const f=Math.max(0,Math.min(1,(v-lo)/(hi-lo)));chainState.syncing=true;try{chainState.targets.filter(t=>t!==src&&!chainIsPad(t)).forEach(t=>{const a=chainMin(t),b=chainMax(t);if(b>a)chainSet(t,a+f*(b-a))})}finally{chainState.syncing=false}}
+ window.GLCTC_CHAIN_PUSH=chainPropagate;   /* v201: MIDI-moved knobs drag their chained partners too */
  document.addEventListener('input',e=>chainPropagate(e.target),true);document.addEventListener('change',e=>chainPropagate(e.target),true);
  /* Bubble-phase pointermove runs after each custom knob/fader has updated its own value. */
  document.addEventListener('pointermove',e=>{const t=chainCandidate(e.target);if(t)chainPropagate(t)},false);
@@ -13608,14 +13663,17 @@ function knob(o){const el=document.createElement('div');el.className='ix-kn';el.
  const end=()=>{if(act){act=false;o.done&&o.done()}};el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
  el.addEventListener('wheel',e=>{e.preventDefault();set(fromN(toN(o.get())+(e.deltaY<0?1:-1)*.03));o.done&&o.done()},{passive:false});
  el.addEventListener('keydown',e=>{const d={ArrowUp:1,ArrowRight:1,ArrowDown:-1,ArrowLeft:-1}[e.key];if(!d)return;e.preventDefault();set(fromN(toN(o.get())+d*.03));o.done&&o.done()});
- el.addEventListener('dblclick',()=>{if(o.def!==undefined){set(typeof o.def==='function'?o.def():o.def);o.done&&o.done()}});el.paint=paint;paint();return el}
+ el.addEventListener('dblclick',()=>{if(o.def!==undefined){set(typeof o.def==='function'?o.def():o.def);o.done&&o.done()}});el.paint=paint;
+ let dnT=0;el.chainGet=()=>cl(toN(o.get()),0,1);el.chainSet=n=>{set(fromN(n));clearTimeout(dnT);dnT=setTimeout(()=>o.done&&o.done(),400)};el.chainMin=0;el.chainMax=1;   /* v201: CHAIN + MIDI access */
+ paint();return el}
 function fader(get,set,done){const ft=document.createElement('div');ft.className='ix-ft';ft.tabIndex=0;ft.setAttribute('role','slider');const cap=document.createElement('div');cap.className='ix-fc';ft.append(cap);
  const MAX=1.25,paint=()=>{const n=cl(get()/MAX,0,1);cap.style.top=`calc(${((1-n)*100).toFixed(2)}% - ${((1-n)*20).toFixed(2)}px)`};
  let act=false;const at=e=>{const r=ft.getBoundingClientRect();return cl(1-(e.clientY-r.top-10)/(r.height-20),0,1)*MAX};
  ft.addEventListener('pointerdown',e=>{e.preventDefault();act=true;ft.setPointerCapture&&ft.setPointerCapture(e.pointerId);set(+at(e).toFixed(3));paint()});
  ft.addEventListener('pointermove',e=>{if(!act)return;set(+at(e).toFixed(3));paint()});const end=()=>{if(act){act=false;done&&done()}};ft.addEventListener('pointerup',end);ft.addEventListener('pointercancel',end);
  ft.addEventListener('dblclick',()=>{set(.8);paint();done&&done()});ft.addEventListener('wheel',e=>{e.preventDefault();set(cl(get()+(e.deltaY<0?.03:-.03),0,MAX));paint();done&&done()},{passive:false});
- ft.paint=paint;paint();return ft}
+ ft.paint=paint;let dnT=0;ft.chainGet=()=>get();ft.chainSet=v=>{set(+cl(v,0,MAX).toFixed(3));paint();clearTimeout(dnT);dnT=setTimeout(()=>done&&done(),400)};ft.chainMin=0;ft.chainMax=MAX;   /* v201 */
+ paint();return ft}
 const dbTxt=v=>v<=.001?'-∞':((20*Math.log10(v*v*1.15))>0?'+':'')+(20*Math.log10(v*v*1.15)).toFixed(1);
 const pct=v=>Math.round(v*100)+'%',sec2=v=>v<1?Math.round(v*1000)+' ms':(+v).toFixed(2)+' s',hzf=v=>v>=1000?(v/1000).toFixed(1)+'k':Math.round(v)+'';
 const E=(t,cls,txt)=>{const e=document.createElement(t);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e};
@@ -14059,24 +14117,24 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
  const $=id=>document.getElementById(id),q=s=>document.querySelector(s);
  const PANELS={
   console:()=>$('wsPanel'),drum80:()=>$('beatLabPanel'),divine:()=>$('mine909Panel'),lee:()=>$('lee303Panel'),s101:()=>$('s101Panel'),
-  go:()=>$('galacticOnePanel'),vox:()=>$('voxPanel'),pad:()=>$('pad64Panel'),looper:()=>$('looperPanel'),mixer:()=>$('qmxDesk')||q('.panel.mixer'),
+  go:()=>$('galacticOnePanel'),vox:()=>$('voxPanel'),pad:()=>$('pad64Panel'),sub:()=>$('sub01Panel'),looper:()=>$('looperPanel'),mixer:()=>$('qmxDesk')||q('.panel.mixer'),
   stage:()=>{const v=$('videoPreview');return v&&v.closest('.panel')},editor:()=>{const e=$('editorTitle');return e&&e.closest('.panel')},
   timeline:()=>q('.panel.timeline-panel'),browser:()=>q('.layout .panel.browser'),actions:()=>$('glctc1ActionSequencer'),composer:()=>$('glctc1SongComposer'),design:()=>$('ixPanel')
  };
  const ALL=Object.keys(PANELS);
  const MODES=[
   {k:'all',t:'FULL STUDIO',s:'Every module + controller',i:'☰',c:'#19baff',show:ALL,go:null,mods:'all'},
-  {k:'seq',t:'SEQUENCE',s:'Arrange audio & video',i:'▤',c:'#ffd36a',show:['timeline','browser','editor','stage','mixer'],go:'timeline',mods:[],dock:true},
+  {k:'seq',t:'SEQUENCE',s:'Arrange audio & video',i:'▤',c:'#ffd36a',show:['timeline','browser','editor','stage','mixer'],go:'timeline',mods:[],keys:['ws'],dock:true},
   {k:'drums',t:'DRUM CREATE',s:'Every drum machine',i:'◉',c:'#ff5bb0',show:['drum80','divine','pad','console','looper','mixer'],go:'drum80',mods:['bl','mine','ws','lp'],keys:['bl','mine','ws'],dock:true,pad:true},
-  {k:'synths',t:'SYNTHS',s:'30LEE · 0010110 · Galactic One',i:'∿',c:'#bd54ff',show:['lee','s101','go','mixer'],go:'lee',mods:['lee','s101','go'],keys:['lee','s101','go'],dock:true},
-  {k:'voice',t:'VOICE EDIT',s:'Sing, tune & shape vocals',i:'♪',c:'#ff7ad9',show:['vox','console','looper','mixer'],go:'vox',mods:['vox'],keys:['vox'],dock:true},
+  {k:'synths',t:'SYNTHS',s:'SUB-01 · 30LEE · 0010110 · Galactic One',i:'∿',c:'#bd54ff',show:['sub','lee','s101','go','mixer'],go:'sub',mods:['sub','lee','s101','go'],keys:['sub','lee','s101','go'],dock:true},
+  {k:'voice',t:'VOICE EDIT',s:'Sing, tune & shape vocals',i:'♪',c:'#ff7ad9',show:['vox','console','looper','mixer'],go:'vox',mods:['vox','lp'],keys:['vox'],dock:true},
   {k:'mix',t:'MODULE MIX',s:'Every module on the faders',i:'⫶',c:'#4af59b',show:['pad','console','mixer'],go:'console',mods:'all'},
   {k:'live',t:'LIVE',s:'Perform everything live',i:'♛',c:'#b6ff3c',show:['pad','console','looper','actions','mixer'],go:'console',mods:'all'},
   {k:'remix',t:'REMIX',s:'Master Library & stems',i:'★',c:'#ff8a2a',show:['console','timeline','mixer'],go:'console',tab:'WAVE',lib:true,mods:'all'},
-  {k:'sample',t:'SAMPLE LAB',s:'Chop, crush & split stems',i:'✂',c:'#40eaff',show:['console','looper'],go:'console',tab:'WAVE',mods:[]},
+  {k:'sample',t:'SAMPLE LAB',s:'Chop, crush & split stems',i:'✂',c:'#40eaff',show:['console','looper'],go:'console',tab:'WAVE',mods:['lp'],keys:['ws']},
   {k:'compose',t:'SONG COMPOSER',s:'One song · every module',i:'✦',c:'#f2ca70',show:['composer','design','console','mixer'],go:'composer',mods:'all',dock:true},
   {k:'design',t:'INSTRUMENT DESIGN',s:'Layer, stack & mix instruments',i:'♫',c:'#ffb36a',show:['design','console','mixer'],go:'design',mods:['ix'],keys:['ix'],dock:true},
-  {k:'video',t:'VIDEO',s:'Visual stage & clips',i:'▶',c:'#ff8a2a',show:['stage','timeline','editor','browser'],go:'stage',mods:[],dock:true},
+  {k:'video',t:'VIDEO',s:'Visual stage & clips',i:'▶',c:'#ff8a2a',show:['stage','timeline','editor','browser'],go:'stage',mods:[],keys:['ws'],dock:true},
   {k:'pocket',t:'POCKET',s:'Simple, fun phone studio',i:'📱',c:'#4af59b',show:[],go:null,mods:'all',pocket:true},
   {k:'record',t:'RECORD',s:'Capture anything you play',i:'●',c:'#ff4568',show:['console','timeline','mixer'],go:'console',tab:'RECORD',mods:'all'},
   {k:'install',t:'INSTALL APP',s:'Download & install web app',i:'',img:"glctc1-ankh-mark.png",c:'#8c7cff',show:[],go:null,mods:'all',action:'install'},
@@ -14148,7 +14206,7 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
  function setVisible(el,on,room){if(!el)return;const tg=el.querySelector(':scope>.mod-toggle');if(on){el.classList.remove('gm-hide');if(tg&&el.classList.contains('mod-collapsed'))tg.click()}else if(room)el.classList.add('gm-hide');else if(tg&&!el.classList.contains('mod-collapsed'))tg.click();else if(!tg)el.classList.add('gm-hide')}
  function consoleTab(name){const t=[...document.querySelectorAll('#wsPanel .cn-tab')].find(b=>b.textContent.toUpperCase().includes(name));if(t&&!t.classList.contains('on'))t.click()}
  const MODNAME={lp:'LOOPER',bl:'80LA8',mine:'DIVINE09',sub:'SUB-01',lee:'30LEE',s101:'0010110',go:'GALACTIC ONE',vox:'VOX',ix:'INSTR DESIGNER'};
- const PANEL_MOD={drum80:'bl',divine:'mine',lee:'lee',s101:'s101',go:'go',vox:'vox',looper:'lp',design:'ix'};
+ const PANEL_MOD={drum80:'bl',divine:'mine',sub:'sub',lee:'lee',s101:'s101',go:'go',vox:'vox',looper:'lp',design:'ix'};
  let applying=false,applyingUntil=0;
  const H=()=>window.GLCTC_HUB;
  const playingNow=()=>{try{return !!(window.glctcTimeline&&glctcTimeline.playing()&&!window.__glctcModMode)||Object.values(H().mods).some(m=>m.running&&m.running())}catch(e){return false}};

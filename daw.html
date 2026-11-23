@@ -4414,7 +4414,7 @@ const PERF=[
  ['CHOIR + CHROME (DUAL)',2,'CATHEDRAL CHOIR','CHROME STAB'],
  ['PIXEL LEAD / VELVET BASS (SPLIT)',1,'PIXEL LEAD','VELVET BASS']
 ];
-const findPre=n=>PRE.find(p=>p[0]===n);
+const findPre=n=>PRE.find(p=>p[0]===n);window.GLCTC_GO_LIB={find:findPre,defPatch,defFx};
 function loadPresetInto(pi,name,withFx){const p=findPre(name);if(!p)return;ST.patches[pi]=Object.assign(defPatch(),p[1]);ST.names[pi]=name;if(withFx&&p[2])ST.fx=Object.assign(defFx(),p[2])}
 function userPatches(){try{return JSON.parse(localStorage.getItem(LSU)||'{}')}catch(e){return{}}}
 
@@ -8442,13 +8442,9 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
  function clarify(pack,genre,hand,r){
   if(!window.GLCTC_CLEAN_ON())return;r=r||Math.random;const jit=a=>(r()*2-1)*a;
   const roll=/^(psytrance)$/.test(genre),perc=/^(tribalhouse|afrohouse|amapiano|reggae|ska|meditation)$/.test(genre);
-  /* GALACTIC ONE: main lead, alternate and drop-2 lead phrase in up to six notes a bar, held longer */
-  try{if(pack.go&&Array.isArray(pack.go.pats)&&!roll)[0,1,5].forEach(k=>lead(pack.go.pats[k]))}catch(e){console.warn('clean lead',e)}
-  /* 0010110 stab: three hits a bar at most - the stab is punctuation */
-  try{const s=pack.s101&&pack.s101.steps;if(Array.isArray(s))thinRow(s,0,s.length,3,x=>!!x.on,i=>met(i),i=>{s[i]=Object.assign({},s[i],{on:false,accent:false})})}catch(e){}
-  /* GALACTIC VOX: a short sung phrase, three notes, each held to the next */
-  try{const s=pack.vox&&pack.vox.steps;if(Array.isArray(s)){thinRow(s,0,s.length,3,x=>!!x.on,i=>met(i),i=>{s[i]=Object.assign({},s[i],{on:0})});
-   s.forEach((x,i)=>{if(!x.on)return;let k=1;while(k<8&&!s[(i+k)%s.length].on)k++;x.len=Math.max(1,k-.25)})}}catch(e){}
+  /* v162: melodies keep their full density - they are PHRASED instead: a velocity arc across each 2-bar phrase,
+     stepwise notes joined legato, leaps and the phrase's last note left detached */
+  try{if(pack.go&&Array.isArray(pack.go.pats))[0,1,5].forEach(k=>window.GLCTC_PHRASE&&GLCTC_PHRASE(pack.go.pats[k],r))}catch(e){console.warn('phrase',e)}
   /* 80LA8: one percussion colour per groove, ghost snares kept to two a bar */
   try{if(pack.bl&&Array.isArray(pack.bl.patterns))pack.bl.patterns.forEach((P,k)=>{const S=P&&P.steps;if(!S)return;
    if(k<=1&&!hand&&!perc){const hits=v=>(S[v]||[]).filter(x=>x&&x.on).length,aux=[5,6,7,8,9,10,11].filter(v=>hits(v)>0);
@@ -8506,7 +8502,7 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
  };
 
  /* ---------- 3 SOUND: thicker new lead patches ---------- */
- window.GLCTC_THICKEN=function(p,fx,type){if(!window.GLCTC_CLEAN_ON()||!p)return;
+ window.GLCTC_THICKEN=function(p,fx,type){return;   /* v162: replaced by GLCTC_PRODUCE */
   if(type==='lead'||type==='pad'){p.uni=Math.max(p.uni||1,3);p.spread=Math.max(p.spread||0,14);p.width=Math.max(p.width||0,.8)}
   else{p.uni=Math.max(p.uni||1,2);p.spread=Math.max(p.spread||0,9)}
   if(type==='lead'&&!(p.sub>0)){p.sub=.2;p.subwave=0}
@@ -8629,6 +8625,115 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
   const out=dropped<Math.max(50,center-14)?s:s.filter((x,k)=>k!==s.length-2).concat([dropped]).sort((a,b)=>a-b);   /* never push a chord note down into the bass's mud */
   if(i==='pad'&&out[out.length-1]+12-out[0]<=36&&out[0]+24<=88)out.push(out[0]+24);   /* pads: the root on top for air */
   return out};
+})();
+</script>
+<script id="glctc1-v162-produce">
+/* ===== v162 PRODUCE & SPACE (under ◇ CLEAN & LAYERED) =====
+   PRODUCE   after GENERATE every melodic sound is finished like a mix engineer would:
+             - a brand-new lead is built from one of the studio's DESIGNED factory patches for its role (lead / pluck / stab /
+               pad), then varied - not from random oscillator settings;
+             - every synth gets a real release tail and a filter release that follows it;
+             - every synth gets its effects: hall reverb, a darker tempo-synced (dotted 1/8) delay, chorus and width -
+               scaled to the genre (wet for trance / ambient / deep house, tighter for trap / drill / techno);
+             - natural instruments keep their sound and get a room around them;
+             - the 0010110 stab gets release, chorus, reverb and a synced echo.
+   SPACE     one shared stereo hall the whole song sits in - a send from every musical channel (drums a touch, stabs,
+             leads, pads, vocals more; bass and sub never - the low end stays dry), with pre-delay so the dry hits stay
+             clear, high-passed and damped so it is airy, not muddy. SPACE slider in the composer, 0 = off.
+   PHRASE    melodies keep every note but are played: a velocity arc across each 2-bar phrase, stepwise notes joined
+             legato, leaps and phrase endings detached. */
+(()=>{'use strict';
+ const on=()=>!window.GLCTC_CLEAN_ON||GLCTC_CLEAN_ON();
+ const cl=(x,a,b)=>Math.max(a,Math.min(b,x)),R=Math.random,pk=a=>a[Math.floor(R()*a.length)],jit=(v,a)=>v*(1+(R()*2-1)*a);
+ const WET=g=>/^(trap|drill|phonk|south|ukhiphop|dubstep|electro|techhouse|hardhouse|techno)$/.test(g)?.72:/^(ambient|meditation|trance|deephouse|liquid|synthwave|melodictechno)$/.test(g)?1.3:/^(lofi|garage|house|pop)$/.test(g)?1.05:1;
+
+ /* ---------- PHRASE ---------- */
+ window.GLCTC_PHRASE=function(p,r){if(!on()||!p||!Array.isArray(p.steps))return;r=r||R;const L=p.len||p.steps.length,st=p.steps;
+  const idx=[];for(let i=0;i<L;i++)if(st[i]&&st[i].on)idx.push(i);if(idx.length<2)return;
+  const even=idx.slice(1).map((x,k)=>x-idx[k]);if(idx.length>=10&&even.every(x=>x===even[0]))return;   /* arps keep their machine pulse */
+  idx.forEach((i,k)=>{const x=st[i],ph=(i%32)/32,arc=.84+.2*Math.sin(Math.PI*Math.min(1,ph/0.62)),down=i%16===0?.06:i%4===0?.03:0;
+   const last=k===idx.length-1||idx[k+1]%32<i%32;x.v=cl((+x.v||.75)*arc+down-(last?.07:0)+(r()*2-1)*.03,.3,1);
+   const nx=k+1<idx.length?idx[k+1]:idx[0]+L,gap=nx-i,step=k+1<idx.length&&Math.abs((+st[nx%L].n||0)-(+x.n||0))<=1;
+   if(last)x.g=cl(Math.min(+x.g||.5,gap*.7),.25,3);
+   else if(step)x.g=cl(gap*.98,.25,3.2);
+   else x.g=cl(Math.max(+x.g||.5,gap*.55),.25,Math.min(3,gap*.85))})};
+
+ /* ---------- PRODUCE ---------- */
+ const LIB={lead:['SUPERNOVA LEAD','SYNTHWAVE LEAD','VINTAGE SOLO','GALACTIC MASSIVE','OUTRUN BRASS'],
+  pluck:['ARP PLUCK','SUNRISE ARP','TRANCE GATE PLUCK','LASER HARP','GLASS KEYS'],
+  stab:['CHROME STAB','POLY KEYS','RAVE PIANO','GARAGE ORGAN'],
+  pad:['CLOUD CHORDS','WARP PAD','PWM STRINGS','JUPITER STRINGS','INFINITE PAD']};
+ const GLIB={trance:{lead:['TRANCE SUPERSAW','GALACTIC MASSIVE','SUPERNOVA LEAD'],pluck:['TRANCE GATE PLUCK','SUNRISE ARP']},happyhardcore:{lead:['TRANCE SUPERSAW','HOOVER LEAD']},
+  techno:{lead:['HOOVER LEAD','VINTAGE SOLO','SUPERNOVA LEAD'],stab:['CHROME STAB']},hardhouse:{lead:['HOOVER LEAD'],stab:['CHROME STAB']},psytrance:{lead:['HOOVER LEAD','SUPERNOVA LEAD']},
+  synthwave:{lead:['SYNTHWAVE LEAD','OUTRUN BRASS'],pad:['PWM STRINGS','JUPITER STRINGS']},house:{stab:['POLY KEYS','RAVE PIANO','GARAGE ORGAN']},garage:{stab:['GARAGE ORGAN','POLY KEYS']},
+  deephouse:{stab:['POLY KEYS','GLASS KEYS'],pad:['CLOUD CHORDS','PWM STRINGS']},hiphop:{lead:['VINTAGE SOLO','SYNTHWAVE LEAD','JUPITER BRASS']},
+  eastcoast:{lead:['VINTAGE SOLO','JUPITER BRASS']},westcoast:{lead:['VINTAGE SOLO','SYNTHWAVE LEAD']},trap:{lead:['VINTAGE SOLO','SUPERNOVA LEAD'],pluck:['GLASS KEYS','LASER HARP']},
+  ambient:{pad:['INFINITE PAD','CLOUD CHORDS','WARP PAD'],pluck:['GLASS KEYS','LASER HARP']},meditation:{pad:['INFINITE PAD','CLOUD CHORDS']}};
+ const FLOOR={lead:{ar:.34,rv:.24,dl:.16,ch:.32},pluck:{ar:.3,rv:.26,dl:.22,ch:.3},stab:{ar:.22,rv:.18,dl:.1,ch:.3},pad:{ar:1.4,rv:.42,dl:.14,ch:.4}};
+ const roleOf=(p,name)=>{if(/STAB|ORGAN|KEYS|PIANO/.test(name))return 'stab';if(/PAD|STRINGS|CHORDS|CHOIR|ATMOS/.test(name)||p.aa>.2)return 'pad';if(/PLUCK|ARP|HARP|BELL/.test(name)||(p.as<.3&&p.ad<.7))return 'pluck';return 'lead'};
+ function finishGo(p,f,role,W,natural){
+  if(natural){f.rvMix=cl(Math.max(f.rvMix||0,.18*W),0,.55);f.rvSize=Math.max(f.rvSize||0,1);return}
+  const F=FLOOR[role];
+  p.ar=Math.max(p.ar||0,jit(F.ar,.15));p.fr=Math.max(p.fr||0,p.ar*.8);   /* a real release, and the filter closes with it */
+  if(role!=='pad')p.ar=Math.min(p.ar,1.2);
+  f.rvMix=cl(Math.max(f.rvMix||0,F.rv*W),0,.6);f.rvSize=Math.max(f.rvSize||0,role==='stab'&&W<1?0:1);f.rvDamp=Math.min(f.rvDamp||7000,7500);
+  if((f.dlMix||0)<F.dl*W){f.dlMix=F.dl*W;f.dlDiv=role==='stab'?1:2;f.dlFb=cl(Math.max(f.dlFb||0,.34),0,.5)}
+  f.dlMix=cl(f.dlMix,0,.42);f.dlTone=Math.min(f.dlTone||5500,role==='pad'?5000:4200);f.dlPing=1;   /* darker, wider repeats sit behind the dry sound */
+  if(!f.chMode)f.chMode=role==='lead'?2:3;f.chMix=cl(Math.max(f.chMix||0,F.ch),0,.75);
+  f.width=Math.max(f.width||0,role==='lead'?1.15:1.3);
+ }
+ window.GLCTC_PRODUCE=function(genre){if(!on())return null;let made=null;const W=WET(genre);
+  try{const GO=window.GALACTIC_ONE,LIBGO=window.GLCTC_GO_LIB;if(GO&&GO.state&&GO.restoreProject&&LIBGO){
+   const s=JSON.parse(JSON.stringify(GO.state())),name=String(s.names&&s.names[0]||''),NM=name.toUpperCase(),KEEP=window.GLCTC_SHAPE_KEEP_GO||new Set();
+   if(s.patches&&s.patches[0]){let p=s.patches[0],f=s.fx=s.fx||LIBGO.defFx();
+    const natural=KEEP.has(NM);let role=roleOf(p,NM);
+    if(/^✦ /.test(name)&&!/VARIATION/.test(NM)){   /* a fresh lead: start from a designed patch for its role */
+     const m=NM.match(/\b(LEAD|PLUCK|STAB|PAD)\b/);role=m?m[1].toLowerCase():role;
+     const list=((GLIB[genre]||{})[role]||LIB[role]).filter(n=>LIBGO.find(n));const base=list.length?LIBGO.find(pk(list)):null;
+     if(base){p=s.patches[0]=Object.assign(LIBGO.defPatch(),JSON.parse(JSON.stringify(base[1])));f=s.fx=Object.assign(LIBGO.defFx(),JSON.parse(JSON.stringify(base[2]||{})));
+      ['cut','fenv','fd','spread','o2fine','drift'].forEach(k=>{if(typeof p[k]==='number'&&p[k]>0)p[k]=jit(p[k],.12)});p.cut=cl(p.cut,150,16000);
+      made=name.replace(/^✦ /,'')+' ('+base[0]+')';s.names[0]='✦ '+made}}
+    if(!(p.mode&&p.cut<800&&p.sub>.4))finishGo(p,f,role,W,natural);   /* bass patches stay dry */
+    GO.restoreProject(s)}}}catch(e){console.warn('produce GO',e)}
+  try{const A=window.GLCTC_PRESET_LIBRARIES&&GLCTC_PRESET_LIBRARIES.adapters;if(A&&A.s101){const d=A.s101.get(),bpm=(window.GLCTC_CLOCK&&GLCTC_CLOCK.bpm)||120;
+   if(typeof d.release==='number')d.release=Math.max(d.release,.28);
+   if(typeof d.reverb==='number')d.reverb=cl(Math.max(d.reverb,.16*W),0,.5);
+   if(typeof d.chorus==='number')d.chorus=Math.max(d.chorus,.15);
+   if(typeof d.delay==='number'&&d.delay<.1*W){d.delay=.12*W;d.delayTime=cl(60/bpm*.75,.04,1);d.feedback=cl(Math.max(d.feedback||0,.32),0,.5)}
+   A.s101.set(d)}}catch(e){console.warn('produce s101',e)}
+  try{window.GLCTC_SPACE&&GLCTC_SPACE.genre(genre)}catch(e){}
+  return made};
+
+ /* ---------- SPACE: the song's shared hall ---------- */
+ const LS='glctc1.space',SEND={bl:.05,mine:.07,s101:.2,go:.15,vox:.26,ws:.1,ix:.22,ix1:.22,ix2:.22,ix3:.22,ix4:.22,ix5:.22,ix6:.22};
+ let amt=1,gw=1;try{const v=parseFloat(localStorage.getItem(LS));if(Number.isFinite(v))amt=cl(v,0,2)}catch(e){}
+ const SP=new WeakMap();
+ function hallIR(c){const sr=c.sampleRate,len=Math.floor(sr*2.6),ir=c.createBuffer(2,len,sr);
+  for(let ch=0;ch<2;ch++){const a=ir.getChannelData(ch);let lp=0;
+   for(let k=0;k<14;k++){const i=Math.floor((.009+k*.0061+R()*.004)*(ch?1.09:.93)*sr);if(i<len)a[i]+=(R()<.5?-1:1)*(.5-k*.025)}
+   for(let i=Math.floor(sr*.012);i<len;i++){const x=i/sr,damp=.62-.5*Math.min(1,x/2.2);lp+=((R()*2-1)-lp)*damp;a[i]+=lp*.3*Math.exp(-x/.62)*(1-Math.exp(-x/.03))}}
+  return ir}
+ function space(c){let S=SP.get(c);if(S)return S;
+  const inp=c.createGain(),pre=c.createDelay(.2),hp=c.createBiquadFilter(),cv=c.createConvolver(),lp=c.createBiquadFilter(),lo=c.createBiquadFilter(),out=c.createGain();
+  pre.delayTime.value=.024;hp.type='highpass';hp.frequency.value=300;hp.Q.value=.6;lp.type='lowpass';lp.frequency.value=6800;lp.Q.value=.5;
+  lo.type='lowshelf';lo.frequency.value=400;lo.gain.value=-4;cv.buffer=hallIR(c);out.gain.value=.62;
+  inp.connect(pre);pre.connect(hp);hp.connect(cv);cv.connect(lp);lp.connect(lo);lo.connect(out);
+  let dest=null;try{dest=window.GLCTC_DIRECT?GLCTC_DIRECT(c):null}catch(e){}dest=dest||window.masterGain||(typeof masterGain!=='undefined'?masterGain:null);
+  if(!dest)return null;out.connect(dest);S={inp,out,sends:new Map()};SP.set(c,S);return S}
+ function level(id){return (SEND[id]||0)*amt*gw*(on()?1:0)}
+ function attach(){try{if(!window.GLCTC_WSBUSFULL)return;for(const id of Object.keys(SEND)){const b=GLCTC_WSBUSFULL(id);if(!b||!b.c)continue;const S=space(b.c);if(!S)continue;
+   let g=S.sends.get(id);if(!g||g.__bus!==b){g=b.c.createGain();g.__bus=b;try{b.pan.connect(g)}catch(e){continue}g.connect(S.inp);S.sends.set(id,g)}
+   const v=level(id);if(Math.abs(g.gain.value-v)>1e-4)g.gain.setTargetAtTime(v,b.c.currentTime,.05)}}catch(e){}}
+ window.GLCTC_SPACE={attach,set(v){amt=cl(+v||0,0,2);try{localStorage.setItem(LS,String(amt))}catch(e){}attach()},get:()=>amt,genre(g){gw=WET(g);attach()}};
+ setInterval(()=>{if(window.audioCtx||typeof audioCtx!=='undefined')attach()},2000);
+ /* composer control */
+ function ui(){const t=document.getElementById('gscClean');if(!t||document.getElementById('gscSpace'))return;const lab=t.closest('label');if(!lab)return;
+  const w=document.createElement('label');w.style.cssText='display:flex;gap:6px;align-items:center;margin:0 0 4px';w.title='SPACE: the shared hall reverb the whole song sits in (stabs, leads, pads, vocals, a touch on drums; never the bass). 0 = dry.';
+  w.innerHTML='◇ SPACE <input id="gscSpace" type="range" min="0" max="2" step="0.05" style="width:110px"> <span id="gscSpaceVal"></span>';lab.after(w);
+  const r=document.getElementById('gscSpace'),vl=document.getElementById('gscSpaceVal');r.value=amt;vl.textContent=Math.round(amt*100)+'%';
+  r.addEventListener('input',()=>{GLCTC_SPACE.set(r.value);vl.textContent=Math.round(amt*100)+'%'})}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ui);else ui();setTimeout(ui,1500);
+ document.addEventListener('change',e=>{if(e.target&&e.target.id==='gscClean')attach()},true);
 })();
 </script>
 <script>
@@ -11780,7 +11885,7 @@ const GENRE_SHAPE=GLCTC_GFILL({
 });
 /* v94: GENRE_SHAPE is closed above with GLCTC_GFILL so the newer genres inherit their family's shaping */
 /* the natural instruments keep their own envelope (a guitar must pluck, a marimba must ring) */
-const SHAPE_KEEP_GO=new Set(['HOUSE PIANO','GRAND KEYS','RHODES EP','TONEWHEEL ORGAN','BUBBLE ORGAN','COMBO ORGAN','THEATRE ORGAN','CATHEDRAL ORGAN','STRING ENSEMBLE','STACCATO STRINGS','CONCERT FLUTE','BAMBOO FLUTE','SKA HORNS','FRENCH HORN','TRUMPET STAB','CRUNK BRASS','TRANCE ARP PLUCK','ACID ARP','ELECTRO ARP','G-FUNK WHINE','SINGING BOWL','TANPURA DRONE','DEEP CHORD','RAGGA STAB','DUB SIREN','LIQUID PAD','TECH PLUCK','LOG DRUM','MELODICA','RAVE PIANO','NYLON GUITAR','SPANISH GUITAR','ACOUSTIC GUITAR','JAZZ GUITAR','WAH FUNK GUITAR','POWER GUITAR','SITAR','MARIMBA','VIBRAPHONE','KALIMBA','STEEL DRUM','PAN FLUTE','SALSA PIANO','LIQUID RHODES','BRASS SECTION','MARIACHI TRUMPET','DISCO STRINGS','PIZZICATO STRINGS','FRETLESS BASS','ACCORDION']);
+const SHAPE_KEEP_GO=new Set(['HOUSE PIANO','GRAND KEYS','RHODES EP','TONEWHEEL ORGAN','BUBBLE ORGAN','COMBO ORGAN','THEATRE ORGAN','CATHEDRAL ORGAN','STRING ENSEMBLE','STACCATO STRINGS','CONCERT FLUTE','BAMBOO FLUTE','SKA HORNS','FRENCH HORN','TRUMPET STAB','CRUNK BRASS','TRANCE ARP PLUCK','ACID ARP','ELECTRO ARP','G-FUNK WHINE','SINGING BOWL','TANPURA DRONE','DEEP CHORD','RAGGA STAB','DUB SIREN','LIQUID PAD','TECH PLUCK','LOG DRUM','MELODICA','RAVE PIANO','NYLON GUITAR','SPANISH GUITAR','ACOUSTIC GUITAR','JAZZ GUITAR','WAH FUNK GUITAR','POWER GUITAR','SITAR','MARIMBA','VIBRAPHONE','KALIMBA','STEEL DRUM','PAN FLUTE','SALSA PIANO','LIQUID RHODES','BRASS SECTION','MARIACHI TRUMPET','DISCO STRINGS','PIZZICATO STRINGS','FRETLESS BASS','ACCORDION']);window.GLCTC_SHAPE_KEEP_GO=SHAPE_KEEP_GO;
 function shapeGenreSound(genre){
  const SH=GENRE_SHAPE[genre],A=window.GLCTC_PRESET_LIBRARIES&&GLCTC_PRESET_LIBRARIES.adapters,pk=GENRE_PACK[genre]||{};if(!SH||!A)return;
  const isPack=k=>{const el=byId('gpcPreset_'+k);return !!(el&&((pk[k]&&el.value===pk[k])||/^(Bass|Keys|Brass|Strings|Pad|Pluck|FX|Mallet|Lead) · /.test(el.value)))};   /* v94: hand-built instruments keep their own shape */
@@ -12072,6 +12177,7 @@ async function generate(){
   try{shapeGenreSound(genreKey)}catch(e){}
   let freshSnd=null;try{freshSnd=designFreshSound(genreKey,freshLevel(txt))}catch(e){console.warn('fresh sound',e)}   /* v120 */
   try{window.GLCTC_BASS_ARCH=designBass(genreKey)}catch(e){console.warn('bass designer',e)}   /* v111 */
+  try{const pr=window.GLCTC_PRODUCE&&GLCTC_PRODUCE(genreKey);if(pr&&freshSnd)freshSnd=pr}catch(e){console.warn('produce',e)}   /* v162 */
   try{window.lpLoadDemo&&window.lpLoadDemo(true,genreKey)}catch(e){}
   try{applySwing(genreKey)}catch(e){}
   try{window.GLCTC_NEW_SONG={genre:genreKey,key:(byId('gscKey')||{}).textContent,bpm:st.bpm,seed:pack?.seed??null,variation:pack?.flavour?.variation??null}}catch(e){}
@@ -12112,6 +12218,7 @@ const AUTO_LS='glctc1.autoSongOnLoad';
    try{window.__glctcDrumComp=0;applyDrumComp()}catch(e){}
    try{shapeGenreSound(g)}catch(e){}
    try{designFreshSound(g,freshLevel(rtxt))}catch(e){console.warn('fresh sound',e)}   /* v120 */
+   try{window.GLCTC_PRODUCE&&GLCTC_PRODUCE(g)}catch(e){}   /* v162 */
    try{window.GLCTC_BASS_ARCH=designBass(g)}catch(e){console.warn('bass designer',e)}   /* v111 */
    try{window.lpLoadDemo&&window.lpLoadDemo(true,g)}catch(e){}
    try{applySwing(g)}catch(e){}

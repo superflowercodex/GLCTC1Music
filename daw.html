@@ -6250,10 +6250,149 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
  const masterSamples=Array(64).fill(null),masterSampleSources=new Set();let perfBank=0;const perfBankAssign=Array.from({length:4},()=>Array(16).fill(''));
  mkPanicBtn.addEventListener('click',()=>{masterSampleSources.forEach(n=>{try{n.stop()}catch(e){}});masterSampleSources.clear()});
  const masterSampleDB=new Promise(resolve=>{try{const r=indexedDB.open('glctc1_master_samples',1);r.onupgradeneeded=()=>r.result.createObjectStore('pads');r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch(e){resolve(null)}});
- function samplePadLabel(i){const row=perfPadRows[i],p=masterSamples[perfBank*16+i];if(!row)return;row.b.textContent=p?'♪ '+(i+1)+' · '+p.name:'PAD '+String(i+1).padStart(2,'0');row.b.title=p?p.name:(row.select.value?row.select.options[row.select.selectedIndex].text:'Unassigned performance pad')}
+ function samplePadLabel(i){const row=perfPadRows[i];if(!row)return;const k=perfBank*16+i,p=masterSamples[k],v=row.select.value,cfg=cfgOf(k),isAct=!!v&&v!=='sample';
+  row.b.textContent=isAct?perfPadActions[Number(v)-1]:p?'♪ '+(i+1)+' · '+p.name:'PAD '+String(i+1).padStart(2,'0');
+  row.b.title=isAct?perfPadActions[Number(v)-1]:p?p.name+' · '+PAD_MODE_NAME[cfg.mode]:'Empty pad · tap to load a sample';
+  row.b.dataset.mode=isAct?'action':p?cfg.mode:'';
+  row.b.classList.toggle('empty',!isAct&&!p);row.b.classList.toggle('playing',!isAct&&sp_Voices.has(k));
+  if(row.tag)row.tag.textContent=isAct?'ACTION':p?PAD_MODE_NAME[cfg.mode]+(cfg.rev?' · REV':'')+(cfg.pitch?' · '+(cfg.pitch>0?'+':'')+cfg.pitch:''):'EMPTY'}
  async function playMasterSample(i){const p=masterSamples[perfBank*16+i];if(!p)return toast('Save a WAV selection to this pad first.');try{const c=ensureBuses();await c.resume();if(!p.buf)p.buf=await c.decodeAudioData(await p.blob.arrayBuffer());const n=window.GLCTC_TUNING.attach(c.createBufferSource());n.buffer=p.buf;n.connect(c._sat||c.destination);masterSampleSources.add(n);n.onended=()=>{masterSampleSources.delete(n);n.disconnect()};n.start();mkStatus.textContent='SAMPLE PAD '+(i+1)+' · '+p.name}catch(e){toast('Sample playback failed: '+e.message)}}
  masterSampleDB.then(db=>{if(!db)return;const r=db.transaction('pads').objectStore('pads').openCursor();r.onsuccess=()=>{const c=r.result;if(!c)return;const k=Number(c.key);if(k>=0&&k<64&&!masterSamples[k]){masterSamples[k]=c.value;try{window.dispatchEvent(new CustomEvent('glctc-perfsample',{detail:{k,load:true}}))}catch(e){}const bk=Math.floor(k/16),pi=k%16;perfBankAssign[bk][pi]='sample';const row=perfPadRows[pi];if(row&&bk===perfBank){row.select.value='sample';samplePadLabel(pi)}}c.continue()}});
 
+ /* ---------- v200 SAMPLE PADS: load / remove samples, per-pad play mode (one-shot · gate · loop · retrigger),
+    volume, pitch, reverse, choke groups and beat-quantised loop starts. Settings persist per bank + pad. ---------- */
+ const PADCFG_KEY='glctc1.padcfg.v1',PAD_DEF={mode:'oneshot',vol:1,pitch:0,rev:false,choke:0,quant:true};
+ const PAD_MODES=[['oneshot','ONE-SHOT','Plays to the end on every tap'],['gate','GATE','Plays only while you hold the pad'],['loop','LOOP','Tap to start looping · tap again to stop'],['retrig','RETRIGGER','Restarts from the top on every tap']];
+ const PAD_MODE_NAME={oneshot:'ONE-SHOT',gate:'GATE',loop:'LOOP',retrig:'RETRIG'};
+ let sp_Cfg={};try{sp_Cfg=JSON.parse(localStorage.getItem(PADCFG_KEY)||'{}')||{}}catch(e){sp_Cfg={}}
+ const cfgOf=k=>Object.assign({},PAD_DEF,sp_Cfg[k]||{});
+ function cfgSet(k,patch){sp_Cfg[k]=Object.assign(cfgOf(k),patch);try{localStorage.setItem(PADCFG_KEY,JSON.stringify(sp_Cfg))}catch(e){}
+  const s=sp_Voices.get(k);if(s)s.forEach(v=>{try{if('vol' in patch)v.g.gain.setTargetAtTime(sp_Cfg[k].vol,v.n.context.currentTime,.02);if('pitch' in patch){v.n.playbackRate.value=Math.pow(2,sp_Cfg[k].pitch/12);v.dur=v.n.buffer.duration/v.n.playbackRate.value}}catch(e){}});
+  sp_PaintK(k)}
+ const sp_Voices=new Map(),sp_Held=new Set(),sp_RevCache=new WeakMap();
+ function sp_RevBuf(c,b){let r=sp_RevCache.get(b);if(r)return r;r=c.createBuffer(b.numberOfChannels,b.length,b.sampleRate);for(let ch=0;ch<b.numberOfChannels;ch++){const s=b.getChannelData(ch),d=r.getChannelData(ch);for(let j=0,n=s.length;j<n;j++)d[j]=s[n-1-j]}sp_RevCache.set(b,r);return r}
+ async function sp_Buf(k){const p=masterSamples[k];if(!p)return null;if(!p.buf){const c=ensureBuses();p.buf=await c.decodeAudioData(await p.blob.arrayBuffer())}return p.buf}
+ function sp_PaintK(k){if((k>>4)===perfBank)samplePadLabel(k&15)}
+ function sp_VoiceStop(v,fade){try{const t=v.n.context.currentTime,f=fade==null?.012:fade;v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0,t+f);v.n.stop(Math.max(t,v.t0)+f+.005)}catch(e){}}
+ function sp_StopK(k,fade){const s=sp_Voices.get(k);if(s)s.forEach(v=>sp_VoiceStop(v,fade))}
+ function sp_StopAll(){sp_Voices.forEach((s,k)=>sp_StopK(k,.02))}
+ function sp_QuantTime(c){const now=c.currentTime+.015;
+  try{if(typeof audioCtx!=='undefined'&&audioCtx===c&&GLCTC_CLOCK.anchored()){const t=GLCTC_CLOCK.timeOfBeat(Math.ceil(GLCTC_CLOCK.beatAt(now)-1e-6));if(t>=now-.005&&t-now<3)return Math.max(now,t)}}catch(e){}
+  const beat=60/Math.max(30,GLCTC_CLOCK.bpm||130);let t0=null;sp_Voices.forEach(s=>s.forEach(v=>{if(v.loop&&(t0==null||v.t0<t0))t0=v.t0}));
+  if(t0==null||t0>now)return now;return t0+Math.ceil((now-t0)/beat-1e-6)*beat}
+ let sp_Raf=0;
+ function sp_Anim(){if(sp_Raf)return;const tick=()=>{sp_Raf=0;perfPadRows.forEach((r,i)=>{const s=sp_Voices.get(perfBank*16+i);let pr=0,q=false;if(s&&s.size){let v=null;s.forEach(x=>v=x);const el=v.n.context.currentTime-v.t0;q=el<0;pr=q?0:v.loop?(el%v.dur)/v.dur:Math.min(1,el/v.dur)}r.b.style.setProperty('--prog',pr.toFixed(3));r.b.classList.toggle('queued',q)});if(sp_Voices.size)sp_Raf=requestAnimationFrame(tick);else perfPadRows.forEach(r=>{r.b.style.setProperty('--prog','0');r.b.classList.remove('queued')})};sp_Raf=requestAnimationFrame(tick)}
+ function sp_Start(c,k,buf,cfg,when){
+  const n=window.GLCTC_TUNING.attach(c.createBufferSource()),g=c.createGain();
+  n.buffer=cfg.rev?sp_RevBuf(c,buf):buf;n.playbackRate.value=Math.pow(2,cfg.pitch/12);n.loop=cfg.mode==='loop';g.gain.value=cfg.vol;
+  n.connect(g);g.connect(c._sat||c.destination);
+  const v={n,g,t0:when,dur:buf.duration/n.playbackRate.value,loop:n.loop};
+  let s=sp_Voices.get(k);if(!s){s=new Set();sp_Voices.set(k,s)}s.add(v);masterSampleSources.add(n);
+  n.onended=()=>{masterSampleSources.delete(n);const s2=sp_Voices.get(k);if(s2){s2.delete(v);if(!s2.size)sp_Voices.delete(k)}try{n.disconnect();g.disconnect()}catch(e){}sp_PaintK(k)};
+  n.start(when);sp_PaintK(k);sp_Anim();return v}
+ async function sp_Press(k){
+  const p=masterSamples[k],i=k&15;if(!p){sp_Edit(k);return}
+  const cfg=cfgOf(k);sp_Held.add(k);
+  if(cfg.mode==='loop'&&sp_Voices.has(k)){sp_StopK(k,.03);mkStatus.textContent='LOOP OFF · PAD '+(i+1)+' · '+p.name;return}
+  let buf,c;try{c=ensureBuses();if(c.state!=='running')c.resume();buf=await sp_Buf(k)}catch(e){toast('Sample playback failed: '+e.message);return}
+  if(!buf)return;
+  if(cfg.mode==='retrig'||cfg.mode==='gate')sp_StopK(k,.006);
+  if(cfg.choke)sp_Voices.forEach((s,k2)=>{if(k2!==k&&cfgOf(k2).choke===cfg.choke)sp_StopK(k2,.02)});
+  const when=cfg.mode==='loop'&&cfg.quant?sp_QuantTime(c):c.currentTime;
+  const v=sp_Start(c,k,buf,cfg,when);
+  if(cfg.mode==='gate'&&!sp_Held.has(k))sp_VoiceStop(v,.08);   /* released while the sample was still decoding */
+  mkStatus.textContent=PAD_MODE_NAME[cfg.mode]+' · PAD '+(i+1)+' · '+p.name+(when>c.currentTime+.02?' · STARTS ON THE BEAT':'')}
+ function sp_Release(k){sp_Held.delete(k);if(cfgOf(k).mode==='gate')sp_StopK(k,.03)}
+ async function sp_Store(k,buf,blob,name){
+  sp_StopK(k,.02);masterSamples[k]={buf,blob,name};const b=k>>4,i=k&15;perfBankAssign[b][i]='sample';perfSaveAssign();
+  if(b===perfBank){perfPadRows[i].select.value='sample';samplePadLabel(i)}
+  try{window.dispatchEvent(new CustomEvent('glctc-perfsample',{detail:{k}}))}catch(e){}
+  const db=await masterSampleDB;
+  if(!db){toast('Loaded for this session · browser storage unavailable, so it will not survive a reload.');return}
+  try{await new Promise((res,rej)=>{const tx=db.transaction('pads','readwrite');tx.objectStore('pads').put({blob,name},k);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error||Error('Storage cancelled'))});toast('Loaded “'+name+'” on bank '+'ABCD'[b]+' pad '+(i+1)+' · kept after reload.')}
+  catch(e){toast('Loaded for this session, but saving failed: '+e.message)}}
+ async function sp_LoadFile(k,f){try{const c=ensureBuses(),buf=await c.decodeAudioData(await f.arrayBuffer());await sp_Store(k,buf,f,(f.name||'Sample').replace(/\.[^.]+$/,'').slice(0,40))}catch(e){toast('Could not load that file: '+(e&&e.message||'unsupported audio'))}}
+ async function sp_LoadTake(k){try{const t=SC.take;if(!t||!t.buf){toast('No recorded take yet. Record something first.');return false}await sp_Store(k,t.buf,new Blob([audioBufferToWav(t.buf)],{type:'audio/wav'}),(t.name||'Take').slice(0,40));return true}catch(e){toast('No recorded take available.');return false}}
+ async function sp_Remove(k){const p=masterSamples[k];if(!p)return false;if(!confirm('Remove “'+p.name+'” from this pad?'))return false;
+  sp_StopK(k,.02);masterSamples[k]=null;const b=k>>4,i=k&15;if(perfBankAssign[b][i]==='sample')perfBankAssign[b][i]='';perfSaveAssign();
+  if(b===perfBank){perfPadRows[i].select.value=perfBankAssign[b][i];samplePadLabel(i)}
+  const db=await masterSampleDB;if(db)await new Promise(res=>{try{const tx=db.transaction('pads','readwrite');tx.objectStore('pads').delete(k);tx.oncomplete=res;tx.onerror=res;tx.onabort=res}catch(e){res()}});
+  try{window.dispatchEvent(new CustomEvent('glctc-perfsampleremove',{detail:{k}}))}catch(e){}
+  toast('Sample removed from bank '+'ABCD'[b]+' pad '+(i+1)+'.');return true}
+ /* ---- pad editor sheet ---- */
+ let sp_EditK=-1;
+ const sp_File=el('input',{type:'file',accept:'audio/*,.wav,.mp3,.ogg,.m4a,.aac,.flac,.aif,.aiff',style:'display:none'});
+ sp_File.onchange=async()=>{const f=sp_File.files&&sp_File.files[0];sp_File.value='';if(!f||sp_EditK<0)return;const k=sp_EditK;await sp_LoadFile(k,f);if(sp_EditK===k)sp_Edit(k)};
+ const sp_Sheet=el('div',{class:'gpe-sheet',role:'dialog','aria-modal':'true'}),sp_Back=el('div',{class:'gpe-back'},sp_Sheet);
+ sp_Back.addEventListener('pointerdown',e=>{if(e.target===sp_Back)sp_Close()});
+ (document.body||document.documentElement).append(sp_Back,sp_File);
+ function sp_Close(){sp_Back.classList.remove('open');sp_EditK=-1}
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sp_Back.classList.contains('open'))sp_Close()});
+ function sp_Edit(k){
+  sp_EditK=k;const b=k>>4,i=k&15,p=masterSamples[k],cfg=cfgOf(k),fn=perfBankAssign[b][i]||(p?'sample':''),B=(t,cls,fn2,title)=>el('button',{type:'button',class:'gpe-btn '+(cls||''),text:t,title:title||t,onclick:fn2});
+  const fnSel=el('select',{class:'gpe-sel','aria-label':'Pad function'});
+  [['','UNASSIGNED'],['sample','SAMPLE PAD']].concat(perfPadActions.map((a,j)=>[String(j+1),a])).forEach(([v,t])=>fnSel.append(el('option',{value:v,text:t})));
+  fnSel.value=fn;fnSel.onchange=()=>{perfBankAssign[b][i]=fnSel.value;perfSaveAssign();if(b===perfBank){perfPadRows[i].select.value=fnSel.value;samplePadLabel(i)}sp_Edit(k)};
+  const head=el('div',{class:'gpe-head'},B('◀','gpe-nav',()=>sp_Edit(b*16+((i+15)%16)),'Previous pad'),el('div',{class:'gpe-title'},el('b',{text:'BANK '+'ABCD'[b]+' · PAD '+String(i+1).padStart(2,'0')}),el('small',{text:p?p.name:'NO SAMPLE LOADED'})),B('▶','gpe-nav',()=>sp_Edit(b*16+((i+1)%16)),'Next pad'));
+  const parts=[head,el('label',{class:'gpe-lab',text:'PAD FUNCTION'}),fnSel];
+  if(fn&&fn!=='sample'){parts.push(el('p',{class:'gpe-note',text:'This pad runs “'+perfPadActions[Number(fn)-1]+'”. Choose SAMPLE PAD to load audio onto it instead.'}))}
+  else{
+   parts.push(el('label',{class:'gpe-lab',text:'SAMPLE'}),el('div',{class:'gpe-row'},
+    B(p?'⤓ REPLACE FILE':'⤓ LOAD FILE','gpe-pri',()=>sp_File.click(),'Load an audio file from this device'),
+    B('● USE LAST TAKE','',async()=>{if(await sp_LoadTake(k))sp_Edit(k)},'Put the latest recorded take on this pad'),
+    p?B('✕ REMOVE','gpe-danger',async()=>{if(await sp_Remove(k))sp_Edit(k)},'Remove the sample from this pad'):null));
+   const modeRow=el('div',{class:'gpe-modes'});
+   PAD_MODES.forEach(([m,t,d])=>modeRow.append(el('button',{type:'button',class:'gpe-mode'+(cfg.mode===m?' on':''),'data-mode':m,onclick:()=>{sp_StopK(k,.02);cfgSet(k,{mode:m});sp_Edit(k)}},el('b',{text:t}),el('small',{text:d}))));
+   const slider=(label,key,min,max,step,fmt)=>{const out=el('output',{text:fmt(cfg[key])}),r=el('input',{type:'range',min,max,step,value:cfg[key],'aria-label':label});r.oninput=()=>{out.textContent=fmt(+r.value);cfgSet(k,{[key]:+r.value})};r.ondblclick=()=>{r.value=PAD_DEF[key];r.oninput()};return el('div',{class:'gpe-slider'},el('span',{text:label}),r,out)};
+   const tog=(label,key,title)=>{const t=el('button',{type:'button',class:'gpe-btn gpe-tog'+(cfg[key]?' on':''),text:label+(cfg[key]?' · ON':' · OFF'),title});t.onclick=()=>{const v=!cfgOf(k)[key];if(key==='rev')sp_StopK(k,.02);cfgSet(k,{[key]:v});t.classList.toggle('on',v);t.textContent=label+(v?' · ON':' · OFF')};return t};
+   const choke=el('select',{class:'gpe-sel','aria-label':'Choke group'});[['0','CHOKE · OFF'],['1','CHOKE GROUP 1'],['2','CHOKE GROUP 2'],['3','CHOKE GROUP 3'],['4','CHOKE GROUP 4']].forEach(([v,t])=>choke.append(el('option',{value:v,text:t})));choke.value=String(cfg.choke||0);choke.onchange=()=>cfgSet(k,{choke:+choke.value});
+   parts.push(el('label',{class:'gpe-lab',text:'HOW THE PAD PLAYS'}),modeRow,
+    slider('VOLUME','vol',0,1.5,.01,v=>Math.round(v*100)+'%'),
+    slider('PITCH','pitch',-24,24,1,v=>(v>0?'+':'')+v+' st'),
+    el('div',{class:'gpe-row'},tog('REVERSE','rev','Play the sample backwards'),tog('LOOP ON BEAT','quant','Loop pads start on the next beat so they stay in time'),choke),
+    el('p',{class:'gpe-note',text:'Pads in the same choke group cut each other off, like an open and closed hi-hat. Double-tap a slider to reset it.'}),
+    el('div',{class:'gpe-row'},B('▶ TEST','',()=>{if(!masterSamples[k]){toast('Load a sample first.');return}sp_Press(k);if(cfgOf(k).mode==='gate')setTimeout(()=>sp_Release(k),700)}),B('■ STOP','',()=>sp_StopK(k,.03))));
+  }
+  parts.push(el('div',{class:'gpe-row gpe-end'},B('DONE','gpe-pri',sp_Close)));
+  sp_Sheet.replaceChildren(...parts);if(!sp_Back.classList.contains('open')){try{const coarse=matchMedia('(pointer:coarse)').matches,z=coarse?Math.min(2.4,innerWidth*.96/480):1;sp_Sheet.style.zoom=z>1.1?z.toFixed(2):'';sp_Sheet.style.maxHeight=z>1.1?(innerHeight*.9/z)+'px':''}catch(e){}sp_Back.classList.add('open');sp_Back.style.pointerEvents='none';setTimeout(()=>{sp_Back.style.pointerEvents=''},420)}   /* ignore the finger-up from the tap that opened it */
+ }
+ {const st=document.createElement('style');st.textContent=`
+ .glctc-perf-pads .glctc-assign>select{display:none!important}
+ .gpe-foot{display:flex;align-items:center;gap:4px;min-width:0}
+ .gpe-tag{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;font-weight:800;letter-spacing:.06em;color:#9d8bb3}
+ .gpe-editbtn{flex:none;min-height:0!important;height:22px;padding:0 6px!important;font-size:8px!important;font-weight:900;letter-spacing:.06em;border-radius:5px!important;border:1px solid #4a3a5e!important;background:#17121f!important;color:#e4c8ff!important}
+ .glctc-perf-pads .glctc-perf-pad{--pc:#c18bff;position:relative;overflow:hidden}
+ .glctc-perf-pads .glctc-perf-pad[data-mode=gate]{--pc:#ffb84d}.glctc-perf-pads .glctc-perf-pad[data-mode=loop]{--pc:#3dffb0}.glctc-perf-pads .glctc-perf-pad[data-mode=retrig]{--pc:#ff5fa2}.glctc-perf-pads .glctc-perf-pad[data-mode=action]{--pc:#7fb6ff}
+ .glctc-perf-pads .glctc-perf-pad[data-mode]{border-color:var(--pc)!important}
+ .glctc-perf-pads .glctc-perf-pad:before{color:var(--pc)!important;text-shadow:0 0 10px var(--pc)!important}
+ .glctc-perf-pads .glctc-perf-pad.empty{background:#0f0c14!important;border:1px dashed #5a4670!important;color:#8d7aa3!important;box-shadow:none!important}
+ .glctc-perf-pads .glctc-perf-pad.empty:before{content:'+'!important;color:#8d7aa3!important;text-shadow:none!important}
+ .glctc-perf-pads .glctc-perf-pad.playing{box-shadow:0 0 16px color-mix(in srgb,var(--pc) 70%,transparent),inset 0 0 12px color-mix(in srgb,var(--pc) 35%,transparent)!important}
+ .glctc-perf-pads .glctc-perf-pad.queued{animation:gpeq .25s ease-in-out infinite alternate}@keyframes gpeq{from{opacity:.55}to{opacity:1}}
+ .glctc-perf-pads .glctc-perf-pad:after{content:'';position:absolute;left:0;bottom:0;height:3px;width:calc(var(--prog,0)*100%);background:var(--pc);box-shadow:0 0 6px var(--pc);pointer-events:none}
+ .gpe-back{position:fixed;inset:0;z-index:99999;display:none;align-items:flex-end;justify-content:center;background:#000a;backdrop-filter:blur(2px)}
+ .gpe-back.open{display:flex}
+ .gpe-sheet{width:min(480px,100%);max-height:88vh;overflow:auto;padding:14px 14px calc(14px + env(safe-area-inset-bottom));border:1px solid #51452f;border-bottom:0;border-radius:16px 16px 0 0;background:linear-gradient(160deg,#17161d,#0b0b10);color:#eee;display:flex;flex-direction:column;gap:8px;box-shadow:0 -10px 40px #000c;font-family:inherit}
+ @media(min-width:700px){.gpe-back{align-items:center}.gpe-sheet{border-radius:16px;border-bottom:1px solid #51452f}}
+ .gpe-head{display:flex;align-items:center;gap:8px}
+ .gpe-title{flex:1;min-width:0;text-align:center;display:flex;flex-direction:column;gap:2px}
+ .gpe-title b{color:#ffd36a;font-size:13px;letter-spacing:.14em}.gpe-title small{color:#c9b4e4;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .gpe-lab{margin-top:4px;color:#ffd36a;font-size:10px;font-weight:900;letter-spacing:.13em}
+ .gpe-row{display:flex;flex-wrap:wrap;gap:6px}.gpe-row>*{flex:1 1 0;min-width:110px}.gpe-end{margin-top:4px}
+ .gpe-btn,.gpe-sel{min-height:40px;padding:6px 10px;border-radius:9px;border:1px solid #3a3346;background:linear-gradient(#22202a,#15141b);color:#eee;font-size:11px;font-weight:900;letter-spacing:.07em}
+ .gpe-sel{width:100%}
+ .gpe-nav{flex:none;min-width:42px}
+ .gpe-pri{border-color:#bd54ff;background:linear-gradient(#7a2fb0,#4a1a73);color:#fff}
+ .gpe-danger{border-color:#7a3340;color:#ff9aa8}
+ .gpe-tog.on{border-color:#3dffb0;color:#3dffb0;box-shadow:inset 0 0 10px #3dffb033}
+ .gpe-modes{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+ .gpe-mode{--pc:#c18bff;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:54px;padding:7px 9px;border-radius:9px;border:1px solid #3a3346;background:#141219;color:#ddd;text-align:left}
+ .gpe-mode[data-mode=gate]{--pc:#ffb84d}.gpe-mode[data-mode=loop]{--pc:#3dffb0}.gpe-mode[data-mode=retrig]{--pc:#ff5fa2}
+ .gpe-mode b{font-size:11px;letter-spacing:.1em;color:var(--pc)}.gpe-mode small{font-size:10px;opacity:.75;line-height:1.25}
+ .gpe-mode.on{border-color:var(--pc);background:color-mix(in srgb,var(--pc) 16%,#141219);box-shadow:0 0 12px color-mix(in srgb,var(--pc) 35%,transparent)}
+ .gpe-slider{display:grid;grid-template-columns:62px 1fr 52px;align-items:center;gap:8px;font-size:10px;font-weight:900;letter-spacing:.1em;color:#c9b4e4}
+ .gpe-slider input{width:100%;accent-color:#bd54ff}.gpe-slider output{text-align:right;color:#fff}
+ .gpe-note{margin:0;font-size:10px;line-height:1.4;color:#9a9aa4}`;document.head.appendChild(st)}
  Array.from({length:16},(_,i)=>i).forEach(i=>{
   const b=el('button',{class:'glctc-perf-pad',type:'button',text:'PAD '+String(i+1).padStart(2,'0')});
   const select=el('select',{'aria-label':'Pad '+(i+1)+' assignment'});
@@ -6262,24 +6401,26 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
   select.append(el('option',{value:'sample',text:'PLAY SAVED SAMPLE'}));
   select.value='';
   b.title='Unassigned performance pad';
-  select.addEventListener('change',()=>{perfBankAssign[perfBank][i]=select.value;try{perfSaveAssign()}catch(e){}b.title=select.value==='sample'?(masterSamples[perfBank*16+i]?.name||'Empty sample pad'):select.value?perfPadActions[Number(select.value)-1]:'Unassigned performance pad';mkStatus.textContent='PAD '+(i+1)+' · '+(select.value?('ASSIGNED TO '+select.options[select.selectedIndex].text):'UNASSIGNED')});
+  select.addEventListener('change',()=>{perfBankAssign[perfBank][i]=select.value;try{perfSaveAssign()}catch(e){}samplePadLabel(i);mkStatus.textContent='PAD '+(i+1)+' · '+(select.value?('ASSIGNED TO '+select.options[select.selectedIndex].text):'UNASSIGNED')});
   b.addEventListener('click',()=>{
-   if(!select.value){mkStatus.textContent='PAD '+(i+1)+' · UNASSIGNED · CHOOSE AN ACTION FIRST';return}
+   if(!select.value){sp_Edit(perfBank*16+i);return}
    b.classList.add('hit');setTimeout(()=>b.classList.remove('hit'),140);
    try{window.dispatchEvent(new CustomEvent('glctc-perfpadhit',{detail:perfBank*16+i}))}catch(e){}
-   if(select.value==='sample'){try{window.dispatchEvent(new CustomEvent('glctc-perfsamplehit',{detail:perfBank*16+i}))}catch(e){}playMasterSample(i);return}
+   if(select.value==='sample'){try{window.dispatchEvent(new CustomEvent('glctc-perfsamplehit',{detail:perfBank*16+i}))}catch(e){}b._padK=perfBank*16+i;sp_Press(b._padK);return}
    const a=Number(select.value)-1;
    if(a===0){const play=$('playBtn');if(play)play.click()}
-   else if(a===1){const stop=$('stopBtn');if(stop)stop.click();mkReleaseAll()}
+   else if(a===1){const stop=$('stopBtn');if(stop)stop.click();mkReleaseAll();sp_StopAll()}
    else if(a===2){try{ensureBuses()}catch(e){}try{window.GLCTC_TRANSPORT?GLCTC_TRANSPORT.play():HUB.playAll()}catch(e){}}
-   else if(a===3){mkReleaseAll();mkSetSustain(false);try{window.GALACTIC_ONE?.panic?.();window.GALACTIC_VOX?.panic?.()}catch(e){}}
+   else if(a===3){mkReleaseAll();mkSetSustain(false);sp_StopAll();try{window.GALACTIC_ONE?.panic?.();window.GALACTIC_VOX?.panic?.()}catch(e){}}
    else if(a===4)mkSetSustain(!mkSustain);
    else if(a===5){mkOct=Math.max(0,mkOct-1);renderMasterKeys()}
    else if(a===6){mkOct=Math.min(7,mkOct+1);renderMasterKeys()}
    else if(a===7)mkReset.click();
    mkStatus.textContent='PAD '+(i+1)+' · '+perfPadActions[a];
   });
-  const wrap=el('div',{class:'glctc-assign'});wrap.append(b,select);perfPads.append(wrap);perfPadRows.push({b,select});
+  const sp_Up=()=>{if(b._padK!=null){sp_Release(b._padK);b._padK=null}};['pointerup','pointercancel','pointerleave'].forEach(t=>b.addEventListener(t,sp_Up));
+  const tag=el('span',{class:'gpe-tag',text:'EMPTY'}),edit=el('button',{class:'gpe-editbtn',type:'button',text:'⚙ EDIT',title:'Load, remove and set how pad '+(i+1)+' plays',onclick:()=>sp_Edit(perfBank*16+i)});
+  const wrap=el('div',{class:'glctc-assign'});wrap.append(b,select,el('div',{class:'gpe-foot'},tag,edit));perfPads.append(wrap);perfPadRows.push({b,select,tag});samplePadLabel(i);
  });
 
  /* ---- v42: BANK A / B / C / D under the 16 performance pads ---- */
@@ -6302,7 +6443,7 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
   sampleLoad:async k=>{const p=masterSamples[k];if(!p)return null;if(!p.buf){const c=ensureBuses();p.buf=await c.decodeAudioData(await p.blob.arrayBuffer())}return p.buf},
   infoAt:k=>{const b=k>>4,i=k&15,v=(perfBankAssign[b]&&perfBankAssign[b][i])||(masterSamples[k]?'sample':''),sm=masterSamples[k];return{assigned:!!v,label:v==='sample'?(sm?sm.name:'EMPTY SAMPLE'):v?perfPadActions[Number(v)-1]:'',seq:v==='sample'||(!!v&&[3,4,5,6].includes(Number(v)-1))}},
   fireAt:(k,vel,when,dest)=>{const b=k>>4,i=k&15,v=(perfBankAssign[b]&&perfBankAssign[b][i])||(masterSamples[k]?'sample':'');if(!v)return false;const c=ensureBuses();
-   if(v==='sample'){const p=masterSamples[k];if(!p)return false;if(!p.buf){p.blob.arrayBuffer().then(ab=>c.decodeAudioData(ab)).then(bf=>{p.buf=bf}).catch(()=>{});return false}const n=window.GLCTC_TUNING.attach(c.createBufferSource()),g=c.createGain();n.buffer=p.buf;g.gain.value=vel==null?1:vel;n.connect(g);g.connect((dest&&dest.in)?dest.in:(c._sat||c.destination));masterSampleSources.add(n);n.onended=()=>{masterSampleSources.delete(n);try{n.disconnect();g.disconnect()}catch(e){}};n.start(when||c.currentTime);return true}
+   if(v==='sample'){const p=masterSamples[k];if(!p)return false;if(!p.buf){p.blob.arrayBuffer().then(ab=>c.decodeAudioData(ab)).then(bf=>{p.buf=bf}).catch(()=>{});return false}const n=window.GLCTC_TUNING.attach(c.createBufferSource()),g=c.createGain(),cf=cfgOf(k);n.buffer=cf.rev?sp_RevBuf(c,p.buf):p.buf;n.playbackRate.value=Math.pow(2,cf.pitch/12);g.gain.value=(vel==null?1:vel)*cf.vol;n.connect(g);g.connect((dest&&dest.in)?dest.in:(c._sat||c.destination));masterSampleSources.add(n);n.onended=()=>{masterSampleSources.delete(n);try{n.disconnect();g.disconnect()}catch(e){}};n.start(when||c.currentTime);return true}
    const a=Number(v)-1;if(![3,4,5,6].includes(a))return false;const delay=Math.max(0,((when||0)-c.currentTime)*1000);
    setTimeout(()=>{if(a===3){mkReleaseAll();mkSetSustain(false);try{window.GALACTIC_ONE?.panic?.();window.GALACTIC_VOX?.panic?.()}catch(e){}}else if(a===4)mkSetSustain(!mkSustain);else if(a===5){mkOct=Math.max(0,mkOct-1);renderMasterKeys()}else{mkOct=Math.min(7,mkOct+1);renderMasterKeys()}},delay);return true},
   press:i=>{const r=perfPadRows[i];if(r)r.b.click()},
@@ -7366,7 +7507,7 @@ function glctcBeatGrid(mono, sr, hint){
  const clearChainBtn=liveBtn('CLEAR CHAIN','lv-danger','Remove all current control links',()=>{chainState.targets.forEach(x=>x.classList.remove('chain-picked'));chainState.targets=[];chainState.mode='off';chainButton.classList.remove('on');chainButton.textContent='CHAIN';liveStatus.textContent='CHAIN CLEARED'});
  const liveRecordBtn=liveBtn('● RECORD','lv-rec','Record the currently armed modules to the WAV screen and timeline',()=>{setTab('record');if(!REC.on&&!REC.counting){ST.rec.src=mkSelected.size?[...mkSelected].map(id=>'mod:'+id):['master'];ST.rec.mode=ST.rec.mode||'mix';save();refreshChips()}recToggle();liveStatus.textContent=(REC.on||REC.counting)?'RECORDING LIVE PERFORMANCE…':'RECORD STOPPED · PROCESSING TAKE'},'cnLiveRecord');
  const livePlayBtn=liveBtn('▶ PLAY TAKE','', 'Play the latest recorded take',()=>{if(SC.take){scPlayTake();liveStatus.textContent=SC.src?'PLAYING RECORDED TAKE':'TAKE PLAYBACK STOPPED'}else{toast('No recorded take yet. Press RECORD first.');setTab('record')}},'cnLivePlay');
- const liveStopBtn=liveBtn('■ STOP','', 'Stop recording, take playback and module playback',()=>{if(REC.on||REC.counting)recStop();scStopTake();try{if(window.GLCTC_TRANSPORT)GLCTC_TRANSPORT.stop();else{stopPlayback(true);HUB.stopAll()}}catch(e){}scBtns();liveStatus.textContent='LIVE STOP · PLAYBACK AND MODULES STOPPED'},'cnLiveStop');
+ const liveStopBtn=liveBtn('■ STOP','', 'Stop recording, take playback, module playback and looping pads',()=>{try{sp_StopAll()}catch(e){}if(REC.on||REC.counting)recStop();scStopTake();try{if(window.GLCTC_TRANSPORT)GLCTC_TRANSPORT.stop();else{stopPlayback(true);HUB.stopAll()}}catch(e){}scBtns();liveStatus.textContent='LIVE STOP · PLAYBACK AND MODULES STOPPED'},'cnLiveStop');
  const liveDeleteBtn=liveBtn('✕ DELETE','lv-danger','Delete the latest recorded take from the timeline and take preview',()=>{
   if(!SC.take){toast('There is no recorded take selected to delete.');return}
   const nm=SC.take.name;if(!confirm('Delete recorded take “'+nm+'” from the project? This cannot be undone.'))return;
@@ -7405,7 +7546,7 @@ function glctcBeatGrid(mono, sr, hint){
  /* Bubble-phase pointermove runs after each custom knob/fader has updated its own value. */
  document.addEventListener('pointermove',e=>{const t=chainCandidate(e.target);if(t)chainPropagate(t)},false);
  document.addEventListener('pointerup',e=>{const t=chainCandidate(e.target);if(t)chainPropagate(t)},true);
- const cnKeyboard=el('div',{class:'cn-keysec'},el('div',{class:'cn-sechead'},el('b',{text:'KEYBOARD'}),el('span',{text:'PLAYS EVERY ARMED CHANNEL · WHEELS · 8 ASSIGNABLE KNOBS · 16 PADS · 2 RIBBONS · PC KEYS A W S E D F T G Y H U J K O L P · Z/X OCTAVE · SPACE HOLD'})),livePanel,perfShelf,mkChassis,mkUtil);
+ const cnKeyboard=el('div',{class:'cn-keysec'},el('div',{class:'cn-sechead'},el('b',{text:'KEYBOARD'}),el('span',{text:'PLAYS EVERY ARMED CHANNEL · WHEELS · 8 ASSIGNABLE KNOBS · 16 PADS · 2 RIBBONS · PC KEYS A W S E D F T G Y H U J K O L P · Z/X OCTAVE · SPACE HOLD'})),perfShelf,livePanel,mkChassis,mkUtil);
  body.innerHTML='';
  {const pp=$('pad64Panel');if(pp)pp.append(padC.c);else body.append(padC.c)}   /* v154: PAD-64 has its own panel under GALACTIC VOX */
  body.append(el('div',{class:'cn'},cnBarEl,(document.getElementById('pad64Panel')?null:padC.c),cnScreen,cnMixer,cnKeyboard,det('SCENES · SNAPSHOT THE WHOLE CONSOLE',scC.c),det('SEQUENCE TRACKS · TIMELINE',trkC.c)));

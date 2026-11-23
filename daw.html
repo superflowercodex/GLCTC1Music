@@ -7356,7 +7356,7 @@ function glctcBeatGrid(mono, sr, hint){
     {const made=swStems.map((b,i)=>swToTimeline(b,mlName(r)+' · '+swStemNames[i],0,{bpm:T,key:r.key}));try{made.forEach(t=>{t.remixStem=true;t.clips.forEach(c=>{const a=project.assets.find(x=>x.id===c.assetId);if(a)a.remixStem=true;if(lead>1e-4){c.offset=(c.offset||0)+lead;c.length=Math.max(.25,c.length-lead)}if(startB>1e-4)c.start=startB});const k=project.tracks.indexOf(t);if(k>=0){project.tracks.splice(k,1)}});project.tracks.unshift(...made);selectedTrackId=made[0]&&made[0].id;window.GLCTC_SONG?.fitRemix(Math.max(...made.flatMap(t=>t.clips.map(c=>c.start+c.length))));renderAll();markDirty()}catch(e){console.warn('remix stem order',e)}}swSay('★ REMIX READY · '+swStems.length+' STEMS ON THE TIMELINE AT BAR 1 · '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm)+' BPM'+(grid?' · BEAT GRID LOCKED (TEMPO '+(Math.round(T*100)/100)+(lead>1e-4?' · LEAD-IN '+Math.round(lead*6e4/T)+' MS TRIMMED':startB>1e-4?' · INTRO ALIGNED TO THE BAR':'')+')':' · LIBRARY TEMPO (NO CLEAR BEAT FOUND)')+' · PRESS ▶ AND PLAY THE MODULES OVER IT');toast('Remix ready: stems on the timeline at bar 1, master BPM '+GLCTC_CLOCK.fmt(GLCTC_CLOCK.bpm))};
    if(r.stems?.some(Boolean)){if(await mlLoadStems(r))toTl();return}
    const b=await mlLoadMaster(r);if(!b)return;swAfterSplit=()=>{swStemNames=STEM_NAMES.slice();toTl()};swSplit()}catch(e){toast(e.message)}}
- window.GLCTC_ML={remixById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();
+ window.GLCTC_ML={findById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();return rows.find(x=>sid&&String(x.id)===sid)||rows.find(x=>sc&&String(x.cat).trim().toLowerCase()===sc)||null},remixById:async(id,cat)=>{const rows=await mlFetch(false),sid=String(id==null?'':id),sc=String(cat||'').trim().toLowerCase();
    const r=rows.find(x=>sid&&String(x.id)===sid)||rows.find(x=>sc&&String(x.cat).trim().toLowerCase()===sc);
    if(!r)throw Error('That track was not found in the Master Library');await mlRemix(r);return r}};
  const mlBtn=scB('☁ MASTER LIBRARY',()=>{if(mlBox.style.display==='none')mlOpen(false);else mlBox.style.display='none'},'Browse the GLCTC1 Play Space Master Library: load masters, stems, or remix a track');
@@ -14431,14 +14431,19 @@ window.addEventListener('glctc-tuning',()=>{PCACHE.clear();KCACHE.clear()});
  const wait=(ok,ms)=>new Promise((res,rej)=>{const t0=Date.now();(function tick(){if(ok())return res();if(Date.now()-t0>ms)return rej(Error('The studio did not finish loading'));setTimeout(tick,150)})()});
  async function go(){
   try{
-   await wait(()=>window.GLCTC_STUDIO_MODE&&window.GLCTC_ML,30000);
+   await wait(()=>window.GLCTC_STUDIO_MODE&&window.GLCTC_ML&&window.GLCTC_REMIX,30000);
    await new Promise(r=>setTimeout(r,600));            // let the studio finish its own start-up room
    window.GLCTC_STUDIO_MODE.set('remix');
    say('★ LOADING YOUR SONG INTO THE REMIX ROOM…');
-   const r=await window.GLCTC_ML.remixById(id,cat);
-   say('★ '+((r.artist?r.artist+' — ':'')+(r.title||r.cat))+' · READY TO REMIX · PRESS ▶',9000);
+   /* v204: the song goes into the REMIX DECK · library stems (or a 4-stem split) · then the FIRST CUT is offered */
+   const r=await window.GLCTC_ML.findById(id,cat);if(!r)throw Error('That track was not found in the Master Library');
+   const nm=(r.artist?r.artist+' — ':'')+(r.title||r.cat);
+   setTimeout(()=>{const d=document.getElementById('rxPanel');if(d&&d.__noJump)d.__noJump({behavior:'smooth',block:'start'});else if(d)d.scrollIntoView({behavior:'smooth',block:'start'})},300);
+   say('★ '+nm+' · LOADING INTO THE REMIX DECK (SPLITTING STEMS IF NEEDED)…');
+   const ok=await window.GLCTC_REMIX.loadRow(r);if(!ok)throw Error('the Remix Deck could not load it');
+   say('★ '+nm+' · STEMS READY · CHECK THE ✂ FIRST CUT, APPLY IT, THEN PRESS ▶ PLAY IN SYNC',10000);
    try{history.replaceState(null,'',location.pathname)}catch(e){}   // a refresh will not reload it again
-  }catch(e){console.warn('remix arrival',e);say('COULD NOT OPEN THE REMIX · '+e.message+' · USE ☁ MASTER LIBRARY → ★ REMIX',12000)}
+  }catch(e){console.warn('remix arrival',e);say('COULD NOT OPEN THE REMIX · '+e.message+' · OPEN THE REMIX DECK AND USE ☁ LIBRARY',12000)}
  }
  if(document.readyState==='complete')go();else window.addEventListener('load',go,{once:true});
 })();
@@ -17439,7 +17444,7 @@ async function libOpen(){libBox.style.display='';const L=KIT().lib;if(!L){libRow
 async function libLoad(r){const L=KIT().lib;libBox.style.display='none';try{const nm=L.name(r),list=r.stems.map((p,i)=>[p,i]).filter(x=>x[0]);
  if(list.length>=2){const bufs=[];for(const [p,i] of list){say('DOWNLOADING STEM '+(i+1)+' OF '+list.length+' · '+nm+'…');bufs.push(await L.audio(p,'STEM '+(i+1)))}await loadSong(null,nm,{stems:bufs,names:list.map(x=>'STEM '+(x[1]+1)),bpm:r.bpm})}
  else if(r.master){say('DOWNLOADING '+nm+'…');const b=await L.audio(r.master,'MASTER');await loadSong(b,nm,{bpm:r.bpm})}
- else throw Error('This track has no audio')}catch(e){say('LIBRARY LOAD FAILED · '+e.message,true)}}
+ else throw Error('This track has no audio');return !!RX.stems}catch(e){say('LIBRARY LOAD FAILED · '+e.message,true);return false}}
 
 /* ---------------- first cut ---------------- */
 function applyCut(){if(!RX.raw||RX.proposed==null)return;const was=running();stop();
@@ -17671,7 +17676,7 @@ const st=document.createElement('style');st.textContent=`
 `;
 document.head.append(st);
 setTimeout(draw,200);
-window.GLCTC_REMIX={load:loadSong,file:fromFile,play,stop,applyCut,state:()=>({name:RX.name,bpm:RX.bpm,cut:RX.cut,proposed:RX.proposed,cutApplied:RX.cutApplied,running:running(),pos:posNow(),L0:RX.L0,L1:RX.L1,stems:RX.stems?RX.stems.length:0,len:RX.stems?RX.stems[0].duration:0}),_analyse:analyse};
+window.GLCTC_REMIX={loadRow:r=>libLoad(r),load:loadSong,file:fromFile,play,stop,applyCut,state:()=>({name:RX.name,bpm:RX.bpm,cut:RX.cut,proposed:RX.proposed,cutApplied:RX.cutApplied,running:running(),pos:posNow(),L0:RX.L0,L1:RX.L1,stems:RX.stems?RX.stems.length:0,len:RX.stems?RX.stems[0].duration:0}),_analyse:analyse};
 })();
 
 </script>

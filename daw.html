@@ -3256,7 +3256,7 @@ let blOH=null;
 /* v128 IN KEY: the kick's body is tuned to the song's root note (it used to ring at one fixed pitch in every key and clash with the bass) */
 function blSnap(target,lo,hi){try{const H=window.GLCTC_SONG_HARM;if(!H||!Number.isFinite(+H.key))return target;const r0=440*Math.pow(2,((((+H.key)%12)+12)%12-9)/12);let best=target,bd=1e9;[1,1.4983].forEach(m=>{for(let k=-6;k<=4;k++){const f=r0*m*Math.pow(2,k);if(f<lo||f>hi)continue;const d=Math.abs(Math.log(f/target));if(d<bd){bd=d;best=f}}});return best}catch(e){return target}}
 function blKickHz(pitch){try{const H=window.GLCTC_SONG_HARM;if(H&&Number.isFinite(+H.key)){let f=440*Math.pow(2,((((+H.key)%12)+12)%12-9)/12);while(f>=56)f/=2;while(f<38)f*=2;return f}}catch(e){}return Math.max(30,47*pitch)}
-function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;const ctx=ensureAudio();if(ctx.state==='suspended')ctx.resume();const t=Math.max(when??0,ctx.currentTime+GLCTC_LEAD());/* v65 de-click: live hits land 12 ms ahead so the attack is never cut */const v=state.voices[index],type=names[index].type;if(v.mute||state.voices.some(x=>x.solo)&&!v.solo)return;const vel=Math.max(.02,Math.min(1,velocity)),tempoRatio=1   /* v129 HI-FI: drums keep their pitch at every tempo (they were tape-sped by bpm/130) */,pitch=Math.pow(2,v.pitch/12)*tempoRatio,dur=v.decay;const out=ctx.createGain();out.gain.value=0;const srcs=[];const osc=(freq,wave='sine',end=dur)=>{const o=window.GLCTC_TUNING.attach(ctx.createOscillator()),g=ctx.createGain();o.type=wave;o.frequency.setValueAtTime(Math.max(20,freq*pitch),t);o.connect(g);g.connect(out);o.start(t);o.stop(t+Math.max(.03,end));srcs.push(o);return {o,g}};const noise=(filterType,freq,end,level=1)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=noiseBuffer(ctx);f.type=filterType;f.frequency.setValueAtTime(freq,t);f.Q.value=.7;g.gain.setValueAtTime(Math.max(.0001,vel*level),t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.025,end));s.connect(f);f.connect(g);g.connect(out);s.start(t);s.stop(t+Math.max(.03,end));srcs.push(s);return g};
+function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;const ctx=ensureAudio();if(ctx.state==='suspended')ctx.resume();const t=Math.max((when??0)+(when!=null&&window.GLCTC_FEEL&&names[index]?GLCTC_FEEL(GLCTC_ROLE80(names[index].type),velocity):0),ctx.currentTime+GLCTC_LEAD());   /* v161 feel *//* v65 de-click: live hits land 12 ms ahead so the attack is never cut */const v=state.voices[index],type=names[index].type;if(v.mute||state.voices.some(x=>x.solo)&&!v.solo)return;const vel=Math.max(.02,Math.min(1,velocity*(window.GLCTC_HUMAN?GLCTC_HUMAN(type):1))),tempoRatio=1   /* v129 HI-FI: drums keep their pitch at every tempo (they were tape-sped by bpm/130) */,pitch=Math.pow(2,v.pitch/12)*tempoRatio*(window.GLCTC_VAR?GLCTC_VAR('p',type):1),dur=v.decay*(window.GLCTC_VAR?GLCTC_VAR('d',type):1);   /* v161 round-robin variation */const out=ctx.createGain();out.gain.value=0;const srcs=[];const osc=(freq,wave='sine',end=dur)=>{const o=window.GLCTC_TUNING.attach(ctx.createOscillator()),g=ctx.createGain();o.type=wave;o.frequency.setValueAtTime(Math.max(20,freq*pitch),t);o.connect(g);g.connect(out);o.start(t);o.stop(t+Math.max(.03,end));srcs.push(o);return {o,g}};const noise=(filterType,freq,end,level=1)=>{const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=noiseBuffer(ctx);f.type=filterType;f.frequency.setValueAtTime(freq,t);f.Q.value=.7;g.gain.setValueAtTime(Math.max(.0001,vel*level),t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.025,end));s.connect(f);f.connect(g);g.connect(out);s.start(t);s.stop(t+Math.max(.03,end));srcs.push(s);return g};
  const sb=sampleBufferFor(index);let fadeDur=dur;
  if(sb){const sS=window.GLCTC_TUNING.attach(ctx.createBufferSource()),sG=ctx.createGain(),pr=Math.max(.05,pitch);sS.buffer=sb;sS.playbackRate.value=pr;sG.gain.setValueAtTime(vel,t);sS.connect(sG);sG.connect(out);sS.start(t);fadeDur=sb.duration/pr+.03;srcs.push(sS)}
  else if(type==='kick'){const len=Math.max(.12,window.GLCTC_PUNCH?GLCTC_PUNCH.blLen(dur):dur),f1=blKickHz(pitch),sat=blSat(ctx,1.25);sat.connect(out);
@@ -3276,6 +3276,7 @@ function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;
   src.buffer=blMetal(ctx);src.playbackRate.value=Math.max(.5,Math.min(2,pitch));bp.type='bandpass';bp.frequency.value=cl?10500:9000;bp.Q.value=.8;hp.type='highpass';hp.frequency.value=cl?7800:6800;hp.Q.value=.7;
   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vel*(cl?1.1:.9),t+.001);g.gain.exponentialRampToValueAtTime(.0001,t+end);src.connect(bp);bp.connect(hp);hp.connect(g);g.connect(out);src.start(t,Math.random()*.6,end+.05);srcs.push(src);
   noise('highpass',cl?9500:8000,end*.8,cl?.22:.2);fadeDur=Math.max(fadeDur,end);if(!cl)blOH={g,t}}
+ else if((type==='toml'||type==='tomm'||type==='conga')&&window.GLCTC_MEMBRANE&&(!window.GLCTC_CLEAN_ON||GLCTC_CLEAN_ON())){const cg=type==='conga',raw=type==='toml'?98:type==='tomm'?148:205,base=blSnap(raw*pitch,raw*.8,raw*1.25),len=Math.min(cg?.5:.9,Math.max(.08,dur));fadeDur=Math.max(fadeDur,GLCTC_MEMBRANE(ctx,out,t,vel,cg?'conga':'tom',base,len,srcs))}   /* v161 struck membrane */
  else if(type==='toml'||type==='tomm'||type==='conga'){const cg=type==='conga',raw=type==='toml'?98:type==='tomm'?148:205,base=blSnap(raw*pitch,raw*.8,raw*1.25)/pitch,len=Math.min(cg?.45:.9,Math.max(.08,dur));
   const {o,g}=osc(base*(cg?1.25:1.7),'sine',len+.02);o.frequency.exponentialRampToValueAtTime(Math.max(35,base*pitch),t+(cg?.02:.06));g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel,t+.0015);g.gain.exponentialRampToValueAtTime(.0001,t+len);
   const h=osc(base*(cg?2.45:1.5),cg?'sine':'triangle',len*.5);h.o.frequency.exponentialRampToValueAtTime(Math.max(40,base*(cg?2.3:1.25)*pitch),t+.04);h.g.gain.setValueAtTime(0,t);h.g.gain.linearRampToValueAtTime(vel*(cg?.28:.16),t+.001);h.g.gain.exponentialRampToValueAtTime(.0001,t+len*.45);
@@ -3289,6 +3290,7 @@ function trigger(index,velocity=.8,when){if(!state||!state.voices[index])return;
  else if(type==='sub'){const f=55,len=Math.max(.15,dur);const a=osc(f*2.4,'sine',len+.05);a.o.frequency.setValueAtTime(Math.max(20,f*2.4*pitch),t);a.o.frequency.exponentialRampToValueAtTime(Math.max(20,f*pitch),t+.045);a.g.gain.setValueAtTime(.0001,t);a.g.gain.linearRampToValueAtTime(vel,t+.003);a.g.gain.setValueAtTime(vel,t+.07);a.g.gain.exponentialRampToValueAtTime(.0001,t+len);const h=osc(f*2,'sine',len*.7+.05);h.o.frequency.setValueAtTime(Math.max(20,f*2*pitch),t);h.g.gain.setValueAtTime(vel*.3,t);h.g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.1,len*.7));const h3=osc(f*3,'sine',.2);h3.o.frequency.setValueAtTime(Math.max(20,f*3*pitch),t);h3.g.gain.setValueAtTime(vel*.1,t);h3.g.gain.exponentialRampToValueAtTime(.0001,t+.16)}   /* harmonics let the sub read on small speakers */
  else if(type==='cow'){const len=Math.min(.5,Math.max(.08,dur)),bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=1300;bp.Q.value=.5;bp.connect(out);const cb=(typeof blSnap==='function'?blSnap(540*pitch,470,640)/pitch:540);[cb,cb*1.4983].forEach((f,j)=>{const {o,g}=osc(f,'square',len);g.disconnect();g.connect(bp);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel*(j?.4:.5),t+.001);g.gain.exponentialRampToValueAtTime(vel*.14,t+.03);g.gain.exponentialRampToValueAtTime(.0001,t+len)})}   /* v120: 808 cowbell, two-stage decay */
  else if(type==='perc1'||type==='perc2'){const f=type==='perc1'?460:780;const {o,g}=osc(f,type==='perc1'?'triangle':'sine',Math.min(.3,dur));o.frequency.setValueAtTime(f*pitch,t);o.frequency.exponentialRampToValueAtTime(Math.max(50,f*.7*pitch),t+.035);g.gain.setValueAtTime(vel,t);g.gain.exponentialRampToValueAtTime(.0001,t+Math.max(.04,Math.min(.3,dur)));if(type==='perc2')noise('bandpass',2600,Math.min(.06,dur),.25)}
+ if(!sb&&window.GLCTC_DRUM_LAYER)try{GLCTC_DRUM_LAYER(ctx,type,t,vel,out,pitch,srcs,v,ctx===audioCtx?WSB('bl',masterGain):ctx.destination)}catch(e){}   /* v160 layers + shared room */
  let pending=srcs.length;for(const src of srcs)src.addEventListener('ended',()=>{try{src.disconnect()}catch(e){}if(--pending===0){try{out.disconnect()}catch(e){}}},{once:true});routeSource(ctx,index,out);out.gain.setValueAtTime(0,t);out.gain.linearRampToValueAtTime(1,t+.0012);/* v65: 1.2 ms fade-in = no click, keeps the punch */out.gain.setTargetAtTime(.0001,t+Math.max(.05,fadeDur),.04);lastHit=performance.now();$b('blMeter').style.width=Math.round(vel*100)+'%';setTimeout(()=>{$b('blMeter').style.width='0%'},120);
 }
 let blUiQueue=[],blLit=-1;
@@ -3416,7 +3418,8 @@ const _blRenderAll=renderAll;renderAll=function(){const r=_blRenderAll.apply(thi
   set(X.lp.frequency,ch.tone<0?Math.max(500,20000*Math.pow(2,ch.tone*4.6)):20000);set(X.shelf.gain,ch.tone*9);set(X.pan.pan,ch.pan);set(X.sendD.gain,ch.delay||0);set(X.sendR.gain,ch.reverb||0);
   return X}
  function voice(v,vel=.8,when){
-  const c=ctx(),t=Math.max(when??0,c.currentTime+GLCTC_LEAD()),b=getBus(c),ch0=S.channels[v]||{level:1,pan:0,tone:0,delay:0,reverb:0};
+  try{if(window.GLCTC_HUMAN9)vel=Math.max(.02,Math.min(1,vel*GLCTC_HUMAN9(v)))}catch(e){}   /* v160 */
+  const c=ctx(),t=Math.max((when??0)+(when!=null&&window.GLCTC_FEEL?GLCTC_FEEL(GLCTC_ROLE09(v),vel):0),c.currentTime+GLCTC_LEAD()),b=getBus(c),ch0=S.channels[v]||{level:1,pan:0,tone:0,delay:0,reverb:0};
   const MK=(window.__glctcMachine&&window.GLCTC_SONG&&GLCTC_SONG.running&&GLCTC_SONG.running())?window.__glctcMachine:null;
   if(MK&&((S.bitcrush||0)>0||(S.filter??1)<1||S.drive>.2||S.room>.15)){S.bitcrush=0;S.filter=1;S.drive=Math.min(S.drive,.12);S.room=Math.min(S.room,.12);try{updateFx()}catch(e){}}
   const ch=MK&&v<=4?{...ch0,tone:Math.max(0,ch0.tone||0),level:Math.max(v<=2?.9:.6,ch0.level==null?1:ch0.level),delay:v<=2?0:(ch0.delay||0),pan:v<=2?0:(ch0.pan||0)}:ch0;   /* v131 */
@@ -3816,7 +3819,7 @@ window.addEventListener('glctc-tuning',()=>paintSteps());
  out.gain.setTargetAtTime(.0001,Math.max(when+.005,envEnd),Math.max(.012,Math.min(.06,S.decay*.18)));
  const osc=window.GLCTC_TUNING.attach(ctx.createOscillator());osc.type=S.wave;osc.frequency.setValueAtTime(slide&&prevFreq?prevFreq:freq,when);if(slide&&prevFreq)osc.frequency.linearRampToValueAtTime(freq,when+S.slideTime);else osc.frequency.setValueAtTime(freq,when);osc.connect(out);osc.start(when);osc.stop(voiceEnd);
  if(S.sub>.001){const sub=window.GLCTC_TUNING.attach(ctx.createOscillator()),sg=ctx.createGain();sub.type=S.subWave||'square';sub.frequency.setValueAtTime(freq/2,when);sg.gain.value=S.sub*.48;sub.connect(sg);sg.connect(out);sub.start(when);sub.stop(voiceEnd);LEE_SUB=sub}
- out.connect(filt);filt.connect(dest);activeNodes.push(osc);osc.onended=()=>{activeNodes=activeNodes.filter(x=>x!==osc)};LEE_LAST={out,osc,sub:LEE_SUB};return freq}
+ out.connect(filt);filt.connect(dest);if(window.GLCTC_BASS_LAYER)GLCTC_BASS_LAYER(ctx,filt,dest,S);activeNodes.push(osc);osc.onended=()=>{activeNodes=activeNodes.filter(x=>x!==osc)};LEE_LAST={out,osc,sub:LEE_SUB};return freq}
  function leeKill(v,tc){if(!v)return;const ctx=ensureAudio(),t=ctx.currentTime;try{v.out.gain.cancelScheduledValues(t);v.out.gain.setValueAtTime(Math.max(.0001,v.out.gain.value),t);v.out.gain.setTargetAtTime(.0001,t,tc)}catch(e){}const end=t+tc*8+.02;try{v.osc.stop(end)}catch(e){}try{v.sub&&v.sub.stop(end)}catch(e){}}
  function leeLiveOn(n,id,glide){const ctx=ensureAudio();ctx.resume();if(S.tape)return;const t=ctx.currentTime+.005,fx=getFx(ctx,WSB('lee',masterGain||ctx.destination)),prev=lastFreq,old=leeLive;lastFreq=voice(ctx,n,t,30,false,!!(glide&&prev),prev,fx.input);leeLive={id,n,v:LEE_LAST,t0:performance.now()};if(old)leeKill(old.v,glide?.02:.01)}
  function leeLiveOff(id,n){const L=leeLive;if(!L||L.id!==id||(n!=null&&L.n!==n))return;leeLive=null;const rel=Math.max(.012,Math.min(.06,S.decay*.18)),wait=Math.max(0,120-(performance.now()-L.t0));wait?setTimeout(()=>leeKill(L.v,rel),wait):leeKill(L.v,rel)}
@@ -6572,12 +6575,12 @@ function applyLimiter(){const c=audioCtx,l=c&&c._lim;if(!l)return;let T,R;if(ST.
  const laneMuted=l=>{const sl=P().slots,s=sl[l];return s.mute||(sl.some(x=>x.solo)&&!s.solo)};
  function hit(l,vel,when){
   const c=ensureAudio(),b=bus('ws'),s=P().slots[l];if(!b||!s||laneMuted(l))return;
-  const g=c.createGain(),pn=c.createStereoPanner(),t=Math.max(when??0,c.currentTime+GLCTC_LEAD());g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(s.level,t+.0012);/* v65 de-click */pn.pan.value=s.pan;g.connect(pn);pn.connect(b.in);let tail=2600;
+  const g=c.createGain(),pn=c.createStereoPanner(),t=Math.max((when??0)+(when!=null&&window.GLCTC_FEEL?GLCTC_FEEL(GLCTC_ROLEPAD(s.kind),vel):0),c.currentTime+GLCTC_LEAD());g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(s.level,t+.0012);/* v65 de-click */pn.pan.value=s.pan;g.connect(pn);pn.connect(b.in);let tail=2600;
   const oi=ovIdx(s),PA=window.GLCTC_PERF_PADS,ob=(oi>=0&&PA&&PA.sampleBuf)?PA.sampleBuf(oi):null;let ovOnly=false;
   if(oi>=0&&PA&&!ob&&PA.sampleLoad)PA.sampleLoad(oi).catch(()=>{});
   if(ob){const osrc=window.GLCTC_TUNING.attach(c.createBufferSource()),oe=c.createGain();osrc.buffer=ob;oe.gain.value=vel;osrc.connect(oe);oe.connect(g);osrc.start(t);tail=Math.max(tail,ob.duration*1000+400);ovOnly=!!s.ovOnly}
   if(ovOnly){}else if(s.smp&&SMP[l]){const src=window.GLCTC_TUNING.attach(c.createBufferSource()),e=c.createGain(),rate=Math.pow(2,s.tune/12),dur=SMP[l].duration/rate;src.buffer=SMP[l];src.playbackRate.value=rate;e.gain.value=vel;src.connect(e);e.connect(g);src.start(t);if(s.decay<1){e.gain.setValueAtTime(vel,t+dur*s.decay*.75);e.gain.linearRampToValueAtTime(0,t+dur*s.decay)}tail=dur*1000+400}
-  else synth(c,s.kind,vel,t,g,s.tune,s.decay);
+  else synth(c,s.kind,vel,t,g,s.tune,s.decay*(window.GLCTC_VAR?GLCTC_VAR('d','perc1'):1));
   GLCTC_AT(c,t+tail/1000,()=>{try{g.disconnect();pn.disconnect()}catch(e){}},tail+Math.max(0,(t-c.currentTime)*1000));   /* v144 */
  }
  const pat=()=>P().pats[P().act];
@@ -8408,6 +8411,226 @@ document.addEventListener('contextmenu',e=>{if(e.target.closest('button,.pad,.vx
 document.addEventListener('selectstart',e=>{const t=e.target&&e.target.nodeType===1?e.target:(e.target&&e.target.parentElement);if(t&&t.closest('button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.lee303-key,.s101-key,.bl-pad,.pl-keys,.k37-keys,.k37-wheel,.k37-knob,[role="slider"]'))e.preventDefault()},true);
 document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-pad,.pk,.g2-piano,.g2-whtrack,.gk-dial,.lee303-key,.s101-key,.bl-pad,.pl-keys,[role="slider"]'))e.preventDefault()},true);
 </script>
+<script id="glctc1-v160-clean-layered">
+/* ===== v160 CLEAN & LAYERED =====
+   The composer was stacking every module in every drop with dense parts and machine-flat drum hits, so songs sounded
+   cluttered and "preset". This switch (on by default, SONG COMPOSER > ◇ CLEAN & LAYERED) changes three things:
+   1 ARRANGEMENT  each section has a budget of drum modules and musical modules, one melody voice at a time,
+                  and the Instrument Designer layers pads UNDER the stab instead of firing six layers at once.
+   2 PARTS        leads phrase in fewer, longer notes; stabs and vocal chops leave space; drum grooves keep one
+                  percussion colour, not five; hats get a played velocity contour instead of one flat level.
+   3 SOUND        every drum hit is slightly different (velocity / tone, like a player), the snare gets a shell
+                  tone and wire rattle, the clap is spread in stereo, and snare / clap / rim / toms / hats share
+                  one short stereo room - so the kit sounds like one kit in one space. The kick stays dry and mono.
+                  New lead patches get a wider unison, a sub layer and chorus so they sit thick behind fewer notes. */
+(()=>{'use strict';
+ const LS='glctc1.clean';
+ window.GLCTC_CLEAN_ON=function(){try{const e=document.getElementById('gscClean');if(e)return e.checked;return localStorage.getItem(LS)!=='0'}catch(e){return true}};
+ const cl=(x,a,b)=>Math.max(a,Math.min(b,x));
+ const met=i=>i%16===0?4:i%8===0?3:i%4===0?2.2:i%2===0?1.4:.6;
+
+ /* ---------- 2 PARTS ---------- */
+ function thinRow(steps,from,to,max,isOn,score,clear){const idx=[];for(let i=from;i<to;i++)if(steps[i]&&isOn(steps[i]))idx.push(i);
+  if(idx.length<=max)return;const keep=new Set([idx[0]]);idx.slice(1).sort((a,b)=>score(b)-score(a)).slice(0,max-1).forEach(i=>keep.add(i));
+  idx.forEach(i=>{if(!keep.has(i))clear(i)})}
+ function isArp(steps,len){const on=[];for(let i=0;i<len;i++)if(steps[i]&&steps[i].on)on.push(i);if(on.length<10)return false;
+  const g=on.slice(1).map((x,i)=>x-on[i]);return g.every(x=>x===g[0])}
+ function lead(p){if(!p||!Array.isArray(p.steps))return;const L=p.len||p.steps.length,st=p.steps;if(isArp(st,L))return;
+  for(let b=0;b<L;b+=16)thinRow(st,b,Math.min(L,b+16),6,x=>!!x.on,i=>met(i)+(st[i].v||.7),i=>{st[i]=Object.assign({},st[i],{on:0,n:0,a:0,s:0})});
+  const on=[];for(let i=0;i<L;i++)if(st[i].on)on.push(i);
+  on.forEach((i,k)=>{const nx=k+1<on.length?on[k+1]:on[0]+L,gap=nx-i;st[i].g=cl(Math.max(+st[i].g||.5,Math.min(gap*.6,1.4)),.25,Math.min(gap*.85,3))})}
+ function clarify(pack,genre,hand,r){
+  if(!window.GLCTC_CLEAN_ON())return;r=r||Math.random;const jit=a=>(r()*2-1)*a;
+  const roll=/^(psytrance)$/.test(genre),perc=/^(tribalhouse|afrohouse|amapiano|reggae|ska|meditation)$/.test(genre);
+  /* GALACTIC ONE: main lead, alternate and drop-2 lead phrase in up to six notes a bar, held longer */
+  try{if(pack.go&&Array.isArray(pack.go.pats)&&!roll)[0,1,5].forEach(k=>lead(pack.go.pats[k]))}catch(e){console.warn('clean lead',e)}
+  /* 0010110 stab: three hits a bar at most - the stab is punctuation */
+  try{const s=pack.s101&&pack.s101.steps;if(Array.isArray(s))thinRow(s,0,s.length,3,x=>!!x.on,i=>met(i),i=>{s[i]=Object.assign({},s[i],{on:false,accent:false})})}catch(e){}
+  /* GALACTIC VOX: a short sung phrase, three notes, each held to the next */
+  try{const s=pack.vox&&pack.vox.steps;if(Array.isArray(s)){thinRow(s,0,s.length,3,x=>!!x.on,i=>met(i),i=>{s[i]=Object.assign({},s[i],{on:0})});
+   s.forEach((x,i)=>{if(!x.on)return;let k=1;while(k<8&&!s[(i+k)%s.length].on)k++;x.len=Math.max(1,k-.25)})}}catch(e){}
+  /* 80LA8: one percussion colour per groove, ghost snares kept to two a bar */
+  try{if(pack.bl&&Array.isArray(pack.bl.patterns))pack.bl.patterns.forEach((P,k)=>{const S=P&&P.steps;if(!S)return;
+   if(k<=1&&!hand&&!perc){const hits=v=>(S[v]||[]).filter(x=>x&&x.on).length,aux=[5,6,7,8,9,10,11].filter(v=>hits(v)>0);
+    if(aux.length){const best=aux.slice().sort((a,b)=>Math.abs(hits(a)-3)-Math.abs(hits(b)-3))[0];
+     aux.forEach(v=>{if(v!==best)S[v]=S[v].map(()=>({on:false,velocity:.8}))});
+     thinRow(S[best],0,16,4,x=>!!x.on,i=>met(i)+S[best][i].velocity,i=>{S[best][i]={on:false,velocity:.8}})}}
+   if(S[1]){const g=[];S[1].forEach((x,i)=>{if(x&&x.on&&x.velocity<.45)g.push(i)});g.slice(2).forEach(i=>{S[1][i]={on:false,velocity:.8}})}
+   /* played dynamics: downbeat kicks a touch stronger, backbeat firm, every hit a little different */
+   [0,1,2].forEach(v=>{if(S[v])S[v].forEach(x=>{if(x&&x.on)x.velocity=cl(x.velocity*(1+jit(.04)),.2,1)})})})}catch(e){console.warn('clean 80LA8',e)}
+  /* DIVINE09 tops: a hat contour - quiet 16ths, firm off-beats, open hats rationed */
+  try{if(pack.mine&&Array.isArray(pack.mine.patterns))pack.mine.patterns.forEach(rows=>{if(!Array.isArray(rows))return;
+   const H=rows[3];if(Array.isArray(H))H.forEach((x,i)=>{if(!x||!x.on)return;const p=i%16,base=p%4===2?.9:p%4===0?.76:.52;
+    x.velocity=cl((x.velocity||.8)*(.75+.35*(base-.52)/.38)+jit(.04)-(Math.floor(i/16)%2?.025:0),.15,1);x.accent=x.accent&&p%4===2});
+   const O=rows[4];if(Array.isArray(O))for(let b=0;b<O.length;b+=16)thinRow(O,b,b+16,3,x=>!!x.on,i=>met(i+2),i=>{O[i]={on:false,accent:false,velocity:.8}});
+   const R=rows[9];if(Array.isArray(R))R.forEach((x,i)=>{if(x&&x.on)x.velocity=cl((i%4===0?.82:.6)+jit(.05),.2,1)})})}catch(e){console.warn('clean DIVINE09',e)}
+  pack.flavour=pack.flavour||{};pack.flavour.clean=1;
+ }
+ window.GLCTC_CLARIFY=clarify;
+
+ /* ---------- 3 SOUND: humanised hits ---------- */
+ const HUM={kick:.025,snare:.06,clap:.07,hatc:.1,hato:.08,toml:.06,tomm:.06,conga:.08,rim:.07,cow:.05,perc1:.07,perc2:.07};
+ window.GLCTC_HUMAN=function(type){if(!window.GLCTC_CLEAN_ON())return 1;const a=HUM[type]||.05;return 1+(Math.random()*2-1)*a};
+ window.GLCTC_HUMAN9=function(v){if(!window.GLCTC_CLEAN_ON())return 1;const a=v===0?.025:v<=2?.06:v===3||v===4||v===9?.1:.07;return 1+(Math.random()*2-1)*a};
+
+ /* ---------- 3 SOUND: layered snare / clap and one shared stereo room ---------- */
+ const NB=new WeakMap(),ROOM=new WeakMap();
+ function nbuf(c){let b=NB.get(c);if(b)return b;const n=c.sampleRate*1.5|0;b=c.createBuffer(1,n,c.sampleRate);const d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;NB.set(c,b);return b}
+ function roomIR(c){const sr=c.sampleRate,len=Math.floor(sr*.42),ir=c.createBuffer(2,len,sr);
+  const taps=[[.0071,.55],[.0113,.42],[.0167,.36],[.0229,.3],[.031,.24],[.0397,.2]];
+  for(let ch=0;ch<2;ch++){const a=ir.getChannelData(ch);let lp=0;
+   taps.forEach(([t,g],j)=>{const i=Math.floor((t*(ch?1.13:.91)+j*.0007)*sr);if(i<len)a[i]+=(j%2===ch?1:-1)*g});
+   for(let i=Math.floor(sr*.004);i<len;i++){const x=i/sr;lp+=((Math.random()*2-1)-lp)*(.55-.4*(i/len));a[i]+=lp*.33*Math.exp(-x/.085)}}
+  return ir}
+ function room(c,dest){let m=ROOM.get(c);if(!m)ROOM.set(c,m=new Map());let R=m.get(dest);if(R)return R;
+  const inp=c.createGain(),hp=c.createBiquadFilter(),lp=c.createBiquadFilter(),cv=c.createConvolver(),out=c.createGain();
+  hp.type='highpass';hp.frequency.value=320;hp.Q.value=.6;lp.type='lowpass';lp.frequency.value=7200;lp.Q.value=.5;cv.buffer=roomIR(c);out.gain.value=.9;
+  inp.connect(hp);hp.connect(cv);cv.connect(lp);lp.connect(out);out.connect(dest);R={inp};m.set(dest,R);return R}
+ const SEND={snare:.32,clap:.36,rim:.2,toml:.24,tomm:.24,conga:.2,hatc:.09,hato:.12,perc1:.14,perc2:.14,cow:.1};
+ window.GLCTC_DRUM_LAYER=function(c,type,t,vel,out,pitch,srcs,voice,dest){
+  if(!window.GLCTC_CLEAN_ON()||voice&&voice.sampleData)return;
+  const env=(g,peak,a,end)=>{g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,peak),t+a);g.gain.exponentialRampToValueAtTime(.0001,t+end)};
+  const ns=(type0,f,q,peak,end,delay,pan)=>{const s=c.createBufferSource(),bf=c.createBiquadFilter(),g=c.createGain();s.buffer=nbuf(c);bf.type=type0;bf.frequency.value=f;bf.Q.value=q;
+   const t0=t+(delay||0);g.gain.setValueAtTime(.0001,t);g.gain.setValueAtTime(.0001,t0);g.gain.linearRampToValueAtTime(Math.max(.0002,peak),t0+.0015);g.gain.exponentialRampToValueAtTime(.0001,t0+end);
+   s.connect(bf);bf.connect(g);if(pan&&c.createStereoPanner){const p=c.createStereoPanner();p.pan.value=pan;g.connect(p);p.connect(out)}else g.connect(out);
+   s.start(t,Math.random()*1.2);s.stop(t0+end+.03);srcs.push(s)};
+  try{
+   if(type==='snare'){   /* shell tone under the crack + a wire rattle just behind it */
+    const o=c.createOscillator(),g=c.createGain(),f=Math.max(120,Math.min(260,176*pitch));o.type='sine';o.frequency.setValueAtTime(f*1.35,t);o.frequency.exponentialRampToValueAtTime(f*.94,t+.035);
+    env(g,vel*.28,.0012,.13);o.connect(g);g.connect(out);o.start(t);o.stop(t+.16);srcs.push(o);
+    ns('bandpass',4300,.9,vel*.17,.17,.003,-.12);ns('bandpass',5600,.9,vel*.13,.15,.006,.14)}
+   else if(type==='clap'){   /* the clap's hands spread across the stereo field */
+    ns('bandpass',1450,1.3,vel*.32,.06,.006,-.35);ns('bandpass',1150,1.3,vel*.28,.07,.014,.35)}
+  }catch(e){}
+  try{const sl=SEND[type];if(sl&&dest){const R=room(c,dest),g=c.createGain();g.gain.value=sl*(voice&&voice.mute?0:Math.min(1.2,(voice&&voice.volume!=null?voice.volume:.82)/.82));out.connect(g);g.connect(R.inp)}}catch(e){}   /* the hit's output node is disconnected when its sources end, which frees the send too */
+ };
+
+ /* ---------- 3 SOUND: thicker new lead patches ---------- */
+ window.GLCTC_THICKEN=function(p,fx,type){if(!window.GLCTC_CLEAN_ON()||!p)return;
+  if(type==='lead'||type==='pad'){p.uni=Math.max(p.uni||1,3);p.spread=Math.max(p.spread||0,14);p.width=Math.max(p.width||0,.8)}
+  else{p.uni=Math.max(p.uni||1,2);p.spread=Math.max(p.spread||0,9)}
+  if(type==='lead'&&!(p.sub>0)){p.sub=.2;p.subwave=0}
+  if(typeof p.o2lvl==='number'&&p.o2lvl<.4)p.o2lvl=.4;
+  if(typeof p.res==='number')p.res=Math.min(p.res,.55);   /* resonant whistle is the most "preset" sound there is */
+  if(fx){fx.chMix=Math.max(fx.chMix||0,.35);if(type!=='pad')fx.rvMix=Math.min(fx.rvMix||0,.22)}};
+})();
+</script>
+<script id="glctc1-v161-feel">
+/* ===== v161 FEEL, SKIN, MOVEMENT, VARIATION, LAYERS (all under ◇ CLEAN & LAYERED) =====
+   FEEL       each genre's drums sit where players put them: a laid-back hip-hop / reggae snare, late hand percussion in
+              tribal and afro house, tight trap and trance. The kick never moves - everything leans against it.
+   SKIN       congas, bongos, tumba, djembe and toms are struck membranes: several resonant modes at the real drum-head
+              ratios, a skin that relaxes in pitch after the hit, and a slap / stick noise. Every hit lands a little
+              differently on the head.
+   MOVEMENT   the song is no longer a loop per section: phrase-end fills every 8 bars and into each new section,
+              a crash where a drop lands, an open-hat lift every 4th bar of a drop.
+   VARIATION  every drum hit varies its pitch and decay slightly, like a set of round-robin recordings.
+   LAYERS     the bass gets a mid / top layer (driven, filtered, stereo above 200 Hz - the low end stays mono and clean),
+              chords and pads are voiced open (drop-2 spread) instead of stacked close. */
+(()=>{'use strict';
+ const on=()=>!window.GLCTC_CLEAN_ON||GLCTC_CLEAN_ON();
+ const genre=()=>{try{return (window.GLCTC_GROOVE&&GLCTC_GROOVE.genre)||(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||''}catch(e){return ''}};
+ const rnd=a=>(Math.random()*2-1)*a;
+
+ /* ---------- FEEL (milliseconds late; negative = pushing) ---------- */
+ const F={def:{s:0,c:1,h:2,p:3,j:1.2,g:2},
+  tight:{s:0,c:0,h:1,p:2,j:.6,g:1},techno:{s:0,c:1,h:1.5,p:3,j:.8,g:2},
+  house:{s:3,c:4,h:4,p:6,j:2,g:3},techhouse:{s:2,c:3,h:3,p:5,j:1.5,g:3},
+  tribal:{s:2,c:3,h:4,p:9,j:3,g:4},dnb:{s:-2,c:-1,h:2,p:3,j:1.5,g:3},breaks:{s:5,c:5,h:3,p:4,j:2,g:4},
+  boombap:{s:14,c:12,h:7,p:9,j:3.5,g:6},westcoast:{s:9,c:8,h:5,p:6,j:2.5,g:5},uk:{s:4,c:4,h:3,p:4,j:2,g:3},
+  trap:{s:2,c:2,h:0,p:2,j:.8,g:1},roots:{s:15,c:12,h:7,p:8,j:3,g:5},pop:{s:1,c:2,h:2,p:3,j:1,g:2},air:{s:6,c:6,h:6,p:10,j:5,g:4}};
+ const FAM=g=>/^(trance|psytrance|happyhardcore|electro|hardhouse)$/.test(g)?'tight':/^(techno|melodictechno)$/.test(g)?'techno':/^(house|deephouse|garage)$/.test(g)?'house':g==='techhouse'?'techhouse':
+  /^(tribalhouse|afrohouse|amapiano)$/.test(g)?'tribal':/^(dnb|jungle|liquid)$/.test(g)?'dnb':/^(breaks|nuskool)$/.test(g)?'breaks':/^(hiphop|eastcoast|lofi)$/.test(g)?'boombap':g==='westcoast'?'westcoast':
+  g==='ukhiphop'?'uk':/^(trap|drill|phonk|south)$/.test(g)?'trap':/^(reggae|ska)$/.test(g)?'roots':/^(pop|synthwave|dubstep)$/.test(g)?'pop':/^(ambient|meditation)$/.test(g)?'air':'def';
+ window.GLCTC_FEEL=function(role,vel){if(!on())return 0;const g=genre();if(!g)return 0;if(role==='k')return 0;const f=F[FAM(g)]||F.def;
+  let ms=(f[role]!=null?f[role]:f.p)+rnd(f.j);if(vel!=null&&vel<.45&&role!=='h')ms+=f.g;return ms/1000};
+ window.GLCTC_ROLE80=t=>t==='kick'?'k':t==='snare'||t==='rim'?'s':t==='clap'?'c':t==='hatc'||t==='hato'?'h':'p';
+ window.GLCTC_ROLE09=v=>v===0?'k':v===1||v===8?'s':v===2?'c':v===3||v===4||v===9?'h':v===10?'k':'p';
+ window.GLCTC_ROLEPAD=k=>k===0||k===8||k===15?'k':k===1?'s':k===2?'c':k===3||k===4?'h':'p';
+
+ /* ---------- VARIATION ---------- */
+ const VP={kick:.0015,snare:.008,clap:.006,hatc:.015,hato:.012,toml:.006,tomm:.006,conga:.008,rim:.008,cow:.004,perc1:.01,perc2:.01},
+       VD={kick:.04,snare:.08,clap:.08,hatc:.12,hato:.08,toml:.07,tomm:.07,conga:.08,rim:.06,cow:.05,perc1:.08,perc2:.08};
+ window.GLCTC_VAR=function(kind,type){if(!on())return 1;return 1+rnd((kind==='p'?VP:VD)[type]??.05)};
+
+ /* ---------- SKIN: struck-membrane model ---------- */
+ const MODES=[1,1.594,2.136,2.296,2.653,2.918];
+ const KIND={
+  tom:  {amp:[1,.5,.32,.2,.12,.08],dec:1,bend:.16,bendT:.045,slap:.16,slapF:6,slapQ:.8,slapD:.012,click:.06,gain:1.6},
+  conga:{amp:[1,.42,.2,.16,.08,.05],dec:1,bend:.05,bendT:.02,slap:.24,slapF:9,slapQ:1,slapD:.014,click:.05,gain:1.4},
+  slap: {amp:[.7,.5,.4,.3,.22,.15],dec:.28,bend:.04,bendT:.01,slap:.75,slapF:7,slapQ:.9,slapD:.05,click:.12,gain:1.25},
+  bongo:{amp:[1,.38,.24,.15,.1,.06],dec:1,bend:.07,bendT:.012,slap:.32,slapF:9,slapQ:1.4,slapD:.01,click:.07,gain:1.45},
+  djembe:{amp:[1,.45,.35,.25,.16,.1],dec:1,bend:.08,bendT:.02,slap:.45,slapF:7,slapQ:.9,slapD:.03,click:.06,thump:.3,gain:1.05}};
+ const NB=new WeakMap();function nb(c){let b=NB.get(c);if(b)return b;const n=c.sampleRate*.5|0;b=c.createBuffer(1,n,c.sampleRate);const d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;NB.set(c,b);return b}
+ const tune=n=>{try{return window.GLCTC_TUNING?GLCTC_TUNING.attach(n):n}catch(e){return n}};
+ window.GLCTC_MEMBRANE=function(c,dest,t,vel,kind,f,len,srcs){const K=KIND[kind]||KIND.tom;vel*=K.gain||1;
+  f*=1+rnd(.006);const pos=.75+Math.random()*.5,L=Math.max(.05,len*K.dec*(1+rnd(.08)));
+  const nModes=c.sampleRate<40000?5:6;const NORM=1+.35*(K.amp.slice(1).reduce((x,y)=>x+y,0));
+  for(let m=0;m<nModes;m++){const fr=f*MODES[m];if(fr>c.sampleRate*.45)break;
+   const a=K.amp[m]*(m?Math.pow(pos,m):1)*vel*.62/NORM,d=L/(1+m*.85),at=.0012+(m?.0004+Math.random()*.0016:0);if(a<.004)continue;   /* staggered mode onsets: no stacked peak */
+   const o=tune(c.createOscillator()),g=c.createGain();o.type='sine';
+   o.frequency.setValueAtTime(fr*(1+K.bend),t);o.frequency.setTargetAtTime(fr,t+.001,K.bendT);
+   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(a,t+at);g.gain.exponentialRampToValueAtTime(.0001,t+at+d);
+   o.connect(g);g.connect(dest);o.start(t);o.stop(t+d+.03);if(srcs)srcs.push(o)}
+  const ns=(type,fc,q,amp,dur)=>{const s=c.createBufferSource(),fl=c.createBiquadFilter(),g=c.createGain();s.buffer=nb(c);fl.type=type;fl.frequency.value=Math.min(fc,c.sampleRate*.45);fl.Q.value=q;
+   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,amp*vel),t+.0008);g.gain.exponentialRampToValueAtTime(.0001,t+dur);s.connect(fl);fl.connect(g);g.connect(dest);s.start(t,Math.random()*.4);s.stop(t+dur+.02);if(srcs)srcs.push(s)};
+  ns('bandpass',Math.min(7000,f*K.slapF*(1+rnd(.1))),K.slapQ,K.slap*(.85+Math.random()*.3),K.slapD*(1+rnd(.15)));
+  ns('highpass',5500,.7,K.click,.004);
+  if(K.thump){const o=tune(c.createOscillator()),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(f*.62,t);o.frequency.exponentialRampToValueAtTime(f*.45,t+.08);
+   g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(K.thump*vel,t+.002);g.gain.exponentialRampToValueAtTime(.0001,t+.16);o.connect(g);g.connect(dest);o.start(t);o.stop(t+.2);if(srcs)srcs.push(o)}
+  return L+.05};
+ /* PAD-64 world kit: bongo hi / lo, conga slap, tumba, djembe now use the membrane model */
+ try{const I=window.GLCTC_INSTR;if(I&&I.play&&!I.__skin){const P0=I.play;I.__skin=1;
+  const MAP={0:['bongo',430,.17],1:['bongo',300,.24],2:['slap',360,.5],3:['conga',165,.55],13:['djembe',200,.34]};
+  I.play=function(k,c,vel,t,dest,r,dec){const idx=k-I.BASE,m=MAP[idx];if(!m||!on()||!c||!dest)return P0.apply(this,arguments);
+   r=r||1;dec=Math.max(.2,dec||1);vel=Math.max(.01,Math.min(1.5,vel||.9))*(idx===3?1.1:1)*1.1;window.GLCTC_MEMBRANE(c,dest,t,vel,m[0],m[1]*r,m[2]*dec,null);return true}}}catch(e){console.warn('skin',e)}
+
+ /* ---------- MOVEMENT ---------- */
+ const Q=[];let planned=-1,lastBeat=-1;
+ const FILL=g=>/^(tribalhouse|afrohouse|amapiano|reggae|ska)$/.test(g)?'perc':/^(trap|drill|phonk|south)$/.test(g)?'roll':/^(hiphop|eastcoast|westcoast|lofi|ukhiphop)$/.test(g)?'drag':
+  /^(house|deephouse|garage|techhouse)$/.test(g)?'house':/^(dnb|jungle|liquid|breaks|nuskool)$/.test(g)?'snare16':/^(ambient|meditation)$/.test(g)?'none':'club';
+ window.GLCTC_MOVE=function(o){if(!on())return;try{
+  const K=o.K,now=o.now,bb=o.barBeats||4,beat=o.beat;if(beat<lastBeat-.5){Q.length=0;planned=-1}lastBeat=beat;
+  const nextBar=Math.floor(beat/bb+1e-6)+1,nbBeat=nextBar*bb;
+  if(planned<nextBar&&K.timeOfBeat(nbBeat)-now<.6){planned=nextBar;
+   const tot=o.total,local=o.loop?nbBeat%tot:nbBeat;if(o.loop||local<tot){let j=0;while(j<o.secs.length-1&&o.starts[j+1]<=local+1e-6)j++;
+    const sec=o.secs[j],bi=Math.floor((local-o.starts[j])/bb+1e-6),nextSec=o.secs[(j+1)%o.secs.length],cells=o.cells||{},g=genre(),fam=FILL(g);
+    const bl=k=>cells[k]&&cells[k][j]>=0,T=x=>K.timeOfBeat(nbBeat+x),add=(m,i,v,x)=>Q.push({m,i,v,t:T(x)});
+    /* the downbeat of a drop: a crash on the 1 (and lighter every 8 bars inside it) */
+    if(sec.kind==='drop'&&bi%8===0&&fam!=='none'&&(bl('mine')||bl('bl')))add('mine',10,bi===0?.9:.55,0);
+    /* every 4th bar of a drop: an open-hat lift into the next bar */
+    if(sec.kind==='drop'&&bi%4===3&&bl('mine')&&fam!=='roll')add('mine',4,.6,3.5);
+    /* phrase ends and the bar before a new section: a fill on the last beat */
+    const phraseEnd=(bi+1)%8===0||bi===sec.bars-1;
+    if(phraseEnd&&bl('bl')&&sec.kind!=='build'&&fam!=='none'){const big=bi===sec.bars-1&&/^(drop|build)$/.test(nextSec.kind);
+     if(fam==='perc'){[[3,9,.6],[3.25,5,.55],[3.5,6,.7],[3.75,9,.8]].forEach(([x,i,v])=>add('bl',i,v,x));if(big)add('bl',5,.85,3.875)}
+     else if(fam==='roll'){for(let k=0;k<(big?12:6);k++)add('mine',3,.4+k*.04,(big?3:3.5)+k*(big?1/12:1/12))}
+     else if(fam==='drag'){add('bl',1,.32,3.5);add('bl',1,.4,3.75);if(big)add('bl',1,.5,3.875)}
+     else if(fam==='house'){add('bl',2,.55,3.5);add('bl',2,.75,3.75);add('mine',4,.55,3.5)}
+     else if(fam==='snare16'){[3,3.25,3.5,3.75].forEach((x,k)=>add('bl',1,.45+k*.12,x));if(big)[3.125,3.375,3.625,3.875].forEach((x,k)=>add('bl',1,.3+k*.1,x))}
+     else{[3.25,3.5,3.75].forEach((x,k)=>add('bl',1,.4+k*.15,x));if(big)add('bl',6,.7,3.875)}}}}
+  /* fire what is due (the audio is scheduled a short way ahead, so a stopped song leaves nothing behind) */
+  for(let k=Q.length-1;k>=0;k--){const e=Q[k];if(e.t<now-.02){Q.splice(k,1);continue}if(e.t-now<.18){Q.splice(k,1);
+   try{if(e.m==='bl')window.GLCTC_80LA8_INPUT&&GLCTC_80LA8_INPUT.trigger(e.i,e.v,e.t);else window.GLCTC_DIVINE09_INPUT&&GLCTC_DIVINE09_INPUT.trigger(e.i,e.v,e.t)}catch(_){}}}
+ }catch(e){}};
+ window.GLCTC_MOVE.clear=()=>{Q.length=0;planned=-1;lastBeat=-1};
+
+ /* ---------- LAYERS: bass mid / top layer ---------- */
+ window.GLCTC_BASS_LAYER=function(ctx,src,dest,S){if(!on()||!src||!dest)return;try{
+  const hp=ctx.createBiquadFilter(),sh=ctx.createWaveShaper(),lp=ctx.createBiquadFilter(),g=ctx.createGain(),pl=ctx.createStereoPanner(),pr=ctx.createStereoPanner(),dl=ctx.createDelay(.03);
+  hp.type='highpass';hp.frequency.value=220;hp.Q.value=.6;sh.curve=curve();lp.type='lowpass';lp.frequency.value=3200;lp.Q.value=.5;
+  g.gain.value=S&&S.wave==='triangle'?.12:S&&S.wave==='sine'?.1:.16;pl.pan.value=-.55;pr.pan.value=.55;dl.delayTime.value=.011;
+  src.connect(hp);hp.connect(sh);sh.connect(lp);lp.connect(g);g.connect(pl);pl.connect(dest);g.connect(dl);dl.connect(pr);pr.connect(dest)}catch(e){}};
+ let CV=null;function curve(){if(CV)return CV;const n=1024,a=new Float32Array(n),k=3,d=Math.tanh(k);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;a[i]=Math.tanh(k*x)/d}return CV=a}
+
+ /* ---------- LAYERS: open chord voicings ---------- */
+ window.GLCTC_OPEN=function(i,v,center){if(!on()||!Array.isArray(v)||v.length<3||center<52)return v;
+  const s=v.slice().sort((a,b)=>a-b);const second=s[s.length-2],dropped=second-12;
+  const out=dropped<Math.max(50,center-14)?s:s.filter((x,k)=>k!==s.length-2).concat([dropped]).sort((a,b)=>a-b);   /* never push a chord note down into the bass's mud */
+  if(i==='pad'&&out[out.length-1]+12-out[0]<=36&&out[0]+24<=88)out.push(out[0]+24);   /* pads: the root on top for air */
+  return out};
+})();
+</script>
 <script>
 /* ===== GLCTC1 REAL MODULE PRESET LIBRARIES =====
    Named factory + user presets. Every adapter saves/restores the owning instrument's actual state.
@@ -9170,7 +9393,8 @@ function autoCells(secs,genre){
    if(v===A)v=a;else if(v===L)v=a?5:0;else if(v==='C')v=a?4:0;else if(v==='E')v=0;c[m.k].push(v)});   /* E: vocal chop on every second drop only */
   if(s.kind==='drop')drop++});
  /* ALL MODULES: a module the genre plan leaves out joins on the drops (and the verses for the Looper), so every module is in every song */
- MODS.forEach(m=>{if(m.k==='ix'||(plan.mute||[]).includes(m.k)||!c[m.k]||c[m.k].some(v=>v>=0))return;secs.forEach((s,i)=>{if(s.kind==='drop'||(m.k==='lp'&&s.kind==='verse'))c[m.k][i]=0})});
+ const CLEAN=window.GLCTC_CLEAN_ON?GLCTC_CLEAN_ON():true;   /* v160: with CLEAN & LAYERED on, a module the genre leaves out stays out */
+ if(!CLEAN)MODS.forEach(m=>{if(m.k==='ix'||(plan.mute||[]).includes(m.k)||!c[m.k]||c[m.k].some(v=>v>=0))return;secs.forEach((s,i)=>{if(s.kind==='drop'||(m.k==='lp'&&s.kind==='verse'))c[m.k][i]=0})});
  /* INSTRUMENT DESIGNER row: 0 FULL (every layer) · 1 KEYS (chords, pads, strum, stabs, bass) · 2 PADS · 3 LIFT (pads + arp + rising chords) · -1 out.
     Written per genre the way those records use real instruments: pads open the track, keys carry the verse, the lift
     rises through the build, the whole stack lands on the drop, the break strips back to the pads. */
@@ -9185,6 +9409,28 @@ function autoCells(secs,genre){
   lofi:{intro:1,verse:0,build:1,drop:0,break:2,outro:1},reggae:{intro:1,verse:0,build:1,drop:0,break:2,outro:1},ska:{intro:1,verse:0,build:0,drop:0,break:2,outro:1},
   pop:{intro:1,verse:1,build:3,drop:0,break:2,outro:1},synthwave:D,ambient:{intro:2,verse:0,build:3,drop:0,break:2,outro:2},meditation:{intro:2,verse:2,build:3,drop:0,break:2,outro:2}};
   const P=IXA[genre]||D;c.ix=secs.map(s=>{const v=P[s.kind];return v===undefined?(D[s.kind]??1):v})}
+ /* v160 CLEAN & LAYERED: fewer parts, each one given room. Every section has a budget of DRUM modules and MUSICAL modules
+    (SUB-01 is exempt - it is the floor). One melody voice at a time (the lead OR the vocal, the vocal gets the breakdown),
+    the Instrument Designer never fires all six layers at once (pads sit UNDER a stab, keys carry a section alone), and the
+    DIVINE09 tops only double the 80LA8 where the groove is meant to be full (verse / drop). */
+ if(CLEAN){
+  const soft=/^(ambient|meditation)$/.test(genre);
+  const PERC=/^(tribalhouse|afrohouse|amapiano|house|deephouse|techhouse|garage|reggae|ska)$/.test(genre);   /* v161: hand-percussion styles keep kit + tops + percussion */
+  const DB=PERC?{intro:2,verse:3,build:2,drop:3,break:2,outro:2}:{intro:1,verse:2,build:2,drop:2,break:1,outro:1},MB=soft?{intro:2,verse:3,build:3,drop:3,break:3,outro:2}:{intro:2,verse:3,build:3,drop:4,break:3,outro:2};
+  const DP=/^(tribalhouse|afrohouse|amapiano|meditation)$/.test(genre)?['bl','ws','mine','lp']:/^(lofi|ambient)$/.test(genre)?['bl','lp','mine','ws']:['bl','mine','ws','lp'];
+  const MP=soft?(genre==='meditation'?['go','vox','ix','lee','s101']:['go','ix','lee','s101','vox'])
+   :/^(reggae|ska)$/.test(genre)?['lee','s101','go','ix','vox']
+   :/^(hiphop|eastcoast|westcoast|south|ukhiphop|drill|trap|phonk|lofi)$/.test(genre)?['lee','ix','go','s101','vox']
+   :/^(house|deephouse|garage|amapiano|liquid|techhouse)$/.test(genre)?['lee','s101','ix','go','vox']
+   :['lee','go','s101','ix','vox'];
+  secs.forEach((s,i)=>{const on=k=>c[k]&&c[k][i]>=0,off=k=>{if(c[k])c[k][i]=-1};
+   if(on('vox')&&on('go')&&c.go[i]!==7&&s.kind!=='break')off('vox');          /* lead and vocal never fight */
+   if(on('mine')&&on('bl')&&!/^(drop|verse)$/.test(s.kind))off('mine');        /* tops only where the groove is full */
+   if(on('ix')){if(c.ix[i]===0)c.ix[i]=on('s101')?2:1;else if(c.ix[i]===1&&on('s101'))c.ix[i]=2}   /* no six-layer wall */
+   const mp=s.kind==='break'?['vox'].concat(MP.filter(k=>k!=='vox')):MP;
+   let d=DP.filter(on);while(d.length>(DB[s.kind]||2))off(d.pop());
+   let m=mp.filter(on);while(m.length>(MB[s.kind]||3))off(m.pop());});
+ }
  /* v96: SUB-01 plays wherever the bass plays, on the matching pattern (never counts toward the module cap - one sine voice) */
  /* v93 CPU CAP: a section never stacks more than five modules - the lowest-priority
     layers (Vox, then Looper, then PAD-64) sit out of the densest sections, so the drop never overloads the device. */
@@ -9270,7 +9516,7 @@ panel.innerHTML=`<style>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Off = every module plays straight 16ths, perfectly locked. On = the drums, bass and Galactic One swing together in the genre&#39;s groove."><input id="gscSwing" type="checkbox" checked>SWING GROOVE</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="On = the song's home note is the chakra frequency you selected (A4 = chakra Hz, so the key is A at that tuning) and the bass / leads stay in a natural register. Off = the genre picks its own key."><input id="gscChakraKey" type="checkbox">KEY FROM CHAKRA</label></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Builds rise through a high-pass filter, the last beat drops out, and the drop hits at full weight"><input id="gscEpic" type="checkbox" checked>EPIC BUILDS &amp; DROPS</label></div>
  <div title="Genre sound character on the master: EQ, glue compression, saturation, reverb and tempo delay sends per module, and sidechain pump from the kick. Applies to the Song Composer AND the Master Controller PLAY."><label for="gscChar">✺ SOUND CHARACTER</label><select id="gscChar"><option value="auto">AUTO · follows the genre</option><option value="off">OFF · clean / factory</option></select><label for="gscCharAmt" style="margin:6px 0 2px">INTENSITY <b id="gscCharVal" style="color:#f2ca70">100%</b></label><input id="gscCharAmt" type="range" min="0" max="150" step="5" value="100" style="width:100%;accent-color:#d8ae4e"></div>
- <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = every GENERATE, SURPRISE ME and new song on load composes brand-new grooves, basslines, melodies and chords in any key, and designs a new lead sound from scratch. Off = the genre's written classic patterns."><input id="gscFresh" type="checkbox" checked>✦ BRAND-NEW EVERY TIME</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = most songs use the underground cuts: darker, rawer, more present grooves with ghost notes, dynamic hats, rolling basslines and tense hooks. Off = the classic songbook only."><input id="gscEdge" type="checkbox" checked>⚡ UNDERGROUND EDGE</label><label for="gscNovelty" style="margin:0 0 2px;font-size:10px" title="How far a song may travel from the genre's classic grooves. Prompt words also push it: experimental / wild / unique (more), classic / authentic (less).">NOVELTY <b id="gscNoveltyVal" style="color:#f2ca70">55%</b></label><input id="gscNovelty" type="range" min="5" max="100" step="5" value="75" style="width:100%;accent-color:#d8ae4e;margin:0 0 9px"><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Listens to every module while the song plays and sets a balanced level for each (drums up front, 30LEE, synths and pads sitting underneath). Your faders still work on top."><input id="gscAutoMix" type="checkbox" checked>⚖ AUTO MIX LEVELS</label><div id="gscMixInfo" style="font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere"></div></div>
+ <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = every GENERATE, SURPRISE ME and new song on load composes brand-new grooves, basslines, melodies and chords in any key, and designs a new lead sound from scratch. Off = the genre's written classic patterns."><input id="gscFresh" type="checkbox" checked>✦ BRAND-NEW EVERY TIME</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = most songs use the underground cuts: darker, rawer, more present grooves with ghost notes, dynamic hats, rolling basslines and tense hooks. Off = the classic songbook only."><input id="gscEdge" type="checkbox" checked>⚡ UNDERGROUND EDGE</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = fewer parts at once, each given room: one melody voice at a time, simpler leads and stabs, one percussion colour per groove, played drum dynamics, a layered snare and clap in one shared drum room, and thicker lead patches. Off = the full stack as before. Applies to the next GENERATE."><input id="gscClean" type="checkbox" checked>◇ CLEAN &amp; LAYERED</label><label for="gscNovelty" style="margin:0 0 2px;font-size:10px" title="How far a song may travel from the genre's classic grooves. Prompt words also push it: experimental / wild / unique (more), classic / authentic (less).">NOVELTY <b id="gscNoveltyVal" style="color:#f2ca70">55%</b></label><input id="gscNovelty" type="range" min="5" max="100" step="5" value="75" style="width:100%;accent-color:#d8ae4e;margin:0 0 9px"><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Listens to every module while the song plays and sets a balanced level for each (drums up front, 30LEE, synths and pads sitting underneath). Your faders still work on top."><input id="gscAutoMix" type="checkbox" checked>⚖ AUTO MIX LEVELS</label><div id="gscMixInfo" style="font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere"></div></div>
 </div>
 <div class="gsc-note" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
  <label style="margin:0"><input id="gscAutoFX" type="checkbox"> AUTO CHANNEL FX</label>
@@ -9600,7 +9846,7 @@ function liveUpdate(){
   });
  }catch(e){console.warn('composer live join',e)}
 }
-async function startSong(opts){
+async function startSong(opts){try{window.GLCTC_MOVE&&GLCTC_MOVE.clear()}catch(e){}
  const h=H();
  if(!h||!h.mods){status('Module hub not found. Nothing started.');return}
  if(S){stopSong('SONG STOPPED',true);return}
@@ -9709,6 +9955,7 @@ function tick(){
    if(i!==S.cur){S.cur=i;markNow(i)}
    const bar=Math.floor((lb-S.starts[i])/S.barBeats)+1;
    status('▶ SECTION '+(i+1)+'/'+S.n+' · '+S.secs[i].n+' · BAR '+bar+'/'+S.secs[i].bars+' · '+S.bpm+' BPM');
+   try{if(window.GLCTC_MOVE&&!S.suspended)GLCTC_MOVE({K,now,beat,barBeats:S.barBeats,total:S.total,loop:st.loop,secs:S.secs,starts:S.starts,cells:Object.fromEntries(MODS.map(m=>[m.k,st.on[m.k]===false?[]:S.secs.map((_,q)=>eff(m,q))]))})}catch(e){}   /* v161 movement */
   }
   
   MODS.forEach(m=>{
@@ -11175,6 +11422,7 @@ const PAT=(()=>{
    ws:null};
   {const w=wsPats(r,key,handBL,WS_KITS[opts.wsPreset]||null);pack.ws={pats:w.pats,bars:4,swing,tunes:w.tunes};pack.harm={key,semiT:w.semiT};pack.sub={patterns:subPats(bassPair,SC[scale]||SC.minor),root:24+key+REG,swing};if(WS_KITS[opts.wsPreset])pack.flavour.perc='WORLD KIT'}
   if(beatName){pack.flavour.beat=beatName;pack.flavour.hat='BEAT · '+beatName}
+  try{window.GLCTC_CLARIFY&&GLCTC_CLARIFY(pack,genre,handBL,r)}catch(e){console.warn('clarity pass',e)}   /* v160 */
   pack.hook={a:pack.go.pats[0].steps.map(x=>x.on?[x.n,x.g,x.v]:0),b:pack.go.pats[5].steps.map(x=>x.on?[x.n,x.g,x.v]:0),reg:REG};   /* v109 HOOK DNA */
   Gg=old;return pack}
  const API={sub:()=>window.GLCTC_SUB_PATTERNS,bl:()=>window.GLCTC_80LA8_PATTERNS,mine:()=>window.GLCTC_DIVINE09_PATTERNS,lee:()=>window.GLCTC_30LEE_PATTERNS,s101:()=>window.GLCTC_0010110_PATTERNS,go:()=>window.GALACTIC_ONE&&GALACTIC_ONE.patterns,vox:()=>window.GALACTIC_VOX&&GALACTIC_VOX.patterns,ws:()=>window.GLCTC_PAD64_PATTERNS};
@@ -11291,6 +11539,7 @@ function designFreshSound(genre,t){
     const mono=type==='lead'&&R()<T.mono;p.mode=mono?pk([1,2]):0;p.glide=mono?rr(.02,.12):0;
     p.penv=(type==='pluck'||type==='stab')&&R()<.2*t+.05*T.grit?pk([12,7,-12,5]):0;
     if(s.fx){Object.assign(s.fx,{dlMix:type==='pad'?rr(.15,.35):rr(.05,.3),dlFb:rr(.2,.5),rvMix:type==='pad'?rr(.3,.5):rr(.08,.3),chMix:rr(.2,.7),phMix:R()<.2?rr(.1,.4):0})}
+    try{window.GLCTC_THICKEN&&GLCTC_THICKEN(p,s.fx,type)}catch(e){}   /* v160 */
     made=SND_ADJ[Math.floor(R()*SND_ADJ.length)]+' '+type.toUpperCase();
     s.names=s.names||[];s.names[0]='✦ '+made+' '+ri(100,999);
    }else{   /* a variation of the genre patch */
@@ -11873,6 +12122,8 @@ const AUTO_LS='glctc1.autoSongOnLoad';
  if(document.readyState==='complete')setTimeout(run,1500);else window.addEventListener('load',()=>setTimeout(run,1500),{once:true});
 })();
 /* ---------------- controls ---------------- */
+/* v160 CLEAN & LAYERED switch remembers its setting */
+try{const e=byId('gscClean');if(e){e.checked=localStorage.getItem('glctc1.clean')!=='0';e.addEventListener('change',()=>{try{localStorage.setItem('glctc1.clean',e.checked?'1':'0')}catch(_){}status(e.checked?'CLEAN & LAYERED ON · fewer parts, fuller sounds · press GENERATE':'CLEAN & LAYERED OFF · full stack · press GENERATE')})}}catch(e){}
 /* v120 FRESH COMPOSER switches remember their setting */
 (()=>{const e=byId('gscEdge');if(!e)return;try{const v=localStorage.getItem('glctc1.edge');if(v!=null)e.checked=v!=='0'}catch(_){}   /* v152 UNDERGROUND EDGE */
  e.addEventListener('change',()=>{try{localStorage.setItem('glctc1.edge',e.checked?'1':'0')}catch(_){}try{status(e.checked?'⚡ UNDERGROUND EDGE ON · darker, rawer grooves on the next GENERATE':'UNDERGROUND EDGE OFF · classic songbook')}catch(_){}})})();
@@ -12818,7 +13069,8 @@ function harmony(){const P=window.GLCTC_SONG_PACK;
  return{follow:false,key:S.harm.key|0,sc,scName:S.harm.scale,seventh:/^(house|hiphop|garage|lofi|deephouse|liquid|westcoast|eastcoast)$/.test(songGenre()),reg:0,deg:st=>pr[Math.floor(Math.max(0,st)/16)%pr.length],name:NOTE[S.harm.key|0]+' '+S.harm.scale.toUpperCase()}}
 function tonesOf(H,d){const t=[semi(H.sc,d),semi(H.sc,d+2),semi(H.sc,d+4)];if(H.seventh)t.push(semi(H.sc,d+6));return t.map(x=>x+H.key)}
 const lastV=Array.from({length:NL},()=>null);
-function voicing(i,tones,center){const pcs=tones.map(t=>((t%12)+12)%12);let best=null,bs=1e9;
+function voicing(i,tones,center){const v=voicingClose(i,tones,center);return window.GLCTC_OPEN?GLCTC_OPEN(i,v,center):v}   /* v161 open voicings */
+function voicingClose(i,tones,center){const pcs=tones.map(t=>((t%12)+12)%12);let best=null,bs=1e9;
  for(let inv=0;inv<pcs.length;inv++)for(const sh of [-12,0,12]){const ord=pcs.slice(inv).concat(pcs.slice(0,inv));let n=center-6+sh,out=[];
   for(const pc of ord){let x=n;while(((x%12)+12)%12!==pc)x++;out.push(x);n=x+1}
   const mean=out.reduce((a,b)=>a+b,0)/out.length,prev=lastV[i];let sc=Math.abs(mean-center)*1.2;if(prev&&prev.length===out.length)sc+=out.reduce((a,x,k)=>a+Math.abs(x-prev[k]),0)*.5;if(sc<bs){bs=sc;best=out}}

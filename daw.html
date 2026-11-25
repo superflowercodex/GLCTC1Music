@@ -2279,7 +2279,7 @@ window.GLCTC_PROJECT_SESSION={
   if(d.composer)window.GLCTC_SONG?.restoreProject(d.composer);
   if(d.ix)window.GLCTC_IX?.restore(d.ix);
   if(d.channelFX)window.GLCTC_FX?.restore(d.channelFX);
-  const fxBox=document.getElementById('gscAutoFX');if(fxBox&&d.composerFX!==undefined)fxBox.checked=!!d.composerFX;
+  const fxBox=document.getElementById('gscAutoFX');if(fxBox)fxBox.checked=true;
   window.GLCTC_NEW_SONG=d.song||null;window.GLCTC_GROOVE=d.groove||{swing:0};
   const genre=document.getElementById('gscGenre');if(genre&&d.song?.genre)genre.value=d.song.genre;
   const key=document.getElementById('gscKey');if(key)key.textContent=d.song?.key||'—';
@@ -9020,13 +9020,19 @@ function composerFX(genre,on=true){
     (no extra nodes, zero CPU). The 808 styles keep a full-range 30LEE; the SUB strip cuts sub-sonic rumble at 26 Hz. */
  try{const nw=!/^(trap|drill|south|westcoast|eastcoast|hiphop|ukhiphop|lofi|reggae|ska|meditation|ambient|phonk|amapiano)$/.test(genre||'');
   const L=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('lee'),S=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('sub');
-  if(L&&L.hp)L.hp.frequency.setTargetAtTime(on&&window.GLCTC_JUMPUP&&GLCTC_JUMPUP()?180:on&&nw?52:32,L.c.currentTime,.05);if(S&&S.hp)S.hp.frequency.setTargetAtTime(on?26:18,S.c.currentTime,.05);
+  if(L&&L.hp)L.hp.frequency.setTargetAtTime(on&&window.GLCTC_JUMPUP&&GLCTC_JUMPUP()?180:on&&nw?140:32,L.c.currentTime,.05);   /* v202 MEASURED: the 30LEE's own fundamental buried its harmonics (bass = sine); SUB-01 carries the fundamental, the 30LEE the character above 140 Hz */if(S&&S.hp)S.hp.frequency.setTargetAtTime(on?26:18,S.c.currentTime,.05);
   const soft=/^(meditation|ambient)$/.test(genre||''),HP={s101:170,go:140,vox:110,ws:140,ix:soft?55:/^(trap|drill|south|phonk|ukhiphop)$/.test(genre||'')?135:95};   /* v139 strip low-cuts (were FX units) */
   for(const id in HP){const X=GLCTC_WSBUSFULL(id);if(X&&X.hp)X.hp.frequency.setTargetAtTime(on?HP[id]:(MIXHPF[id]||20),X.c.currentTime,.05)}
   /* v183 JUMP UP channel EQ, built into the bus itself: drums scooped at 140 Hz (the sub owns 80-200), the growl steeply cut below 180 */
   {const JU=on&&!!(window.GLCTC_JUMPUP&&GLCTC_JUMPUP());const ins=(X,kind)=>{if(!X||!X.hp||!X.vol)return null;if(X._ju&&X._ju.context===X.c)return X._ju;const f=X.c.createBiquadFilter();f.type=kind;try{X.hp.disconnect(X.vol)}catch(_){try{X.hp.disconnect()}catch(__){}}X.hp.connect(f);f.connect(X.vol);X._ju=f;return f};
    ['bl','mine'].forEach(id=>{const f=ins(GLCTC_WSBUSFULL(id),'peaking');if(f){f.frequency.value=140;f.Q.value=.8;f.gain.setTargetAtTime(JU?-9:0,f.context.currentTime,.05)}});
-   {const f=ins(GLCTC_WSBUSFULL('lee'),'highpass');if(f){f.Q.value=.707;f.frequency.setTargetAtTime(JU?180:10,f.context.currentTime,.05)}}}}catch(e){}
+   {const f=ins(GLCTC_WSBUSFULL('lee'),'highpass');if(f){f.Q.value=.707;f.frequency.setTargetAtTime(JU?100:10,f.context.currentTime,.05)}}   /* v198 MEASURED: the record has full 110-200 Hz growl body; cutting at 180 left a thin bleep */
+   {const X=GLCTC_WSBUSFULL('lee');if(X&&X._ju&&X.vol){let g=X._jug;if(!g||g.context!==X.c){g=X.c.createGain();try{X._ju.disconnect()}catch(_){}X._ju.connect(g);g.connect(X.vol);X._jug=g}g.gain.setTargetAtTime(JU?2.2:1,X.c.currentTime,.05)}}   /* v198 MEASURED: 110-200 Hz growl body was ~7.5 dB under the record */
+   /* v198 MEASURED match (Genuine Psychopaths drop vs ours, each band relative to its own sub): drums ~4 dB too loud against the sub,
+      top above ~10 kHz ~5 dB too bright. Drum buses get a trim + high shelf after the 140 Hz scoop (only for jump up). */
+   ['bl','mine'].forEach(id=>{const X=GLCTC_WSBUSFULL(id);if(!X||!X._ju||!X.vol)return;let c2=X._ju2;
+    if(!c2||c2.sh.context!==X.c){const sh=X.c.createBiquadFilter(),tr=X.c.createGain();sh.type='highshelf';sh.frequency.value=9000;try{X._ju.disconnect()}catch(_){}X._ju.connect(sh);sh.connect(tr);tr.connect(X.vol);c2=X._ju2={sh,tr}}
+    c2.sh.gain.setTargetAtTime(JU?-6:0,X.c.currentTime,.05);c2.tr.gain.setTargetAtTime(JU?(id==='mine'?.63:1):1,X.c.currentTime,.05)})}}catch(e){}   /* the Amen plays through 80LA8: only the kit is trimmed */
  SONG_FX_IDS.forEach(id=>{
   const key='mod:'+id,ch=chainOf(key,true),manual=ch.filter(f=>!f._composer);
   const auto=on?recipe[id].filter(f=>!manual.some(m=>!m._eq&&m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
@@ -9441,7 +9447,7 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
  window.GLCTC_BASS_LAYER=function(ctx,src,dest,S){if(!on()||!src||!dest)return;try{
   const hp=ctx.createBiquadFilter(),sh=ctx.createWaveShaper(),lp=ctx.createBiquadFilter(),g=ctx.createGain(),pl=ctx.createStereoPanner(),pr=ctx.createStereoPanner(),dl=ctx.createDelay(.03);
   hp.type='highpass';hp.frequency.value=240;hp.Q.value=.6;sh.curve=curve();lp.type='lowpass';lp.frequency.value=2600;lp.Q.value=.5;
-  g.gain.value=S&&S.wave==='triangle'?.09:S&&S.wave==='sine'?.08:.11;   /* v163: softer, darker top layer */pl.pan.value=-.55;pr.pan.value=.55;dl.delayTime.value=.011;
+  g.gain.value=(S&&S.wave==='triangle'?.09:S&&S.wave==='sine'?.08:.11)*((window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?1:3.2);   /* v202 MEASURED: bass harmonics (150-400 Hz) sat ~20 dB under the fundamental in every genre - the sine sound. The mid layer is ~10 dB up (jump up keeps its measured balance) */pl.pan.value=-.55;pr.pan.value=.55;dl.delayTime.value=.011;
   src.connect(hp);hp.connect(sh);sh.connect(lp);lp.connect(g);g.connect(pl);pl.connect(dest);g.connect(dl);dl.connect(pr);pr.connect(dest)}catch(e){}};
  let CV=null;function curve(){if(CV)return CV;const n=1024,a=new Float32Array(n),k=1.7,d=Math.tanh(k);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;a[i]=Math.tanh(k*x)/d}return CV=a}
 
@@ -9660,11 +9666,11 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
     /^(techno|trance|psytrance|hardhouse|happyhardcore)$/.test(genre)?'rave':/^(hiphop|eastcoast|westcoast|south|ukhiphop|drill|trap|phonk)$/.test(genre)?'boom':
     /^(reggae|ska|lofi)$/.test(genre)?'roots':/^(ambient|meditation)$/.test(genre)?'none':'bright';
    if(genre==='techno')LY.rave=[1.15,.12,0,.25,0,10,1,450,.1];   /* v185 */
-   if(window.GLCTC_JUMPUP&&GLCTC_JUMPUP()){LY.reese=[1.2,.4,.2,0,.22,10,2,2600,.35];S.setP('level',1.2)}   /* v183 jump up: saw + square growl, poly kept narrow (the reference's low growl is mono) */
+   if(window.GLCTC_JUMPUP&&GLCTC_JUMPUP()){LY.reese=[1.2,0,0,0,0,10,1,800,0];S.setP('level',1.2);S.setP('drive',.35);S.setP('harm',.14);S.setP('cut',150)}   /* v198 MEASURED: the record's sub is one driven sine (3rd harmonic -15 dB); the saw / square layer 2 octaves up was the 4-bit bleep */   /* v183 jump up: saw + square growl, poly kept narrow (the reference's low growl is mono) */
    const L=LY[fam];['subLv','lsaw','lsqr','ltri','lpoly','pdet','loct','ltone','ldrive'].forEach((k,i)=>S.setP(k,L[i]))}}catch(e){console.warn('bass sub',e)}
  };
  /* while a song plays: the 30LEE is high-passed where SUB-01 takes over */
- let leeHP=null;window.GLCTC_BASS_XOVER=function(subOn){try{const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('lee');if(!b||!b.hp)return;const want=on()&&subOn?((window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?180:90):32;   /* v183: jump up - the sub owns everything below 180 Hz, the growl sits above (the reference's scooped low-mids) */
+ let leeHP=null;window.GLCTC_BASS_XOVER=function(subOn){try{const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('lee');if(!b||!b.hp)return;const g808=/^(trap|drill|south|westcoast|eastcoast|hiphop|ukhiphop|lofi|reggae|ska|meditation|ambient|phonk|amapiano)$/.test((document.getElementById('gscGenre')||{}).value||'');const want=on()&&subOn?((window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?180:g808?90:140):32;   /* v202 */   /* v183: jump up - the sub owns everything below 180 Hz, the growl sits above (the reference's scooped low-mids) */
   if(leeHP!==want||Math.abs(b.hp.frequency.value-want)>40){b.hp.frequency.setTargetAtTime(want,b.c.currentTime,.03);leeHP=want}}catch(e){}};
 })();
 </script>
@@ -9747,7 +9753,7 @@ window.__glctcTuneMine=tuneMine;const MN=(name,o,style='clean')=>[name,d=>{Objec
 defs.mine=defs.mine.map(([name,mutate])=>[name,d=>{mutate(d);tuneMine(d,
  name.includes('808')?'hiphop':name.includes('Tribal')?'tribal':name.includes('Industrial')?'industrial':name.includes('Linn')?'ambient':name.includes('707')?'pop':'clean')}]);
 defs.mine.push(
- MN('Techno · Peak Time',{kit:'909',swing:.02},'techno'),
+ MN('Techno · Peak Time',{kit:'909',swing:.02},'techno'),MN('House · Chicago 909',{kit:'909',swing:.14},'clean'),MN('Deep House · Soft 909',{kit:'909',swing:.1},'clean'),
  MN('House · Tribal Swing',{kit:'tribal',swing:.12},'tribal'),
  MN('DnB · Roller Breaks',{kit:'breaks',swing:.03},'breaks'),
  MN('Hip-Hop · 808 Boom',{kit:'808',swing:.16},'hiphop'),
@@ -10546,7 +10552,7 @@ panel.innerHTML=`<style>
 </style>
 <div class="gsc-title">GLCTC1 SONG COMPOSER · EPIC</div>
 <div class="gsc-sub">MODULES ONLY · every module plays the whole song in sync; each section picks its pattern and whether it is heard. Nothing goes to the timeline or MIDI.</div>
-<div style="margin-bottom:10px"><label for="gscPrompt">DESCRIBE YOUR TRACK</label><textarea id="gscPrompt" placeholder="e.g. uplifting tribal techno, hypnotic bass, euphoric chords (try: acid, vocal, no drums, minimal)"></textarea></div>
+<div style="display:none" aria-hidden="true"><label for="gscPrompt">DESCRIBE YOUR TRACK</label><textarea id="gscPrompt" placeholder="e.g. uplifting tribal techno, hypnotic bass, euphoric chords (try: acid, vocal, no drums, minimal)"></textarea></div>
 <div class="gsc-bar">
  <div><label for="gscGenre">GENRE / GROOVE</label><select id="gscGenre"><optgroup label="HOUSE &amp; TECHNO"><option value="techno">Techno</option><option value="house">House · Classic / Chicago</option><option value="deephouse">Deep House · Late Night</option><option value="melodictechno">Melodic Techno</option><option value="techhouse">Tech House</option><option value="tribalhouse">Tribal House</option><option value="hardhouse">Hard House</option></optgroup><optgroup label="TRANCE &amp; RAVE"><option value="trance">Trance</option><option value="psytrance">Psytrance</option><option value="happyhardcore">Happy Hardcore</option></optgroup><optgroup label="DRUM &amp; BASS"><option value="dnb">Drum &amp; Bass</option><option value="jungle">Jungle · Jump Up</option><option value="liquid">Liquid Drum &amp; Bass</option></optgroup><optgroup label="BASS &amp; BREAKS"><option value="breaks">Breakbeat</option><option value="nuskool">Nu Skool Breaks</option><option value="electro">Electro</option><option value="garage">UK Garage / 2-Step</option><option value="dubstep">Dubstep</option></optgroup><optgroup label="HIP HOP"><option value="hiphop">Hip Hop · Head Nod</option><option value="eastcoast">East Coast · Boom Bap</option><option value="westcoast">West Coast</option><option value="south">Southern · Dirty South</option><option value="ukhiphop">UK Hip Hop · Grime</option><option value="drill">UK Drill</option><option value="trap">Trap</option><option value="phonk">Phonk · Drift</option><option value="lofi">Lo-Fi Beats</option></optgroup><optgroup label="AFRO"><option value="amapiano">Amapiano</option><option value="afrohouse">Afro House</option></optgroup><optgroup label="CARIBBEAN"><option value="reggae">Reggae · One Drop</option><option value="ska">Ska</option></optgroup><optgroup label="POP &amp; RETRO"><option value="pop">Pop / Electronic</option><option value="synthwave">Synthwave / Outrun</option></optgroup><optgroup label="CHILL"><option value="ambient">Ambient</option><option value="meditation">Meditation</option></optgroup></select></div>
  <div><label for="gscBpm">AI → MASTER BPM</label><strong id="gscBpm" style="display:block;padding:8px 4px;color:#f2ca70">130</strong><small style="display:block;opacity:.72">AI sets the DAW master; all modules follow</small></div>
@@ -10558,8 +10564,8 @@ panel.innerHTML=`<style>
  <div title="Genre sound character on the master: EQ, glue compression, saturation, reverb and tempo delay sends per module, and sidechain pump from the kick. Applies to the Song Composer AND the Master Controller PLAY."><label for="gscChar">✺ SOUND CHARACTER</label><select id="gscChar"><option value="auto">AUTO · follows the genre</option><option value="off">OFF · clean / factory</option></select><label for="gscCharAmt" style="margin:6px 0 2px">INTENSITY <b id="gscCharVal" style="color:#f2ca70">100%</b></label><input id="gscCharAmt" type="range" min="0" max="150" step="5" value="100" style="width:100%;accent-color:#d8ae4e"></div>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, GENERATE writes genre-correct patterns into every module (your originals can be restored)"><input id="gscAutoFill" type="checkbox" checked>AI-WRITE PATTERNS</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = every GENERATE, SURPRISE ME and new song on load composes brand-new grooves, basslines, melodies and chords in any key, and designs a new lead sound from scratch. Off = the genre's written classic patterns."><input id="gscFresh" type="checkbox" checked>✦ BRAND-NEW EVERY TIME</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = most songs use the underground cuts: darker, rawer, more present grooves with ghost notes, dynamic hats, rolling basslines and tense hooks. Off = the classic songbook only."><input id="gscEdge" type="checkbox" checked>⚡ UNDERGROUND EDGE</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 4px" title="On = fewer parts at once, each given room: one melody voice at a time, simpler leads and stabs, one percussion colour per groove, played drum dynamics, a layered snare and clap in one shared drum room, and thicker lead patches. Off = the full stack as before. Applies to the next GENERATE."><input id="gscClean" type="checkbox" checked>◇ CLEAN &amp; LAYERED</label><label for="gscNovelty" style="margin:0 0 2px;font-size:10px" title="How far a song may travel from the genre's classic grooves. Prompt words also push it: experimental / wild / unique (more), classic / authentic (less).">NOVELTY <b id="gscNoveltyVal" style="color:#f2ca70">55%</b></label><input id="gscNovelty" type="range" min="5" max="100" step="5" value="75" style="width:100%;accent-color:#d8ae4e;margin:0 0 9px"><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="When on, every page load picks a new genre, key and tempo and writes a fresh song into every module (not played until you press PLAY)"><input id="gscAutoLoad" type="checkbox" checked>NEW SONG ON EVERY LOAD</label><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Listens to every module while the song plays and sets a balanced level for each (drums up front, 30LEE, synths and pads sitting underneath). Your faders still work on top."><input id="gscAutoMix" type="checkbox" checked>⚖ AUTO MIX LEVELS</label><div id="gscMixInfo" style="font-size:10px;letter-spacing:.06em;color:#8fe6a8;margin:-4px 0 9px;overflow-wrap:anywhere"></div></div>
 </div>
-<div class="gsc-note" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
- <label style="margin:0"><input id="gscAutoFX" type="checkbox"> AUTO CHANNEL FX</label>
+<div class="gsc-note" style="display:none" aria-hidden="true">
+ <label style="margin:0"><input id="gscAutoFX" type="checkbox" checked> AUTO CHANNEL FX</label>
  <button id="gscApplyFX" type="button">Apply Genre FX</button>
  <label for="gscFXModule">EDIT CHANNEL</label><select id="gscFXModule"><option value="bl">80LA8 DRUMS</option><option value="mine">DIVINE09</option><option value="lee">30LEE BASS</option><option value="s101">0010110 SYNTH</option><option value="go">GALACTIC ONE</option><option value="vox">GALACTIC VOX</option><option value="ws">PAD-64</option><option value="lp">LOOPER</option></select>
  <button id="gscEditFX" type="button">Open Channel FX</button>
@@ -12185,7 +12191,7 @@ const PAT=(()=>{
 /* v183 JUMP UP - modelled on the reference track the user supplied (measured, not copied): 160 BPM, tight two-step (kick 1 + the
    "and" of 3 with a ghost before it, snare 2 & 4), 8th hats with 16th pickups, no amen; a bass that HOLDS one root most of the bar and
    bends to a neighbour at phrase ends; the growl's brightness sweeps ~3 times a bar; mids nearly as loud as the sub; sub mono, growl wide. */
-window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).value,t=((document.getElementById('gscPrompt')||{}).value||'').toLowerCase();return /^(jungle|dnb)$/.test(g)&&/jump.?up|jumpup/.test(t)}catch(e){return false}};
+window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).value,t=((document.getElementById('gscPrompt')||{}).value||'').toLowerCase();return g==='jungle'||(g==='dnb'&&/jump.?up|jumpup/.test(t))}catch(e){return false}};   /* v199: Jungle IS jump up - no typing needed */
  /* ===== v170 CLASSIC DNA: one or two beats per genre written in the spirit of a landmark record of the style - its drum
     programming, bass rhythm, chord movement, hook rhythm and arrangement habits - with ORIGINAL melodies (close in feel, never
     a copy). Tagged cl:1 and carry ref (the record they nod to). The 🏆 CLASSIC DNA switch picks them for most songs; a prompt
@@ -12606,13 +12612,13 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
   const nv=Gg.gr.length;let variant=Number.isInteger(opts.variant)?((opts.variant%nv)+nv)%nv:Math.floor(r()*nv);
   const old=Gg;Gg=Object.assign({},old,{scale});
   OWNB=false;let beatName=null,beatRef=null;   /* v121 PRODUCER BEATS: one coherent hand-written beat per song */
-  if(old.beats&&old.beats.length&&(fresh<.9||/jump.?up|jumpup/.test(t))){   /* v186: jump up keeps its beats at any novelty */   /* v126: the producer beats are used at normal novelty (they were skipped whenever NOVELTY was on - i.e. always) */
+  if(old.beats&&old.beats.length&&(fresh<.9||genre==='jungle'||/jump.?up|jumpup/.test(t))){   /* v186: jump up keeps its beats at any novelty */   /* v126: the producer beats are used at normal novelty (they were skipped whenever NOVELTY was on - i.e. always) */
   /* v152: ⚡ UNDERGROUND EDGE on = an underground cut ~75% of the time (classic songbook the rest); off = classic songbook only */
   const UG=old.beats.map((x,i)=>x.ug&&!x.cl&&!x.ju&&!x.own?i:-1).filter(i=>i>=0),CL=old.beats.map((x,i)=>x.ug||x.cl||x.ju||x.own?-1:i).filter(i=>i>=0),CLS=old.beats.map((x,i)=>x.cl?i:-1).filter(i=>i>=0);
   /* v170 CLASSIC DNA: the beats written after the landmark records of the genre play most songs (always when the prompt asks for classic / old school) */
   const clOn=opts.classic!=null?!!opts.classic:(()=>{try{const e=document.getElementById('gscClassic');return !e||e.checked}catch(_){return true}})(),wantCl=/classic|traditional|authentic|old.?school|textbook|original|proper|real /.test(t);
   const JUP=old.beats.map((x,i)=>x.ju?i:-1).filter(i=>i>=0),OWN=old.beats.map((x,i)=>x.own?i:-1).filter(i=>i>=0);
-  const pool=JUP.length&&/jump.?up|jumpup/.test(t)?JUP:OWN.length?OWN:   /* v185: your own techno sound plays most techno songs */CLS.length&&(wantCl||(clOn&&r()<.6))?CLS:edge&&UG.length?(r()<.75||!CL.length?UG:CL):(CL.length?CL:UG.length?UG:CLS),np=pool.length,vi=Number.isInteger(opts.variant)?((opts.variant%np)+np)%np:Math.floor(r()*np);
+  const pool=JUP.length&&(genre==='jungle'||/jump.?up|jumpup/.test(t))?JUP:OWN.length?OWN:   /* v185: your own techno sound plays most techno songs */CLS.length&&(wantCl||(clOn&&r()<.6))?CLS:edge&&UG.length?(r()<.75||!CL.length?UG:CL):(CL.length?CL:UG.length?UG:CLS),np=pool.length,vi=Number.isInteger(opts.variant)?((opts.variant%np)+np)%np:Math.floor(r()*np);
   const ti=(window.GLCTC_TASTE&&!opts.noTaste)?GLCTC_TASTE.beat(genre,pool.map(i=>old.beats[i].name),vi):vi;
   let B=old.beats[pool[ti]??pool[vi]];OWNB=!!B.own;if(edge&&!B.cl)B=edgeBeat(B,genre,r);beatName=B.name;beatRef=B.ref||null;variant=0;window.__glctcLastBeat={genre,beat:B.name};
    Gg=Object.assign({},Gg,{gr:[B.gr],prog:[B.prog],stab:[B.stab],bass:[B.bass],vox:B.vox?[B.vox]:Gg.vox,bd:B.bd||Gg.bd,bk:B.bk||Gg.bk,pc:B.pc||Gg.pc,lead:Object.assign({},Gg.lead,{rh:[B.lead.rh],m:[B.lead.m]},B.lead.g!=null?{g:B.lead.g}:{})})}
@@ -12637,6 +12643,9 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
   {const w=wsPats(r,key,handBL,WS_KITS[opts.wsPreset]||null);pack.ws={pats:w.pats,bars:4,swing,tunes:w.tunes};pack.harm={key,semiT:w.semiT};pack.sub={patterns:subPats(bassPair,SC[scale]||SC.minor),root:24+key+REG,swing};if(WS_KITS[opts.wsPreset])pack.flavour.perc='WORLD KIT'}
   if(beatName){pack.flavour.beat=beatName;pack.flavour.hat='BEAT · '+beatName;if(beatRef)pack.flavour.ref=beatRef}
   try{window.GLCTC_CLARIFY&&GLCTC_CLARIFY(pack,genre,handBL,r)}catch(e){console.warn('clarity pass',e)}   /* v160 */
+  /* v200 SUB REGISTER (every genre): the chakra register lift put many subs at 65-100 Hz (low-mid, not sub). Measured on the jump up
+     record the sub is one note at ~43 Hz, so every genre's SUB-01 root now sits in the 34-68 Hz octave, whatever the key. */
+  try{const hz=(window.GLCTC_TUNING&&+GLCTC_TUNING.hz)||440,f=m=>hz*Math.pow(2,(m-69)/12);let rt=pack.sub.root;while(f(rt)>=68)rt-=12;while(f(rt)<34)rt+=12;pack.sub.root=rt}catch(e){}
   /* v190 JUMP UP BASSLINE - a real 4-bar line (the reference's sub never sits still: root, minor 3rd on the back half of bar 1, fifth
      and fourth answering in bar 2, riding the fourth in bar 3, bends between them). Written in that vocabulary, not copied note for note.
      SUB-01 plays the line (held notes + slides); the 30LEE growl stabs it an octave up in the measured stab rhythm. */
@@ -12644,7 +12653,7 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
   /* v192 FORMULA BASSLINE: a 4-bar line from the genre's formula (seeded, so every song is a little different). SUB-01 plays it low,
      30LEE plays it (or its own stab rhythm) an octave up. Chord-relative, so it follows the song's chords. */
   {const FM=window.GLCTC_FORMULA&&GLCTC_FORMULA[genre];
-   if(FM&&FM.bass&&FM.bass.lines&&!OWNB&&!(/jump.?up|jumpup/.test(t)&&/^(jungle|dnb)$/.test(genre))){try{
+   if(FM&&FM.bass&&FM.bass.lines&&!OWNB&&!(genre==='jungle'||(/jump.?up|jumpup/.test(t)&&genre==='dnb'))){try{
     const sc=SC[scale]||SC.minor,B=FM.bass,L=sc.length,DEG=L===5?{R:0,O:0,'3':1,'4':2,'5':3,'6':4,'7':4,b:-1,L:-2}:{R:0,O:0,'3':2,'4':3,'5':4,'6':5,'7':6,b:-1,L:-L+4};   /* pentatonic: the fifth is 3 steps up */
     const pickL=()=>B.lines[Math.floor(r()*B.lines.length)].slice();
     const fold=x=>{let n=((x%12)+12)%12;return n>6?n-12:n};
@@ -12663,18 +12672,40 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
     pack.sub.patterns[0]=a.sub;pack.sub.patterns[1]=b.sub;pack.sub.patterns[3]=a.sub;
     pack.lee.patterns[0]=a.lee;pack.lee.patterns[1]=b.lee;pack.lee.patterns[3]=a.lee;pack.lee.length=64;
     pack.flavour.bassline=B.name+' · 4 BARS'}catch(e){console.warn('formula bass',e)}}}
-  if(/jump.?up|jumpup/.test(t)&&/^(jungle|dnb)$/.test(genre)){try{
-   const L1=[[0,0,0,8,0],[0,8,3,4,1],[0,12,0,4,1],[1,0,0,6,0],[1,6,3,2,1],[1,8,0,3,1],[1,11,1,1,1],[1,12,7,1,1],[1,13,5,3,1],
-             [2,0,5,4,0],[2,4,7,2,1],[2,6,0,3,1],[2,9,3,3,1],[2,12,0,2,1],[2,14,-2,2,1],[3,0,0,10,0],[3,10,2,2,1],[3,12,0,4,1]];
-   const L2=[[0,0,0,6,0],[0,6,3,2,1],[0,8,5,4,1],[0,12,3,4,1],[1,0,0,8,0],[1,8,-2,2,1],[1,10,0,2,1],[1,12,7,4,1],
-             [2,0,5,6,0],[2,6,3,2,1],[2,8,0,4,1],[2,12,-2,4,1],[3,0,0,8,0],[3,8,3,4,1],[3,12,1,2,1],[3,14,0,2,1]];
-   const noteAt=(L,i)=>{let c=0;for(const e of L){if(e[0]*16+e[1]<=i)c=e[2]}return c};
+  if(genre==='jungle'||(/jump.?up|jumpup/.test(t)&&genre==='dnb')){try{
+   const PH={   /* v201: bar phrases in the record's vocabulary (root holds, minor 3rd, 4th / 5th answers, bends) - [step, semitone, length, slide] */
+     a:[[[0,0,8,0],[8,3,4,1],[12,0,4,1]],[[0,0,6,0],[6,3,2,1],[8,0,8,0]],[[0,0,10,0],[10,3,2,1],[12,0,4,1]],[[0,0,8,0],[8,5,4,1],[12,3,4,1]]],
+     b:[[[0,0,6,0],[6,3,2,1],[8,0,3,1],[11,1,1,1],[12,7,1,1],[13,5,3,1]],[[0,0,8,0],[8,-2,2,1],[10,0,2,1],[12,7,4,1]],[[0,0,6,0],[6,5,2,1],[8,7,4,1],[12,5,4,1]],[[0,0,4,0],[4,3,4,1],[8,5,4,1],[12,3,4,1]]],
+     c:[[[0,5,4,0],[4,7,2,1],[6,0,3,1],[9,3,3,1],[12,0,2,1],[14,-2,2,1]],[[0,5,6,0],[6,3,2,1],[8,0,4,1],[12,-2,4,1]],[[0,3,4,0],[4,5,4,1],[8,7,4,1],[12,5,4,1]],[[0,0,6,0],[6,3,2,1],[8,5,8,1]]],
+     d:[[[0,0,10,0],[10,2,2,1],[12,0,4,1]],[[0,0,8,0],[8,3,4,1],[12,1,2,1],[14,0,2,1]],[[0,0,8,0],[8,7,2,1],[10,5,2,1],[12,3,2,1],[14,0,2,1]],[[0,0,12,0],[12,-2,2,1],[14,0,2,1]]]};
+    const pk=a=>a[Math.floor(r()*a.length)],bar=(b,ph)=>ph.map(([st,n,len,sl])=>[b,st,n,len,sl]);
+    const L1=[...bar(0,pk(PH.a)),...bar(1,pk(PH.b)),...bar(2,pk(PH.c)),...bar(3,pk(PH.d))];
+    const L2=[...bar(0,pk(PH.a)),...bar(1,pk(PH.b)),...bar(2,pk(PH.c)),...bar(3,pk(PH.d))];
+    const noteAt=(L,i)=>{let c=0;for(const e of L){if(e[0]*16+e[1]<=i)c=e[2]}return c};
    const subLine=L=>{const a=Array.from({length:64},()=>({on:false,n:0,len:4,v:.9,sl:false}));L.forEach(([b,st,n,len,sl])=>{a[b*16+st]={on:true,n,len,v:st===0?.95:.88,sl:!!sl}});return a};
    pack.sub.patterns[0]=subLine(L1);pack.sub.patterns[1]=subLine(L2);
    const sc=SC[scale]||SC.minor,root=bassNote('r',0,key,sc),STAB=[[0,6,10,12],[0,10,12]];
    const growl=L=>Array.from({length:64},(_,i)=>{const b=Math.floor(i/16),st=i%16,on=STAB[b%2].includes(st);return{on,note:Math.max(12,Math.min(60,root+12+noteAt(L,i))),accent:st===0||st===12,slide:false,velocity:on?(st===0?.95:.86):.78}});
    pack.lee.patterns[0]=growl(L1);pack.lee.patterns[1]=growl(L2);pack.lee.length=64;
    pack.flavour.bassline='JUMP UP 4-BAR LINE'}catch(e){console.warn('jump up line',e)}}
+  /* v198 JUMP UP DRUMS - measured from Genuine Psychopaths (attack energy per 16th over a 2-bar cycle): kick bar 1 on steps 1 and 7,
+     bar 2 on steps 1 and 11; snare only on 2 and 4; hats a steady even wash (every 16th within ~4 dB). No ghost-snare chaos, no doubled
+     snare on 80LA8, no PAD-64 percussion (pots and pans), no voice (vocals come later, female only). */
+  if(genre==='jungle'||(/jump.?up|jumpup/.test(t)&&genre==='dnb')){try{
+   const st=(on,v,acc)=>({on:!!on,accent:!!acc,velocity:v});
+   const K=[0,6,16,26],S=[4,12,20,28];   /* measured base - always there */
+   {const v=Math.floor(r()*5);if(v===1)K.push(29);else if(v===2)K.push(10);else if(v===3)S.push(30);else if(v===4)S.push(14)}   /* v201: one variation per song at most (or none) */
+   const mk=crash=>pack.mine.patterns[0].map((row,tr)=>Array.from({length:32},(_,i)=>{
+     if(tr===0)return st(K.includes(i),i%16===0?1:.92,i%16===0);
+     if(tr===1)return st(S.includes(i),.98,true);
+     if(tr===3)return st(true,i%2===0?.62:.5,false);   /* even 16th wash */
+     if(tr===10)return st(crash&&i===0,.8,false);
+     return st(false,.8,false)}));
+   pack.mine.patterns[0]=mk(false);pack.mine.patterns[1]=mk(true);pack.mine.bars=2;
+   (pack.bl.patterns||[]).forEach(P=>{const S8=P.steps||P;S8.forEach(r=>r.forEach(x=>{x.on=false}))});
+   if(pack.ws&&pack.ws.pats)pack.ws.pats=pack.ws.pats.map(P=>P.map(L=>L.map(()=>0)));
+   if(pack.vox&&Array.isArray(pack.vox.steps))pack.vox.steps=pack.vox.steps.map(x=>Object.assign({},x,{on:false}));
+   pack.flavour.beat='JUMP UP · MEASURED (GENUINE PSYCHOPATHS)'}catch(e){console.warn('jump up drums',e)}}
   pack.hook={a:pack.go.pats[0].steps.map(x=>x.on?[x.n,x.g,x.v]:0),b:pack.go.pats[5].steps.map(x=>x.on?[x.n,x.g,x.v]:0),reg:REG};   /* v109 HOOK DNA */
   Gg=old;return pack}
  const API={sub:()=>window.GLCTC_SUB_PATTERNS,bl:()=>window.GLCTC_80LA8_PATTERNS,mine:()=>window.GLCTC_DIVINE09_PATTERNS,lee:()=>window.GLCTC_30LEE_PATTERNS,s101:()=>window.GLCTC_0010110_PATTERNS,go:()=>window.GALACTIC_ONE&&GALACTIC_ONE.patterns,vox:()=>window.GALACTIC_VOX&&GALACTIC_VOX.patterns,ws:()=>window.GLCTC_PAD64_PATTERNS};
@@ -13027,7 +13058,7 @@ const SUB_POOL=GLCTC_GFILL({techno:['Techno Rumble','Pure Sine Sub','Trance Offb
  eastcoast:['Hip-Hop Warm Sub','808 Long Boom'],westcoast:['Hip-Hop Warm Sub','808 Glide'],south:['808 Long Boom','808 Glide'],ukhiphop:['808 Glide','Pure Sine Sub'],drill:['Drill Slide 808','808 Glide'],trap:['808 Glide','808 Long Boom'],lofi:['Lo-Fi Soft Sub','Hip-Hop Warm Sub'],hiphop:['Hip-Hop Warm Sub'],
  reggae:['Reggae Roots Sub','Dub Pressure'],ska:['Reggae Roots Sub','Pure Sine Sub'],pop:['Pure Sine Sub','Deep House Round'],synthwave:['Synthwave Pulse Sub','Pure Sine Sub'],ambient:['Meditation Drone Sub','Pure Sine Sub'],meditation:['Meditation Drone Sub']});
 const SUB_LEVEL=GLCTC_GFILL({jungle:90,reggae:80,ska:80,trap:82,drill:82,south:85,psytrance:80,ambient:70,meditation:72,lofi:85,hiphop:90});
-function fitSubRoot(root){const ratio=(window.GLCTC_TUNING&&GLCTC_TUNING.ratio&&GLCTC_TUNING.ratio())||1,f=m=>440*Math.pow(2,(m-69)/12)*ratio;while(f(root)>=80)root-=12;while(f(root)<40)root+=12;return root}   /* v101: the sub lives at 40-80 Hz - the club sub range, felt on big systems and present on small ones */
+function fitSubRoot(root){const ratio=(window.GLCTC_TUNING&&GLCTC_TUNING.ratio&&GLCTC_TUNING.ratio())||1,f=m=>440*Math.pow(2,(m-69)/12)*ratio;while(f(root)>=68)root-=12;while(f(root)<34)root+=12;return root}   /* v200 MEASURED (jump up record: sub ~43 Hz): the sub root lives in the 34-68 Hz octave; small speakers hear it through the driven sine's 3rd harmonic */
 function fitSub(pack){try{if(pack&&pack.sub)pack.sub.root=fitSubRoot(pack.sub.root)}catch(e){}return pack}
 window.addEventListener('glctc-tuning',()=>{try{const P=window.GLCTC_SUB_PATTERNS;if(!P)return;const d=P.get();P.set({patterns:d.patterns,root:fitSubRoot(d.root)})}catch(e){}});
 /* ===== v120 FRESH COMPOSER · controls =====
@@ -13162,10 +13193,10 @@ function designBass(genre){
  const A=window.GLCTC_PRESET_LIBRARIES&&GLCTC_PRESET_LIBRARIES.adapters;if(!A||!A.lee)return null;
  let list=BASS_POOL[genre]||BASS_POOL.techno;let id=null;
  try{const tx=((document.getElementById('gscPrompt')||{}).value||'').toLowerCase();   /* v182: the prompt picks the bass family */
-  if(/jump.?up|jumpup/.test(tx))list=[['jumpup',1]];else if(/reese|neuro/.test(tx))list=[['reese',4],['grit',1]];else if(/wobble/.test(tx))list=[['wobble',4]];
+  if(/jump.?up|jumpup/.test(tx)||genre==='jungle')list=[['jumpup',1]];else if(/reese|neuro/.test(tx))list=[['reese',4],['grit',1]];else if(/wobble/.test(tx))list=[['wobble',4]];
   else if(/acid|303/.test(tx))list=[['acid',4]];else if(/808/.test(tx))list=[['b808',4]]}catch(_){}
- for(let i=0;i<8;i++){const tot=list.reduce((a,x)=>a+x[1],0);let r=Math.random()*tot;id=list[0][0];for(const x of list){r-=x[1];if(r<=0){id=x[0];break}}if(id!==lastBass[genre]||list.length<2)break}
- lastBass[genre]=id;const a=BASS_ARCH[id],j=(v,m)=>v*(1+(Math.random()*2-1)*m),d=A.lee.get();
+ {const tot=list.reduce((a,x)=>a+x[1],0);let r=Math.random()*tot;id=list[0][0];for(const x of list){r-=x[1];if(r<=0){id=x[0];break}}}   /* v201: the genre's own bass archetypes (its list only) */
+ lastBass[genre]=id;const a=BASS_ARCH[id],j=(v,m)=>v*(1+(Math.random()*2-1)*m*.4),d=A.lee.get();   /* small nudges: about +-8% instead of +-20% */
  d.wave=a.wave;d.subWave=a.subWave;d.octave=a.octave;d.filterMode=a.filterMode;
  d.sub=Math.max(0,Math.min(1,j(a.sub,.15)));d.cutoff=Math.max(120,j(a.cutoff,.18));d.resonance=Math.max(0,Math.min(20,j(a.resonance,.2)));
  d.envMod=Math.max(0,Math.min(1,j(a.envMod,.15)));d.decay=Math.max(.05,Math.min(2,j(a.decay,.2)));d.attack=a.attack;d.drive=Math.max(0,Math.min(.8,j(a.drive,.2)));
@@ -13195,7 +13226,7 @@ function chooseComposerBpm(genreKey,promptText){
  const asked=explicit?Number(explicit[1]||explicit[2]):NaN;
  if(Number.isFinite(asked))return Math.max(30,Math.min(300,Math.round(asked*10)/10));
  /* Genre defaults are applied only when GENERATE is pressed, never just by changing genre. */
- const range=((window.GLCTC_FORMULA&&GLCTC_FORMULA[genreKey])||{}).tempo||GLCTC_GFILL({amapiano:[110,114],afrohouse:[120,124],phonk:[126,140],melodictechno:[122,126],deephouse:[122,125],techhouse:[124,128],tribalhouse:[124,128],hardhouse:[145,150],happyhardcore:[170,178],jungle:[160,166],liquid:[172,175],nuskool:[130,136],electro:[118,128],westcoast:[96,100],eastcoast:[86,94],south:[70,78],ukhiphop:[138,142],drill:[140,144],reggae:[84,94],ska:[150,165],meditation:[60,68],techno:[130,130],house:[120,126],dnb:[172,175],hiphop:[84,96],ambient:[70,90],pop:[110,124],trance:[136,140],psytrance:[142,148],dubstep:[140,140],garage:[128,134],breaks:[124,136],synthwave:[90,112],trap:[132,150],lofi:[72,88]})[genreKey]||[126,134];
+ const range=(window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?[160,160]:((window.GLCTC_FORMULA&&GLCTC_FORMULA[genreKey])||{}).tempo||GLCTC_GFILL({amapiano:[110,114],afrohouse:[120,124],phonk:[126,140],melodictechno:[122,126],deephouse:[122,125],techhouse:[124,128],tribalhouse:[124,128],hardhouse:[145,150],happyhardcore:[170,178],jungle:[160,166],liquid:[172,175],nuskool:[130,136],electro:[118,128],westcoast:[96,100],eastcoast:[86,94],south:[70,78],ukhiphop:[138,142],drill:[140,144],reggae:[84,94],ska:[150,165],meditation:[60,68],techno:[130,130],house:[120,126],dnb:[172,175],hiphop:[84,96],ambient:[70,90],pop:[110,124],trance:[136,140],psytrance:[142,148],dubstep:[140,140],garage:[128,134],breaks:[124,136],synthwave:[90,112],trap:[132,150],lofi:[72,88]})[genreKey]||[126,134];
  return range[0]+Math.floor(Math.random()*(range[1]-range[0]+1));
 }
 function setMasterBpmFromComposer(value){
@@ -13556,9 +13587,27 @@ function chooseSongPresets(genre,original){
    if(q&&roles[m.k]!==undefined)add(q.label+' · '+q.names[roles[m.k]],W[1]);
    add(pk[m.k],W[2]);(ex[m.k]||[]).forEach(v=>add(v,W[3]))}
   if(list.length)o[m.k]=wpick(list)});return o};
- let pal=build(),tries=0;const sig=o=>MODS.map(m=>o[m.k]).join('|');
- while(sig(pal)===lastSoundPalette[genre]&&tries++<6)pal=build();   /* never the exact same sound stack twice in a row */
- Object.assign(out,pal);lastSoundPalette[genre]=sig(out);return out;
+ /* v200 ONE SOUND PER GENRE: no dice. Every module loads the genre's own designated preset every time (a measured fix in PAL_FIX
+    wins where the designated one was found broken; the sub gets the genre's own sub patch). */
+ const fixed={...original};MODS.forEach(m=>{const avail=new Set(presetOpts(m).map(x=>x[0]));const ok=v=>v&&(avail.size===0||avail.has(v));
+  const fx=PAL_FIX[genre]&&PAL_FIX[genre][m.k];
+  if(m.k==='sub'){const v=(SUB_POOL[genre]||['Pure Sine Sub'])[0];if(ok(v))fixed.sub=v;return}
+  if(m.k==='lee'||m.k==='go'||m.k==='vox'){if(ok(original[m.k]))return;}
+  if(fx&&fx.length&&m.k!=='lee'){const best=fx.slice().sort((x,y)=>y[1]-x[1])[0][0];if(ok(best)){fixed[m.k]=best;return}}
+  if(!ok(original[m.k])&&fx&&fx.length)fixed[m.k]=fx[0][0]});
+ /* v201 FLEXIBILITY INSIDE THE GENRE: each song picks among the genre's OWN sounds - the designated one most often, then other presets
+    made for this genre (same genre label, or the genre's own palette lists). Never another genre's preset, never the 'Character' kits. */
+ {const norm=x=>String(x||'').toLowerCase().replace(/[^a-z]/g,''),G=norm(genre);
+  const own=v=>{if(!v)return false;const pre=String(v).split(' · ')[0];if(/^(character|factory)$/i.test(pre))return false;if(/latin|reggaeton|flamenco/i.test(String(v)))return false;const n=norm(pre);
+   return /^(kit|tops|bass|pad|keys|strings|brass|fx|lead|f\|)/i.test(pre)||(n&&(G.includes(n)||n.includes(G)))};
+  const pk=GENRE_PACK[genre]||{},ex=GENRE_EXTRA[genre]||{};
+  MODS.forEach(m=>{if(m.k==='sub'||m.k==='vox')return;if(genre==='jungle'&&(m.k==='mine'||m.k==='bl'))return;   /* jump up kit stays the measured one */
+   const avail=new Set(presetOpts(m).map(x=>x[0]));const L=[[fixed[m.k],4]];
+   const addc=(v,w)=>{if(v&&v!==fixed[m.k]&&avail.has(v)&&own(v)&&!L.some(x=>x[0]===v))L.push([v,w])};
+   addc(original[m.k],2);addc(pk[m.k],1);(ex[m.k]||[]).forEach(v=>addc(v,1));(PAL_FIX[genre]&&PAL_FIX[genre][m.k]||[]).forEach(([v])=>addc(v,1));
+   const tot=L.reduce((a,x)=>a+x[1],0);let r=Math.random()*tot;for(const x of L){r-=x[1];if(r<=0){fixed[m.k]=x[0];break}}})}
+ {const KF=({house:['House · Chicago 909','Deep House · Soft 909'],deephouse:['Deep House · Soft 909','House · Chicago 909']}[genre]||[])[Math.random()<.7?0:1];const M=MODS.find(m=>m.k==='mine');if(KF&&M&&presetOpts(M).some(x=>x[0]===KF))fixed.mine=KF}   /* v200: house is a 909 sound, not hand drums */
+ Object.assign(out,fixed);lastSoundPalette[genre]=MODS.map(m=>out[m.k]).join('|');return out;
 }
 /* v119 NO SILENT CELLS: an arranged cell that points at a pattern the genre engine left empty made that module "play"
    silence for the whole section (hip-hop breakdown kits have no hats, so DIVINE09 pattern C was blank in every East / West
@@ -13616,6 +13665,7 @@ function prepareSong(genreKey,txt,forceFill){
  try{window.GLCTC_CHARACTER&&GLCTC_CHARACTER.setGenre(genreKey)}catch(e){}
  try{window.GLCTC_BREAK&&GLCTC_BREAK.forGenre(genreKey)}catch(e){}   /* v109 BREAK SLOT */
  try{window.GLCTC_FX?.composer(genreKey,byId('gscAutoFX')?.checked!==false)}catch(e){console.warn('composer fx',e)}
+ try{window.GLCTC_GENRE_BUSES&&GLCTC_GENRE_BUSES(genreKey)}catch(e){console.warn('genre buses',e)}
  let pack=null;
  try{if(forceFill||(byId('gscAutoFill')&&byId('gscAutoFill').checked))pack=fillPatterns(genreKey,txt)}catch(e){console.warn('pattern fill',e)}
  try{fitCellsToPatterns()}catch(e){console.warn('cell fit',e)}
@@ -13744,7 +13794,7 @@ window.GLCTC_COMPOSER_CLEAR=function(){
 };
 byId('gscEditFX').onclick=()=>window.GLCTC_FX?.select('mod:'+byId('gscFXModule').value,true);
 byId('gscApplyFX').onclick=()=>{byId('gscAutoFX').checked=true;window.GLCTC_FX?.composer(byId('gscGenre').value,true);status('GENRE CHANNEL FX APPLIED · edit each channel in the mixer')};
-try{byId('gscAutoFX').checked=localStorage.getItem('glctc1.composerAutoFX')!=='0'}catch(e){byId('gscAutoFX').checked=true}
+byId('gscAutoFX').checked=true;   /* v199: genre FX always on (the switch is gone; an old saved 'off' no longer applies) */
 byId('gscAutoFX').onchange=()=>{try{localStorage.setItem('glctc1.composerAutoFX',byId('gscAutoFX').checked?'1':'0')}catch(e){}window.GLCTC_FX?.composer(byId('gscGenre').value,byId('gscAutoFX').checked);status(byId('gscAutoFX').checked?'AUTO CHANNEL FX ON':'COMPOSER FX OFF · manual channel FX kept')};
 byId('gscSave').onclick=()=>window.GLCTC_COMPOSER_FILES.save();
 byId('gscLoad').onclick=()=>window.GLCTC_COMPOSER_FILES.load();
@@ -15714,59 +15764,60 @@ const IDS=['bl','mine','sub','lee','s101','go','vox','ws','ix'];
 const dB=v=>Math.pow(10,v/20);
 /* rev.mix / dly.mix / pump.depth are per-module amounts (0..1) */
 const CH={
- techno:   {name:'Techno · Warehouse Weight',low:[2.5,60],mud:-2.5,pres:1.5,air:1.5,tone:20000,glue:[-18,3,.01,.12],drive:.25,
+ /* v202 MEASURED: a sawtooth through the master came out with its 2nd-7th harmonics 5-8 dB down (every bass sounded like a sine) - the character's low shelf (+2..+3.5 dB) and 300 Hz mud cut (-2..-4 dB) buried the bass harmonics. Now capped at +1 / -1 dB. */
+ techno:   {name:'Techno · Warehouse Weight',low:[1.0,60],mud:-1.0,pres:1.5,air:1.5,tone:20000,glue:[-18,3,.01,.12],drive:.25,
             rev:{t:2.2,pre:.02,damp:7000,mix:{bl:.05,mine:.08,s101:.18,go:.15,vox:.2,ws:.12}},dly:{beats:.75,fb:.42,lo:300,hi:4500,mix:{s101:.18,go:.12,mine:.05,vox:.15}},
             pump:{depth:{lee:.35,go:.3,s101:.3,ws:.25,vox:.2},rel:.18}},
- house:    {name:'House · Warm Pump',low:[2,70],mud:-2,pres:2,air:2.5,tone:20000,glue:[-16,2.5,.015,.15],drive:.15,
+ house:    {name:'House · Warm Pump',low:[1.0,70],mud:-1.0,pres:2,air:2.5,tone:20000,glue:[-16,2.5,.015,.15],drive:.15,
             rev:{t:1.6,pre:.015,damp:8000,mix:{bl:.05,mine:.1,s101:.2,go:.18,vox:.22,ws:.12}},dly:{beats:.75,fb:.35,lo:350,hi:5000,mix:{s101:.2,vox:.18,go:.1}},
             pump:{depth:{lee:.3,go:.35,s101:.4,ws:.25,vox:.2},rel:.2}},
- dnb:      {name:'DnB · Tight & Heavy',low:[3,50],mud:-3,pres:2.5,air:2,tone:20000,glue:[-14,4,.005,.08],drive:.3,
+ dnb:      {name:'DnB · Tight & Heavy',low:[1.0,50],mud:-1.0,pres:2.5,air:2,tone:20000,glue:[-14,4,.005,.08],drive:.3,
             rev:{t:1.4,pre:.01,damp:7500,mix:{mine:.08,go:.2,vox:.2,ws:.15,s101:.15}},dly:{beats:.5,fb:.3,lo:400,hi:5000,mix:{go:.12,vox:.15}},
             pump:{depth:{lee:.2,go:.25,ws:.2},rel:.12}},
- hiphop:   {name:'Hip-Hop · Dusty Knock',low:[3.5,55],mud:-2,pres:1.5,air:-1,tone:14000,glue:[-15,3,.02,.2],drive:.3,crackle:.12,
+ hiphop:   {name:'Hip-Hop · Dusty Knock',low:[1.0,55],mud:-1.0,pres:1.5,air:-1,tone:14000,glue:[-15,3,.02,.2],drive:.3,crackle:.12,
             rev:{t:1.0,pre:.01,damp:5000,mix:{bl:.06,mine:.06,s101:.12,go:.12,vox:.1}},dly:{beats:1,fb:.25,lo:300,hi:3500,mix:{vox:.12,s101:.1}},
             pump:{depth:{go:.15,s101:.15},rel:.2}},
- ambient:  {name:'Ambient · Endless Space',low:[1,80],mud:-1.5,pres:-1,air:3,tone:20000,glue:[-22,1.6,.03,.4],drive:.05,
+ ambient:  {name:'Ambient · Endless Space',low:[1.0,80],mud:-1.0,pres:-1,air:3,tone:20000,glue:[-22,1.6,.03,.4],drive:.05,
             rev:{t:5.5,pre:.04,damp:9000,mix:{bl:.3,mine:.3,lee:.15,s101:.45,go:.5,vox:.5,ws:.45}},dly:{beats:1.5,fb:.55,lo:250,hi:5000,mix:{go:.3,s101:.3,vox:.3,ws:.2}},
             pump:{depth:{},rel:.3}},
- pop:      {name:'Pop · Radio Shine',low:[2,70],mud:-2.5,pres:2.5,air:3,tone:20000,glue:[-16,3,.01,.15],drive:.12,
+ pop:      {name:'Pop · Radio Shine',low:[1.0,70],mud:-1.0,pres:2.5,air:3,tone:20000,glue:[-16,3,.01,.15],drive:.12,
             rev:{t:1.8,pre:.02,damp:9000,mix:{bl:.05,mine:.08,s101:.18,go:.18,vox:.25,ws:.12}},dly:{beats:.75,fb:.3,lo:400,hi:6000,mix:{vox:.15,go:.1}},
             pump:{depth:{go:.2,s101:.2,lee:.15,ws:.15},rel:.2}},
- trance:   {name:'Trance · Euphoric Hall',low:[2,60],mud:-2.5,pres:2,air:3.5,tone:20000,glue:[-17,3,.01,.12],drive:.15,
+ trance:   {name:'Trance · Euphoric Hall',low:[1.0,60],mud:-1.0,pres:2,air:3.5,tone:20000,glue:[-17,3,.01,.12],drive:.15,
             rev:{t:3.5,pre:.03,damp:9000,mix:{lee:.04,mine:.08,s101:.3,go:.35,vox:.35,ws:.2}},dly:{beats:.75,fb:.45,lo:350,hi:6000,mix:{go:.25,s101:.2,vox:.2}},
             pump:{depth:{lee:.45,go:.5,s101:.5,ws:.35,vox:.3},rel:.22}},
- psytrance:{name:'Psytrance · Rolling Drive',low:[2.5,55],mud:-3,pres:2,air:2,tone:20000,glue:[-15,3.5,.005,.08],drive:.25,
+ psytrance:{name:'Psytrance · Rolling Drive',low:[1.0,55],mud:-1.0,pres:2,air:2,tone:20000,glue:[-15,3.5,.005,.08],drive:.25,
             rev:{t:2.2,pre:.02,damp:8000,mix:{s101:.2,go:.25,vox:.2,ws:.15}},dly:{beats:.375,fb:.4,lo:400,hi:5500,mix:{go:.2,s101:.18}},
             pump:{depth:{lee:.5,go:.3,s101:.3,ws:.25},rel:.1}},
- dubstep:  {name:'Dubstep · Sub Pressure',low:[3.5,50],mud:-2,pres:3,air:1.5,tone:20000,glue:[-14,4,.005,.1],drive:.4,
+ dubstep:  {name:'Dubstep · Sub Pressure',low:[1.0,50],mud:-1.0,pres:3,air:1.5,tone:20000,glue:[-14,4,.005,.1],drive:.4,
             rev:{t:2.0,pre:.02,damp:7000,mix:{mine:.08,go:.18,vox:.2,ws:.18,s101:.15}},dly:{beats:.75,fb:.35,lo:300,hi:4000,mix:{go:.12,vox:.2,ws:.1}},
             pump:{depth:{lee:.3,go:.3,ws:.25},rel:.15}},
- garage:   {name:'UK Garage · Shuffle Shine',low:[2.5,60],mud:-2,pres:2,air:2.5,tone:20000,glue:[-16,2.5,.01,.12],drive:.18,
+ garage:   {name:'UK Garage · Shuffle Shine',low:[1.0,60],mud:-1.0,pres:2,air:2.5,tone:20000,glue:[-16,2.5,.01,.12],drive:.18,
             rev:{t:1.4,pre:.015,damp:8000,mix:{mine:.1,s101:.18,go:.15,vox:.22,ws:.12}},dly:{beats:.75,fb:.32,lo:400,hi:5500,mix:{s101:.2,vox:.2}},
             pump:{depth:{lee:.3,go:.3,s101:.35,ws:.2,vox:.15},rel:.16}},
- synthwave:{name:'Synthwave · Neon Gated',low:[1.5,70],mud:-1.5,pres:1,air:2,tone:16000,glue:[-18,2.5,.02,.25],drive:.2,
+ synthwave:{name:'Synthwave · Neon Gated',low:[1.0,70],mud:-1.0,pres:1,air:2,tone:16000,glue:[-18,2.5,.02,.25],drive:.2,
             rev:{t:2.8,pre:.02,damp:7000,mix:{bl:.18,mine:.15,lee:.05,s101:.3,go:.3,vox:.3,ws:.25}},dly:{beats:.75,fb:.4,lo:300,hi:4500,mix:{go:.22,s101:.2,vox:.2}},
             pump:{depth:{lee:.2,go:.25,s101:.25,ws:.2},rel:.2}},
- trap:     {name:'Trap · 808 Slam',low:[1.5,45],mud:-2.5,pres:2,air:2.5,tone:20000,glue:[-12,2,.025,.12],drive:.12,
+ trap:     {name:'Trap · 808 Slam',low:[1.0,45],mud:-1.0,pres:2,air:2.5,tone:20000,glue:[-12,2,.025,.12],drive:.12,
             rev:{t:.8,pre:.02,damp:6500,mix:{mine:.02,go:.06,vox:.1,ws:.06,s101:.05}},dly:{beats:.5,fb:.18,lo:400,hi:4500,mix:{go:.04,vox:.08}},
             pump:{depth:{lee:.12,go:.4,ws:.3,s101:.4},rel:.12}},
- lofi:     {name:'Lo-Fi · Cassette Warmth',low:[2,70],mud:-1,pres:-2,air:-4,tone:9500,glue:[-18,2.5,.03,.3],drive:.35,crackle:.35,
+ lofi:     {name:'Lo-Fi · Cassette Warmth',low:[1.0,70],mud:-1.0,pres:-2,air:-4,tone:9500,glue:[-18,2.5,.03,.3],drive:.35,crackle:.35,
             rev:{t:1.5,pre:.01,damp:4000,mix:{bl:.08,mine:.08,s101:.2,go:.22,vox:.2,ws:.18}},dly:{beats:1,fb:.3,lo:400,hi:2500,mix:{s101:.15,go:.12}},
             pump:{depth:{go:.18,s101:.18,ws:.15},rel:.25}},
- breaks:   {name:'Breaks · Big Beat Crunch',low:[2.5,60],mud:-2,pres:2.5,air:2,tone:20000,glue:[-14,4,.005,.1],drive:.35,
+ breaks:   {name:'Breaks · Big Beat Crunch',low:[1.0,60],mud:-1.0,pres:2.5,air:2,tone:20000,glue:[-14,4,.005,.1],drive:.35,
             rev:{t:1.6,pre:.015,damp:7500,mix:{bl:.06,mine:.08,s101:.18,go:.15,vox:.2,ws:.12}},dly:{beats:.75,fb:.35,lo:350,hi:5000,mix:{s101:.15,vox:.15}},
             pump:{depth:{lee:.25,go:.25,s101:.3,ws:.2},rel:.14}},
  /* extra character presets, usable with any genre */
- club:     {name:'Extra · Club Loud',low:[3,55],mud:-3,pres:2.5,air:2.5,tone:20000,glue:[-12,4,.005,.1],drive:.45,
+ club:     {name:'Extra · Club Loud',low:[1.0,55],mud:-1.0,pres:2.5,air:2.5,tone:20000,glue:[-12,4,.005,.1],drive:.45,
             rev:{t:1.8,pre:.02,damp:7000,mix:{mine:.08,s101:.15,go:.15,vox:.18,ws:.12}},dly:{beats:.75,fb:.35,lo:350,hi:5000,mix:{s101:.15,go:.1,vox:.15}},
             pump:{depth:{lee:.4,go:.4,s101:.4,ws:.3,vox:.25},rel:.18}},
- vinyl:    {name:'Extra · Vinyl Record',low:[1.5,70],mud:-1,pres:-1,air:-3,tone:11000,glue:[-17,2.5,.02,.25],drive:.3,crackle:.45,
+ vinyl:    {name:'Extra · Vinyl Record',low:[1.0,70],mud:-1.0,pres:-1,air:-3,tone:11000,glue:[-17,2.5,.02,.25],drive:.3,crackle:.45,
             rev:{t:1.3,pre:.01,damp:4500,mix:{mine:.06,s101:.15,go:.15,vox:.15,ws:.12}},dly:{beats:1,fb:.25,lo:400,hi:3000,mix:{s101:.1,go:.1}},
             pump:{depth:{go:.12,s101:.12},rel:.25}},
- stadium:  {name:'Extra · Stadium Anthem',low:[2,60],mud:-2,pres:2.5,air:3.5,tone:20000,glue:[-16,3,.01,.15],drive:.18,
+ stadium:  {name:'Extra · Stadium Anthem',low:[1.0,60],mud:-1.0,pres:2.5,air:3.5,tone:20000,glue:[-16,3,.01,.15],drive:.18,
             rev:{t:4.2,pre:.035,damp:9000,mix:{bl:.12,mine:.12,lee:.04,s101:.3,go:.35,vox:.4,ws:.25}},dly:{beats:.75,fb:.42,lo:350,hi:6000,mix:{go:.22,s101:.2,vox:.25}},
             pump:{depth:{lee:.3,go:.35,s101:.35,ws:.25,vox:.2},rel:.22}},
- tape:     {name:'Extra · Analog Tape',low:[2,65],mud:-1.5,pres:.5,air:-1.5,tone:13000,glue:[-17,2.5,.02,.25],drive:.4,
+ tape:     {name:'Extra · Analog Tape',low:[1.0,65],mud:-1.0,pres:.5,air:-1.5,tone:13000,glue:[-17,2.5,.02,.25],drive:.4,
             rev:{t:1.4,pre:.015,damp:5500,mix:{mine:.06,s101:.15,go:.15,vox:.15,ws:.12}},dly:{beats:.75,fb:.35,lo:350,hi:3500,mix:{s101:.15,go:.12,vox:.12}},
             pump:{depth:{lee:.15,go:.15,s101:.15},rel:.2}}
 };
@@ -16343,11 +16394,11 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 const $=id=>document.getElementById(id);
 const dB=v=>Math.pow(10,v/20);
 /* drop loudness each genre is mastered to (short-term LUFS): club styles loud and dense, chilled styles keep their dynamics */
-const TARGET=GLCTC_GFILL({techno:-7.5,house:-8,deephouse:-9,techhouse:-7.5,tribalhouse:-8,hardhouse:-7,trance:-7.5,psytrance:-7,happyhardcore:-7,
- dnb:-7.5,jungle:-8,liquid:-9,breaks:-8,nuskool:-7.5,electro:-8,garage:-8,dubstep:-7,eastcoast:-8.5,westcoast:-8.5,south:-9,ukhiphop:-8,drill:-9,
+/* v200 MEASURED: your drops (stereo K-weighted 3 s LUFS, as this meter reads): Genuine Psychopaths -11.0, Open Our Hearts -9.3. Techno / jungle land on them after the club style's -2.5 dB; every other genre keeps its original target (without the old +8 dB boost they match your records on average). */ const TARGET=GLCTC_GFILL({techno:-6.8,house:-8,deephouse:-9,techhouse:-7.5,tribalhouse:-8,hardhouse:-7,trance:-7.5,psytrance:-7,happyhardcore:-7,
+ dnb:-7.5,jungle:-8.5,liquid:-9,breaks:-8,nuskool:-7.5,electro:-8,garage:-8,dubstep:-7,eastcoast:-8.5,westcoast:-8.5,south:-9,ukhiphop:-8,drill:-9,
  trap:-8.5,hiphop:-8.5,lofi:-11.5,reggae:-9.5,ska:-9,pop:-8,synthwave:-8.5,ambient:-14,meditation:-16});   /* v144: +1 dB louder masters - the punch clipper keeps the limiter out of the drums */
 /* starting drive (dB into the limiter), measured on every genre so the first bar is already at level */
-const DRIVE0=GLCTC_GFILL({"techno":8.6,"house":7.9,"deephouse":6.6,"techhouse":8.6,"tribalhouse":7.8,"hardhouse":6.9,"trance":8.8,"psytrance":9.5,"happyhardcore":8.0,"dnb":7.3,"jungle":5.1,"liquid":6.3,"breaks":5.6,"nuskool":9.5,"electro":5.8,"garage":9.5,"dubstep":7.6,"eastcoast":9.0,"westcoast":9.5,"south":7,"ukhiphop":9.1,"drill":6.5,"trap":6.5,"lofi":9.2,"reggae":7.7,"ska":9.4,"pop":8.9,"synthwave":8.4,"ambient":6.1,"meditation":3.2});   /* v106: re-measured with the group buses in the path */
+/* v200 MEASURED start drives: drops recorded after removing the +8 dB boost (techno +1.1, jungle +5.5, house / trap +2.3 dB short of target) */ const DRIVE0=GLCTC_GFILL({"techno":10.4,"house":10.2,"deephouse":8.9,"techhouse":10.9,"tribalhouse":10.1,"hardhouse":9.2,"trance":11.1,"psytrance":11.8,"happyhardcore":10.3,"dnb":9.6,"jungle":12.9,"liquid":8.6,"breaks":7.9,"nuskool":11.8,"electro":8.1,"garage":11.8,"dubstep":9.9,"eastcoast":11.3,"westcoast":11.8,"south":9.3,"ukhiphop":11.4,"drill":8.8,"trap":8.8,"lofi":11.5,"reggae":10.0,"ska":11.7,"pop":11.2,"synthwave":10.7,"ambient":8.4,"meditation":5.5});   /* v106: re-measured with the group buses in the path */
 /* v150 MASTERING STYLES: CLEAN / CLUB / LOUD. AUTO (default) picks the right one for every song's genre, so a listener
    always hears the best version without touching anything.
      LOUD  = the v146 master: genre target, up to 6 dB of limiting, fast 1 ms limiter, split clipper fully in.
@@ -16368,11 +16419,11 @@ window.__glctcLimP=()=>{const st=ST_();return{att:st.att,rel:st.rel}};
 const LS='glctc1.mastering.v6';   /* v151/v153: learned drives are dropped (comb fix, then the louder targets) */
 /* v153 LOUDER MASTERS: every genre's loudness target and starting drive +2 dB; the limiter budgets get 1 dB more room so the
    level is reached by the clipper + limiter, not by squashing. Ceiling stays at -1 dBFS. */
-for(const g in TARGET)TARGET[g]+=8;for(const g in DRIVE0)DRIVE0[g]=+(DRIVE0[g]+8).toFixed(1);STYLES.club.cap=10;STYLES.clean.cap=8;STYLES.loud.cap=12;   /* v155: +8 dB in all - maximum-loudness masters */
+/* v200: the v155 '+8 dB maximum-loudness' boost is removed - it crushed every genre (techno measured 7 dB louder than your record with 8.8 dB of limiting). Targets now come from your records. */
 {const F={deephouse:-2.3,jungle:-1.0,eastcoast:-3.7,phonk:-3.2,lofi:-4.8,amapiano:-3.6,reggae:-3.7,ska:-2.5,synthwave:-1.9};for(const g in F)if(DRIVE0[g]!=null)DRIVE0[g]=+(DRIVE0[g]+F[g]).toFixed(1)}   /* v151: re-measured starting drives (comb fix, new master chain, new low end) */   /* v107: drill / trap / southern targets changed - old learned drives are dropped */
 const S={on:true,style:'auto',genre:null,drive:3,locked:false,st:[],drop:0,lastAdj:0,learn:{},gr:0,lufs:null};
-try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x){S.on=x.on!==false;if(x.learn&&typeof x.learn==='object')S.learn=x.learn;if(x.style&&(x.style==='auto'||STYLES[x.style]))S.style=x.style}}catch(e){}
-const save=()=>{try{localStorage.setItem(LS,JSON.stringify({on:S.on,learn:S.learn,style:S.style}))}catch(e){}};
+try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x){S.on=x.on!==false;if(x.learn&&typeof x.learn==='object'&&x.lv===200)S.learn=x.learn;   /* v200: drives learned at the old, louder targets are dropped */if(x.style&&(x.style==='auto'||STYLES[x.style]))S.style=x.style}}catch(e){}
+const save=()=>{try{localStorage.setItem(LS,JSON.stringify({lv:200,on:S.on,learn:S.learn,style:S.style}))}catch(e){}};
 const ac=()=>{try{return window.GLCTC_WS&&GLCTC_WS.ac&&GLCTC_WS.ac()}catch(e){return null}};
 let N=null;
 function build(c){
@@ -16409,7 +16460,7 @@ function applyStyle(){const X=N;if(!X)return;const st=S.on?ST_():STYLES.loud,k=s
 function setStyle(v){if(v!=='auto'&&!STYLES[v])return;const was=styleKey();S.style=v;save();
  if(styleKey()!==was){const L=S.learn[S.genre+'|'+styleKey()];setDrive(Number.isFinite(L)?L:(DRIVE0[S.genre]??3)+ST_().off);S.locked=false;S.dst=[];S.ok=0;S.next=25}
  applyStyle();paint()}
-function setDrive(d){S.drive=Math.max(-14,Math.min(12,d));   /* v146: room to turn a hot mix down (was -6) */
+function setDrive(d){S.drive=Math.max(-14,Math.min(16,d));   /* v200: room for quiet mixes - the 3 dB limiting budget still guards the punch */   /* v146: room to turn a hot mix down (was -6) */
 const X=ensure();if(!X)return;const v=S.on?dB(S.drive):1;try{X.drive.gain.setTargetAtTime(v,X.c.currentTime,.25)}catch(e){X.drive.gain.value=v}}
 function setMono(){const X=ensure();if(!X)return;const f=S.on?120:10;X.hp1.frequency.value=f;X.hp2.frequency.value=f}
 function startSong(genre){
@@ -16631,7 +16682,7 @@ function voice(c,b,ev,t,stepDur){const sl=b.buf.duration/b.slices;
   g.gain.setValueAtTime(0,st);g.gain.linearRampToValueAtTime(vel,st+.0015);g.gain.setValueAtTime(vel,st+len-.004);g.gain.linearRampToValueAtTime(0,st+len);
   src.connect(g);g.connect(N.g);src.start(st,Math.min(off,buf.duration-.01));src.stop(st+len+.01);src.onended=()=>{try{g.disconnect()}catch(e){}};
   if(k===reps-1)last={g,end:st+len}}}
-function progFor(kind){return kind===3?'build':kind===2?'halftime':kind===1?(S.alt||'choppy'):(S.edit||'rinse')}
+function progFor(kind){return kind===3?'build':kind===2?((window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?'rolling':'halftime'):kind===1?(S.alt||'choppy'):(S.edit||'rinse')}
 /* called by 80LA8 on every 16th: absolute step, unswung time, its pattern (A-D = main/alt/breakdown/build), destination, gate */
 function step(abs,t,kind,c,dest,on){if(!S.on)return;const b=src();if(!b)return;nodes(c,dest);
  if(kind!==curKind){curKind=kind;apply()}
@@ -16662,7 +16713,7 @@ const GEN={
  lofi:{on:1,src:'funky',edit:'straight',alt:'halftime',level:.5,pitch:-1,crunch:.6,hp:60,lp:6000},
  ukhiphop:{on:1,src:'brother',edit:'choppy',alt:'rolling',level:.4,pitch:0,crunch:.4,hp:300,lp:14000}
 };
-function forGenre(g){if(!S.auto)return;const G=(window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?null:GEN[g];if(!G){S.on=false}else{const keepUser=S.src==='user'&&BUF.user&&G.src==='brother';Object.assign(S,G,{on:!!G.on});if(keepUser)S.src='user'}
+function forGenre(g){if(!S.auto)return;const G=(window.GLCTC_JUMPUP&&GLCTC_JUMPUP())?{on:1,src:'brother',edit:'rolling',alt:'straight',level:1,pitch:0,crunch:.15,hp:250,lp:8000}:GEN[g];   /* v198 jump up: the Amen rolls under the measured kick / snare, its low end removed (the record's mids never gap) */if(!G){S.on=false}else{const keepUser=S.src==='user'&&BUF.user&&G.src==='brother';Object.assign(S,G,{on:!!G.on});if(keepUser)S.src='user'}
  save();get(S.src==='user'?'brother':S.src);apply();paint()}
 
 /* ---------------------------------------------------------------- UI: a card in 80LA8 */
@@ -17589,7 +17640,10 @@ function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))ret
  /* breakdown opens on a downlifter */
  if(!OOH&&sec.kind==='break')downlifter(c,ts,Math.min(2*T.barBeats,sec.bars*T.barBeats)*60/K.bpm);
  /* phrase variation inside long sections (the section-end fill is the composer's own) */
- if(!OOH&&sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
+ const JU=!!(window.GLCTC_JUMPUP&&GLCTC_JUMPUP());   /* v198 jump up: no fills inside drops / verses (the record keeps its groove clean); one fast snare-roll crescendo at the end of every build, into the drop */
+ if(JU&&sec.kind==='build'&&nextKind==='drop')PEND.push({pb:eb,big:true,st:'jungle'});
+ if(JU&&sec.kind==='build'){const sb4=Math.max(sb,eb-4*T.barBeats),t4=Math.max(ts,K.timeOfBeat(sb4));try{siren(c,t4,Math.max(.5,K.timeOfBeat(eb-1)-t4),rootHz())}catch(e){}}   /* v198: siren into the drop (the prompt) */
+ if(!OOH&&!JU&&sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
    for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats,big=p%8===0;if(sec.kind==='break'&&!big)continue;PEND.push({pb,big,st})}}   /* v145: fills are written ~1.5 s ahead by the tick, not a whole section ahead */
  /* final-chorus key lift */
  const lastDrop=T.secs.map((x,j)=>x.kind==='drop'?j:-1).filter(j=>j>=0).pop(),cents=LIFT[g]||0;
@@ -19673,6 +19727,34 @@ const pk=setInterval(()=>{const t=document.querySelector('#glctcPocket2 .p2-top'
  window.addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('#playBtn,#gscPlay');if(!b)return;
   setTimeout(()=>{const c=ctx();if(!playing())return;if(!c){say('NO SOUND: the audio engine did not start - tap play again');return}
    if(c.state!=='running'){wake();setTimeout(()=>{if(c.state!=='running')say('NO SOUND: the phone kept audio paused ('+c.state+'). Tap play again; on iPhone check the side switch and that no other app is playing.')},800)}},1500)},true);
+})();
+</script>
+<script>/* v199: no word box - the genre menu decides everything. The hidden box always reads empty, so nothing old or saved can change a song. */
+(function(){const t=document.getElementById('gscPrompt');if(!t)return;try{Object.defineProperty(t,'value',{configurable:true,get(){return ''},set(){}})}catch(e){}})();
+</script>
+<script>/* v200 GENRE BUSES: each genre family sets the six group buses (DRUMS, SUB, BASS, SYNTHS, INSTRUMENTS, VOCALS).
+   glue = bus compression (threshold -20*glue dB, ratio 1+2.5*glue), drv = saturation, lc / hc = low / high cut, dly / rev = sends.
+   Genre conventions; techno and jump up follow the measured records (dark top / sub dominant). */
+(function(){
+ const BASE=[{lc:28,hc:19500,drv:.12,glue:.55,dly:0,rev:0},{lc:24,hc:150,drv:0,glue:.35,dly:0,rev:0},{lc:45,hc:12000,drv:.1,glue:.45,dly:0,rev:0},{lc:140,hc:19500,drv:0,glue:.35,dly:0,rev:0},{lc:100,hc:19000,drv:0,glue:.3,dly:0,rev:0},{lc:170,hc:17500,drv:0,glue:.5,dly:0,rev:0}];
+ const FAM={
+  techno:[{glue:.5,drv:.1},{},{},{hc:9000,rev:.08},{hc:10000},{}],
+  club:[{},{},{},{rev:.1,dly:.08},{rev:.12},{rev:.15,dly:.12}],
+  rave:[{glue:.55,drv:.15},{},{drv:.12},{rev:.16,dly:.12},{rev:.14},{rev:.18,dly:.12}],
+  deep:[{glue:.45,drv:.08},{},{glue:.4},{rev:.16,dly:.1},{rev:.16},{rev:.18,dly:.12}],
+  breaks:[{glue:.6,drv:.22},{},{drv:.15,glue:.5},{rev:.08},{rev:.1},{rev:.12,dly:.1}],
+  jumpup:[{glue:.45,drv:.18},{glue:.3},{drv:.15,glue:.5},{rev:.06},{rev:.08},{rev:.1,dly:.1}],
+  boom:[{glue:.5,drv:.2,hc:15000},{},{glue:.4},{rev:.08},{rev:.1},{rev:.08}],
+  lofi:[{glue:.5,drv:.25,hc:9000},{},{glue:.4,hc:7000},{hc:9000,rev:.15},{hc:9000,rev:.18},{hc:10000,rev:.12}],
+  trap:[{glue:.4,drv:.08},{glue:.15,hc:220},{drv:.15},{rev:.12},{rev:.12},{rev:.12,dly:.1}],
+  roots:[{glue:.35,drv:.1},{},{glue:.3},{dly:.25,rev:.12},{dly:.15,rev:.12},{rev:.15,dly:.15}],
+  retro:[{glue:.5},{},{},{rev:.2,dly:.12},{rev:.18},{rev:.2,dly:.12}],
+  soft:[{glue:.2,drv:0},{glue:.2},{glue:.25},{rev:.3,dly:.15},{rev:.3},{rev:.3,dly:.12}]};
+ const FOR=g=>g==='techno'?'techno':g==='jungle'?'jumpup':/^(house|techhouse|tribalhouse|melodictechno|pop)$/.test(g)?'club':/^(trance|psytrance|hardhouse|happyhardcore)$/.test(g)?'rave':
+  /^(deephouse|liquid|amapiano|afrohouse|garage)$/.test(g)?'deep':/^(dnb|breaks|nuskool|dubstep)$/.test(g)?'breaks':/^(hiphop|eastcoast|westcoast|ukhiphop)$/.test(g)?'boom':
+  g==='lofi'?'lofi':/^(trap|drill|south|phonk)$/.test(g)?'trap':/^(reggae|ska)$/.test(g)?'roots':/^(synthwave|electro)$/.test(g)?'retro':/^(ambient|meditation)$/.test(g)?'soft':'club';
+ window.GLCTC_GENRE_BUSES=function(g){const B=window.GLCTC_BUSES;if(!B||!B.state)return;const st=B.state();const F=FAM[FOR(g)]||FAM.club;
+  for(let i=0;i<6;i++){const b=st.buses&&st.buses[i];if(!b||b._c===false)continue;B.set(i,{fx:Object.assign({on:true},BASE[i],F[i]||{})})}};
 })();
 </script>
 </body>

@@ -4060,7 +4060,8 @@ const NOTE=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const nn=m=>NOTE[((m%12)+12)%12]+(Math.floor(m/12)-1);
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 /* ---------- presets: every one is a complete sub-bass voice ---------- */
-const P0={wave:0,oct:0,sub2:0,drive:.08,harm:.14,cut:150,res:.7,a:.005,d:.5,s:.9,r:.2,glide:.03,penv:0,ptime:.05,lfoRate:2,lfoDepth:0,lfoTgt:0,level:.9};
+const P0={wave:0,oct:0,sub2:0,drive:.08,harm:.14,cut:150,res:.7,a:.005,d:.5,s:.9,r:.2,glide:.03,penv:0,ptime:.05,lfoRate:2,lfoDepth:0,lfoTgt:0,level:.9,
+ subLv:1,lsaw:0,lsqr:0,ltri:0,lpoly:0,pdet:14,loct:1,ltone:800,ldrive:.15};   /* v181 LAYERS: saw / square / triangle / poly (3 detuned saws) over the sine sub, each on its own fader */
 /* v99 SUB FOCUS: every preset is a sine-led sub - low cutoff, low drive, a touch of warmth for small speakers, nothing that reads as a lead */
 const PRESETS=[
  ['Pure Sine Sub',{wave:0,drive:.02,harm:.1,cut:120,a:.006,d:.3,s:1,r:.14,glide:.02}],
@@ -4110,7 +4111,7 @@ const defPats=()=>{const A=blankPat(),B=blankPat(),C=blankPat(),D=blankPat();[0,
 const defaults=()=>({v:3,preset:'Pure Sine Sub',p:Object.assign({},PRESETS[0][1]),patterns:defPats(),active:0,root:33,swing:0,kbOct:0,pad:0});
 let S;try{S=Object.assign(defaults(),JSON.parse(localStorage.getItem(KEY)||'{}'))}catch(e){S=defaults()}
 if(!Array.isArray(S.patterns)||S.patterns.length!==4)S.patterns=defPats();S.p=Object.assign({},P0,S.p||{});
-if(S.v!==3){const pr=PRESETS.find(x=>x[0]===S.preset)||PRESETS[0];S.preset=pr[0];S.p=Object.assign({},pr[1]);S.v=3}   /* v99: move saved sounds onto the new sub-focused presets */
+if(S.v!==3){const pr=PRESETS.find(x=>x[0]===S.preset)||PRESETS[0];S.preset=pr[0];S.p=Object.assign({},P0,pr[1]);S.v=3}   /* v99: move saved sounds onto the new sub-focused presets */
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 /* ---------- audio chain: voices → drive → [low-pass clean] + [high-passed harmonics] → level (+LFO) → SUB-01 mixer channel ---------- */
 let A=null,sel=0,running=false,timer=0,step=0,voice=null;
@@ -4121,13 +4122,17 @@ function chain(){const c=ctx();if(A&&A.c===c)return A;
  const inn=c.createGain(),ws=c.createWaveShaper(),lp=c.createBiquadFilter(),hp=c.createBiquadFilter(),hl=c.createBiquadFilter(),hg=c.createGain(),lvl=c.createGain(),trem=c.createGain(),out=c.createGain();
  ws.oversample='none';lp.type='lowpass';hp.type='highpass';hp.frequency.value=110;   /* sub-range drive needs no oversampling (CPU) */hp.Q.value=.6;
  hl.type='lowpass';hl.frequency.value=480;hl.Q.value=.5;   /* v99: harmonics capped at 420 Hz - warmth you hear on a phone, no lead buzz */
- inn.connect(ws);ws.connect(lp);lp.connect(lvl);ws.connect(hp);hp.connect(hl);hl.connect(hg);hg.connect(lvl);lvl.connect(trem);trem.connect(out);
+ const sg=c.createGain(),lay=c.createGain(),lhp=c.createBiquadFilter(),llp=c.createBiquadFilter(),lws=c.createWaveShaper(),lout=c.createGain();
+ lhp.type='highpass';lhp.frequency.value=65;lhp.Q.value=.6;llp.type='lowpass';llp.Q.value=.8;lws.oversample='2x';lout.gain.value=1;
+ inn.connect(ws);ws.connect(lp);lp.connect(sg);sg.connect(lvl);ws.connect(hp);hp.connect(hl);hl.connect(hg);hg.connect(lvl);lvl.connect(trem);trem.connect(out);
+ lay.connect(lhp);lhp.connect(llp);llp.connect(lws);lws.connect(lout);lout.connect(lvl);   /* v181 layer path */
  const dest=(window.WSB?WSB('sub',mg(c)):null)||mg(c);out.connect(dest);
- A={c,inn,ws,lp,hp,hg,lvl,trem,out,dest,lfo:null,lfoG:null};apply();return A}
+ A={c,inn,ws,lp,hp,hg,lvl,trem,out,dest,lfo:null,lfoG:null,sg,lay,llp,lws};apply();return A}
 function relink(){if(!A)return;const c=A.c,d=(window.WSB?WSB('sub',mg(c)):null)||mg(c);if(d!==A.dest){try{A.out.disconnect()}catch(e){}A.out.connect(d);A.dest=d}}
 function apply(){if(!A)return;const p=S.p,t=A.c.currentTime;
  A.ws.curve=curve(p.drive);A.lp.frequency.setTargetAtTime(cl(p.cut,30,400),t,.02);A.lp.Q.setTargetAtTime(cl(p.res,.3,4),t,.02);
  A.hg.gain.setTargetAtTime(p.harm*1.1,t,.03);A.lvl.gain.setTargetAtTime(p.level,t,.03);
+ if(A.sg){A.sg.gain.setTargetAtTime(p.subLv??1,t,.03);A.llp.frequency.setTargetAtTime(cl(p.ltone??800,150,4000),t,.02);A.lws.curve=curve((p.ldrive??.15)*.6)}
  /* LFO only exists while it is used (no idle CPU) */
  if(p.lfoDepth>0){if(!A.lfo){A.lfo=A.c.createOscillator();A.lfoG=A.c.createGain();A.lfo.connect(A.lfoG);A.lfo.start()}
   try{A.lfoG.disconnect()}catch(e){}A.lfo.frequency.setTargetAtTime(cl(p.lfoRate,.05,20),t,.02);
@@ -4142,21 +4147,29 @@ function noteAt(m,vel,when,dur,slide){const a=chain(),c=a.c,p=S.p,t=Math.max(whe
  if(voice&&voice.end>t+.01&&slide&&voice.c===c){const g=Math.max(.01,p.glide||.06);voice.oscs.forEach(o=>{o.x.frequency.cancelScheduledValues(t);o.x.frequency.setValueAtTime(o.x.frequency.value||f*o.mul,t);o.x.frequency.exponentialRampToValueAtTime(f*o.mul,t+g)});
   {const vg=voice.g.gain,sus=Math.max(.0002,cl(vel??.9,.05,1)*Math.max(p.s,.35));if(vg.cancelAndHoldAtTime)vg.cancelAndHoldAtTime(t);else{vg.cancelScheduledValues(t);vg.setValueAtTime(sus,t)}vg.linearRampToValueAtTime(sus,t+.012)}   /* v104: a slide re-opens the level - a slid note after a finished release used to stay silent (and every note after it) */
   const rel=t+len;voice.g.gain.cancelScheduledValues(rel);voice.g.gain.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));voice.oscs.forEach(o=>{try{o.x.stop(rel+p.r*1.5+.1)}catch(e){}});voice.end=rel+p.r*1.5;return}
- if(voice&&voice.end>t+.01&&voice.w===p.wave&&voice.s2===(p.sub2>0)&&voice.c===c){   /* v97 CPU: mono retrigger - reuse the running oscillators, no new nodes per note */
+ const LSIG=[p.lsaw>0,p.lsqr>0,p.ltri>0,p.lpoly>0,p.pdet,p.loct].join();
+ if(voice&&voice.end>t+.01&&voice.w===p.wave&&voice.s2===(p.sub2>0)&&voice.L===LSIG&&voice.c===c){   /* v97 CPU: mono retrigger - reuse the running oscillators, no new nodes per note */
   const vg=voice.g.gain,v=cl(vel??.9,.05,1),sus=Math.max(.0002,v*p.s),rel=t+len,end=rel+p.r*1.5+.05;
   voice.oscs.forEach(o=>{const f0=f*o.mul,fr=o.x.frequency;fr.cancelScheduledValues(t);if(p.glide>.08&&!p.penv){fr.setValueAtTime(Math.max(10,fr.value||f0),t);fr.exponentialRampToValueAtTime(f0,t+p.glide)}else{fr.setValueAtTime(f0*Math.pow(2,(p.penv||0)/12),t);if(p.penv)fr.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime))}try{o.x.stop(end)}catch(e){}});
   if(vg.cancelAndHoldAtTime)vg.cancelAndHoldAtTime(t);else{vg.cancelScheduledValues(t);vg.setValueAtTime(sus,t)}
   vg.linearRampToValueAtTime(v,t+Math.max(.004,p.a));vg.setTargetAtTime(sus,t+Math.max(.004,p.a),Math.max(.01,p.d/3));vg.setValueAtTime(sus,rel);vg.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));voice.end=end;return}
  const g=c.createGain(),oscs=[],v=cl(vel??.9,.05,1),types=WAVES[p.wave]||WAVES[0];
+ /* v181: g is now the ENVELOPE (a constant 1 through it) - it opens a sub VCA and a layer VCA together */
+ const cs=c.createConstantSource();cs.offset.value=1;cs.connect(g);cs.start(t);const vS=c.createGain(),vL=c.createGain();vS.gain.value=0;vL.gain.value=0;g.connect(vS.gain);g.connect(vL.gain);vS.connect(a.inn);vL.connect(a.lay||a.inn);
+ const DUM={cancelScheduledValues(){},setValueAtTime(){},exponentialRampToValueAtTime(){},linearRampToValueAtTime(){},value:0};oscs.push({x:{frequency:DUM,stop:e=>{try{cs.stop(e)}catch(_){}}},mul:1});
+ const mkL=(type,lv,det,pan)=>{const x=tune(c.createOscillator());x.type=type;const mul=Math.pow(2,p.loct||0),f0=f*mul;x.frequency.setValueAtTime(f0*Math.pow(2,(p.penv||0)/12),t);if(p.penv)x.frequency.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime));x.detune.value=det||0;
+  const og=c.createGain();og.gain.value=lv;x.connect(og);if(pan){const pn=c.createStereoPanner();pn.pan.value=pan;og.connect(pn);pn.connect(vL)}else og.connect(vL);x.start(t);oscs.push({x,mul})};
+ if(p.lsaw>0)mkL('sawtooth',p.lsaw*1.35);if(p.lsqr>0)mkL('square',p.lsqr*.9);if(p.ltri>0)mkL('triangle',p.ltri*2.1);   /* v181b: level-matched to the (hot) sine sub - they were 15 dB under it */
+ if(p.lpoly>0){const d=p.pdet||14;[[-d,-.7],[0,0],[d,.7]].forEach(([dt,pn])=>mkL('sawtooth',p.lpoly*.78,dt+(Math.random()-.5)*2,pn))}
  const mk=(type,mul,lv)=>{const x=tune(c.createOscillator());x.type=type;const f0=f*mul,fs=f0*Math.pow(2,(p.penv||0)/12);x.frequency.setValueAtTime(fs,t);if(p.penv)x.frequency.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime));
-  const og=c.createGain();og.gain.value=lv;x.connect(og);og.connect(g);x.start(t);oscs.push({x,mul})};
+  const og=c.createGain();og.gain.value=lv;x.connect(og);og.connect(vS);x.start(t);oscs.push({x,mul})};
  types.forEach((ty,i)=>mk(ty,1,(ty==='square'?.42:1)/types.length));if(p.sub2>0)mk('sine',.5,p.sub2);
  const pk=v,sus=Math.max(.0002,pk*p.s),rel=t+len;
  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(pk,t+Math.max(.002,p.a));g.gain.setTargetAtTime(sus,t+Math.max(.002,p.a),Math.max(.01,p.d/3));
  g.gain.cancelScheduledValues(rel);g.gain.setValueAtTime(sus,rel);g.gain.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));
- g.connect(a.inn);const end=rel+p.r*1.5+.05;oscs.forEach(o=>o.x.stop(end));
+ const end=rel+p.r*1.5+.05;oscs.forEach(o=>o.x.stop(end));
  if(voice&&voice.end>t){const old=voice;old.g.gain.cancelScheduledValues(t);old.g.gain.setTargetAtTime(.0001,t,.008);old.oscs.forEach(o=>{try{o.x.stop(t+.06)}catch(e){}})}
- voice={g,oscs,end,w:p.wave,s2:p.sub2>0,c}}
+ voice={g,oscs,end,w:p.wave,s2:p.sub2>0,L:LSIG,c}}
 function padAt(i,when,m){const a=chain(),c=a.c,buf=userBufs[i]||padBuf(i);if(!buf)return;const s=tune(c.createBufferSource());s.buffer=buf;const note=m??S.root;s.playbackRate.value=userBufs[i]?1:Math.pow(2,(note-33)/12);
  const g=c.createGain();g.gain.value=.9;s.connect(g);g.connect(a.inn);s.start(Math.max(when||0,c.currentTime+GLCTC_LEAD()))}
 function padBuf(i){if(padBufs[i])return padBufs[i];const c=ctx(),sr=c.sampleRate,len=Math.ceil(sr*2.4);
@@ -4178,7 +4191,9 @@ const CTL=[['wave','WAVE',0,3,1,v=>['SINE','TRI','SINE+TRI','SOFT SQR'][v]],['oc
  ['drive','DRIVE',0,1,.01,v=>Math.round(v*100)+'%'],['harm','WARMTH',0,1,.01,v=>Math.round(v*100)+'%'],['cut','CUTOFF',40,400,1,v=>Math.round(v)+' Hz'],['res','RESO',.3,4,.1,v=>(+v).toFixed(1)],
  ['a','ATTACK',.001,1.5,.001,v=>(v*1000|0)+' ms'],['d','DECAY',.05,3,.01,v=>(+v).toFixed(2)+' s'],['s','SUSTAIN',0,1,.01,v=>Math.round(v*100)+'%'],['r','RELEASE',.02,4,.01,v=>(+v).toFixed(2)+' s'],
  ['glide','GLIDE',0,.4,.005,v=>(v*1000|0)+' ms'],['penv','PITCH DROP',0,24,1,v=>v+' st'],['ptime','DROP TIME',.005,.3,.005,v=>(v*1000|0)+' ms'],
- ['lfoRate','LFO RATE',.05,12,.05,v=>(+v).toFixed(2)+' Hz'],['lfoDepth','LFO DEPTH',0,1,.01,v=>Math.round(v*100)+'%'],['lfoTgt','LFO → ',0,1,1,v=>v?'FILTER':'AMP'],['level','LEVEL',0,1.2,.01,v=>Math.round(v*100)+'%']];
+ ['lfoRate','LFO RATE',.05,12,.05,v=>(+v).toFixed(2)+' Hz'],['lfoDepth','LFO DEPTH',0,1,.01,v=>Math.round(v*100)+'%'],['lfoTgt','LFO → ',0,1,1,v=>v?'FILTER':'AMP'],['level','LEVEL',0,1.2,.01,v=>Math.round(v*100)+'%'],
+ ['subLv','SUB',0,1.2,.01,v=>Math.round(v*100)+'%'],['lsaw','SAW',0,1,.01,v=>Math.round(v*100)+'%'],['lsqr','SQUARE',0,1,.01,v=>Math.round(v*100)+'%'],['ltri','TRIANGLE',0,1,.01,v=>Math.round(v*100)+'%'],['lpoly','POLY',0,1,.01,v=>Math.round(v*100)+'%'],
+ ['pdet','POLY SPREAD',2,40,1,v=>v+' ct'],['loct','LAYER OCT',0,2,1,v=>'+'+v],['ltone','LAYER TONE',150,4000,10,v=>Math.round(v)+' Hz'],['ldrive','LAYER DRIVE',0,1,.01,v=>Math.round(v*100)+'%']];
 function build(){const root=$('subApp');if(!root)return;
  const css=document.createElement('style');css.textContent=`
 #sub01Panel{--sb:#8f6bff;--sb2:#4fd8ff;background:linear-gradient(180deg,#120c24,#0a0716);border:1px solid #3a2a6a}
@@ -4230,7 +4245,7 @@ function build(){const root=$('subApp');if(!root)return;
  <div style="display:flex;gap:6px;align-items:center;padding:0 12px;font-size:10px;color:#a99ad8"><button class="sb-mini" id="subKbDown">OCT −</button><button class="sb-mini" id="subKbUp">OCT +</button><span id="subKbLbl"></span><span style="flex:1"></span><button class="sb-mini" id="subPadLoadBtn">LOAD SAMPLE → SELECTED PAD</button><button class="sb-mini" id="subPadClear">RESET PAD</button><input id="subPadLoad" type="file" accept="audio/*" hidden></div>
  <div class="sb-kb" id="subKb"></div>`;
  /* presets */const ps=$('gpcPreset_sub');PRESETS.forEach(([n])=>{const o=document.createElement('option');o.value=n;o.textContent=n;ps.append(o)});ps.value=S.preset;
- ps.onchange=()=>{const pr=PRESETS.find(x=>x[0]===ps.value);if(!pr)return;S.preset=pr[0];S.p=Object.assign({},pr[1]);apply();paintCtl();save();say('PRESET · '+S.preset)};
+ ps.onchange=()=>{const pr=PRESETS.find(x=>x[0]===ps.value);if(!pr)return;S.preset=pr[0];S.p=Object.assign({},P0,pr[1]);apply();paintCtl();save();say('PRESET · '+S.preset)};
  /* controls: big knobs (tone + movement) and big vertical faders (envelope + level) */buildCtl();
  /* steps */const st=$('subSteps');for(let i=0;i<16;i++){const b=document.createElement('button');b.className='sb-step';b.dataset.step=i;b.onclick=()=>{sel=i;paintSteps()};b.ondblclick=()=>{const s=cur()[i];s.on=!s.on;save();paintSteps()};st.append(b)}
  $('subStepOn').onclick=()=>{const s=cur()[sel];s.on=!s.on;save();paintSteps()};$('subStepSl').onclick=()=>{const s=cur()[sel];s.sl=!s.sl;save();paintSteps()};
@@ -4245,7 +4260,7 @@ function build(){const root=$('subApp');if(!root)return;
  /* transport: the same hub hand-off as every other module */$('subPlay').onclick=()=>window.GLCTC_HUB?GLCTC_HUB.toggleFrom('sub'):(running?stop():start());
  $('subStop').onclick=()=>window.GLCTC_HUB?GLCTC_HUB.stopFrom('sub'):stop();
 }
-const GROUPS=[['TONE','k',['wave','oct','sub2','cut','res','drive','harm']],['PITCH · MOVE','k',['glide','penv','ptime','lfoRate','lfoDepth','lfoTgt']],['ENVELOPE · LEVEL','f',['a','d','s','r','level']]];
+const GROUPS=[['TONE','k',['wave','oct','sub2','cut','res','drive','harm']],['LAYERS · MIX','f',['subLv','lsaw','lsqr','ltri','lpoly']],['LAYER TONE','k',['pdet','loct','ltone','ldrive']],['PITCH · MOVE','k',['glide','penv','ptime','lfoRate','lfoDepth','lfoTgt']],['ENVELOPE · LEVEL','f',['a','d','s','r','level']]];
 const LOGK=new Set(['a','d','r','cut','lfoRate','ptime','glide']);
 const def=k=>CTL.find(c=>c[0]===k);
 function toN(k,v){const[,,mn,mx]=def(k);if(LOGK.has(k)){const lo=Math.max(mn,k==='glide'?.001:mn);return cl(Math.log(Math.max(lo,v)/lo)/Math.log(mx/lo),0,1)}return cl((v-mn)/(mx-mn),0,1)}
@@ -9554,7 +9569,14 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
    A.lee.set(d)}}catch(e){console.warn('bass lee',e)}
   try{const S=window.GLCTC_SUB;if(S&&S.setP){S.setP('wave',0);S.setP('sub2',0);if(!/^(hardhouse|happyhardcore)$/.test(genre))S.setP('penv',0);   /* v177: in tune from the first cycle */   /* a pure sine core, nothing below 40 Hz */
    S.setP('harm',Math.max(.35,+S.getP('harm')||0));S.setP('drive',Math.max(.18,Math.min(.4,+S.getP('drive')||0)));   /* warmth so phones hear the sub */
-   S.setP('a',Math.max(.002,Math.min(.008,+S.getP('a')||.003)));S.setP('r',Math.max(.06,Math.min(.25,+S.getP('r')||.1)))}}catch(e){console.warn('bass sub',e)}
+   S.setP('a',Math.max(.002,Math.min(.008,+S.getP('a')||.003)));S.setP('r',Math.max(.06,Math.min(.25,+S.getP('r')||.1)));
+   /* v181 LUSH LAYERS: saw / square / triangle / poly over the sine sub - [sub, saw, square, tri, poly, spread, layer oct, tone, drive] */
+   const LY={reese:[.8,.2,0,0,.55,18,1,750,.2],house:[.85,.35,0,.2,0,14,1,650,.15],rave:[.8,.4,.12,0,.15,12,1,950,.2],boom:[.9,0,.15,.4,0,10,1,520,.22],
+    roots:[.9,0,0,.45,0,10,1,480,.1],bright:[.8,.25,0,0,.3,12,1,1100,.15],none:[1,0,0,0,0,14,1,800,.1]};
+   const fam=/^(dnb|jungle|liquid|nuskool|dubstep)$/.test(genre)?'reese':/^(house|deephouse|techhouse|tribalhouse|afrohouse|amapiano|garage|melodictechno)$/.test(genre)?'house':
+    /^(techno|trance|psytrance|hardhouse|happyhardcore)$/.test(genre)?'rave':/^(hiphop|eastcoast|westcoast|south|ukhiphop|drill|trap|phonk)$/.test(genre)?'boom':
+    /^(reggae|ska|lofi)$/.test(genre)?'roots':/^(ambient|meditation)$/.test(genre)?'none':'bright';
+   const L=LY[fam];['subLv','lsaw','lsqr','ltri','lpoly','pdet','loct','ltone','ldrive'].forEach((k,i)=>S.setP(k,L[i]))}}catch(e){console.warn('bass sub',e)}
  };
  /* while a song plays: the 30LEE is high-passed where SUB-01 takes over */
  let leeHP=null;window.GLCTC_BASS_XOVER=function(subOn){try{const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('lee');if(!b||!b.hp)return;const want=on()&&subOn?90:32;

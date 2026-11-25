@@ -4327,15 +4327,18 @@ window.addEventListener('glctc-tuning',()=>paintSteps());
  function getFx(ctx,dest){let f=fxCache.get(ctx);if(!f){const input=ctx.createGain(),pre=ctx.createGain(),sh=ctx.createWaveShaper(),filter=ctx.createBiquadFilter(),dry=ctx.createGain(),delay=ctx.createDelay(2),fb=ctx.createGain(),dwet=ctx.createGain(),rev=ctx.createConvolver(),rwet=ctx.createGain(),out=ctx.createGain();input.connect(pre);pre.connect(sh);sh.connect(filter);filter.connect(dry);dry.connect(out);filter.connect(delay);delay.connect(dwet);dwet.connect(out);delay.connect(fb);fb.connect(delay);filter.connect(rev);rev.buffer=makeImpulse(ctx);rev.connect(rwet);rwet.connect(out);out.connect(dest);f={input,pre,sh,filter,dry,delay,fb,dwet,rev,rwet,out};fxCache.set(ctx,f)}f.sh.curve=driveCurve(S.fx.dist,S.fx.bitcrush);f.sh.oversample='2x';f.filter.type=S.filterMode||'lowpass';f.filter.frequency.setTargetAtTime(S.fx.filter,ctx.currentTime,.01);f.filter.Q.value=1+S.resonance*.25;f.delay.delayTime.value=60/(GLCTC_CLOCK.bpm)*.75;f.fb.gain.value=Math.min(.78,S.fx.feedback);f.dwet.gain.value=S.fx.delay*S.fx.wet;f.rwet.gain.value=S.fx.reverb*S.fx.wet;__gate(f.filter,f.rev,S.fx.reverb*S.fx.wet>.002);f.out.gain.value=S.level;return f}
  function makeImpulse(ctx){const len=Math.floor(ctx.sampleRate*1.8),b=ctx.createBuffer(2,len,ctx.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3)}return b}
  let LEE_LAST=null,LEE_SUB=null,leeLive=null;
- function voice(ctx,n,when,dur,accent,slide,prevFreq,dest){LEE_SUB=null;const freq=440*Math.pow(2,(n-69)/12)*Math.pow(2,S.octave);const out=ctx.createGain();out.gain.setValueAtTime(.0001,when);out.gain.linearRampToValueAtTime((accent?1+S.accent*.8:1)*.75,when+Math.max(.004,S.attack));const envEnd=when+Math.max(dur,S.decay*(accent?.72:1));
+ function voice(ctx,n,when,dur,accent,slide,prevFreq,dest){LEE_SUB=null;
+ /* v179 MONO BASS: a bassline plays one note at a time - the previous note is faded out over 6 ms as this one starts (notes used to ring their
+    whole decay, more than a second, piling up and beating against each other) */
+ if(LEE_LAST&&LEE_LAST.out&&LEE_LAST.ctx===ctx&&when>=LEE_LAST.when){try{const g=LEE_LAST.out.gain,a=Math.max(LEE_LAST.when+.002,when);if(g.cancelAndHoldAtTime)g.cancelAndHoldAtTime(a);else g.cancelScheduledValues(a);g.setTargetAtTime(0,a,.002);(LEE_LAST.oscs||[]).forEach(o=>{try{o.stop(a+.03)}catch(_){}})}catch(_){}}const freq=440*Math.pow(2,(n-69)/12)*Math.pow(2,S.octave);const out=ctx.createGain();out.gain.setValueAtTime(.0001,when);out.gain.linearRampToValueAtTime((accent?1+S.accent*.8:1)*.75,when+Math.max(.004,S.attack));const envEnd=when+Math.max(dur,S.decay*(accent?.72:1));
  const filt=ctx.createBiquadFilter();filt.type=S.filterMode||'lowpass';filt.Q.setValueAtTime(Math.min(30,S.resonance+(accent?2:0)),when);const cut=Math.max(60,Math.min(18000,S.cutoff*(accent?1.45:1)));filt.frequency.setValueAtTime(Math.max(60,cut*(1+S.envMod*3)),when);filt.frequency.exponentialRampToValueAtTime(cut,when+Math.max(.025,S.decay));
- const release=Math.max(.06,Math.min(.18,S.decay*.45)),voiceEnd=Math.max(when+dur,envEnd)+release;
- out.gain.setTargetAtTime(.0001,Math.max(when+.005,envEnd),Math.max(.012,Math.min(.06,S.decay*.18)));
- const osc=window.GLCTC_TUNING.attach(ctx.createOscillator());osc.type=S.wave;osc.frequency.setValueAtTime(slide&&prevFreq?prevFreq:freq,when);if(slide&&prevFreq)osc.frequency.linearRampToValueAtTime(freq,when+S.slideTime);else osc.frequency.setValueAtTime(freq,when);osc.connect(out);osc.start(when);osc.stop(voiceEnd);
+ const relTc=Math.max(.012,Math.min(.06,S.decay*.18)),release=relTc*8,voiceEnd=Math.max(when+dur,envEnd)+release;   /* v179: 8 time-constants - the tail is silent when the oscillator stops (it was cut at ~5% = a click) */
+ out.gain.setTargetAtTime(0,Math.max(when+.005,envEnd),relTc);
+ const osc=window.GLCTC_TUNING.attach(ctx.createOscillator());osc.type=S.wave;osc.frequency.setValueAtTime(slide&&prevFreq?prevFreq:freq,when);if(slide&&prevFreq)osc.frequency.linearRampToValueAtTime(freq,when+S.slideTime);else osc.frequency.setValueAtTime(freq,when);const OSCS=[osc];osc.connect(out);osc.start(when);osc.stop(voiceEnd);
  if(S.wave==='sawtooth'||S.wave==='square'){   /* v176 FAT BASS: a second oscillator 9 cents apart (the first moves 4 the other way) - the classic analogue double */
-  const o2=window.GLCTC_TUNING.attach(ctx.createOscillator()),g2=ctx.createGain();o2.type='sawtooth';osc.detune.value=-4;o2.detune.value=9;o2.frequency.setValueAtTime(slide&&prevFreq?prevFreq:freq,when);if(slide&&prevFreq)o2.frequency.linearRampToValueAtTime(freq,when+S.slideTime);g2.gain.value=S.wave==='square'?.55:.8;o2.connect(g2);g2.connect(out);o2.start(when);o2.stop(voiceEnd)}
- if(S.sub>.001){const sub=window.GLCTC_TUNING.attach(ctx.createOscillator()),sg=ctx.createGain();sub.type=S.subWave||'square';sub.frequency.setValueAtTime(freq/2,when);sg.gain.value=S.sub*.48;sub.connect(sg);sg.connect(out);sub.start(when);sub.stop(voiceEnd);LEE_SUB=sub}
- out.connect(filt);filt.connect(dest);if(window.GLCTC_BASS_LAYER)GLCTC_BASS_LAYER(ctx,filt,dest,S);activeNodes.push(osc);osc.onended=()=>{activeNodes=activeNodes.filter(x=>x!==osc)};LEE_LAST={out,osc,sub:LEE_SUB};return freq}
+  const o2=window.GLCTC_TUNING.attach(ctx.createOscillator()),g2=ctx.createGain();o2.type='sawtooth';osc.detune.value=-4;o2.detune.value=9;o2.frequency.setValueAtTime(slide&&prevFreq?prevFreq:freq,when);if(slide&&prevFreq)o2.frequency.linearRampToValueAtTime(freq,when+S.slideTime);g2.gain.value=S.wave==='square'?.55:.8;o2.connect(g2);g2.connect(out);o2.start(when);o2.stop(voiceEnd);OSCS.push(o2)}
+ if(S.sub>.001){const sub=window.GLCTC_TUNING.attach(ctx.createOscillator()),sg=ctx.createGain();sub.type=S.subWave||'square';sub.frequency.setValueAtTime(freq/2,when);sg.gain.value=S.sub*.48;sub.connect(sg);sg.connect(out);sub.start(when);sub.stop(voiceEnd);LEE_SUB=sub;OSCS.push(sub)}
+ out.connect(filt);filt.connect(dest);if(window.GLCTC_BASS_LAYER)GLCTC_BASS_LAYER(ctx,filt,dest,S);activeNodes.push(osc);osc.onended=()=>{activeNodes=activeNodes.filter(x=>x!==osc)};LEE_LAST={out,osc,sub:LEE_SUB,oscs:OSCS,ctx,when};return freq}
  function leeKill(v,tc){if(!v)return;const ctx=ensureAudio(),t=ctx.currentTime;try{v.out.gain.cancelScheduledValues(t);v.out.gain.setValueAtTime(Math.max(.0001,v.out.gain.value),t);v.out.gain.setTargetAtTime(.0001,t,tc)}catch(e){}const end=t+tc*8+.02;try{v.osc.stop(end)}catch(e){}try{v.sub&&v.sub.stop(end)}catch(e){}}
  function leeLiveOn(n,id,glide){const ctx=ensureAudio();ctx.resume();if(S.tape)return;const t=ctx.currentTime+.005,fx=getFx(ctx,WSB('lee',masterGain||ctx.destination)),prev=lastFreq,old=leeLive;lastFreq=voice(ctx,n,t,30,false,!!(glide&&prev),prev,fx.input);leeLive={id,n,v:LEE_LAST,t0:performance.now()};if(old)leeKill(old.v,glide?.02:.01)}
  function leeLiveOff(id,n){const L=leeLive;if(!L||L.id!==id||(n!=null&&L.n!==n))return;leeLive=null;const rel=Math.max(.012,Math.min(.06,S.decay*.18)),wait=Math.max(0,120-(performance.now()-L.t0));wait?setTimeout(()=>leeKill(L.v,rel),wait):leeKill(L.v,rel)}
@@ -17427,6 +17430,7 @@ const FAM={psytrance:'psy',trance:'rave',hardhouse:'rave',happyhardcore:'rave',
  dnb:'breaks',jungle:'breaks',liquid:'breaks',breaks:'breaks',nuskool:'breaks',
  trap:'boom',drill:'boom',south:'boom',phonk:'boom',westcoast:'boom',electro:'boom',
  hiphop:'hip',eastcoast:'hip',ukhiphop:'hip',lofi:'soft',reggae:'hip',ska:'house',ambient:'soft',meditation:'soft'};
+const DFAM={reggae:'roots',ska:'roots',amapiano:'light',jungle:'light',dnb:'light',liquid:'light'},dfam=g=>DFAM[g]||fam(g);   /* v180: duck families */
 const fam=g=>FAM[g]||'house';
 /* kick: len = body length in beats (null = keep the preset), max = seconds cap, kc = beater click, kb = knock layer,
    kx = start pitch ratio of the sweep, kt = sweep time, ks = saturation */
@@ -17448,7 +17452,10 @@ const DUCK={
  breaks:{lee:-5, sub:-8, s101:-1.5,go:-1.5,hold:.18},
  boom:  {lee:-2.5,sub:-5,hold:.15},
  hip:   {lee:-4, sub:-7, s101:-1,go:-1,hold:.18},
- soft:  {}};
+ soft:  {},
+ roots: {},   /* v180: reggae / ska - the bass leads, nothing pumps it */
+ light: {lee:-1.5,sub:-3,hold:.12},   /* v180: amapiano log drums, jungle / dnb breaks - busy kicks only nudge the sub */
+};
 const dbg=d=>Math.pow(10,d/20);
 function shape(v,p,kc){const g=genre();if(!g)return p;const K=KICK[fam(g)];const q=Object.assign({},p);kc=kc||{f:1,d:1,b:1,n:1};
  if(v===0){const B=beat();
@@ -17501,13 +17508,13 @@ function duckNode(id){const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL(id);if(!b|
  if(b._dk&&b._dk.context===b.c)return b._dk;
  const dk=b.c.createGain();dk.gain.value=1;try{b.vol.disconnect(b.tap)}catch(e){try{b.vol.disconnect()}catch(_){}}b.vol.connect(dk);dk.connect(b.tap);b._dk=dk;return dk}
 let lastT={};
-function duck(t,vel,dur){const g=genre();if(!g)return;BAL.hit(t);const D=DUCK[fam(g)];if(!D||!D.lee&&!D.sub)return;
+function duck(t,vel,dur){const g=genre();if(!g)return;BAL.hit(t);const D=DUCK[dfam(g)];if(!D||!D.lee&&!D.sub)return;
  let pumping=false;try{pumping=!!(window.GLCTC_CHARACTER&&GLCTC_CHARACTER.state().pumping)}catch(e){}
  const B=beat(),hold=Math.min(.16,(D.hold||.2)*B),rel=Math.max(.012,B*(D.rel||.12)),v=Math.max(.35,Math.min(1,vel||.9));
  for(const id of ['lee','sub','s101','go','ix']){const d=D[id];if(!d)continue;if(pumping&&id!=='sub')continue;
   if(lastT[id]!=null&&Math.abs(t-lastT[id])<.03)continue;   /* one duck per kick even when two drum machines hit together */
   const n=duckNode(id);if(!n)continue;const P=n.gain,c=n.context;if(t<c.currentTime)continue;
-  try{P.setTargetAtTime(dbg(d*v*.6),Math.max(c.currentTime,t-.004),.004);   /* v147: 60 % duck depth */
+  try{P.setTargetAtTime(dbg(d*v*.6),Math.max(c.currentTime,t-.008),.012);   /* v180: 12 ms - a 4 ms duck snapped a 70 Hz bass mid-cycle = click */   /* v147: 60 % duck depth */
   P.setTargetAtTime(1,t+hold,rel)}catch(e){}
   lastT[id]=t}}
 function resetDuck(){for(const id of ['lee','sub','s101','go','ix']){try{const b=GLCTC_WSBUSFULL(id);if(b&&b._dk){const P=b._dk.gain;P.cancelScheduledValues(0);P.setValueAtTime(1,b.c.currentTime)}}catch(e){}}lastT={}}

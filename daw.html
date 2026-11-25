@@ -38,9 +38,9 @@ function killNotes(ctx){const now=ctx?ctx.currentTime:0,cut=[];
    else if(n.__t1==null||n.__t1>t+1.2)n.stop(t+.015)}catch(e){}LIVE.delete(n)});   /* ringing: long ones cut, short tails finish */
  return cut.length}
 /* 3 · reverb impulse cap */
-const IRMAX=()=>{let m='auto';try{m=localStorage.getItem('glctc1.cpuMode')||'auto'}catch(e){}return m==='eco'?.9:99};   /* v208 STUDIO QUALITY: full reverb tails in AUTO and FULL on every device; only ECO (chosen by hand) shortens them */   /* ECO (phones) .9 s · AUTO 1.4 s · FULL untouched */
+const IRMAX=()=>{let m='auto',t=false;try{t=matchMedia('(pointer:coarse)').matches}catch(e){}try{m=localStorage.getItem('glctc1.cpuMode')||'auto'}catch(e){}return m==='eco'?.9:m==='full'?99:t?2:99};   /* v209: phones in AUTO keep 2 s tails (was 0.9 s before v208, unlimited in v208 - too heavy) */   /* v208 STUDIO QUALITY: full reverb tails in AUTO and FULL on every device; only ECO (chosen by hand) shortens them */   /* ECO (phones) .9 s · AUTO 1.4 s · FULL untouched */
 try{const P=ConvolverNode.prototype,d=Object.getOwnPropertyDescriptor(P,'buffer'),short=new WeakMap();
- const full=()=>{try{return (window.GLCTC_PERF&&GLCTC_PERF.mode)!=='eco'&&localStorage.getItem('glctc1.cpuMode')!=='eco'}catch(e){return true}};
+ const full=()=>{try{return (window.GLCTC_PERF&&GLCTC_PERF.mode)==='full'||localStorage.getItem('glctc1.cpuMode')==='full'}catch(e){return false}};
  if(d&&d.set)Object.defineProperty(P,'buffer',{configurable:true,enumerable:d.enumerable,get(){return d.get.call(this)},set(b){
   const cap=IRMAX();if(b&&rt(this.context)&&!full()&&b.duration>cap+.05){let s=short.get(b);if(!s||s.length!==Math.floor(cap*b.sampleRate)){const n=Math.floor(cap*b.sampleRate),fade=Math.floor(n*.2);
     s=new AudioBuffer({numberOfChannels:b.numberOfChannels,length:n,sampleRate:b.sampleRate});
@@ -170,7 +170,8 @@ section.panel.ix,#glctc1SongComposer,#glctc1ActionSequencer{content-visibility:a
    ECO (the default on phones): 32 kHz - every node in the studio does a third less work, and it still reproduces up to 16 kHz.
    AUTO: 32 kHz on phones and tablets, 44.1 kHz on computers. FULL: the device's own rate. A change of CPU mode applies the next time the page is opened. */
 window.GLCTC_RATE=function(){let mode='auto',touch=false;try{try{touch=matchMedia('(pointer:coarse)').matches}catch(_){}mode=localStorage.getItem('glctc1.cpuMode')||'auto'}catch(e){}
- return mode==='eco'?{sampleRate:32000}:{}};   /* v208 STUDIO QUALITY: AUTO and FULL run at the device's own rate (usually 48 kHz, no resampling) on phones too; only ECO drops to 32 kHz */
+ let t=false;try{t=matchMedia('(pointer:coarse)').matches}catch(e){}
+ return mode==='eco'?{sampleRate:32000}:(mode==='auto'&&t)?{sampleRate:44100}:{}};   /* v209: phones in AUTO run at 44.1 kHz (full audible range, a little lighter than 48 kHz) */   /* v208 STUDIO QUALITY: AUTO and FULL run at the device's own rate (usually 48 kHz, no resampling) on phones too; only ECO drops to 32 kHz */
 
 /* v118 GLCTC_LEAD: how far ahead a live hit must be scheduled so its fade-in is never rendered late (late = click).
    It is measured from how the audio clock actually advances on this device (phones advance in bigger jumps). */
@@ -1939,18 +1940,30 @@ window.__glctcLoad=function(){try{var m=window.GLCTC_HUB&&GLCTC_HUB.mods,n=0;if(
  const style=document.createElement('style');style.textContent='body.glctc-lowfx *{box-shadow:none!important;text-shadow:none!important;filter:none!important;transition:none!important}';document.head.append(style);
  let mode='auto';try{const saved=localStorage.getItem('glctc1.cpuMode');let touch=false;try{touch=matchMedia('(pointer:coarse)').matches}catch(_){}mode=saved||'auto'}catch(e){}if(!['auto','eco','full'].includes(mode))mode='auto';   /* v208: phones start in AUTO too (ECO only when chosen) */
  let q=0,ema=0,last=performance.now(),calm=0,lastQuality=-1;const shapers=new Set();
+ const T0=performance.now(),TOUCH=(()=>{try{return matchMedia('(pointer:coarse)').matches}catch(e){return false}})();let ots=null,lastStep=0,quiet=0,glitches=0,gT=[];
+ /* v209 REAL DROPOUT DETECTOR: compares the audio clock with the wall clock. When the device cannot keep up, the audio clock
+    falls behind - that is a dropout you can hear. Page lag alone (UI work) no longer changes the sound. */
+ function lostMs(){try{const c=(window.__glctcCtxs||[]).find(x=>x&&x._post&&x.state==='running');if(!c||!c.getOutputTimestamp){ots=null;return 0}
+  const ts=c.getOutputTimestamp();if(!ts||!ts.performanceTime){return 0}if(!ots||ots.c!==c){ots={c,ct:ts.contextTime,pt:ts.performanceTime};return 0}
+  const dp=(ts.performanceTime-ots.pt)/1000,dc=ts.contextTime-ots.ct;ots={c,ct:ts.contextTime,pt:ts.performanceTime};if(dp<=.05||dp>2)return 0;return Math.max(0,(dp-dc)*1000)}catch(e){return 0}}
+ const songOn=()=>{try{return!!(window.GLCTC_SONG&&GLCTC_SONG.running())}catch(e){return false}};
  const budget=window.GLCTC_PERF={
   get mode(){return mode},get quality(){return window.__glctcQ()},
   setMode(value){if(!['auto','eco','full'].includes(value))return;mode=value;try{localStorage.setItem('glctc1.cpuMode',mode)}catch(e){}calm=0;update(true)},
   registerShaper(node){if(typeof WeakRef==='function')shapers.add({ref:new WeakRef(node),original:null,last:null})},
-  getStats(){return{mode,level:window.__glctcQ(),modules:window.__glctcLoad(),timerLagMs:Math.round(ema)}}
+  getStats(){return{mode,level:window.__glctcQ(),modules:window.__glctcLoad(),timerLagMs:Math.round(ema),dropouts:glitches}}
  };
  window.__glctcQ=function(){if(mode==='full'||window.GLCTC_SONG_EXPORTING)return 0;if(mode==='eco')return 3;return q};   /* v208 STUDIO QUALITY: a song no longer drops to LIGHT just because many modules play - AUTO only steps down when the device actually falls behind (timer lag); exports always render at full quality */
  window.__glctcUiMs=function(){return [33,60,100,140][window.__glctcQ()]};
  function update(force){
   const now=performance.now(),lag=Math.max(0,now-last-250);last=now;ema=ema*.8+lag*.2;
-  const m=window.__glctcLoad(),want=ema>90?3:ema>45?2:ema>20?1:0;
-  if(force||want>q){q=want;calm=0}else if(want<q&&++calm>=12){q=want;calm=0}else if(want===q)calm=0;
+  const m=window.__glctcLoad(),song=songOn(),floor=TOUCH&&song?1:0,lost=lostMs();   /* v209: phones play songs one notch lighter (BALANCED) from the first bar, so nothing rebuilds mid-song */
+  if(lost>6){glitches++;quiet=0;gT.push(now)}else quiet++;gT=gT.filter(t=>now-t<4000);const real=gT.length>=2;   /* two dropouts within 4 s = the device is really struggling (one blip is ignored) */
+  const severeLag=now-T0>8000&&ema>160;   /* page lag only counts when it is extreme, and never while the page is still loading */
+  if(force){calm=0}
+  if(q<floor){q=floor;lastStep=now}
+  else if((real||severeLag)&&q<3&&now-lastStep>2500){q++;lastStep=now;quiet=0;gT=[]}   /* a real dropout: step down ONE level, then give it time to settle */
+  else if(!song&&q>floor&&quiet>=32&&now-lastStep>8000){q--;lastStep=now;quiet=0}   /* quality comes back only between songs - never mid-song (a change rebuilds effects and can click) */
   const quality=window.__glctcQ();document.body?.classList.toggle('glctc-live',m>0);document.body?.classList.toggle('glctc-lowfx',quality>0);
   for(const item of shapers){const n=item.ref.deref();if(!n){shapers.delete(item);continue}if(item.original===null)item.original=n.oversample;const target=quality>=2?'none':item.original;if(item.last!==target||n.oversample!==target){n.oversample=target;item.last=target}}
   if(lastQuality!==quality){lastQuality=quality;window.dispatchEvent(new CustomEvent('glctc-cpu-change',{detail:{level:quality}}))}

@@ -213,7 +213,8 @@ window.GLCTC_GLIDE=function(root,sel,on,off){if(!root||root.__glide)return;root.
 <script>(function(){try{const d=Object.getOwnPropertyDescriptor(ConvolverNode.prototype,'buffer');if(!d||!d.set)return;
  /* v139 CPU: module-internal reverb impulses longer than 1.8 s are cut to 1.8 s with a smooth fade (the master hall, 2.8 s+, is untouched) -
     the tail past 1.8 s sits 40 dB down under the mix but cost a quarter of all reverb processing */
- Object.defineProperty(ConvolverNode.prototype,'buffer',{configurable:true,get:d.get,set(b){try{if(b&&b.duration>1.85&&b.duration<2.8){const sr=b.sampleRate,n=Math.floor(1.8*sr),f=Math.floor(n*.3),o=this.context.createBuffer(b.numberOfChannels,n,sr);
+ Object.defineProperty(ConvolverNode.prototype,'buffer',{configurable:true,get:d.get,set(b){try{const FULLTAIL=(()=>{try{return localStorage.getItem('glctc1.lineup')!=='0'&&!matchMedia('(pointer:coarse)').matches}catch(_){return false}})();   /* STUDIO 8: 8 parts leave CPU for full tails on desktop */
+  if(!FULLTAIL&&b&&b.duration>1.85&&b.duration<2.8){const sr=b.sampleRate,n=Math.floor(1.8*sr),f=Math.floor(n*.3),o=this.context.createBuffer(b.numberOfChannels,n,sr);
   for(let ch=0;ch<b.numberOfChannels;ch++){const a=b.getChannelData(ch),z=o.getChannelData(ch);for(let i=0;i<n;i++)z[i]=a[i]*(i<n-f?1:(n-i)/f)}b=o}}catch(e){}d.set.call(this,b)}})}catch(e){}})();
 window.__gate=(function(){const W=new WeakMap();return(src,dst,on)=>{try{let m=W.get(src);if(!m){m=new Map();W.set(src,m)}const was=m.has(dst)?m.get(dst):true;if(on&&!was){src.connect(dst);m.set(dst,true)}else if(!on&&was){src.disconnect(dst);m.set(dst,false)}}catch(e){}}})();</script>
 <script>
@@ -10681,7 +10682,7 @@ panel.innerHTML=`<style>
  <div><label style="display:flex;gap:6px;align-items:center;margin:0 0 9px" title="Builds rise through a high-pass filter, the last beat drops out, and the drop hits at full weight"><input id="gscEpic" type="checkbox" checked>EPIC BUILDS &amp; DROPS</label></div>
 </div>
 <div class="gsc-note" style="display:none" aria-hidden="true">
- <label style="margin:0"><input id="gscAutoFX" type="checkbox" checked> AUTO CHANNEL FX</label>
+ <label style="margin:0"><input id="gscAutoFX" type="checkbox" checked> AUTO CHANNEL FX</label> <label style="margin:0" title="Every song: sub bass, bass lead, drums, warm melody, 0010110 synth, pad, keys, brass and one riser FX. Untick for the full band."><input id="gscLineup" type="checkbox" checked> STUDIO 8 LINEUP</label>
  <button id="gscApplyFX" type="button">Apply Genre FX</button>
  <label for="gscFXModule">EDIT CHANNEL</label><select id="gscFXModule"><option value="bl">80LA8 DRUMS</option><option value="mine">DIVINE09</option><option value="lee">30LEE BASS</option><option value="s101">0010110 SYNTH</option><option value="go">GALACTIC ONE</option><option value="vox">GALACTIC VOX</option><option value="ws">PAD-64</option><option value="lp">LOOPER</option></select>
  <button id="gscEditFX" type="button">Open Channel FX</button>
@@ -13827,7 +13828,7 @@ function prepareSong(genreKey,txt){
  if(/no loop|without loop/.test(txt))skip.add('lp');
  if(/no drums|without drums|drumless/.test(txt)){['bl','mine','ws','lp'].forEach(k=>skip.add(k))}
  if(/minimal/.test(txt)){skip.add('s101');skip.add('vox')}
- MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});st.on.sub=true;   /* v97: SUB-01 is in every song */
+ MODS.forEach(m=>{st.on[m.k]=!skip.has(m.k)});st.on.sub=true;try{window.GLCTC_LINEUP&&GLCTC_LINEUP.on(st,genreKey)}catch(e){console.warn('studio 8',e)}   /* STUDIO 8 LINEUP */   /* v97: SUB-01 is in every song */
  /* v86 GENRE MIX BALANCE: kick and bass forward for club genres, heavy 808 for trap, louder lead for trance / synthwave, warmer keys for lo-fi */
  st.level=GLCTC_GFILL({ambient:{go:85,s101:65,ws:55,vox:55,bl:55,lee:70,lp:50},reggae:{bl:92,mine:72,lee:100,s101:74,go:60,vox:64,ws:52,lp:42},
   techno:{bl:100,mine:85,lee:88,s101:60,go:62,vox:55,ws:60,lp:40},house:{bl:95,mine:85,lee:85,s101:72,go:68,vox:65,ws:62,lp:45},
@@ -13853,6 +13854,7 @@ function prepareSong(genreKey,txt){
  let pack=null;
  pack=fillPatterns(genreKey,txt);
  try{fitCellsToPatterns()}catch(e){console.warn('cell fit',e)}
+ try{window.GLCTC_LINEUP&&GLCTC_LINEUP.cells(st,genreKey)}catch(e){console.warn('studio 8 cells',e)}   /* STUDIO 8: extras silent, IX plays pad / keys / brass */
  save();renderGrid();try{refreshTimeline()}catch(e){}
  return pack;
 }
@@ -14060,6 +14062,78 @@ function fitRemix(beats){
  st.loop=false;byId('gscLoop').checked=false;save();renderGrid();refreshTimeline();
 }
 window.GLCTC_SONG={matchTrack,fitRemix,restoreProject:d=>{let n=null;try{n=normSt(JSON.parse(JSON.stringify(d)))}catch(e){}if(!n){console.warn('GLCTC1 composer: project has no readable song - kept the current one');return}if(S||starting)stopSong('SONG STOPPED · PROJECT OPENED');st=n;ixCells();st.bpm=GLCTC_CLOCK.bpm;try{wsKeyTunes=window.GLCTC_PAD64_PATTERNS?.get()?.tunes||null}catch(e){}byId('gscLen').value=st.len;save();renderGrid();refreshTimeline();setBtn()},play:()=>TRANSPORT.play(),generate,stop:home=>stopSong(home?'SONG STOPPED · BACK TO START':null,!home),lengthBeats:()=>songBeats(),state:()=>st,running:()=>!!S,pending:()=>starting,prepareStep,suspendModules,joinModules,position:()=>S?{total:S.total,start:S.t0,loop:!!st.loop}:null,timeline:()=>S&&S.starts?{starts:S.starts.slice(),total:S.total,barBeats:S.barBeats,n:S.n,loop:!!st.loop,genre:(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||null,secs:S.secs.map(x=>({n:x.n,kind:x.kind,bars:x.bars}))}:null,sectionKind:()=>S&&S.cur>=0&&S.secs[S.cur]?S.secs[S.cur].kind:null,section:()=>S&&S.cur>=0&&S.secs[S.cur]?{i:S.cur,count:S.secs.length,name:S.secs[S.cur].n,kind:S.secs[S.cur].kind}:null};
+})();
+</script>
+
+<script id="glctc1-studio8-lineup">
+/* ===== STUDIO 8 LINEUP =====
+   Quality over quantity: every song the Song Composer makes plays the same eight parts, each with its own job and its own
+   space in the mix:
+     1 SUB BASS     SUB-01                         · the sub, mono, under everything
+     2 BASS LEAD    30LEE                          · the moving bass line
+     3 DRUMS        80LA8 (kick / snare / clap) + DIVINE09 (hats / ride) · one kit across two machines
+     4 MELODY       GALACTIC ONE                   · warmed (gentle top roll-off, a little low-mid body)
+     5 PAD          INSTR DESIGNER layer 1         · one fat pad, every section
+     6 KEYS         INSTR DESIGNER layer 2         · chords from the verse on
+     7 BRASS        INSTR DESIGNER layer 3         · stabs in the drops only
+     8 SYNTH        0010110                        · its stabs and lines, as the composer writes them
+     9 ONE FX       the build riser into each drop (reverse cymbals, downlifters, horns and sirens are off)
+   LOOPER, GALACTIC VOX and PAD-64 sit out. Untick STUDIO 8 LINEUP in the Song Composer to go back to the full band. */
+(()=>{'use strict';
+const LS='glctc1.lineup';
+function enabled(){const e=document.getElementById('gscLineup');if(e)return !!e.checked;try{return localStorage.getItem(LS)!=='0'}catch(_){return true}}
+const OFF=['lp','vox','ws'];
+/* pad · keys · brass for each genre family */
+const FAM=[
+ [/^(techno|techhouse|melodictechno|psytrance|hardhouse|electro)$/,'Club',['Dark Pad','Electric Grand (CP)','Synth Brass 80s']],
+ [/^(house|tribalhouse|afrohouse)$/,'House',['Warm Pad','House Dance Piano','Horn Section Stab']],
+ [/^(deephouse|garage|amapiano)$/,'Deep',['Warm Pad','Classic Rhodes','Horn Section Stab']],
+ [/^(trance|happyhardcore|nuskool)$/,'Trance',['Sweep Pad','Glass DX Piano','Synth Brass 80s']],
+ [/^(dnb|liquid|jungle|breaks)$/,'Liquid',['Warm Pad','Classic Rhodes','Soft Horns']],
+ [/^(trap|drill|phonk)$/,'Trap',['Dark Pad','Felt Piano','Horn Section Stab']],
+ [/^(hiphop|eastcoast|westcoast|south|ukhiphop)$/,'Soul',['Warm Pad','Suitcase Tremolo','Brass Section']],
+ [/^(lofi)$/,'Lo-Fi',['Warm Pad','Lo-Fi Keys','Soft Horns']],
+ [/^(synthwave)$/,'Synthwave',['Sweep Pad','Bright Pop Piano','Synth Brass 80s']],
+ [/^(ambient|meditation)$/,'Ambient',['Glass Pad','Felt Piano','Soft Horns']],
+ [/^(dubstep)$/,'Dubstep',['Dark Pad','Electric Grand (CP)','Brass Section']],
+ [/^(reggae|ska)$/,'Roots',['Warm Pad','Reggae Bubble Organ','Horn Section Stab']],
+ [/./,'Pop',['Warm Pad','Bright Pop Piano','Synth Brass 80s']]
+];
+const QUIET=/^(ambient|meditation)$/;
+function fam(g){const hit=x=>FAM.slice(0,-1).find(f=>f[0].test(x));const p=(window.GLCTC_GENRE_PARENT||{})[g];return hit(g)||(p&&hit(p))||FAM[FAM.length-1]}
+const name=f=>'Studio 8 · '+f[1];
+function stacks(){const o={};FAM.forEach(f=>{const [pad,keys,brass]=f[2],q=f[1]==='Ambient';
+ o[name(f)]=[
+  {s:pad,part:'pad',vol:.52,rev:.42,dly:0,pan:0},
+  {s:keys,part:'chords',vol:.5,pan:-.18,rev:.24,dly:.08,roles:['verse','build','drop','break','outro']},
+  q?{s:brass,part:'pad',vol:.3,pan:.2,rev:.5,roles:['break','drop']}
+   :{s:brass,part:'stabs',vol:.4,pan:.2,rev:.22,dly:.1,roles:['drop']}]});return o}
+function stack(g){return name(fam(g))}
+function desc(g){const f=fam(g);return f[2][0]+' pad · '+f[2][1]+' keys · '+f[2][2]+(f[1]==='Ambient'?' swells':' stabs on the drops')}
+/* composer hooks */
+function on(st,g){if(!enabled()||!st||!st.on)return;OFF.forEach(k=>{st.on[k]=false});st.on.ix=true;st.on.sub=true;st.on.s101=true}
+function cells(st,g){if(!enabled()||!st||!st.cells||!st.secs)return;const n=st.secs.length;
+ OFF.forEach(k=>{st.cells[k]=Array(n).fill(-1)});
+ st.cells.ix=st.secs.map(()=>0);
+ /* 0010110 plays in every song: as written where the composer gave it a part, its main pattern through verses, builds, drops and breaks where it had none */
+ if(st.on.s101!==false){const c=st.cells.s101=(st.cells.s101||[]).slice(0,n);for(let i=0;i<n;i++){if(!(c[i]>=0)&&/^(verse|build|drop|break)$/.test(st.secs[i].kind))c[i]=0;if(c[i]==null)c[i]=-1}
+  if(st.level)st.level.s101=Math.max(st.level.s101||0,QUIET.test(g)?72:86)}   /* A · FULL - each layer's own roles decide where it plays */
+ if(st.presets){st.presets.ix=stack(g)}}
+/* warm melody: a gentle low-pass + a touch of low-mid body ahead of GALACTIC ONE's channel */
+function warm(){try{const b=window.GLCTC_WSBUSFULL&&GLCTC_WSBUSFULL('go');if(!b||!b.in||!b.hp)return;const c=b.c;
+ if(!b._warm){const body=c.createBiquadFilter(),lp=c.createBiquadFilter();body.type='peaking';body.frequency.value=320;body.Q.value=.8;lp.type='lowpass';lp.Q.value=.5;
+  try{b.in.disconnect(b.hp)}catch(e){return}b.in.connect(body);body.connect(lp);lp.connect(b.hp);b._warm={body,lp}}
+ const w=b._warm,t=c.currentTime,E=enabled(),g=(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||'';
+ w.lp.frequency.setTargetAtTime(E?(QUIET.test(g)?5200:/^(trance|psytrance|hardhouse|happyhardcore|dubstep)$/.test(g)?9500:7200):20000,t,.05);
+ w.body.gain.setTargetAtTime(E?1.5:0,t,.05)}catch(e){}}
+window.addEventListener('glctc-song-start',()=>setTimeout(warm,50));setInterval(()=>{try{if(window.GLCTC_SONG&&GLCTC_SONG.running())warm()}catch(e){}},2000);
+window.GLCTC_LINEUP={enabled,stacks,stack,desc,on,cells,warm,OFF};
+/* the toggle in the Song Composer */
+function bindToggle(){const e=document.getElementById('gscLineup');if(!e){setTimeout(bindToggle,500);return}
+ try{const v=localStorage.getItem(LS);if(v!=null)e.checked=v!=='0'}catch(_){}
+ e.addEventListener('change',()=>{try{localStorage.setItem(LS,e.checked?'1':'0')}catch(_){}warm();
+  const s=document.getElementById('gscStatus');const msg=e.checked?'STUDIO 8 ON · sub, bass lead, drums, warm melody, 0010110 synth, pad, keys, brass, one FX - press GENERATE':'STUDIO 8 OFF · the full band plays on the next GENERATE';try{if(window.toast)toast(msg)}catch(_){}if(s)s.textContent=msg})}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bindToggle);else bindToggle();
 })();
 </script>
 
@@ -14586,11 +14660,13 @@ STK[hornFeature]=[
  phrase('Trumpet',[[2,2,1,.78],[6,4,2,.91],[14,2,1,.64],[22,5,2,.88],[27,4,1,.66]],.49,-.17),
  phrase('Trombone',[[2,0,2,.8],[6,1,2,.86],[18,0,3,.72],[22,2,2,.82]],.42,.16),
  {s:'Classic Rhodes',part:'chords',style:'garage',vol:.37,pan:.05,rev:.18,roles:['verse','intro','break','outro']}];
+try{Object.assign(STK,window.GLCTC_LINEUP?GLCTC_LINEUP.stacks():{})}catch(e){}   /* STUDIO 8 stacks: pad · keys · brass */
 STK[stringFeature]=[
  phrase('Solo Violin',[[0,4,2,.93],[3,5,1,.65],[10,6,2,.82],[20,5,3,.87],[30,4,1,.7]],.5,-.21),
  phrase('Pizzicato Strings',[[6,0,1,.76],[14,2,1,.64],[18,1,1,.75],[27,0,2,.83]],.39,.24),
  {s:'Low Strings',part:'pad',vol:.32,pan:.08,rev:.23,roles:['intro','build','break','outro']}];
 function featureName(g){
+ if(window.GLCTC_LINEUP&&GLCTC_LINEUP.enabled())return GLCTC_LINEUP.stack(g);   /* STUDIO 8 */
  if(/^(ska|reggae|afrohouse|hiphop|eastcoast|westcoast|breaks|south|lofi)$/.test(g))return hornFeature;
  if(/^(drill|ukhiphop|trap|liquid|garage|melodictechno|trance|phonk)$/.test(g))return stringFeature;
  return null;
@@ -15330,6 +15406,7 @@ function paintNow(sec){const e=$('ixNow');if(!e)return;const H=harmony(),st=runn
  document.querySelectorAll('#ixSong th[data-kind]').forEach(th=>th.classList.toggle('now',!!(sec&&sec.song&&th.dataset.kind===sec.kind)))}
 function matchedBand(g){
  const feature=featureName(g);
+ if(feature&&window.GLCTC_LINEUP&&feature===GLCTC_LINEUP.stack(g))return [feature,GLCTC_LINEUP.desc(g)];
  if(feature)return [feature,feature===hornFeature?'trumpet and trombone with Rhodes':'solo violin and pizzicato with low strings'];
  return MATCH[g]||MATCH[(window.GLCTC_GENRE_PARENT||{})[g]];
 }
@@ -17779,16 +17856,16 @@ function scheduleSection(T,K,cycle,i){const key=cycle+':'+i;if(done.has(key))ret
  /* builds: riser over the whole build (max 8 bars), ending on the pre-drop gap */
  if(sec.kind==='build'){const rb=Math.max(sb,eb-8*T.barBeats);riser(c,Math.max(ts,K.timeOfBeat(rb)),K.timeOfBeat(eb-gapBeat),rootHz())}
  /* v132 sound-system FX */
- if(/^(jungle|dnb)$/.test(g)){const r=rootHz();  if(sec.kind==='drop'&&(g==='jungle'||cycle+i===0||Math.random()<.5)){try{horn(c,ts,r,K.bpm)}catch(e){}}}
+ if(!(window.GLCTC_LINEUP&&GLCTC_LINEUP.enabled())&&/^(jungle|dnb)$/.test(g)){const r=rootHz();  if(sec.kind==='drop'&&(g==='jungle'||cycle+i===0||Math.random()<.5)){try{horn(c,ts,r,K.bpm)}catch(e){}}}
  /* reverse cymbal into the next drop / chorus / breakdown */
  const OOH=g==='techno'||g==='jungle';   /* v202: Genuine Psychopaths has none either */   /* v189 MEASURED: Open Our Hearts has no clap rolls, no reverse cymbals, no downlifters */
- if(!OOH&&g!=='reggae'&&nextKind&&/^(drop|break|verse)$/.test(nextKind)&&!(nextKind==='verse'&&sec.kind==='intro'&&i===0)){const len=Math.min(2,T.barBeats/2)*60/K.bpm;revCym(c,te,len,nextKind==='drop'?.24:.14)}
+ if(!(window.GLCTC_LINEUP&&GLCTC_LINEUP.enabled())&&!OOH&&g!=='reggae'&&nextKind&&/^(drop|break|verse)$/.test(nextKind)&&!(nextKind==='verse'&&sec.kind==='intro'&&i===0)){const len=Math.min(2,T.barBeats/2)*60/K.bpm;revCym(c,te,len,nextKind==='drop'?.24:.14)}
  /* breakdown opens on a downlifter */
- if(!OOH&&sec.kind==='break')downlifter(c,ts,Math.min(2*T.barBeats,sec.bars*T.barBeats)*60/K.bpm);
+ if(!(window.GLCTC_LINEUP&&GLCTC_LINEUP.enabled())&&!OOH&&sec.kind==='break')downlifter(c,ts,Math.min(2*T.barBeats,sec.bars*T.barBeats)*60/K.bpm);
  /* phrase variation inside long sections (the section-end fill is the composer's own) */
  const JU=!!(window.GLCTC_JUMPUP&&GLCTC_JUMPUP());   /* v198 jump up: no fills inside drops / verses (the record keeps its groove clean); one fast snare-roll crescendo at the end of every build, into the drop */
  if(JU&&sec.kind==='build'&&nextKind==='drop')PEND.push({pb:eb,big:true,st:'jungle'});
- if(JU&&sec.kind==='build'){const sb4=Math.max(sb,eb-4*T.barBeats),t4=Math.max(ts,K.timeOfBeat(sb4));try{siren(c,t4,Math.max(.5,K.timeOfBeat(eb-1)-t4),rootHz())}catch(e){}}   /* v198: siren into the drop (the prompt) */
+ if(!(window.GLCTC_LINEUP&&GLCTC_LINEUP.enabled())&&JU&&sec.kind==='build'){const sb4=Math.max(sb,eb-4*T.barBeats),t4=Math.max(ts,K.timeOfBeat(sb4));try{siren(c,t4,Math.max(.5,K.timeOfBeat(eb-1)-t4),rootHz())}catch(e){}}   /* v198: siren into the drop (the prompt) */
  if(!OOH&&!JU&&sec.bars>=8&&/^(verse|drop|break)$/.test(sec.kind)){const st=FILLSTYLE(g);
    for(let p=4;p<sec.bars;p+=4){const pb=sb+p*T.barBeats,big=p%8===0;if(sec.kind==='break'&&!big)continue;PEND.push({pb,big,st})}}   /* v145: fills are written ~1.5 s ahead by the tick, not a whole section ahead */
  /* final-chorus key lift */

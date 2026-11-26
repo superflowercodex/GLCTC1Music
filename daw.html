@@ -4199,6 +4199,7 @@ const PRESETS=[
  ['DnB Reese Under',{wave:0,sub2:.2,drive:.1,harm:.14,cut:120,a:.008,d:.6,s:.95,r:.22,glide:.05}],
  ['Signature Warm Sine',{wave:0,drive:.14,harm:.15,cut:140,res:.7,a:.004,d:.5,s:.95,r:.14,glide:.03,subLv:1,ltri:.18,loct:1,ltone:420,ldrive:.15}],   /* v204 SIGNATURE */
  ['Signature Valve Weight',{wave:0,sub2:.1,drive:.18,harm:.16,cut:150,a:.004,d:.6,s:.92,r:.16,glide:.04,subLv:1,lsaw:.12,ltri:.12,pdet:8,loct:1,ltone:520,ldrive:.25}],
+ ['Genuine Psychopaths Sub',{wave:0,drive:0,harm:.12,cut:165,a:.004,d:.6,s:.98,r:.1,subLv:1}],
  ['Signature Jump Up Pressure',{wave:0,drive:.2,harm:.12,cut:150,a:.003,d:.6,s:1,r:.1,glide:.05,subLv:1.1}],
  ['Jungle Weight',{wave:0,drive:.08,harm:.14,cut:130,a:.006,d:.7,s:.95,r:.3,glide:.06,penv:1}],
  ['Dubstep Pressure',{wave:0,sub2:.15,drive:.16,harm:.16,cut:120,a:.006,d:.5,s:.95,r:.2,lfoRate:2,lfoDepth:.3,lfoTgt:0}],
@@ -4273,7 +4274,8 @@ function noteAt(m,vel,when,dur,slide){const a=chain(),c=a.c,p=S.p,t=Math.max(whe
  if(voice&&voice.end>t+.01&&slide&&voice.c===c){const g=Math.max(.01,p.glide||.06);voice.oscs.forEach(o=>{o.x.frequency.cancelScheduledValues(t);o.x.frequency.setValueAtTime(o.x.frequency.value||f*o.mul,t);o.x.frequency.exponentialRampToValueAtTime(f*o.mul,t+g)});
   {const vg=voice.g.gain,sus=Math.max(.0002,cl(vel??.9,.05,1)*Math.max(p.s,.35));if(vg.cancelAndHoldAtTime)vg.cancelAndHoldAtTime(t);else{vg.cancelScheduledValues(t);vg.setValueAtTime(sus,t)}vg.linearRampToValueAtTime(sus,t+.012)}   /* v104: a slide re-opens the level - a slid note after a finished release used to stay silent (and every note after it) */
   const rel=t+len;voice.g.gain.cancelScheduledValues(rel);voice.g.gain.setTargetAtTime(.0001,rel,Math.max(.01,p.r/4));voice.oscs.forEach(o=>{try{o.x.stop(rel+p.r*1.5+.1)}catch(e){}});voice.end=rel+p.r*1.5;return}
- const LSIG=[p.lsaw>0,p.lsqr>0,p.ltri>0,p.lpoly>0,p.pdet,p.loct].join();
+ const recordedSub=S.preset==='Genuine Psychopaths Sub' && p.wave===0;
+ const LSIG=[recordedSub,p.lsaw>0,p.lsqr>0,p.ltri>0,p.lpoly>0,p.pdet,p.loct].join();
  if(voice&&voice.end>t+.01&&voice.w===p.wave&&voice.s2===(p.sub2>0)&&voice.L===LSIG&&voice.c===c){   /* v97 CPU: mono retrigger - reuse the running oscillators, no new nodes per note */
   const vg=voice.g.gain,v=cl(vel??.9,.05,1),sus=Math.max(.0002,v*p.s),rel=t+len,end=rel+p.r*1.5+.05;
   voice.oscs.forEach(o=>{const f0=f*o.mul,fr=o.x.frequency;fr.cancelScheduledValues(t);if(p.glide>.08&&!p.penv){fr.setValueAtTime(Math.max(10,fr.value||f0),t);fr.exponentialRampToValueAtTime(f0,t+p.glide)}else{fr.setValueAtTime(f0*Math.pow(2,(p.penv||0)/12),t);if(p.penv)fr.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime))}try{o.x.stop(end)}catch(e){}});
@@ -4287,7 +4289,12 @@ function noteAt(m,vel,when,dur,slide){const a=chain(),c=a.c,p=S.p,t=Math.max(whe
   const og=c.createGain();og.gain.value=lv;x.connect(og);if(pan){const pn=c.createStereoPanner();pn.pan.value=pan;og.connect(pn);pn.connect(vL)}else og.connect(vL);x.start(t);oscs.push({x,mul})};
  if(p.lsaw>0)mkL('sawtooth',p.lsaw*1.35);if(p.lsqr>0)mkL('square',p.lsqr*.9);if(p.ltri>0)mkL('triangle',p.ltri*2.1);   /* v181b: level-matched to the (hot) sine sub - they were 15 dB under it */
  if(p.lpoly>0){const d=p.pdet||14;[[-d,-.7],[0,0],[d,.7]].forEach(([dt,pn])=>mkL('sawtooth',p.lpoly*.78,dt+(Math.random()-.5)*2,pn))}
- const mk=(type,mul,lv)=>{const x=tune(c.createOscillator());x.type=type;const f0=f*mul,fs=f0*Math.pow(2,(p.penv||0)/12);x.frequency.setValueAtTime(fs,t);if(p.penv)x.frequency.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime));
+ const mk=(type,mul,lv)=>{const x=tune(c.createOscillator());x.type=type;
+  if(recordedSub && mul===1){
+   if(!a.genuineWave)a.genuineWave=c.createPeriodicWave(new Float32Array([0, 1.0, -0.0183, 0.0371, -0.0013, -0.0325, -0.0005, 0.0048, -0.0024, 0.002, 0.0005, 0.0026, -0.0044]),new Float32Array([0, 0.0, -0.0022, -0.0368, -0.0076, 0.0117, 0.0004, -0.0038, -0.0008, 0.0013, -0.0001, -0.0, 0.0045]));
+   x.setPeriodicWave(a.genuineWave);
+  }
+  const f0=f*mul,fs=f0*Math.pow(2,(p.penv||0)/12);x.frequency.setValueAtTime(fs,t);if(p.penv)x.frequency.exponentialRampToValueAtTime(f0,t+Math.max(.005,p.ptime));
   const og=c.createGain();og.gain.value=lv;x.connect(og);og.connect(vS);x.start(t);oscs.push({x,mul})};
  types.forEach((ty,i)=>mk(ty,1,(ty==='square'?.42:1)/types.length));if(p.sub2>0)mk('sine',.5,p.sub2);
  const pk=v,sus=Math.max(.0002,pk*p.s),rel=t+len;
@@ -9749,7 +9756,7 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
     /^(techno|trance|psytrance|hardhouse|happyhardcore)$/.test(genre)?'rave':/^(hiphop|eastcoast|westcoast|south|ukhiphop|drill|trap|phonk)$/.test(genre)?'boom':
     /^(reggae|ska|lofi)$/.test(genre)?'roots':/^(ambient|meditation)$/.test(genre)?'none':'bright';
    if(genre==='techno')LY.rave=[1.15,.12,0,.25,0,10,1,450,.1];   /* v185 */
-   if(window.GLCTC_JUMPUP&&GLCTC_JUMPUP()){LY.reese=[1.0,.62,.18,0,0,8,1,1700,.55];S.setP('glide',0);S.setP('penv',0);   /* v205: one long, held bass note per hit - a driven sine with a saw + triangle one octave up for the growl you hear on small speakers */S.setP('level',1.2);S.setP('drive',.35);S.setP('harm',.14);S.setP('cut',150)}   /* v198 MEASURED: the record's sub is one driven sine (3rd harmonic -15 dB); the saw / square layer 2 octaves up was the 4-bit bleep */   /* v183 jump up: saw + square growl, poly kept narrow (the reference's low growl is mono) */
+   if(window.GLCTC_JUMPUP&&GLCTC_JUMPUP()){LY.reese=genre==='jungle'?[1,0,0,0,0,0,0,800,0]:[1.0,.62,.18,0,0,8,1,1700,.55];S.setP('glide',0);S.setP('penv',0);   /* v205: one long, held bass note per hit - a driven sine with a saw + triangle one octave up for the growl you hear on small speakers */S.setP('level',1.2);S.setP('drive',genre==='jungle'?0:.35);S.setP('harm',.14);S.setP('cut',150)}   /* v198 MEASURED: the record's sub is one driven sine (3rd harmonic -15 dB); the saw / square layer 2 octaves up was the 4-bit bleep */   /* v183 jump up: saw + square growl, poly kept narrow (the reference's low growl is mono) */
    const L=LY[fam];['subLv','lsaw','lsqr','ltri','lpoly','pdet','loct','ltone','ldrive'].forEach((k,i)=>S.setP(k,L[i]))}}catch(e){console.warn('bass sub',e)}
  };
  /* while a song plays: the 30LEE is high-passed where SUB-01 takes over */
@@ -10978,7 +10985,7 @@ function applyPresets(force){
 function setBtn(){
  const on=!!S,busy=on||starting;
  const gen=byId('gscGen'),play=byId('gscPlay'),stop=byId('gscStop');
- if(gen)gen.disabled=busy;
+ if(gen)gen.disabled=starting;
  if(play){play.disabled=starting;play.textContent=on?'Ⅱ PAUSE':'▶ PLAY';play.classList.toggle('active',on)}
  if(stop){stop.disabled=false;stop.classList.toggle('active',on)}
  const pa=byId('playAllModulesBtn');if(pa)pa.disabled=on;const ts=byId('timeSig');if(ts)ts.disabled=on;
@@ -11134,7 +11141,7 @@ function tick(){
    // Pattern selection is done by prepareStep for each scheduler's exact event beat.
   });
   if(beat>=Bb){
-   if(last){if(now>K.timeOfBeat(Bb)+1.2)stopSong('SONG FINISHED')}
+   if(last){if(now>K.timeOfBeat(Bb)+1.2){stopSong('SONG FINISHED');if(!window.GLCTC_SONG_EXPORTING)window.dispatchEvent(new Event('glctc-song-finished'))}}
    else{delete S.ph[a-1];S.a++;}
    return;
   }
@@ -12714,7 +12721,7 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
   const r=RNG(seed);let key=opts.key!=null?opts.key:Gg.keys[Math.floor(r()*Gg.keys.length)];
   if(fresh&&opts.key==null)key=Math.floor(r()*12);   /* v120: any of the 12 keys */
   const TECH=genre==='techno';if(TECH)key=5;const referenceJungle=genre==='jungle';
-  if(referenceJungle&&!Number.isInteger(window.__glctcMatchKey))key=5;
+  if(referenceJungle)key=Number.isInteger(opts.key)?opts.key:[5,7,3,5,2,4][(seed>>>0)%6];
   else if(window.GLCTC_JUMPUP&&GLCTC_JUMPUP()&&!Number.isInteger(window.__glctcMatchKey))key=[5,5,5,4,7,6,2][Math.floor(RNG((seed|0)+77)()*7)];
   let scale=Gg.scale;const t=opts.text||'';if(/major|happy|bright|uplift|euphor/.test(t))scale='major';else if(/phrygian|spook|dark|menac/.test(t))scale='phrygian';else if(/minor|sad|melanch/.test(t))scale='minor';
   if(TECH||referenceJungle)scale='minor';
@@ -12793,16 +12800,19 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
    /* v206 EVERY SONG ITS OWN LINE, SAME STYLE: built from the record's moves - long held notes that the kick re-hits, a jump on the
       last beat of every second bar, a turnaround in bar 8 - but each song picks its own rhythms and intervals */
    const RR=RNG((seed|0)+911),pick=a=>a[Math.floor(RR()*a.length)];
-   const R1=referenceJungle?[[0,10],[10,6]]:pick([[[0,10],[10,6]],[[0,10],[10,6]],[[0,3],[3,7],[10,6]],[[0,6],[6,4],[10,6]],[[0,7],[7,3],[10,6]]]);
-   const R2=referenceJungle?[[0,6],[6,6],[12,4]]:pick([[[0,6],[6,6],[12,4]],[[0,6],[6,6],[12,4]],[[0,10],[10,2],[12,4]],[[0,6],[6,4],[10,2],[12,4]],[[0,3],[3,3],[6,6],[12,4]]]);
-   const MV=referenceJungle?3:pick([3,3,5,7,-2,1,8]),TV=referenceJungle?5:pick([5,5,7,-2,3,-4]),BEND=0;   /* v210: no bends */
+   const calls=[[0,10],[0,3,10],[0,7,10],[0,6],[0,3,7],[0,6,11]];
+   const groove=(Number.isInteger(opts.variant)?opts.variant:seed)>>>0;
+   const rhythm=hits=>hits.map((step,i)=>[step,(hits[i+1]??16)-step]);
+   const R1=referenceJungle?rhythm(calls[groove%calls.length]):pick([[[0,10],[10,6]],[[0,10],[10,6]],[[0,3],[3,7],[10,6]],[[0,6],[6,4],[10,6]],[[0,7],[7,3],[10,6]]]);
+   const R2=pick([[[0,6],[6,6],[12,4]],[[0,6],[6,6],[12,4]],[[0,10],[10,2],[12,4]],[[0,6],[6,4],[10,2],[12,4]],[[0,3],[3,3],[6,6],[12,4]]]);
+   const MV=pick([3,3,5,7,-2,1,8]),TV=pick([5,5,7,-2,3,-4]),BEND=0;   /* v210: no bends */
    const BA=R1.map(([st,len])=>[st,0,len,0]),BB=R2.map(([st,len],k)=>[st,k===R2.length-1?MV:0,len,0]);   /* v210: notes jump, never slide */
    const BT=R2.map(([st,len])=>[st,TV,len,0]);
    const bar=(b,ph)=>ph.map(([st,n,len,sl])=>[b,st,n,len,sl]);
    const L1=[...bar(0,BA),...bar(1,BB),...bar(2,BA),...bar(3,BB)],L2=[...bar(0,BA),...bar(1,BB),...bar(2,BA),...bar(3,BT)];
    /* v208 HORNS + PIANO & STRINGS: horn chord stabs between the beats; a piano + strings riff that keeps out of the horns' steps */
-   try{const HR=pick(['..X...X...X...X.','..X...X...X...X.','..X..X....X..X..','......X...X...X.','..X...X.X.....X.']);
-    if(pack.s101){pack.s101.steps=Array.from({length:16},(_,i)=>({on:HR[i]==='X',note:12,accent:i===2||i===10,velocity:HR[i]==='X'?(i===2||i===10?.92:.8):.78}));pack.s101.len=16}
+   try{const hornNotes=pick([[12,12,15,10],[12,7,10,12],[7,10,12,15],[12,15,12,7]]);const HR=pick(['..X...X...X...X.','..X...X...X...X.','..X..X....X..X..','......X...X...X.','..X...X.X.....X.']);
+    if(pack.s101){pack.s101.steps=Array.from({length:16},(_,i)=>({on:HR[i]==='X',note:referenceJungle?hornNotes[Math.floor(i/4)]:12,accent:i===2||i===10,velocity:HR[i]==='X'?(i===2||i===10?.92:.8):.78}));pack.s101.len=16}
     const RIFF=pick([[[0,12,3],[3,15,3],[8,19,4],[12,15,3],[16,17,3],[19,15,3],[24,12,6]],[[0,7,4],[4,8,4],[8,7,3],[11,3,5],[16,7,4],[20,10,4],[24,8,3],[27,7,5]],[[0,12,8],[8,15,4],[12,17,4],[16,10,8],[24,7,8]],[[0,15,3],[3,12,5],[8,10,4],[12,12,4],[16,15,3],[19,17,5],[24,15,8]]]);
     const HOLD=[[0,12,16],[16,10,8],[24,8,8]];
     const pat=L=>({len:32,steps:Array.from({length:32},(_,i)=>{const e=L.find(x=>x[0]===i);return e?{on:1,n:e[1],v:i%16===0?.86:.78,g:e[2],p:1,r:1,c:0,a:0,s:0}:{on:0,n:0,v:.8,g:.7,p:1,r:1,c:0,a:0,s:0}})});
@@ -12823,12 +12833,16 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
    pack.lee.patterns[0]=growl(L1);pack.lee.patterns[1]=growl(L2);pack.lee.patterns[3]=growl(L1);pack.lee.length=64;
    if(referenceJungle){
     // Keep the turnaround on bar eight even when one arrangement cell repeats.
+    const reply=BB.map(([step,n,len,slide],i)=>[step,i===1?MV:i===BB.length-1?TV:n,len,slide]);
+    const secondDrop=[...bar(0,BA),...bar(1,reply),...bar(2,BA),...bar(3,BT)];
     for(const slot of [0,1,3]){
-     pack.sub.patterns[slot]=subLine(L1).concat(subLine(L2));
-     pack.lee.patterns[slot]=growl(L1).concat(growl(L2));
+     const answer=slot===1?secondDrop:L2;
+     pack.sub.patterns[slot]=subLine(L1).concat(subLine(answer));
+     pack.lee.patterns[slot]=growl(L1).concat(growl(answer));
     }
     pack.lee.length=128;
    }
+   if(referenceJungle){pack.flavour.variation=1+groove%6;pack.flavour.of=6}
    pack.flavour.bassline='GENUINE PSYCHOPATHS · 8-BAR SUB LINE'}catch(e){console.warn('jump up line',e)}}
   /* v198 JUMP UP DRUMS - measured from Genuine Psychopaths (attack energy per 16th over a 2-bar cycle): kick bar 1 on steps 1 and 7,
      bar 2 on steps 1 and 11; snare only on 2 and 4; hats a steady even wash (every 16th within ~4 dB). No ghost-snare chaos, no doubled
@@ -12837,7 +12851,7 @@ window.GLCTC_JUMPUP=()=>{try{const g=(document.getElementById('gscGenre')||{}).v
    const st=(on,v,acc)=>({on:!!on,accent:!!acc,velocity:v});
    /* v202 re-measured on the record's true grid (the old grid sat one 16th late): bar 1 kick on 1 and the "and" of 3 (steps 0, 10),
       bar 2 kick on 1 and the "a" of 2 (steps 0, 6); snare on 2 and 4 every bar; closed hats on the 8ths with 16th pickups around beat 3 */
-   const K=pack.__juK&&pack.__juK.length?pack.__juK:[0,10,16,22],S=[4,12,20,28],HX=referenceJungle?[7,9,23,25,27]:[[7,9,23,25,27],[7,9,23,25,27],[15,23,25,31],[7,11,23,27,29]][((seed|0)>>>3)%4];   /* v206: kick follows this song's bass hits */
+   const K=pack.__juK&&pack.__juK.length?pack.__juK:[0,10,16,22],S=[4,12,20,28],HX=[[7,9,23,25,27],[7,9,23,25,27],[15,23,25,31],[7,11,23,27,29]][((seed|0)>>>3)%4];   /* v206: kick follows this song's bass hits */
    const mk=crash=>pack.mine.patterns[0].map((row,tr)=>Array.from({length:32},(_,i)=>{
      if(tr===0)return st(K.includes(i),i%16===0?1:.92,i%16===0);
      if(tr===1)return st(S.includes(i),.98,true);
@@ -13356,7 +13370,7 @@ function designBass(genre){
 function fillPatterns(genre,txt){
  const entropy=window.crypto?.getRandomValues?window.crypto.getRandomValues(new Uint32Array(1))[0]:Math.floor(Math.random()*4294967296);
  const seed=PAT.hash(genre+'|'+txt+'|'+(++fillN)+'|'+Date.now()+'|'+entropy);
- const nv=PAT.variants?PAT.variants(genre):4,prev=lastSongVariant[genre],variant=prev===undefined?seed%nv:(prev+1+seed%Math.max(1,nv-1))%nv; /* never the same groove twice in a row */
+ const nv=genre==='jungle'?6:PAT.variants?PAT.variants(genre):4,prev=lastSongVariant[genre],variant=prev===undefined?seed%nv:(prev+1+seed%Math.max(1,nv-1))%nv; /* never the same groove twice in a row */
  /* v92: a world-percussion 80LA8 kit (bongos / congas / djembe / taiko) gets its hand-drum section written; PAD-64 then steps back to rim / clave so nothing doubles */
  const blPre=String((st.presets||{}).bl||''),handBL=!!(GENRE_PACK[genre]&&GENRE_PACK[genre].bl===blPre)||/bongo|conga|djembe|taiko|hand drum|tribal perc|latin perc|tribal toms/i.test(blPre);
  const mk=window.__glctcMatchKey,ck=!Number.isInteger(mk)&&chakraKeyOn(),pack=PAT.build(genre,seed,Object.assign({text:txt,variant,handBL,fresh:freshLevel(genre,txt),wsPreset:String((st.presets||{}).ws||''),reg:ck?chakraReg():0},Number.isInteger(mk)?{key:mk}:ck?{key:9}:{})),done=PAT.apply(fitSub(pack));if(ck)pack.name=pack.name+' · '+((window.GLCTC_TUNING&&GLCTC_TUNING.hz)||440)+' Hz';lastSongVariant[genre]=variant;
@@ -13805,7 +13819,7 @@ function applyGenreOwn(genreKey){try{const OWN=window.GLCTC_GENRE_OWN[genreKey];
 function prepareSong(genreKey,txt){
  try{freshKnobs()}catch(e){console.warn('knob reset',e)}
  const g=GENRE[genreKey]||GENRE.techno,len=byId('gscLen').value;
- st.len=TPL[len]?len:'full';st.secs=mkSecs(st.len,genreKey);st.cells=autoCells(st.secs,genreKey);st.loop=true;   /* v94: the song repeats when it finishes */
+ st.len=TPL[len]?len:'full';st.secs=mkSecs(st.len,genreKey);st.cells=autoCells(st.secs,genreKey);if(window.GLCTC_SHUFFLE && GLCTC_SHUFFLE.mode()!=='off')st.loop=false;
  st.bpm=setMasterBpmFromComposer(chooseComposerBpm(genreKey,txt));
  const skip=new Set();   /* every module is in every song */
  /* every module plays in every song; the prompt can still leave parts out ("instrumental", "no loop", "no drums", "minimal") */
@@ -13829,7 +13843,7 @@ function prepareSong(genreKey,txt){
   arrangeEnsemble(n);
  }else delete st.presets.ix}catch(e){}   /* the instrument stack this genre needs (kept when the designer is locked) */
  applyGenreOwn(genreKey);
- if(genreKey==='jungle')Object.assign(st.presets,{mine:'Genuine Psychopaths · Drums',lee:'Bass · Jump Up Wobble',sub:'Signature Jump Up Pressure'});   /* v209 */
+ if(genreKey==='jungle')Object.assign(st.presets,{mine:'Genuine Psychopaths · Drums',lee:'Bass · Jump Up Wobble',sub:'Genuine Psychopaths Sub'});   /* v209 */
  try{if(window.GLCTC_MIX)window.GLCTC_MIX.boost=GLCTC_GFILL({meditation:2.2,ambient:2.2,techno:1.35,house:1.3,dnb:1.35,dubstep:1.35,psytrance:1.35,trance:1.3,breaks:1.3,garage:1.3,trap:1.25,hiphop:1.25,pop:1.25,synthwave:1.25,lofi:1.15})[genreKey]||1}catch(e){} /* v87 genre loudness into the master limiter */
  try{if(window.GLCTC_MIX&&window.GLCTC_MIX.autoSong)window.GLCTC_MIX.autoSong(genreKey)}catch(e){}
  try{window.GLCTC_CHARACTER&&GLCTC_CHARACTER.setGenre(genreKey)}catch(e){}
@@ -13837,7 +13851,7 @@ function prepareSong(genreKey,txt){
  try{window.GLCTC_FX?.composer(genreKey,byId('gscAutoFX')?.checked!==false)}catch(e){console.warn('composer fx',e)}
  try{window.GLCTC_GENRE_BUSES&&GLCTC_GENRE_BUSES(genreKey)}catch(e){console.warn('genre buses',e)}
  let pack=null;
- try{pack=fillPatterns(genreKey,txt)}catch(e){console.warn('pattern fill',e)}
+ pack=fillPatterns(genreKey,txt);
  try{fitCellsToPatterns()}catch(e){console.warn('cell fit',e)}
  save();renderGrid();try{refreshTimeline()}catch(e){}
  return pack;
@@ -13868,8 +13882,8 @@ async function generate(){
   try{applySwing(genreKey)}catch(e){}
   try{window.GLCTC_NEW_SONG={genre:genreKey,key:(byId('gscKey')||{}).textContent,bpm:st.bpm,seed:pack?.seed??null,variation:pack?.flavour?.variation??null}}catch(e){}
   status((freshSnd?'✦ BRAND-NEW SONG · LEAD '+freshSnd+' · ':'SONG GENERATED · ')+st.bpm+' BPM · '+(byId('gscKey')?.textContent||'KEY')+' · PRESS PLAY WHEN READY');
- }catch(e){console.error('Song generation failed:',e);status('SONG GENERATION FAILED · SEE CONSOLE')}
- setBtn();
+ }catch(e){console.error('Song generation failed:',e);status('SONG GENERATION FAILED · SEE CONSOLE');setBtn();return false}
+ setBtn();return true;
 }
 /* ---------- NEW SONG ON EVERY LOAD: random genre, key, tempo; every module written into the same key / tempo / genre ---------- */
 (()=>{const cap=()=>setTimeout(()=>{try{if(!BASE_KNOBS)freshKnobs()}catch(e){}},1000);if(document.readyState==='complete')cap();else window.addEventListener('load',cap,{once:true})})();
@@ -13983,7 +13997,12 @@ function drawSecMarks(){
 window.GLCTC_SECMARKS=drawSecMarks;
 const refreshTimeline=()=>{try{window.glctcTimeline.render()}catch(e){}try{drawSecMarks()}catch(e){}};
 window.addEventListener('load',()=>setTimeout(refreshTimeline,2200));
-byId('gscGen').addEventListener('click',generate);
+byId('gscGen').addEventListener('click',async()=>{
+ if(starting||window.GLCTC_SONG_EXPORTING)return;
+ const resume=!!S;
+ if(resume)stopSong('CHANGING SONG');
+ if(await generate() && resume)await startSong({from:0});
+});
 {const sb=byId('gscSurprise');if(sb)sb.onclick=()=>{if(S||starting)return;const ks=[...byId('gscGenre').options].map(o=>o.value).filter(k=>GENRE[k]&&k!==byId('gscGenre').value),g=ks[Math.floor(Math.random()*ks.length)],ls=['full','full','radio','epic','club'],L=ls[Math.floor(Math.random()*ls.length)];byId('gscGenre').value=g;byId('gscLen').value=L;const p=byId('gscPrompt');if(p)p.value='';generate();status('🎲 '+(byId('gscGenre').selectedOptions[0]||{}).textContent+' · '+(byId('gscLen').selectedOptions[0]||{}).textContent+' · PRESS PLAY')}}
 byId('gscGenre').addEventListener('change',()=>{if(!S){st.bpm=Math.max(30,Math.min(300,Number(byId('bpm').value)||130));save()}});
 /* Song Composer tempo is read-only: the DAW master BPM is the only tempo control. */
@@ -17814,19 +17833,25 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 <script id="glctc1-v127-shuffle">
 /* v127 SHUFFLE: when a song finishes, start a brand-new one instead of repeating (same genre, or any genre) */
 (()=>{'use strict';const LS='glctc1.shuffle',MODES=['off','genre','any'],LBL={off:'🔀 SHUFFLE · OFF',genre:'🔀 SHUFFLE · SAME GENRE',any:'🔀 SHUFFLE · ANY GENRE'};
-let mode='off';try{mode=localStorage.getItem(LS)||'off';if(!MODES.includes(mode))mode='off'}catch(e){}
-const $=id=>document.getElementById(id);let busy=false,wasRunning=false,lastBeat=0,total=0,bb=4;
+let mode='off';try{mode=localStorage.getItem(LS)||'genre';if(!MODES.includes(mode))mode='off'}catch(e){}
+const $=id=>document.getElementById(id);let busy=false;
 function paint(){const b=$('gscShuffle');if(!b)return;b.textContent=LBL[mode];const on=mode!=='off';b.style.background=on?'#f2ca70':'#221b0c';b.style.color=on?'#1a1406':'#f2ca70';b.setAttribute('aria-pressed',String(on))}
 function loopOff(){const l=$('gscLoop');if(l&&l.checked){l.checked=false;l.dispatchEvent(new Event('change',{bubbles:true}))}}
-function wire(){const b=$('gscShuffle');if(!b){setTimeout(wire,500);return}b.onclick=()=>{mode=MODES[(MODES.indexOf(mode)+1)%MODES.length];try{localStorage.setItem(LS,mode)}catch(e){}if(mode!=='off')loopOff();paint()};paint();
+function wire(){const b=$('gscShuffle');if(!b){setTimeout(wire,500);return}b.onclick=()=>{mode=MODES[(MODES.indexOf(mode)+1)%MODES.length];try{localStorage.setItem(LS,mode)}catch(e){}if(mode!=='off')loopOff();paint()};if(mode!=='off')loopOff();paint();
  const l=$('gscLoop');if(l)l.addEventListener('change',()=>{if(l.checked&&mode!=='off'){mode='off';try{localStorage.setItem(LS,mode)}catch(e){}paint()}})}
-async function next(){if(busy)return;busy=true;try{const sel=$('gscGenre');if(mode==='any'&&sel){const opts=[...sel.options].map(o=>o.value).filter(v=>v&&!/^(surprise|ambient|meditation)$/.test(v));
-  const cur=sel.value;let g=cur;for(let k=0;k<6&&g===cur;k++)g=opts[Math.floor(Math.random()*opts.length)];sel.value=g;sel.dispatchEvent(new Event('change',{bubbles:true}))}
- await GLCTC_SONG.generate();loopOff();await new Promise(r=>setTimeout(r,400));try{glctcTimeline.setHead(0)}catch(e){}GLCTC_SONG.play()}catch(e){console.warn('shuffle',e)}finally{setTimeout(()=>{busy=false},1500)}}
-setInterval(()=>{let run=false;try{run=GLCTC_SONG.running()}catch(e){}
- if(run){try{const T=GLCTC_SONG.timeline();if(T){total=T.total;bb=T.barBeats;lastBeat=GLCTC_CLOCK.beatAt(GLCTC_AUDIO().currentTime)}}catch(e){}if(mode!=='off')loopOff()}
- else if(wasRunning&&mode!=='off'&&total>0&&lastBeat>=total-2*bb){total=0;next()}
- wasRunning=run},250);
+async function next(){
+ if(busy||mode==='off'||window.GLCTC_SONG_EXPORTING)return;
+ busy=true;
+ try{
+  const sel=$('gscGenre');
+  if(mode==='any'&&sel){
+   const choices=Array.from(sel.options,o=>o.value).filter(g=>g!==sel.value&&!/^(surprise|ambient|meditation)$/.test(g));
+   if(choices.length){sel.value=choices[Math.floor(Math.random()*choices.length)];sel.dispatchEvent(new Event('change',{bubbles:true}));$('gscPrompt').value=''}
+  }
+  if(await GLCTC_SONG.generate()){loopOff();glctcTimeline.setHead(0);GLCTC_SONG.play()}
+ }catch(e){console.warn('shuffle',e)}finally{busy=false}
+}
+window.addEventListener('glctc-song-finished',next);
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',wire,{once:true});else wire();
 window.GLCTC_SHUFFLE={mode:()=>mode,set:m=>{if(MODES.includes(m)){mode=m;try{localStorage.setItem(LS,mode)}catch(e){}if(mode!=='off')loopOff();paint()}}};
 })();

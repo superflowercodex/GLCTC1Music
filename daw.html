@@ -2033,7 +2033,7 @@ document.addEventListener('DOMContentLoaded',function(){var r=document.querySele
 /* 30LEE bass: [name, wave, cutoff, reso, envMod, decay, drive, sub, gate, slide, fx] */
 const LE=(n,wave,cutoff,resonance,envMod,decay,drive,sub,gate,slideTime,fx)=>[n,{wave,cutoff,resonance,envMod,decay,drive,sub,gate,slideTime,level:.75},Object.assign({dist:0,delay:0,feedback:.1,reverb:.04,wet:.12,bitcrush:0},fx||{})];
 /* SUB-01: [name, settings] */
-const SB=(n,o)=>[n,Object.assign({wave:0,drive:.06,harm:.12,cut:130,a:.005,d:.6,s:.9,r:.22,glide:.03},o)];
+const SB=(n,o)=>[n,Object.assign({wave:0,drive:.08,harm:.12,cut:130,a:.005,d:.6,s:.9,r:.22,glide:.03},o,{harm:Math.max(.32,(o&&o.harm)||0),ltri:/Meditation|Ambient/.test(n)?.06:.16,loct:1,ltone:900,ldrive:.2})];   /* harmonics + an octave layer so the sub is heard on small speakers */
 /* 0010110: [name, settings, layer 1, layer 2] */
 const SY=(n,o,l1,l2)=>[n,Object.assign({attack:.005,decay:.25,sustain:.3,release:.25,drive:.08,delay:.1,reverb:.15,chorus:.15,glide:0,level:.7,lfoRate:4,lfoAmt:0,bitcrush:0},o),l1||{wave:o.wave,level:.8},l2||{wave:o.wave,oct:1,level:.25,detune:5}];
 /* GALACTIC ONE patch: [NAME, voice, fx]  waves 0 saw 1 square 2 pulse 3 triangle 4 sine */
@@ -6886,6 +6886,21 @@ const AM_GAPG={hiphop:{go:4,s101:4,ix:3,vox:3},eastcoast:{go:4,s101:4,ix:3,vox:3
 (()=>{try{const o=AM_GENRE.techno=Object.assign({},AM_GENRE.techno),q=AM_START_G.techno=Object.assign({},AM_START_G.techno);o.go=(o.go||0)+5;q.go=(q.go||0)+5;o.mine=(o.mine||0)+2;q.mine=(q.mine||0)+2;o.lee=(o.lee||0)-5.5;q.lee=(q.lee||0)-5.5}catch(e){}})();   /* v185 techno: lead +3 dB, tops +2 dB */
 (()=>{for(const g of ['westcoast']){const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]);o.lee=(o.lee||0)-4;q.lee=(q.lee||0)-4}})();   /* v176: the West Coast bass sat 4 dB too loud */
 (()=>{const U={go:2.5,s101:2.5,ix:2.5,vox:2.5,ws:2.5};for(const g in AM_GENRE){if(g==='ambient'||g==='meditation')continue;const o=AM_GENRE[g]=Object.assign({},AM_GENRE[g]),q=AM_START_G[g]=Object.assign({},AM_START_G[g]||{});for(const k in U){o[k]=(o[k]||0)+U[k];q[k]=(q[k]||0)+U[k]}}})();
+/* ===== MIX REBUILD: drums and bass set the level, every other part sits WITH them (not under them).
+   One rule for every genre, replacing the stacked per-genre offsets. Kit = the machine that carries the kick. ===== */
+(()=>{try{
+ Object.assign(AM_TARGET,{bl:-10.5,mine:-15,sub:-14.5,lee:-14.5,s101:-17,go:-16.5,ix:-16.5,vox:-16,ws:-22,lp:-27});
+ Object.assign(AM_GAP,{sub:0,lee:0,s101:1.5,go:1,ix:1,vox:1,ws:6});
+ for(const k in AM_GAPG)delete AM_GAPG[k];
+ Object.assign(AM_MAXUP,{sub:12,lee:14,s101:22,go:22,ix:24,vox:18,bl:10,mine:14,ws:12});
+ const G=Object.keys(Object.assign({},AM_GENRE,AM_START_G,window.GLCTC_GENRE_KITS||{}));
+ for(const g of G){const ownsKick=!!(window.GLCTC_DRUM_MACHINE&&GLCTC_DRUM_MACHINE[g]),calm=/^(ambient|meditation)$/.test(g);
+  const o={};if(ownsKick){o.mine=2.5;o.bl=-2}   /* the 909/808 machine carries the kick: it is the kit, the other machine sits just under */
+  if(calm){o.bl=-5;o.mine=-5;o.sub=-1;o.lee=-2;o.go=0;o.ix=1;o.s101=-1}
+  AM_GENRE[g]=o;
+  const q=AM_START_G[g]=Object.assign({},AM_START_G[g]||{});['s101','go','ix','vox'].forEach(k=>{q[k]=Math.max(q[k]==null?-6:q[k],-6)});q.sub=(q.sub==null?-6:q.sub)+3;q.lee=(q.lee==null?-8:q.lee)+3}   /* bass starts nearer its new level */
+}catch(e){console.warn('mix rebuild',e)}})();
+
 function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTER_BY[AM.genre]||-18;amRestoreLoop();AM.tdb={};const G0=AM_START_G[AM.genre]||{};MODS.forEach(m=>{if(!m.track)AM.tdb[m.id]=G0[m.id]??AM_START[m.id]??0});AM.master=G0.master??0;   /* v105: every genre starts where its auto mix settles, so the intro is not louder than the drop */AM.locked=false;AM.stable=0;
   AM.hist={};AM.measured=new Set();AM.mHist=[];AM.mPk=0;AM.last=AM.lastM=performance.now();AM.active=AM.on;
   if(AM.on){const lt=amLoop();if(lt)amLoopTrim(.4)}
@@ -6926,7 +6941,7 @@ function amStart(genre){if(typeof genre==='string')AM.genre=genre;AM.mt=AM_MASTE
   let changed=false,n=0;
   MODS.forEach(m=>{if(m.track||!inSection(m.id)||!measured.has(m.id))return;const h=AM.hist[m.id];if(!h||h.length<12)return;n++;
    const p90=amPct(h,.9),err=tgt(m.id)-p90;if(Math.abs(err)<1.3)return;
-   const step=Math.max(-6,Math.min((m.id==='bl'||m.id==='mine')?3:1.5,err*.8)),cur=AM.tdb[m.id]||0,nt=Math.max(-30,Math.min(AM_MAXUP[m.id]??0,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
+   const anchorStep=/^(bl|mine|sub|lee)$/.test(m.id),step=anchorStep?Math.max(-1.5,Math.min(1.5,err*.6)):Math.max(-6,Math.min(1.5,err*.8))   /* drums and bass glide to their level, one hot hit cannot drop them */,cur=AM.tdb[m.id]||0,nt=Math.max(-30,Math.min(AM_MAXUP[m.id]??0,cur+step)),dl=nt-cur;if(!dl)return;AM.tdb[m.id]=nt;for(let i=0;i<h.length;i++)h[i]+=dl;changed=true});
   /* the Looper demo loop is a timeline track: trim it through its track volume (your own fader move is respected) */
   if(lt&&inSection('lp')&&AM.hist.lp&&AM.hist.lp.length>=30&&AM.lpSet!=null){n++;
    {const g=amLoopNode();if(g&&Math.abs(g.value-AM.lpSet)>.05&&g.value>.9999)amLoopTrim(AM.lpSet)}
@@ -9292,6 +9307,7 @@ function composerRecipe(genre){
   if(!/^(lofi|phonk)$/.test(genre||''))for(const k in q){if(!Array.isArray(q[k]))continue;q[k]=q[k].filter(x=>!(x&&(x.type==='lofi'||x.type==='bitcrush'||x.type==='crush'))).map(x=>{if(!x||!x.p)return x;const y=JSON.parse(JSON.stringify(x));
    if(y.type==='tape'){y.p.wow=0;y.p.warm=Math.max(y.p.warm||0,18500);y.p.drv=Math.min(y.p.drv==null?.2:y.p.drv,.22)}if(y.type==='tele'){y.p.mix=Math.min(y.p.mix==null?.3:y.p.mix,.25)}if(y.type==='autof'){y.p.depth=Math.min(y.p.depth==null?.5:y.p.depth,.5);y.p.f=Math.max(y.p.f||0,900);y.p.q=Math.min(y.p.q==null?4:y.p.q,5)}return y})}}   /* v129 HI-FI */   /* v126 WIDTH: stab synth spread */
  const out=JSON.parse(JSON.stringify(R[genre]||R.techno));out.sub=[];if(genre==='jungle')out.mine=[comp(-13,2,.012,.09)];const JUMP=!!(window.GLCTC_JUMPUP&&GLCTC_JUMPUP());if(JUMP){out.lee=[{type:'drive',p:{drv:.3,tone:4200,mix:.38}},{type:'autof',p:{type:0,f:1600,depth:.55,sync:0,rate:Math.max(1.5,Math.min(2.4,((window.GLCTC_CLOCK&&GLCTC_CLOCK.bpm)||160)/60*.75)),div:9,q:4.5,wave:0}},comp(-14,4,.004,.1)]}   /* v183 jump up growl */
+ if(Array.isArray(out.lee)&&!out.lee.some(x=>x&&x.type==='drive'))out.lee.push(drive(.2,.25,5000));   /* the bass lead always gets parallel harmonics so it reads on any speaker */
  if(!JUMP&&Array.isArray(out.lee))out.lee=out.lee.filter(x=>x&&!/^(wah|crush|lofi|bitcrush|tele)$/.test(x.type)&&!(x.type==='autof'&&!/^(dubstep|nuskool)$/.test(genre))).map(x=>{if(x.type==='drive'&&x.p){x.p.drv=Math.min(x.p.drv,.22);x.p.mix=Math.min(x.p.mix,.3)}if(x.type==='tape'&&x.p){x.p.drv=Math.min(x.p.drv||0,.2)}return x});   /* v177 FAT CLEAN BASS */   /* v96: SUB-01 runs clean - no channel compressor (CPU) */Object.keys(out).forEach(k=>out[k]=out[k].filter(Boolean));
  let dl=0;['go','vox','s101','ws','lp','lee','mine','bl'].forEach(k=>{if(!out[k])return;out[k]=out[k].filter(f=>{if(f.type!=='delay'&&f.type!=='pingpong')return true;return ++dl<=3})});   /* v94 CPU: three channel delays per song at most */
 
@@ -9435,7 +9451,7 @@ const DREAM_TWEAK={
 const DREAM_OUT={hapiout:{trim:1}};   /* the chain trims ~1 dB of sub-sonic energy - the print stage gives it back */
 const DREAM_ORDER=['hapiin','pultec','varimu','hg2','atr','hapiout'];   /* v208 CLEANER MASTER: one EQ -> glue -> harmonics -> tape -> print, then the look-ahead limiter. The second EQ and the hall on the whole mix (which washed the kick and bass) are gone - space comes from the genre's reverb returns */
 function masterRecipe(genre){const g=String(genre||''),base=DREAM_BASE[DREAM_FAM[g]||DREAM_FAM[(window.GLCTC_GENRE_PARENT||{})[g]]||'club'],tw=DREAM_TWEAK[g]||{};
- return DREAM_ORDER.map(type=>({type,p:Object.assign({},DREAM_OUT[type]||{},base[type]||{},tw[type]||{})}))}
+ return DREAM_ORDER.map(type=>{const p=Object.assign({},DREAM_OUT[type]||{},base[type]||{},tw[type]||{});if(type==='pultec'){p.la=Math.min(+p.la||0,1.5);p.lb=Math.max(+p.lb||0,p.la+1)}if(type==='hapiout'){p.trim=Math.min(+p.trim||0,-.5)}return{type,p}})}   /* the master lifts the low end instead of cutting it */
 function composerMaster(genre,on){
  const ch=chainOf('master',true),manual=ch.filter(f=>!f._composer);
  const auto=on?masterRecipe(genre).filter(f=>!manual.some(m=>m.type===f.type&&m.on!==false)).map(f=>({...newFx(f.type),p:{...defP(f.type),...f.p},_composer:true})):[];
@@ -9665,7 +9681,8 @@ document.addEventListener('dragstart',e=>{if(e.target.closest('button,.pad,.vx-p
  const FAM=g=>/^(trance|psytrance|happyhardcore|electro|hardhouse)$/.test(g)?'tight':/^(techno|melodictechno)$/.test(g)?'techno':/^(house|deephouse|garage)$/.test(g)?'house':g==='techhouse'?'techhouse':
   /^(tribalhouse|afrohouse|amapiano)$/.test(g)?'tribal':/^(dnb|jungle|liquid)$/.test(g)?'dnb':/^(breaks|nuskool)$/.test(g)?'breaks':/^(hiphop|eastcoast|lofi)$/.test(g)?'boombap':g==='westcoast'?'westcoast':
   g==='ukhiphop'?'uk':/^(trap|drill|phonk|south)$/.test(g)?'trap':/^(reggae|ska)$/.test(g)?'roots':/^(pop|synthwave|dubstep)$/.test(g)?'pop':/^(ambient|meditation)$/.test(g)?'air':'def';
- window.GLCTC_FEEL=function(role,vel){if(!on())return 0;const g=genre();if(!g)return 0;if(role==='k')return 0;const f=F[FAM(g)]||F.def;
+ window.GLCTC_FEEL=function(role,vel){return 0;   /* one grid for every module: drums land on the same clock as bass and synths */
+ if(!on())return 0;const g=genre();if(!g)return 0;if(role==='k')return 0;const f=F[FAM(g)]||F.def;
   let ms=(f[role]!=null?f[role]:f.p)+rnd(f.j);if(vel!=null&&vel<.45&&role!=='h')ms+=f.g;return ms/1000};
  window.GLCTC_ROLE80=t=>t==='kick'?'k':t==='snare'||t==='rim'?'s':t==='clap'?'c':t==='hatc'||t==='hato'?'h':'p';
  window.GLCTC_ROLE09=v=>v===0?'k':v===1||v===8?'s':v===2?'c':v===3||v===4||v===9?'h':v===10?'k':'p';
@@ -10293,7 +10310,7 @@ function write(pack,X){const g=X.genre,D=G[g];if(!D||SKIP.test(g))return false;c
  const counter=ld.style==='arp'?(()=>{const s=Z(),last=mainP.steps.slice(29,32);[0,10,20].forEach((i,k)=>{const x=last[k];s[i]=st(x.n+12,.74,9.5,1)});return{len:32,steps:s}})():(()=>{const s=Z();for(let b=0;b<4;b++){s[b*8]=st(semi(sc,prog[b]+4)+12,.62,3.8,0);s[b*8+4]=st(semi(sc,prog[b]+2)+12,.58,3.8,0)}return{len:32,steps:s}})();
  const pulse=(()=>{const s=Z();for(let i=0;i<32;i+=2){const b=Math.floor(i/8);s[i]=st(semi(sc,prog[b]+(i%4?4:0)),i%8===0?.8:.66,.9,i%8===0)}return{len:32,steps:s}})();
  const padP=(()=>{const s=Z();for(let b=0;b<4;b++)s[b*8]=st(semi(sc,prog[b]),.66,7.8,0);return{len:32,steps:s}})();
- pack.go=Object.assign(pack.go||{},{pats:[mainP,altP,sparse,rise,counter,drop2,pulse,padP],root:key,scale:scName==='dorian'?'dorian':scName,rate:0,swing:Math.min(1,sw/.62)});
+ pack.go=Object.assign(pack.go||{},{pats:[mainP,altP,sparse,rise,counter,drop2,pulse,padP],root:key,scale:scName==='dorian'?'dorian':scName,rate:0,swing:0});   /* 8th-note melody sits on the unswung beats, locked with the drums' 16th swing */
  /* VOX: tonic / fifth pedal - sits over every chord of the progression */
  if(pack.vox&&Array.isArray(pack.vox.steps))pack.vox.steps=pack.vox.steps.map((x,i)=>x.on?Object.assign({},x,{n:(i%8===0?0:7)}):x);
  pack.vox&&(pack.vox.scale=scName==='major'?'major':scName==='phrygian'?'phrygian':'minor');
@@ -10317,6 +10334,12 @@ function arrange(st,g){if(!st)return;try{const KN=window.GLCTC_GENRE_KITS;if(KN&
    outro:{bl:2,mine:2,sub:2,lee:-1,s101:fam==='beat'?0:-1,go:7,ix:2}}[k]||{bl:0,mine:0,sub:0,lee:0,s101:0,go:2,ix:1};
   if(fam==='calm'){T.bl=k==='intro'?-1:/^(break|outro)$/.test(k)?2:0;T.mine=/^(verse|build|drop)$/.test(k)?0:-1;T.lee=k==='drop'?2:-1;T.sub=2;T.s101=k==='intro'||k==='outro'?-1:0;T.go=k==='drop'?0:k==='break'?4:7}
   if(fam==='beat'&&k==='intro'){T.sub=2}
+  /* both drum machines start on bar 1 and change sections together */
+  {const D1=G[g]||{},has=(o,ks)=>!!o&&ks.some(q=>o[q]&&/[^.]/.test(o[q])),BLK=['K','S','C','R','T','U','CB','G','P','Q'],MNK=['H','O','B'];
+   const bkBL=has(D1.bk,BLK),bkMN=has(D1.bk,MNK);
+   if(fam!=='calm'){if(k==='intro'){T.bl=fam==='club'?0:(bkBL?2:0);T.mine=fam==='club'?0:(bkMN?2:0)}
+    if(k==='outro'){T.bl=fam==='club'?0:(bkBL?2:0);T.mine=fam==='club'?0:(bkMN?2:0)}
+    if(k==='break'){T.bl=bkBL?2:-1;T.mine=bkMN?2:-1}}}
   if(last&&k!=='outro'){T.go=7}
   const D0=G[g]||{};if(D0.arr&&D0.arr[k])Object.assign(T,D0.arr[k]);
   if(D0.leeLate&&i<=1)T.lee=-1;

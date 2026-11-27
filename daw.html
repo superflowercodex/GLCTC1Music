@@ -38,7 +38,7 @@ function killNotes(ctx){const now=ctx?ctx.currentTime:0,cut=[];
    else if(n.__t1==null||n.__t1>t+1.2)n.stop(t+.015)}catch(e){}LIVE.delete(n)});   /* ringing: long ones cut, short tails finish */
  return cut.length}
 /* 3 · reverb impulse cap */
-const IRMAX=()=>{let m='auto',t=false;try{t=matchMedia('(pointer:coarse)').matches}catch(e){}try{m=localStorage.getItem('glctc1.cpuMode')||'auto'}catch(e){}return m==='eco'?.9:m==='full'?99:t?2:99};   /* v209: phones in AUTO keep 2 s tails (was 0.9 s before v208, unlimited in v208 - too heavy) */   /* v208 STUDIO QUALITY: full reverb tails in AUTO and FULL on every device; only ECO (chosen by hand) shortens them */   /* ECO (phones) .9 s · AUTO 1.4 s · FULL untouched */
+const IRMAX=()=>{let m='auto',t=false;try{t=matchMedia('(pointer:coarse)').matches}catch(e){}try{m=localStorage.getItem('glctc1.cpuMode')||'auto'}catch(e){}return m==='eco'?.9:m==='full'?99:t?1.5:99};   /* v214: phones in AUTO keep 1.5 s tails (was 0.9 s before v208, unlimited in v208 - too heavy) */   /* v208 STUDIO QUALITY: full reverb tails in AUTO and FULL on every device; only ECO (chosen by hand) shortens them */   /* ECO (phones) .9 s · AUTO 1.4 s · FULL untouched */
 try{const P=ConvolverNode.prototype,d=Object.getOwnPropertyDescriptor(P,'buffer'),short=new WeakMap();
  const full=()=>{try{return (window.GLCTC_PERF&&GLCTC_PERF.mode)==='full'||localStorage.getItem('glctc1.cpuMode')==='full'}catch(e){return false}};
  if(d&&d.set)Object.defineProperty(P,'buffer',{configurable:true,enumerable:d.enumerable,get(){return d.get.call(this)},set(b){
@@ -92,7 +92,29 @@ window.GLCTC_STUDIO_LIMIT=function(c){if(!c||!c._post||!c._final||!c._sat||c._wl
   const w=new AudioWorkletNode(c,'glctc-limiter',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]});
   w.parameters.get('ceiling').value=Math.pow(10,-1/20);w.parameters.get('release').value=.09;
   w.port.onmessage=e=>{c._wlimGR=e.data};
-  c._post.connect(w);w.connect(c._sat);
+  /* v214 TRUE-PEAK SAFE: the master volume sits after the limiter, so the ceiling follows it - the file / speaker never
+     sees more than about -1 dB true peak (exports measured +0.5 dB over before, which distorts on phones and in MP3s) */
+  const cp=w.parameters.get('ceiling');let lastV=-1;const follow=()=>{if(c.state==='closed')return;try{const v=c._vol?Math.max(.05,c._vol.gain.value):1;if(Math.abs(v-lastV)>.002){lastV=v;cp.setTargetAtTime(Math.min(.95,.76/v),c.currentTime,.05)}}catch(e){}setTimeout(follow,200)};follow();
+  /* v214 AUTO TONAL BALANCE: four gentle EQ bands in front of the limiter that slowly (~12 s) steer the mix toward the
+     balance of commercial records - measured, the songs were sub-heavy and short on presence (2-6 kHz), which also sounds
+     thin and quiet on phone speakers. Bounded to a few dB, never moves fast, so it cannot pump. 808 styles keep more sub.
+     Off: localStorage glctc1.tonal = 'off' (or GLCTC_TONAL.set(false)). */
+  const eq=(type,f,q)=>{const b=c.createBiquadFilter();b.type=type;b.frequency.value=f;if(q)b.Q.value=q;b.gain.value=0;return b};
+  const T=[eq('lowshelf',60),eq('peaking',130,.8),eq('peaking',3500,.7),eq('highshelf',9000)];
+  c._post.connect(T[0]);T[0].connect(T[1]);T[1].connect(T[2]);T[2].connect(T[3]);T[3].connect(w);w.connect(c._sat);c._tonal=T;
+  const an=c.createAnalyser();an.fftSize=8192;an.smoothingTimeConstant=0;c._post.connect(an);
+  const fd=new Float32Array(4096),td=new Float32Array(2048),E=[[20,60],[60,250],[250,2000],[2000,6000],[6000,20000]],LIM=[[-4,3],[-3,2],[-2,3],[-2,3]];
+  let on=true;try{on=localStorage.getItem('glctc1.tonal')!=='off'}catch(e){}
+  const sm=[0,0,0,0];
+  window.GLCTC_TONAL={get:()=>({on,gains:sm.map(x=>+x.toFixed(2))}),set:v=>{on=!!v;try{localStorage.setItem('glctc1.tonal',on?'on':'off')}catch(e){}}};
+  const steer=()=>{if(c.state==='closed')return;setTimeout(steer,500);try{
+   if(!on){sm.fill(0)}else if(c.state==='running'){an.getFloatTimeDomainData(td);let e=0;for(let i=0;i<td.length;i++)e+=td[i]*td[i];
+    if(e/td.length>1e-4){an.getFloatFrequencyData(fd);const sr=c.sampleRate,P=[0,0,0,0,0];
+     for(let k=1;k<4096;k++){const f=k*sr/8192;if(f<20||f>=20000)continue;const p=Math.pow(10,fd[k]/10);for(let j=0;j<5;j++)if(f<E[j][1]){P[j]+=p;break}}
+     if(P[2]>0){const g=(window.GLCTC_NEW_SONG&&GLCTC_NEW_SONG.genre)||'',soft=/^(ambient|meditation)$/.test(g),boom=/^(trap|drill|south|westcoast|eastcoast|hiphop|ukhiphop|dubstep|phonk|reggae|amapiano)$/.test(g);
+      const tgt=[boom?5:2.5,boom?6:4.5,-4.5,-6.5],meas=[P[0],P[1],P[3],P[4]].map(x=>10*Math.log10((x+1e-30)/P[2])),k=soft?.35:.7;
+      for(let j=0;j<4;j++){const want=Math.max(LIM[j][0],Math.min(LIM[j][1],(tgt[j]-meas[j])*k));sm[j]+=(want-sm[j])*.04}}}}
+   T.forEach((b,j)=>{if(Math.abs(b.gain.value-sm[j])>.02)b.gain.setTargetAtTime(sm[j],c.currentTime,1)})}catch(e){}};steer();
   try{c._final.disconnect(c._sat)}catch(e){}   /* the old browser-compressor path stays built but is no longer heard */
   c._wlim=w}catch(e){console.warn('GLCTC1 studio limiter',e)}})};
 window.GLCTC_ENGINE={killNotes,live:()=>LIVE.size};
@@ -129,10 +151,13 @@ window.GLCTC_AT=function(c,until,fn,ms){const go=()=>{let left=-1;try{left=c.sta
 (function(){'use strict';
  function arm(){try{if(!window.IntersectionObserver||!document.getAnimations)return;var io=arm.io||(arm.io=new IntersectionObserver(function(es){es.forEach(function(e){e.target.classList.toggle('glctc-off',!e.isIntersecting)})}));
   var seen=arm.seen||(arm.seen=new WeakSet());document.getAnimations().forEach(function(a){var t=a.effect&&a.effect.target;if(!t||seen.has(t))return;var tm=a.effect.getTiming&&a.effect.getTiming();if(!tm||tm.iterations!==Infinity)return;seen.add(t);io.observe(t)})}catch(e){}}
- window.addEventListener('load',function(){arm();setInterval(arm,6000)});
+ /* v214: while music plays, the looping decorations (neon title, ad-bar shimmer, chakra aura) hold still - they made the
+    phone redraw the whole screen ~50 times a second, competing with the audio for the CPU */
+ function still(){try{var live=document.body&&document.body.classList.contains('glctc-live');document.getAnimations().forEach(function(a){var t=a.effect&&a.effect.target,tm=a.effect&&a.effect.getTiming&&a.effect.getTiming();if(!t||!t.classList||!tm||tm.iterations!==Infinity)return;t.classList.toggle('glctc-still',!!live)})}catch(e){}}
+ window.addEventListener('load',function(){arm();setInterval(arm,6000);setInterval(still,700)});
 })();
 </script>
-<style id="glctc1-v108-sleep">.glctc-off,.glctc-off::before,.glctc-off::after{animation-play-state:paused!important}
+<style id="glctc1-v108-sleep">.glctc-off,.glctc-off::before,.glctc-off::after,.glctc-still,.glctc-still::before,.glctc-still::after{animation-play-state:paused!important}
 /* the Instrument Designer, Song Composer and Action Sequencer skip layout and paint while off screen, like the other modules */
 section.panel.ix,#glctc1SongComposer,#glctc1ActionSequencer{content-visibility:auto;contain-intrinsic-size:auto 1100px}</style>
 <script id="glctc1-reverb-sleeper">
@@ -158,13 +183,20 @@ section.panel.ix,#glctc1SongComposer,#glctc1ActionSequencer{content-visibility:a
  AN.prototype.disconnect=function(dst,...a){if(dst&&dst.__an){try{D.call(this,dst.__an)}catch(e){}}return D.call(this,dst,...a)};
  function wake(cv){cv.__sleep=false;cv.__outs.forEach(([d,a])=>{try{C.call(cv,d,...a)}catch(e){}})}
  function sleep(cv){cv.__sleep=true;try{D.call(cv)}catch(e){}}
+ /* v214 REVERB BUDGET: a reverb is the most expensive thing in the studio (12 running reverbs cost ~8x more than 40 synth
+    voices). FULL quality: no limit. BALANCED (phones during a song): 6 at once. LIGHT / ECO: 4. The studio's main reverbs
+    (marked __prio) always get a place; a module reverb that finds no free place stays dry - nothing awake is ever cut off. */
+ function budget(){let q=0;try{q=window.__glctcQ?window.__glctcQ():0}catch(e){}return [99,6,4,4][q]||99}
+ function roomFor(cv){const cap=budget();if(cap>=99)return true;let awake=0;list.forEach(x=>{if(!x.__sleep&&x.context===cv.context)awake++});
+  if(cv.__prio)return true;let reserved=0;list.forEach(x=>{if(x.__prio&&x.__sleep&&x.context===cv.context)reserved++});return awake+reserved<cap}
  function tick(){const now=performance.now();if(!buf)buf=new Float32Array(2048);let any=false;
   list.forEach(cv=>{if(!cv.context||cv.context.state==='closed'){list.delete(cv);return}any=true;if(cv.context.state!=='running')return;
    cv.__an.getFloatTimeDomainData(buf);let pk=0;for(let i=0;i<2048;i++){const v=buf[i]<0?-buf[i]:buf[i];if(v>pk)pk=v}
-   if(pk>1e-5){cv.__last=now;if(cv.__sleep)wake(cv)}
+   cv.__lv=(cv.__lv||0)*.8+pk*.2;
+   if(pk>1e-4){cv.__last=now;if(cv.__sleep&&roomFor(cv))wake(cv)}   /* v214: -80 dB floor (was -100 dB) - hiss and DC no longer keep a reverb running */
    else if(!cv.__sleep&&cv.__outs.length&&now-cv.__last>((cv.buffer?cv.buffer.duration:3)*1000+400))sleep(cv)});
   if(!any){clearInterval(timer);timer=0}}
- window.GLCTC_SLEEPER={stats:()=>{let a=0,s=0;list.forEach(cv=>cv.__sleep?s++:a++);return{awake:a,asleep:s}}};
+ window.GLCTC_SLEEPER={stats:()=>{let a=0,s=0;list.forEach(cv=>cv.__sleep?s++:a++);return{awake:a,asleep:s,budget:budget()}}};
 })();
 /* ===== GLCTC1 SAMPLE RATE BY CPU MODE =====
    ECO (the default on phones): 32 kHz - every node in the studio does a third less work, and it still reproduces up to 16 kHz.
@@ -2287,7 +2319,7 @@ Object.assign(GLCTC_CLOCK,{
  },
  prepare(id,beat){return window.GLCTC_SONG?.prepareStep?.(id,beat)||{on:true,beat,section:null}},
  within(id,fn){const prev=this.owner;this.owner=id;try{return fn()}finally{this.owner=prev}},
- every(id,fn){this.jobs.set(id,fn);if(!this.pulseTimer)this.pulseTimer=setInterval(()=>this.pulse(),10);return {clockJob:id}},
+ every(id,fn){this.jobs.set(id,fn);if(!this.pulseTimer)this.pulseTimer=setInterval(()=>this.pulse(),(()=>{try{return matchMedia('(pointer:coarse)').matches?20:10}catch(e){return 10}})());   /* v214: phones check the schedule 50x a second instead of 100x - the 0.45 s look-ahead covers it */return {clockJob:id}},
  cancel(handle){if(handle&&handle.clockJob){this.jobs.delete(handle.clockJob);if(!this.jobs.size){clearInterval(this.pulseTimer);this.pulseTimer=0}}else clearInterval(handle)},
  pulse(){{const t=performance.now(),gap=this._lp?t-this._lp:10;this._lp=t;this._ge=(this._ge||10)*.92+gap*.08;   /* v100 ADAPTIVE LOOK-AHEAD */
   if(gap>140||this._ge>28){const want=Math.min(1.1,.45+gap/1000*1.5+(this._ge>28?.15:0));if(want>this.AHEAD)this.AHEAD=want;this._calm=0}
@@ -2753,7 +2785,7 @@ function tfx(t){return t.fx||(t.fx={on:false,flt:false,dly:false,rev:false,cut:1
 function mfx(){return project.mfx||(project.mfx={on:false,flt:false,dly:false,rev:false})}
 function makeIR(ctx){const L=Math.floor(ctx.sampleRate*2.2),b=ctx.createBuffer(2,L,ctx.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<L;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/L,2.5)}return b}
 function mkDelay(ctx){const i=ctx.createGain(),d=ctx.createDelay(2),f=ctx.createGain();GLCTC_CLOCK.syncDelay(d,.75);f.gain.value=.3;i.connect(d);d.connect(f);f.connect(d);return {in:i,out:d}}
-function mkRev(ctx){const i=ctx.createGain(),c=ctx.createConvolver();c.buffer=makeIR(ctx);i.connect(c);return {in:i,out:c}}
+function mkRev(ctx){const i=ctx.createGain(),c=ctx.createConvolver();c.__prio=1;c.buffer=makeIR(ctx);i.connect(c);return {in:i,out:c}}
 function fxApply(b){const f=tfx(b.track),on=f.on;b.filter.value=on&&f.flt?f.cut:20000;b.delay.value=on&&f.dly?f.ds:0;b.reverb.value=on&&f.rev?f.rs:0}
 function fxAll(){Object.values(audioCtx?._buses||{}).forEach(fxApply)}
 /* v73 DIRECT OUT: every channel's straight-to-master signal goes through one node, so soloing a BUS can silence the direct outs while the sends keep feeding the buses */
@@ -9387,10 +9419,13 @@ function composerBuses(genre,on){
     the DRUMS bus), k2 = kick trim after the drum-bus compressors, b = SUB + BASS buses, m = SYNTHS / INSTRUMENTS / VOCALS buses. Targets: kick 1-2 dB over the bass in club styles,
     level with it in bass-led styles, under it in reggae / ska; music 5-7 dB under the drums. 808 styles lose kick boom, never gain bass. */
  const MIXFIX={"techno":{"k":-2.1,"b":0.0,"m":4.4,"k2":-3.3},"melodictechno":{"k":-1.3,"b":0.0,"m":2.8},"techhouse":{"k":-3.6,"b":0.0,"m":5.5},"hardhouse":{"k":-0.3,"b":0.0,"m":2.3,"k2":-1.4},"trance":{"k":-3.4,"b":0.0,"m":-0.2,"k2":1.5},"psytrance":{"k":-1.8,"b":0.0,"m":2.2,"k2":1.1},"happyhardcore":{"k":-1.7,"b":0.0,"m":0.8},"house":{"k":-2.5,"b":0.0,"m":2.2},"tribalhouse":{"k":-2.4,"b":0.0,"m":-0.5,"k2":-1.0},"garage":{"k":-3.5,"b":0.0,"m":3.3,"k2":-3.1},"pop":{"k":-6.5,"b":0.0,"m":0.8,"k2":-2.1},"synthwave":{"k":-1.7,"b":0.0,"m":1.6},"deephouse":{"k":-0.4,"b":0.0,"m":4.3,"k2":-1.1},"amapiano":{"k":-6.6,"b":0.0,"m":-1.9},"afrohouse":{"k":-6.4,"b":1.9,"m":-1.9},"dnb":{"k":-4.0,"b":0.0,"m":1.0,"k2":1.2},"jungle":{"k":-4.0,"b":0.0,"m":1.1},"liquid":{"k":-2.8,"b":0.0,"m":2.5},"dubstep":{"k":-5.2,"b":0.0,"m":-1.4,"k2":-2.8},"breaks":{"k":-8.2,"b":0.0,"m":0.6},"nuskool":{"k":-4.2,"b":0.0,"m":-2.4},"electro":{"k":-6.9,"b":3.0,"m":0.7,"k2":-2.2},"hiphop":{"k":-5.9,"b":0.0,"m":-0.6,"k2":-2.0},"eastcoast":{"k":-6.0,"b":0.0,"m":0.4,"k2":-2.2},"westcoast":{"k":-7.1,"b":3.4,"m":-1.0,"k2":2.0},"ukhiphop":{"k":-3.7,"b":0.0,"m":1.4},"lofi":{"k":-1.7,"b":0.0,"m":2.2},"trap":{"k":-6.8,"b":0.0,"m":0.6,"k2":-1.5},"drill":{"k":-7.1,"b":0.0,"m":0.0},"south":{"k":-4.4,"b":0.0,"m":1.2},"phonk":{"k":-7.1,"b":0.0,"m":1.4},"reggae":{"k":-7.0,"b":3.5,"m":2.8},"ska":{"k":-6.5,"b":0.0,"m":-1.8,"k2":-5.0}},MF=soft?{k:0,b:0,m:0}:Object.assign({k:0,b:0,m:0},MIXFIX[g]||MIXFIX[(window.GLCTC_GENRE_PARENT||{})[g]]);
+ /* v214 RE-MEASURED (house + trap drops, group-bus outputs): since v160-v211 the music groups had drifted up level with the
+    drums and the drums sat under the bass. Drums +1.5 dB, synths / instruments / vocals -1.5 dB (not in ambient / meditation). */
+ const BAL14=soft?0:1.5;if(BAL14)MF.m=(MF.m||0)-BAL14;
  const plan=[
-  {i:0,name:'DRUMS',vol:DV,ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
+  {i:0,name:'DRUMS',vol:+(DV*Math.pow(10,BAL14/20)).toFixed(3),ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
    ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,+((e808?.5:1.5)+MF.k).toFixed(1),MF.k<-4?.6:MF.k<-1?.8:1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?0:1.5,.7),fx('punch',{amt:PU,att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:PM})]},   /* v208: no drum-bus exciter - the master's harmonics stage is the only brightener */
-  {i:1,name:'SUB',ids:['sub'],vol:e808?.6:g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
+  {i:1,name:'SUB',ids:['sub'],vol:e808?.85:   /* v214: measured trap songs had ~3 dB less deep sub than trap records - the sub under the 808 comes up */g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
    ins:[{type:'util',p:{gain:0,pan:0,mono:1,inv:0}}]},
   {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:12000,drv:e808?0:hard?.1:.04,glue:e808?.3:.45,dly:0,rev:0},
    ins:[peq(260,-2,1,1100,1.5,.9),comp(-18,3,.01,.15)]},   /* v208: bass harmonics come from the channel drive now, not a second exciter */
@@ -16750,7 +16785,7 @@ function build(c){
  N.in.connect(N.low);N.low.connect(N.mud);N.mud.connect(N.pres);N.pres.connect(N.air);N.air.connect(N.tone);N.tone.connect(N.comp);N.comp.connect(N.make);
  /* v105: the dry path waits for the oversampled saturator, so dry + saturation add up instead of comb-filtering */N.dd=c.createDelay(.05);if(window.GLCTC_LAT)GLCTC_LAT.hold(N.dd,()=>GLCTC_LAT.ws('2x',c.sampleRate));N.make.connect(N.dd);N.dd.connect(N.dry);N.make.connect(N.sat);N.sat.connect(N.wet);N.dry.connect(N.out);N.wet.connect(N.out);
  /* reverb return */
- N.revIn=c.createGain();N.revPre=c.createDelay(.2);N.rev=c.createConvolver();N.revRet=c.createGain();
+ N.revIn=c.createGain();N.revPre=c.createDelay(.2);N.rev=c.createConvolver();N.rev.__prio=1;N.revRet=c.createGain();
  N.revIn.connect(N.revPre);N.revPre.connect(N.rev);N.rev.connect(N.revRet);N.revRet.connect(c._mg);   /* return → master bus, so the master fader controls it */
  /* ping-pong delay return */
  N.dlyIn=c.createGain();N.dHp=c.createBiquadFilter();N.dHp.type='highpass';N.dLp=c.createBiquadFilter();N.dLp.type='lowpass';

@@ -9430,10 +9430,13 @@ function composerBuses(genre,on){
  /* v214 RE-MEASURED (house + trap drops, group-bus outputs): since v160-v211 the music groups had drifted up level with the
     drums and the drums sat under the bass. Drums +1.5 dB, synths / instruments / vocals -1.5 dB (not in ambient / meditation). */
  const BAL14=soft?0:1.5;if(BAL14)MF.m=(MF.m||0)-BAL14;
+ /* SLAM v1: drums were buried after the +5 dB master (kick 3.5 dB under the sub, snare / hats level with the music). Drum bus +2.5 dB,
+    music buses -1.5 dB more, sub -2.5 dB; kick, snare crack and hat air lifted on the drum bus, punch + NY parallel comp pushed harder. */
+ const SLAM=soft?0:1;if(SLAM)MF.m=Math.min(hard?-1:1,(MF.m||0)-1.5);   /* music never more than +1 dB (techno / tech house had +3-4 dB over their drums) */
  const plan=[
-  {i:0,name:'DRUMS',vol:+(DV*Math.pow(10,BAL14/20)).toFixed(3),ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
-   ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,+((e808?.5:1.5)+MF.k).toFixed(1),MF.k<-4?.6:MF.k<-1?.8:1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?0:1.5,.7),fx('punch',{amt:PU,att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:PM})]},   /* v208: no drum-bus exciter - the master's harmonics stage is the only brightener */
-  {i:1,name:'SUB',ids:['sub'],vol:e808?.85:   /* v214: measured trap songs had ~3 dB less deep sub than trap records - the sub under the 808 comes up */g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
+  {i:0,name:'DRUMS',vol:+(DV*Math.pow(10,(BAL14+SLAM*2.5)/20)).toFixed(3),ids:['bl','mine','lp'],fx:{on:true,lc:28,hc:soft?12000:19500,drv:e808?.03:hard?.12:.06,glue:soft?.3:hard?.55:.45,dly:0,rev:0},
+   ins:soft?[peq(380,-2,1.1,5200,1,.7)]:[peq(KF,+((e808?.5:1.5)+MF.k).toFixed(1),MF.k<-4?.6:MF.k<-1?.8:1.1,5000,dark?1:2.5,.8),peq(400,-2.5,1.2,10500,dark?1.5:4,.7),peq(200,+1.5,1.4,3300,+3,.9),fx('punch',{amt:Math.min(.85,PU+.2),att:hard?.02:.028}),fx('pcomp',{thr:-32,ratio:6,att:.003,rel:.12,mix:Math.min(.45,PM+.12)})]},   /* SLAM v1: hats +2.5 dB air, snare body 200 Hz + crack 3.3 kHz, harder punch, more NY parallel comp */   /* v208: no drum-bus exciter - the master's harmonics stage is the only brightener */
+  {i:1,name:'SUB',ids:['sub'],vol:SLAM?+((e808?.85:g==='electro'?.7:boom?.8:.9)*(boom?.75:.63)).toFixed(3):e808?.85:   /* v214: measured trap songs had ~3 dB less deep sub than trap records - the sub under the 808 comes up */g==='electro'?.7:boom?.8:.9,fx:{on:true,lc:24,hc:boom?220:150,drv:0,glue:.35,dly:0,rev:0},
    ins:[{type:'util',p:{gain:0,pan:0,mono:1,inv:0}}]},
   {i:2,name:'BASS',ids:['lee'],fx:{on:true,lc:boom?32:45,hc:soft?5000:12000,drv:e808?0:hard?.1:.04,glue:e808?.3:.45,dly:0,rev:0},
    ins:[peq(260,-2,1,1100,1.5,.9),comp(-18,3,.01,.15)]},   /* v208: bass harmonics come from the channel drive now, not a second exciter */
@@ -9447,7 +9450,7 @@ function composerBuses(genre,on){
  {const ut=d=>({type:'util',p:{gain:+d.toFixed(1),pan:0,mono:0,inv:0}});   /* v151 trims (post auto-mix, so nothing chases them) */
   if(Math.abs(MF.b)>.05){const s=plan[1].ins.find(f=>f.type==='util');if(s)s.p.gain=+MF.b.toFixed(1);else plan[1].ins.push(ut(MF.b));plan[2].ins.push(ut(MF.b))}
   if(Math.abs(MF.m)>.05)[3,4,5].forEach(i=>plan[i].ins.push(ut(MF.m)));
-  if(Math.abs(MF.k2||0)>.05)plan[0].ins.push(peq(KF,+MF.k2.toFixed(1),.7,120,0,1))}   /* kick trim AFTER the punch compressors (an EQ in front of them is partly undone by the compressor) */
+  {const k2=(MF.k2||0)+SLAM*(boom?3:4);if(Math.abs(k2)>.05)plan[0].ins.push(peq(KF,+k2.toFixed(1),.7,120,0,1))}}   /* SLAM v1: kick +3 dB after the punch compressors, where it is not squashed back */   /* kick trim AFTER the punch compressors (an EQ in front of them is partly undone by the compressor) */
  const clearIns=i=>{const ch=chainOf('bus:'+i,true),keep=ch.filter(f=>!f._composer);ch.splice(0,ch.length,...keep);persist('bus:'+i);rebuild('bus:'+i)};
  plan.forEach(P=>{if(!mine(P.i))return;
   CB_IDS.forEach(id=>{const k='mod:'+id;if(B.routeOf(k)===P.i)B.setRoute(k,null);if((B.sends(k)[P.i]||0)>0)B.setSend(k,P.i,0)});
@@ -17324,7 +17327,7 @@ function build(c){
  /* v146 SPLIT CLIP: the kick / bass peaks (below 120 Hz) are rounded off on their own, so the leads, pads, keys and vocals above
     never get crushed by a kick hitting the clipper (no intermodulation grit on the music) */
  X.xl=[0,1].map(()=>{const f=c.createBiquadFilter();f.type='lowpass';f.frequency.value=120;f.Q.value=.7071;return f});X.xh=[0,1].map(()=>{const f=c.createBiquadFilter();f.type='highpass';f.frequency.value=120;f.Q.value=.7071;return f});
- X.loIn=g(.5);X.loMk=g(1);X.clMk=g(1);X.loClip=c.createWaveShaper();X.loClip.oversample='2x';{const n=4097,cv=new Float32Array(n),K0=.55,R=.4;for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.loClip.curve=cv}X.sum=g(1);
+ X.loIn=g(.5);X.loMk=g(1);X.clMk=g(1);X.loClip=c.createWaveShaper();X.loClip.oversample='2x';{const n=4097,cv=new Float32Array(n),K0=.66,R=.4;   /* SLAM v1: knee .55 -> .66, the kick was being flattened down to the sub's level */for(let i=0;i<n;i++){const x=(i/(n-1)*2-1)*2,a=Math.abs(x),y=a<=K0?a:K0+R*Math.tanh((a-K0)/R);cv[i]=x<0?-y:y}X.loClip.curve=cv}X.sum=g(1);
  X.drive.connect(X.xl[0]);X.xl[0].connect(X.xl[1]);X.xl[1].connect(X.loIn);X.loIn.connect(X.loClip);X.loClip.connect(X.loMk);X.loMk.connect(X.sum);X.drive.connect(X.xh[0]);X.xh[0].connect(X.xh[1]);X.xh[1].connect(X.sum);
  try{mOut.disconnect(lim)}catch(e){}mOut.connect(X.in);X.sum.connect(X.clipIn);X.clip.connect(X.clMk);X.clMk.connect(lim);
  /* K-weighted loudness meter on the real output */
@@ -20632,6 +20635,55 @@ const pk=setInterval(()=>{const t=document.querySelector('#glctcPocket2 .p2-top'
   for(let i=0;i<6;i++){const b=st.buses&&st.buses[i];if(!b||b._c===false)continue;B.set(i,{fx:Object.assign({on:true},BASE[i],F[i]||{})})}};
 })();
 </script>
+<!-- ===== PANIC v1: one button that clears a glitch without losing your song. Next to the transport STOP and the composer STOP;
+     holding either STOP for 0.6 s does the same. Patterns, presets, mixer and FX settings are all kept. -->
+<style>.glctc-panic{background:#5a0f14!important;color:#ffd7d7!important;border-color:#ff4d5e!important;font-weight:700;letter-spacing:.04em}
+.glctc-panic.fire{background:#ff2b3d!important;color:#fff!important}</style>
+<script>
+(()=>{'use strict';
+const T=f=>{try{return f()}catch(e){}};
+let busy=false;
+function panic(){
+ if(busy)return;busy=true;
+ const c=T(()=>window.GLCTC_AUDIO&&GLCTC_AUDIO());
+ /* 1 · duck the output so the cut is click-free */
+ if(c&&c._vol){const t=c.currentTime;T(()=>{c._vol.gain.cancelScheduledValues(t);c._vol.gain.setValueAtTime(c._vol.gain.value,t);c._vol.gain.linearRampToValueAtTime(0,t+.02)})}
+ /* 2 · stop the song, the timeline and every module, then kill every queued or ringing note */
+ T(()=>window.GLCTC_SONG&&GLCTC_SONG.running()&&GLCTC_SONG.stop(true));
+ T(()=>window.GLCTC_TRANSPORT&&GLCTC_TRANSPORT.stop());
+ T(()=>typeof stopPlayback==='function'&&stopPlayback(true));
+ T(()=>window.GLCTC_HUB&&GLCTC_HUB.stopAll());
+ T(()=>window.glctcSoftStop&&glctcSoftStop());
+ ['GALACTIC_ONE','GALACTIC_VOX','GLCTC_WS'].forEach(k=>T(()=>window[k]&&window[k].panic&&window[k].panic()));
+ T(()=>{const b=document.getElementById('lee303Panic');b&&b.onclick&&b.onclick()});
+ T(()=>window.lpStopAll&&lpStopAll());
+ T(()=>window.GLCTC_ENGINE&&GLCTC_ENGINE.killNotes(c));
+ /* 3 · empty the echo / reverb tails: sends and returns closed while the output is down */
+ const held=[];
+ if(c){[c._send,c._m&&c._m.delay,c._m&&c._m.reverb].forEach(p=>{const g=p&&(p.gain||p);if(g&&'value' in g){held.push([g,g.value]);T(()=>{g.cancelScheduledValues(c.currentTime);g.value=0})}});
+  T(()=>{if(c.state!=='running')c.resume()})}
+ /* 4 · fresh mastering loop (it re-learns on the next drop) and the output comes back at the fader level */
+ setTimeout(()=>{held.forEach(([g,v])=>T(()=>{g.value=v}));
+  T(()=>{const M=window.GLCTC_MASTERING,s=M&&M.state();if(s&&s.genre)M.startSong(s.genre)});
+  T(()=>typeof setMaster==='function'&&setMaster());
+  if(c&&c._vol)T(()=>{const v=Math.max(0,Number((document.getElementById('masterVol')||{}).value)||0)*1.06;c._vol.gain.cancelScheduledValues(c.currentTime);c._vol.gain.setTargetAtTime(v,c.currentTime,.03)});
+  T(()=>typeof toast==='function'&&toast('PANIC · all notes off, modules stopped, FX tails cleared - your song is kept'));
+  document.querySelectorAll('.glctc-panic').forEach(b=>b.classList.remove('fire'));busy=false},450);
+ document.querySelectorAll('.glctc-panic').forEach(b=>b.classList.add('fire'));
+}
+window.GLCTC_PANIC=panic;
+function add(stopId,cls){const s=document.getElementById(stopId);if(!s||s.dataset.panic)return;s.dataset.panic='1';
+ const b=document.createElement('button');b.type='button';b.className='glctc-panic'+(cls?' '+cls:'');b.textContent='⚠ PANIC';
+ b.title='Panic: stop everything, kill stuck notes, clear FX tails. Your song, patterns and mix are kept. (Or hold STOP)';b.onclick=panic;s.after(b);
+ /* hold STOP 0.6 s = panic */
+ let tm=0;const down=()=>{clearTimeout(tm);tm=setTimeout(panic,600)},up=()=>clearTimeout(tm);
+ s.addEventListener('pointerdown',down);['pointerup','pointerleave','pointercancel'].forEach(e=>s.addEventListener(e,up));}
+function init(){add('stopBtn');add('gscStop','danger')}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+setTimeout(init,1500);
+})();
+</script>
+
 </body>
 </html>
 

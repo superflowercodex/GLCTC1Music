@@ -54,20 +54,28 @@ const GLCTC_WL_CODE=`
 class GLim extends AudioWorkletProcessor{
  static get parameterDescriptors(){return[{name:'ceiling',defaultValue:.891,minValue:.1,maxValue:1,automationRate:'k-rate'},{name:'release',defaultValue:.09,minValue:.01,maxValue:1,automationRate:'k-rate'}]}
  constructor(){super();const L=this.L=Math.max(16,Math.round(sampleRate*.005));
-  this.dl=[new Float32Array(L),new Float32Array(L)];this.dp=0;
+  /* LIFT v1 TRUE-PEAK: 4x oversampled peak detection (8-tap Hann-windowed sinc, phases 1/4 1/2 3/4) - inter-sample overs are
+     caught by the limiter itself, so the ceiling no longer needs a blanket 2.4 dB safety margin */
+  this.TP=[.25,.5,.75].map(f=>{const h=[];let s=0;for(let k=-3;k<=4;k++){const t=k-f,x=Math.PI*t,sn=Math.abs(t)<1e-9?1:Math.sin(x)/x,w=.5+.5*Math.cos(Math.PI*t/4.5);h.push(sn*w);s+=sn*w}return h.map(v=>v/s)});
+  this.hx=[new Float32Array(8),new Float32Array(8)];this.hp=0;this.D=4;
+  this.dl=[new Float32Array(L+4),new Float32Array(L+4)];this.dp=0;
   this.hv=new Float32Array(L+3);this.hi=new Int32Array(L+3);this.hh=0;this.ht=0;this.n=0;
   this.box=new Float32Array(L);this.bp=0;this.sum=L;this.box.fill(1);this.r=1;this.gr=1}
  process(ins,outs,P){const i0=ins[0],o=outs[0];if(!o||!o.length)return true;
   const a=i0&&i0[0]?i0[0]:null,b=i0&&i0[1]?i0[1]:a,N=o[0].length,L=this.L,c=P.ceiling[0],rel=Math.exp(-1/(Math.max(.01,P.release[0])*sampleRate));
   const oa=o[0],ob=o[1]||null,dA=this.dl[0],dB=this.dl[1],hv=this.hv,hi=this.hi,Q=L+3;let gmin=1;
-  for(let k=0;k<N;k++){const x=a?a[k]:0,y=b?b[k]:0,pk=Math.max(Math.abs(x),Math.abs(y)),need=pk>c?c/pk:1,n=this.n++;
+  const TP=this.TP,hx=this.hx[0],hy=this.hx[1],DL=L+4;
+  for(let k=0;k<N;k++){const x=a?a[k]:0,y=b?b[k]:0,hp=this.hp;hx[hp]=x;hy[hp]=y;this.hp=(hp+1)&7;
+   let pk=Math.max(Math.abs(hx[(hp+5)&7]),Math.abs(hy[(hp+5)&7]));
+   for(let f=0;f<3;f++){const h=TP[f];let sa=0,sb=0;for(let j=0;j<8;j++){const q=(hp+1+j)&7;sa+=hx[q]*h[j];sb+=hy[q]*h[j]}const m=Math.max(Math.abs(sa),Math.abs(sb));if(m>pk)pk=m}
+   const need=pk>c?c/pk:1,n=this.n++;
    while(this.ht!==this.hh){const j=(this.ht-1+Q)%Q;if(hv[j]>=need)this.ht=j;else break}
    hv[this.ht]=need;hi[this.ht]=n;this.ht=(this.ht+1)%Q;
    while(hi[this.hh]<n-L)this.hh=(this.hh+1)%Q;
    const h=hv[this.hh];this.r=h<this.r?h:h+(this.r-h)*rel;
    this.sum+=this.r-this.box[this.bp];this.box[this.bp]=this.r;this.bp=(this.bp+1)%L;
    let g=this.sum/L;if(g>1)g=1;if(g<gmin)gmin=g;
-   const p=this.dp,da=dA[p],db=dB[p];dA[p]=x;dB[p]=y;this.dp=(p+1)%L;
+   const p=this.dp,da=dA[p],db=dB[p];dA[p]=x;dB[p]=y;this.dp=(p+1)%DL;
    let u=da*g,v=db*g;if(u>c)u=c;else if(u<-c)u=-c;if(v>c)v=c;else if(v<-c)v=-c;
    oa[k]=u;if(ob)ob[k]=v}
   this.gr=gmin;if((this.n&16383)<N)this.port.postMessage(gmin);return true}}
@@ -94,14 +102,14 @@ window.GLCTC_STUDIO_LIMIT=function(c){if(!c||!c._post||!c._final||!c._sat||c._wl
   w.port.onmessage=e=>{c._wlimGR=e.data};
   /* v214 TRUE-PEAK SAFE: the master volume sits after the limiter, so the ceiling follows it - the file / speaker never
      sees more than about -1 dB true peak (exports measured +0.5 dB over before, which distorts on phones and in MP3s) */
-  const cp=w.parameters.get('ceiling');let lastV=-1;const follow=()=>{if(c.state==='closed')return;try{const v=c._vol?Math.max(.05,c._vol.gain.value):1;if(Math.abs(v-lastV)>.002){lastV=v;cp.setTargetAtTime(Math.min(.95,.76/v),c.currentTime,.05)}}catch(e){}setTimeout(follow,200)};follow();
+  const cp=w.parameters.get('ceiling');let lastV=-1;const follow=()=>{if(c.state==='closed')return;try{const v=c._vol?Math.max(.05,c._vol.gain.value):1;if(Math.abs(v-lastV)>.002){lastV=v;cp.setTargetAtTime(Math.min(.95,.88/v),c.currentTime,.05)}}catch(e){}setTimeout(follow,200)};follow();
   /* v214 AUTO TONAL BALANCE: four gentle EQ bands in front of the limiter that slowly (~12 s) steer the mix toward the
      balance of commercial records - measured, the songs were sub-heavy and short on presence (2-6 kHz), which also sounds
      thin and quiet on phone speakers. Bounded to a few dB, never moves fast, so it cannot pump. 808 styles keep more sub.
      Off: localStorage glctc1.tonal = 'off' (or GLCTC_TONAL.set(false)). */
   const eq=(type,f,q)=>{const b=c.createBiquadFilter();b.type=type;b.frequency.value=f;if(q)b.Q.value=q;b.gain.value=0;return b};
   const T=[eq('lowshelf',60),eq('peaking',130,.8),eq('peaking',3500,.7),eq('highshelf',9000)];
-  c._post.connect(T[0]);T[0].connect(T[1]);T[1].connect(T[2]);T[2].connect(T[3]);T[3].connect(w);w.connect(c._sat);c._tonal=T;
+  c._post.connect(T[0]);T[0].connect(T[1]);T[1].connect(T[2]);T[2].connect(T[3]);T[3].connect(w);w.connect(c._sat);c._tonal=T;try{if(c._satWS){c._satWS.oversample='none';c._satWS.disconnect();c._satWS.connect(c._vol)}}catch(e){}   /* LIFT v1: behind the true-peak limiter the clipper is a linear backstop - its 2x resampling filters only rang over the ceiling, and the 5 Hz DC filter after it pushed limited peaks back over (DC is already blocked at the master input) */
   const an=c.createAnalyser();an.fftSize=8192;an.smoothingTimeConstant=0;c._post.connect(an);
   const fd=new Float32Array(4096),td=new Float32Array(2048),E=[[20,60],[60,250],[250,2000],[2000,6000],[6000,20000]],LIM=[[-4,3],[-3,2],[-2,3],[-2,3]];
   let on=true;try{on=localStorage.getItem('glctc1.tonal')!=='off'}catch(e){}
@@ -2352,7 +2360,7 @@ function defaultProject(){return {version:1,id:uid(),name:'Untitled Galactic Pro
  {id:uid(),name:'0010110 · Module Track',type:'audio',color:'#75e4ff',volume:.8,pan:0,mute:false,solo:false,clips:[]},
  {id:uid(),name:'GALACTIC ONE · Module Track',type:'audio',color:'#40eaff',volume:.8,pan:0,mute:false,solo:false,clips:[]}
  ],assets:[],created:Date.now(),updated:Date.now()}}
-function ensureAudio(){if(!audioCtx){audioCtx=(window.GLCTC_NEW_CTX?GLCTC_NEW_CTX({latencyHint:"interactive"}):new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"}));GLCTC_CLOCK.install(audioCtx);const createShaper=audioCtx.createWaveShaper.bind(audioCtx);audioCtx.createWaveShaper=(...args)=>{const n=createShaper(...args);window.GLCTC_PERF?.registerShaper(n);return n};masterGain=audioCtx.createGain();audioCtx._fin=audioCtx.createGain();masterFilter=audioCtx.createBiquadFilter();masterFilter.type='lowpass';masterFilter.frequency.value=18000;delayNode=audioCtx.createDelay(2);GLCTC_CLOCK.syncDelay(delayNode,.75);const fb=audioCtx.createGain();fb.gain.value=.22;delayNode.connect(fb);fb.connect(delayNode);delayWet=audioCtx.createGain();delayDry=audioCtx.createGain();const lim=audioCtx.createDynamicsCompressor();lim.threshold.value=0;lim.knee.value=0;lim.ratio.value=1;lim.attack.value=.003;lim.release.value=.1;audioCtx._lim=lim;audioCtx._mg=masterGain;const mIn=audioCtx.createGain(),mOut=audioCtx.createGain();const dcb=audioCtx.createBiquadFilter();dcb.type='highpass';dcb.frequency.value=10;dcb.Q.value=.7071;audioCtx._dcb=dcb;masterGain.connect(dcb);dcb.connect(mIn);   /* DC blocker */mIn.connect(mOut);mOut.connect(lim);audioCtx._limIn=mIn;audioCtx._mIns=[mIn,mOut];const limTrim=audioCtx.createGain();audioCtx._limTrim=limTrim;lim.connect(limTrim);limTrim.connect(masterFilter);sendBus=audioCtx.createGain();audioCtx._send=sendBus;const tr=mkRev(audioCtx);audioCtx._rev=tr.in;tr.out.connect(masterGain);const md=mkDelay(audioCtx),mr=mkRev(audioCtx),mDW=audioCtx.createGain(),mRW=audioCtx.createGain();const satIn=audioCtx.createGain(),sat=audioCtx.createWaveShaper(),cv=new Float32Array(4097);satIn.gain.value=.5;for(let i=0;i<cv.length;i++){const x=(i/(cv.length-1)*2-1)*2,ax=Math.abs(x),y=ax<=.8?ax:.8+.2*Math.tanh((ax-.8)/.2);cv[i]=(x<0?-y:y)*.98}sat.curve=cv;sat.oversample='2x';satIn.connect(sat);const oVol=audioCtx.createGain();audioCtx._vol=oVol;const dco=audioCtx.createBiquadFilter();dco.type='highpass';dco.frequency.value=5;dco.Q.value=.5;sat.connect(dco);dco.connect(oVol);oVol.connect(audioCtx.destination);   /* master volume = last stage, after limiter/clipper */audioCtx._sat=satIn;/* v73 FINAL SAFETY LIMITER: master + master delay/reverb returns are summed and held under the output soft-clipper (-3.5 dBFS, browser make-up gain cancelled) */const post=audioCtx.createGain(),fl=audioCtx.createDynamicsCompressor(),flT=audioCtx.createGain();fl.threshold.value=-1;fl.knee.value=0;fl.ratio.value=20;fl.attack.value=.001;fl.release.value=.08;flT.gain.value=1/Math.pow(1/Math.pow(10,(-1+1/20)/20),.6);   /* v105: mastering ceiling -1 dBFS */audioCtx._flim=fl;post.connect(fl);fl.connect(flT);flT.connect(satIn);oVol.connect(audioCtx._fin);audioCtx._post=post;audioCtx._final=flT;try{window.GLCTC_STUDIO_LIMIT&&GLCTC_STUDIO_LIMIT(audioCtx)}catch(e){}masterFilter.connect(md.in);md.out.connect(mDW);mDW.connect(post);masterFilter.connect(mr.in);mr.out.connect(mRW);mRW.connect(post);audioCtx._m={volume:oVol.gain,filter:masterFilter.frequency,delay:mDW.gain,reverb:mRW.gain};sendBus.connect(delayNode);masterFilter.connect(post);delayNode.connect(delayWet);delayWet.connect(masterGain);setMaster()}if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
+function ensureAudio(){if(!audioCtx){audioCtx=(window.GLCTC_NEW_CTX?GLCTC_NEW_CTX({latencyHint:"interactive"}):new (window.AudioContext||window.webkitAudioContext)({latencyHint:"interactive"}));GLCTC_CLOCK.install(audioCtx);const createShaper=audioCtx.createWaveShaper.bind(audioCtx);audioCtx.createWaveShaper=(...args)=>{const n=createShaper(...args);window.GLCTC_PERF?.registerShaper(n);return n};masterGain=audioCtx.createGain();audioCtx._fin=audioCtx.createGain();masterFilter=audioCtx.createBiquadFilter();masterFilter.type='lowpass';masterFilter.frequency.value=18000;delayNode=audioCtx.createDelay(2);GLCTC_CLOCK.syncDelay(delayNode,.75);const fb=audioCtx.createGain();fb.gain.value=.22;delayNode.connect(fb);fb.connect(delayNode);delayWet=audioCtx.createGain();delayDry=audioCtx.createGain();const lim=audioCtx.createDynamicsCompressor();lim.threshold.value=0;lim.knee.value=0;lim.ratio.value=1;lim.attack.value=.003;lim.release.value=.1;audioCtx._lim=lim;audioCtx._mg=masterGain;const mIn=audioCtx.createGain(),mOut=audioCtx.createGain();const dcb=audioCtx.createBiquadFilter();dcb.type='highpass';dcb.frequency.value=10;dcb.Q.value=.7071;audioCtx._dcb=dcb;masterGain.connect(dcb);dcb.connect(mIn);   /* DC blocker */mIn.connect(mOut);mOut.connect(lim);audioCtx._limIn=mIn;audioCtx._mIns=[mIn,mOut];const limTrim=audioCtx.createGain();audioCtx._limTrim=limTrim;lim.connect(limTrim);limTrim.connect(masterFilter);sendBus=audioCtx.createGain();audioCtx._send=sendBus;const tr=mkRev(audioCtx);audioCtx._rev=tr.in;tr.out.connect(masterGain);const md=mkDelay(audioCtx),mr=mkRev(audioCtx),mDW=audioCtx.createGain(),mRW=audioCtx.createGain();const satIn=audioCtx.createGain(),sat=audioCtx.createWaveShaper(),cv=new Float32Array(4097);satIn.gain.value=.5;for(let i=0;i<cv.length;i++){const x=(i/(cv.length-1)*2-1)*2,ax=Math.abs(x),y=ax<=.9?ax:.9+.1*Math.tanh((ax-.9)/.1);cv[i]=(x<0?-y:y)*.98}sat.curve=cv;sat.oversample='2x';audioCtx._satWS=sat;satIn.connect(sat);const oVol=audioCtx.createGain();audioCtx._vol=oVol;const dco=audioCtx.createBiquadFilter();dco.type='highpass';dco.frequency.value=5;dco.Q.value=.5;sat.connect(dco);dco.connect(oVol);oVol.connect(audioCtx.destination);   /* master volume = last stage, after limiter/clipper */audioCtx._sat=satIn;/* v73 FINAL SAFETY LIMITER: master + master delay/reverb returns are summed and held under the output soft-clipper (-3.5 dBFS, browser make-up gain cancelled) */const post=audioCtx.createGain(),fl=audioCtx.createDynamicsCompressor(),flT=audioCtx.createGain();fl.threshold.value=-1;fl.knee.value=0;fl.ratio.value=20;fl.attack.value=.001;fl.release.value=.08;flT.gain.value=1/Math.pow(1/Math.pow(10,(-1+1/20)/20),.6);   /* v105: mastering ceiling -1 dBFS */audioCtx._flim=fl;post.connect(fl);fl.connect(flT);flT.connect(satIn);oVol.connect(audioCtx._fin);audioCtx._post=post;audioCtx._final=flT;try{window.GLCTC_STUDIO_LIMIT&&GLCTC_STUDIO_LIMIT(audioCtx)}catch(e){}masterFilter.connect(md.in);md.out.connect(mDW);mDW.connect(post);masterFilter.connect(mr.in);mr.out.connect(mRW);mRW.connect(post);audioCtx._m={volume:oVol.gain,filter:masterFilter.frequency,delay:mDW.gain,reverb:mRW.gain};sendBus.connect(delayNode);masterFilter.connect(post);delayNode.connect(delayWet);delayWet.connect(masterGain);setMaster()}if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
 function setMaster(){if(!masterGain)return;const m=mfx();masterGain.gain.value=.8;{const v=Math.max(0,Number($('masterVol').value)||0),g=v<.001?0:v*1.06;if(audioCtx&&audioCtx._vol){audioCtx._vol.gain.cancelScheduledValues(audioCtx.currentTime);audioCtx._vol.gain.setTargetAtTime(g,audioCtx.currentTime,.015)}}masterFilter.frequency.value=m.on&&m.flt?Number($('filterCutoff').value):20000;if(audioCtx&&audioCtx._m){audioCtx._m.delay.value=m.on&&m.dly?Number($('delayMix').value):0;audioCtx._m.reverb.value=m.on&&m.rev?Number($('reverbMix').value):0}if(delayWet)delayWet.gain.value=.8}
 function stopSources(){activeSources.forEach(s=>{try{s.stop?.()}catch(e){}try{s.disconnect?.()}catch(e){}});activeSources=[];startedClips.clear();resetAuto()}
 function trackAudible(track){if(track.type==='auto')return !track.mute;/* v67 GLOBAL SOLO: a soloed module silences every un-soloed track too */const anySolo=project.tracks.some(t=>t.solo&&t.type!=='auto')||!!(window.glctcModSolo&&window.glctcModSolo());return !track.mute&&(!anySolo||track.solo)}
@@ -9483,8 +9491,8 @@ const DREAM_TWEAK={
  reggae:{hall224:{prog:2,dec:1.8,mix:.07},pultec:{lb:1.5}},ska:{pultec:{lf:3,lb:0,la:1,hf:3,hb:2},hall224:{prog:1,dec:1.3,mix:.06},atr:{bump:.3}},
  synthwave:{hall224:{prog:0,dec:2.8,mix:.1},atr:{speed:0,drv:.4},hg2:{tri:.4}},meditation:{hall224:{dec:5.5,mix:.2},varimu:{thr:-24}}
 };
-const DREAM_OUT={hapiout:{trim:1}};   /* the chain trims ~1 dB of sub-sonic energy - the print stage gives it back */
-const DREAM_ORDER=['hapiin','pultec','varimu','hg2','atr','hapiout'];   /* v208 CLEANER MASTER: one EQ -> glue -> harmonics -> tape -> print, then the look-ahead limiter. The second EQ and the hall on the whole mix (which washed the kick and bass) are gone - space comes from the genre's reverb returns */
+const DREAM_OUT={hapiout:{trim:1},comp:{thr:-16,ratio:2,att:.03,rel:.2,mk:0}};   /* LIFT v1: bus glue (2:1, 30 ms attack lets transients through) evens the mix so the +5 dB needs less limiting */   /* the chain trims ~1 dB of sub-sonic energy - the print stage gives it back */
+const DREAM_ORDER=['hapiin','pultec','varimu','comp','hg2','atr','hapiout'];   /* v208 CLEANER MASTER: one EQ -> glue -> harmonics -> tape -> print, then the look-ahead limiter. The second EQ and the hall on the whole mix (which washed the kick and bass) are gone - space comes from the genre's reverb returns */
 function masterRecipe(genre){const g=String(genre||''),base=DREAM_BASE[DREAM_FAM[g]||DREAM_FAM[(window.GLCTC_GENRE_PARENT||{})[g]]||'club'],tw=DREAM_TWEAK[g]||{};
  return DREAM_ORDER.map(type=>{const p=Object.assign({},DREAM_OUT[type]||{},base[type]||{},tw[type]||{});if(type==='pultec'){p.la=Math.min(+p.la||0,1.5);p.lb=Math.max(+p.lb||0,p.la+1)}if(type==='hapiout'){p.trim=Math.min(+p.trim||0,-.5)}return{type,p}})}   /* the master lifts the low end instead of cutting it */
 function composerMaster(genre,on){
@@ -17278,23 +17286,25 @@ const dB=v=>Math.pow(10,v/20);
      CLEAN = 5 dB under the LOUD target (never quieter than -16 LUFS), max 1.5 dB of limiting:
              full dynamics for chilled / acoustic / ambient music. */
 const STYLES={
- loud:{name:'LOUD',off:0,cap:6,att:.001,rel:.14,knee:1},
- club:{name:'CLUB',off:-2.5,cap:3,att:.003,rel:.12,knee:1},
- clean:{name:'CLEAN',off:-5,cap:1.5,att:.003,rel:.12,knee:1}};   /* tuned on a fixed drum loop: the soft split-clipper catches kick peaks more gently than the limiter, so it stays in; less drive does the work */
+ loud:{name:'LOUD',off:0,cap:8,att:.001,rel:.14,knee:1},
+ club:{name:'CLUB',off:-2.5,cap:5,att:.003,rel:.12,knee:1},
+ clean:{name:'CLEAN',off:-5,cap:3,att:.003,rel:.12,knee:1}};   /* LIFT v1: +2 / +2 / +1.5 dB limiting budget for the +5 dB master */   /* tuned on a fixed drum loop: the soft split-clipper catches kick peaks more gently than the limiter, so it stays in; less drive does the work */
 const AUTO_CLEAN=['ambient','meditation','lofi','deephouse','liquid','reggae','amapiano'];
 const autoStyle=g=>g&&AUTO_CLEAN.includes(g)?'clean':'club';
 const styleKey=()=>S.style&&S.style!=='auto'?S.style:autoStyle(S.genre);
 const ST_=()=>STYLES[styleKey()]||STYLES.club;
-const tgt=g=>{const t=TARGET[g]??-9,st=ST_();return st.off?Math.max(t+st.off,Math.min(t,-16)):t};
+const LIFT=5;   /* LIFT v1: master +5 dB (true-peak ceiling gives ~1.5 dB of it for free, glue + clip + limiter share the rest) */
+const tgt=g=>{const t=TARGET[g]??-9,st=ST_();return (st.off?Math.max(t+st.off,Math.min(t,-16)):t)+LIFT};
 window.__glctcLimP=()=>{const st=ST_();return{att:st.att,rel:st.rel}};
 const LS='glctc1.mastering.v6';   /* v151/v153: learned drives are dropped (comb fix, then the louder targets) */
 /* v153 LOUDER MASTERS: every genre's loudness target and starting drive +2 dB; the limiter budgets get 1 dB more room so the
    level is reached by the clipper + limiter, not by squashing. Ceiling stays at -1 dBFS. */
 /* v200: the v155 '+8 dB maximum-loudness' boost is removed - it crushed every genre (techno measured 7 dB louder than your record with 8.8 dB of limiting). Targets now come from your records. */
 {const F={deephouse:-2.3,jungle:-1.0,eastcoast:-3.7,phonk:-3.2,lofi:-4.8,amapiano:-3.6,reggae:-3.7,ska:-2.5,synthwave:-1.9};for(const g in F)if(DRIVE0[g]!=null)DRIVE0[g]=+(DRIVE0[g]+F[g]).toFixed(1)}   /* v151: re-measured starting drives (comb fix, new master chain, new low end) */   /* v107: drill / trap / southern targets changed - old learned drives are dropped */
+for(const g in DRIVE0)DRIVE0[g]=+(DRIVE0[g]+3.5).toFixed(1);   /* LIFT v1: start drives +3.5 dB (the other 1.5 dB comes from the true-peak ceiling) */
 const S={on:true,style:'auto',genre:null,drive:3,locked:false,st:[],drop:0,lastAdj:0,learn:{},gr:0,lufs:null};
-try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x?.lv===200&&x.learn&&typeof x.learn==='object')S.learn=x.learn;}catch(e){}
-const save=()=>{try{localStorage.setItem(LS,JSON.stringify({lv:200,learn:S.learn}))}catch(e){}};
+try{const x=JSON.parse(localStorage.getItem(LS)||'null');if(x?.lv===201&&x.learn&&typeof x.learn==='object')S.learn=x.learn;}catch(e){}
+const save=()=>{try{localStorage.setItem(LS,JSON.stringify({lv:201,learn:S.learn}))}catch(e){}};
 const ac=()=>{try{return window.GLCTC_WS&&GLCTC_WS.ac&&GLCTC_WS.ac()}catch(e){return null}};
 let N=null;
 function build(c){
@@ -17331,7 +17341,7 @@ function applyStyle(){const X=N;if(!X)return;const st=S.on?ST_():STYLES.loud,k=s
 function setStyle(v){if(v!=='auto'&&!STYLES[v])return;const was=styleKey();S.style=v;save();
  if(styleKey()!==was){const L=S.learn[S.genre+'|'+styleKey()];setDrive(Number.isFinite(L)?L:(DRIVE0[S.genre]??3)+ST_().off);S.locked=false;S.dst=[];S.ok=0;S.next=25}
  applyStyle()}
-function setDrive(d){S.drive=Math.max(-14,Math.min(16,d));   /* v200: room for quiet mixes - the 3 dB limiting budget still guards the punch */   /* v146: room to turn a hot mix down (was -6) */
+function setDrive(d){S.drive=Math.max(-14,Math.min(22,d));   /* v200: room for quiet mixes - the 3 dB limiting budget still guards the punch */   /* v146: room to turn a hot mix down (was -6) */
 const X=ensure();if(!X)return;const v=S.on?dB(S.drive):1;try{X.drive.gain.setTargetAtTime(v,X.c.currentTime,.25)}catch(e){X.drive.gain.value=v}}
 function setMono(){const X=ensure();if(!X)return;const f=S.on?120:10;X.hp1.frequency.value=f;X.hp2.frequency.value=f}
 function startSong(genre){
@@ -17345,7 +17355,7 @@ function tick(){
  if(!S.on||!S.genre||!k){S.kind=null;return}
  const X=ensure();if(!X||X.c.state!=='running')return;
  const p=ms(X.aL)+ms(X.aR);S.st.push(p);if(S.st.length>30)S.st.shift();
- try{S.gr=Math.max(-(X.c._lim.reduction||0),-((X.c._flim&&X.c._flim.reduction)||0))}catch(e){S.gr=0}
+ try{const c=X.c,w=c._wlim?-20*Math.log10(Math.max(1e-4,Math.min(1,c._wlimGR||1))):-((c._flim&&c._flim.reduction)||0);S.gr=Math.max(-(c._lim.reduction||0),w)}catch(e){S.gr=0}   /* LIFT v1: read the limiter that is actually heard (the look-ahead worklet), not the bypassed browser compressor stuck at ~8 dB */
  const m=S.st.reduce((a,b)=>a+b,0)/S.st.length;S.lufs=m>1e-10?-.691+10*Math.log10(m):null;
  if(k!==S.kind){S.kind=k;if(k==="drop"){S.dst=[];S.ok=0;S.next=40}}
  if(!S.on||S.locked||k!=='drop'||!S.genre){return}

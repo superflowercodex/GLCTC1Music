@@ -2599,13 +2599,6 @@ async function loadComposerFile(){
 }
 window.GLCTC_COMPOSER_FILES={save:saveComposerFile,load:loadComposerFile};
 window.GLCTC_PROJECT_FILES={save:saveProject,open:openProjectFile,importFile:f=>importPackage(f)};
-/* PANIC v2 hook: the engine reset saves and re-opens the session from inside this scope */
-window.GLCTC_PANIC_IO={ready:()=>!!db,
- put(key,extra){return new Promise((res,rej)=>{if(!db)return rej(new Error('storage not ready'));const rec={...dbProject(),...extra,id:key,__origId:project.id};const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(rec);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})},
- take(key){return new Promise(res=>{try{const tx=db.transaction(STORE,'readwrite'),os=tx.objectStore(STORE),r=os.get(key);r.onsuccess=()=>{const v=r.result;if(v)os.delete(key);tx.oncomplete=()=>res(v||null)};r.onerror=()=>res(null)}catch(e){res(null)}})},
- apply(rec,perf,bpm,ts){(rec.assets||[]).forEach(a=>{a.audioBuffer=null});(rec.tracks||[]).forEach(t=>t.clips=t.clips||[]);
-  window.__glctcProjectOpened=true;project=rec;if(Number.isFinite(bpm)&&bpm>=30&&bpm<=300)project.bpm=bpm;if(ts&&[...$('timeSig').options].some(o=>o.value===ts))project.timeSig=ts;
-  selectedClipId=null;selectedTrackId=null;playheadBeats=0;renderAll();if(perf)window.GLCTC_PROJECT_SESSION.restore(perf);decodeAssets();markDirty()}};
 function blobToDataURL(b){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(b)})}
 function dbProject(){return {...project,assets:project.assets.map(({audioBuffer,decoding,peaking,...rest})=>rest)}}
 async function exportPackage(){return saveProject(true)}
@@ -20642,76 +20635,53 @@ const pk=setInterval(()=>{const t=document.querySelector('#glctcPocket2 .p2-top'
   for(let i=0;i<6;i++){const b=st.buses&&st.buses[i];if(!b||b._c===false)continue;B.set(i,{fx:Object.assign({on:true},BASE[i],F[i]||{})})}};
 })();
 </script>
-<!-- ===== PANIC v2: ENGINE RESET. Crackle that stays after STOP is the audio engine itself overloaded (thousands of live nodes:
-     reverb tails, delays, LFOs, bus FX) - stopping notes cannot fix that. PANIC now stops everything at once (instant silence),
-     saves the whole session (timeline + imported audio + composer song + every module's patterns, sounds and mix) in this
-     browser, restarts the audio engine from scratch and puts the session back. Takes a few seconds; press PLAY afterwards.
-     Next to the transport STOP and the composer STOP; holding either STOP for 0.6 s does the same. -->
+<!-- ===== PANIC v3 (composer): BACKGROUND REFRESH + FRESH SONG, no page reload.
+     1 instant silence: song, timeline and every module stopped, every queued or ringing note cut, output faded out
+     2 FX tails emptied: echo / reverb sends and returns closed while the output is down
+     3 audio output restarted (engine suspended then resumed) - clears a stalled / crackling output stream
+     4 a fresh song is generated in the current genre, the mastering loop starts clean, the output comes back up -->
 <style>.glctc-panic{background:#5a0f14!important;color:#ffd7d7!important;border-color:#ff4d5e!important;font-weight:700;letter-spacing:.04em}
-.glctc-panic.fire{background:#ff2b3d!important;color:#fff!important}
-#glctcPanicVeil{position:fixed;inset:0;z-index:99999;background:rgba(10,0,4,.82);color:#ffd7d7;display:flex;align-items:center;justify-content:center;font:700 15px/1.5 system-ui,sans-serif;letter-spacing:.06em;text-align:center;padding:24px}</style>
+.glctc-panic.fire{background:#ff2b3d!important;color:#fff!important}</style>
 <script>
 (()=>{'use strict';
-const KEY='__glctc_panic_restore__',T=f=>{try{return f()}catch(e){}};
-const veil=msg=>{let v=document.getElementById('glctcPanicVeil');if(!v){v=document.createElement('div');v.id='glctcPanicVeil';document.body.appendChild(v)}v.textContent=msg;return v};
-/* 1 · instant silence: everything stopped, every note killed, output cut */
-function silence(){
+const T=f=>{try{return f()}catch(e){}},wait=ms=>new Promise(r=>setTimeout(r,ms));
+let busy=false;
+async function panic(){
+ if(busy)return;busy=true;
+ const btns=[...document.querySelectorAll('.glctc-panic')];btns.forEach(b=>{b.classList.add('fire');b.textContent='⚠ …'});
  const c=T(()=>window.GLCTC_AUDIO&&GLCTC_AUDIO());
+ /* 1 · instant silence */
  if(c&&c._vol)T(()=>{const t=c.currentTime;c._vol.gain.cancelScheduledValues(t);c._vol.gain.setValueAtTime(c._vol.gain.value,t);c._vol.gain.linearRampToValueAtTime(0,t+.015)});
  T(()=>window.GLCTC_SONG&&GLCTC_SONG.running()&&GLCTC_SONG.stop(true));
  T(()=>window.GLCTC_TRANSPORT&&GLCTC_TRANSPORT.stop());
- T(()=>typeof stopPlayback==='function'&&stopPlayback(true));
  T(()=>window.GLCTC_HUB&&GLCTC_HUB.stopAll());
  T(()=>window.glctcSoftStop&&glctcSoftStop());
  T(()=>{const b=document.getElementById('lee303Panic');b&&b.onclick&&b.onclick()});
  T(()=>window.lpStopAll&&lpStopAll());
  T(()=>window.GLCTC_ENGINE&&GLCTC_ENGINE.killNotes(c));
- setTimeout(()=>(window.__glctcCtxs||[]).forEach(x=>T(()=>{if(x.state==='running')x.suspend()})),40);   /* engine stops rendering: crackle ends now */
-}
-/* 2 · save the session where a reload can find it */
-let busy=false;
-async function panic(){
- if(busy)return;busy=true;document.querySelectorAll('.glctc-panic').forEach(b=>b.classList.add('fire'));
- silence();veil('PANIC · saving your session and restarting the audio engine…');
- try{
-  const IO=window.GLCTC_PANIC_IO;if(!IO)throw new Error('session hook missing');
-  await IO.put(KEY,{__performance:GLCTC_PROJECT_SESSION.capture(),__bpm:GLCTC_CLOCK.bpm,__timeSig:(document.getElementById('timeSig')||{}).value,__vol:(document.getElementById('masterVol')||{}).value,__at:Date.now()});
-  try{sessionStorage.setItem('glctc1.panic','1')}catch(e){}
-  setTimeout(()=>location.reload(),80);
- }catch(e){
-  /* storage unavailable: keep the soft panic, never reload without a copy of the work */
-  console.warn('GLCTC1 panic save failed',e);
-  (window.__glctcCtxs||[]).forEach(x=>T(()=>{if(x.state==='suspended')x.resume()}));
-  T(()=>typeof setMaster==='function'&&setMaster());
-  const c=T(()=>GLCTC_AUDIO());if(c&&c._vol)T(()=>{const v=Math.max(0,Number((document.getElementById('masterVol')||{}).value)||0)*1.06;c._vol.gain.setTargetAtTime(v,c.currentTime,.03)});
-  const v=document.getElementById('glctcPanicVeil');v&&v.remove();T(()=>toast('PANIC · everything stopped (engine restart unavailable: '+e.message+')'));
-  document.querySelectorAll('.glctc-panic').forEach(b=>b.classList.remove('fire'));busy=false}
+ /* 2 · empty the FX tails */
+ const held=[];
+ if(c)[c._send,c._m&&c._m.delay,c._m&&c._m.reverb].forEach(p=>{const g=p&&(p.gain||p);if(g&&'value' in g){held.push([g,g.value]);T(()=>{g.cancelScheduledValues(c.currentTime);g.value=0})}});
+ await wait(60);
+ /* 3 · restart the audio output stream */
+ if(c){T(()=>GLCTC_ENGINE.killNotes(c));try{if(c.state==='running')await c.suspend();await wait(150);await c.resume()}catch(e){}}
+ /* 4 · fresh song in the current genre */
+ let ok=true;
+ try{if(window.GLCTC_SONG&&GLCTC_SONG.generate)await GLCTC_SONG.generate()}catch(e){ok=false;console.warn('GLCTC1 panic: generate failed',e)}
+ await wait(250);
+ held.forEach(([g,v])=>T(()=>{g.value=v}));
+ T(()=>{const M=window.GLCTC_MASTERING,s=M&&M.state();if(s&&s.genre)M.startSong(s.genre)});
+ T(()=>typeof setMaster==='function'&&setMaster());
+ if(c&&c._vol)T(()=>{const v=Math.max(0,Number((document.getElementById('masterVol')||{}).value)||0)*1.06;c._vol.gain.cancelScheduledValues(c.currentTime);c._vol.gain.setTargetAtTime(v,c.currentTime,.03)});
+ T(()=>typeof toast==='function'&&toast(ok?'PANIC · engine refreshed - fresh song ready, press PLAY':'PANIC · engine refreshed (new song could not be generated - press GENERATE)'));
+ btns.forEach(b=>{b.classList.remove('fire');b.textContent='⚠ PANIC'});busy=false;
 }
 window.GLCTC_PANIC=panic;
-/* 3 · after the restart: put the session back */
-async function restore(){
- let flag=null;try{flag=sessionStorage.getItem('glctc1.panic');sessionStorage.removeItem('glctc1.panic')}catch(e){}
- if(!flag)return;
- veil('PANIC · restoring your session…');
- const t0=Date.now();while(!(window.GLCTC_PANIC_IO&&GLCTC_PANIC_IO.ready()&&window.GLCTC_PROJECT_SESSION&&window.GLCTC_SONG)&&Date.now()-t0<15000)await new Promise(r=>setTimeout(r,150));
- await new Promise(r=>setTimeout(r,1200));   /* let the modules finish their own start-up first */
- const rec=window.GLCTC_PANIC_IO?await GLCTC_PANIC_IO.take(KEY):null;const v=document.getElementById('glctcPanicVeil');
- if(!rec){v&&v.remove();T(()=>toast('PANIC · audio engine restarted'));return}
- try{
-  const perf=rec.__performance,bpm=rec.__bpm,ts=rec.__timeSig,vol=rec.__vol;
-  rec.id=rec.__origId;['__origId','__performance','__bpm','__timeSig','__vol','__at'].forEach(k=>delete rec[k]);
-  if(vol!=null){const mv=document.getElementById('masterVol');if(mv){mv.value=vol;T(()=>mv.dispatchEvent(new Event('input',{bubbles:true})))}}
-  GLCTC_PANIC_IO.apply(rec,perf,bpm,ts);
-  v&&v.remove();T(()=>toast('PANIC · audio engine restarted, your session is back. Press PLAY.'));
- }catch(e){console.error('GLCTC1 panic restore',e);v&&v.remove();T(()=>toast('PANIC · engine restarted, but the session could not be put back: '+e.message))}
-}
-function add(stopId,cls){const s=document.getElementById(stopId);if(!s||s.dataset.panic)return;s.dataset.panic='1';
- const b=document.createElement('button');b.type='button';b.className='glctc-panic'+(cls?' '+cls:'');b.textContent='⚠ PANIC';
- b.title='Panic: instant silence, then the audio engine restarts with your session kept (clears crackle and glitches). Or hold STOP.';b.onclick=panic;s.after(b);
- let tm=0;const down=()=>{clearTimeout(tm);tm=setTimeout(panic,600)},up=()=>clearTimeout(tm);
- s.addEventListener('pointerdown',down);['pointerup','pointerleave','pointercancel'].forEach(e=>s.addEventListener(e,up));}
-function init(){add('stopBtn');add('gscStop','danger')}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{init();restore()});else{init();restore()}
+function init(){const s=document.getElementById('gscStop');if(!s||s.dataset.panic)return;s.dataset.panic='1';
+ const b=document.createElement('button');b.type='button';b.className='glctc-panic danger';b.textContent='⚠ PANIC';
+ b.title='Panic: instant silence, the audio engine is refreshed in the background and a fresh song is generated (clears crackle and glitches). The current song is replaced.';
+ b.onclick=panic;s.after(b)}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 setTimeout(init,1500);
 })();
 </script>
